@@ -1,0 +1,28 @@
+{
+  "name": "vcpkg-turbonet",
+  "version-semver": "0.1.0",
+  "dependencies": [
+    {
+      "name": "boringssl"
+    },
+    {
+      "name": "pkgconf",
+      "host": true
+    },
+    {
+      "name": "sqlite3",
+      "version>=": "3.49.0"
+    },
+    {
+      "name": "libpq",
+      "version>=": "16.9",
+      "default-features": false,
+      "features": [
+        "zstd"
+      ]
+    },
+    "zstd",
+    "mongo-c-driver"
+  ],
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+}

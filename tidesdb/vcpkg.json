@@ -1,0 +1,27 @@
+{
+  "name": "tidesdb",
+  "version-string": "9.3.15",
+  "description": "TidesDB is a high-performance durable, transactional embeddable storage engine designed for flash and RAM optimization with optional object storage support for unlimited data scaling.",
+  "dependencies": [
+    "zstd",
+    {
+      "name": "pthreads",
+      "platform": "!windows"
+    }
+  ],
+  "features": {
+    "mimalloc": {
+      "description": "Use mimalloc as the memory allocator for improved performance",
+      "dependencies": [
+        "mimalloc"
+      ]
+    },
+    "s3": {
+      "description": "Build the S3-compatible object store connector",
+      "dependencies": [
+        "curl"
+      ]
+    }
+  },
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+}

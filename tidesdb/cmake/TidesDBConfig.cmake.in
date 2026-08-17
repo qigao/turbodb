@@ -1,0 +1,22 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if(WIN32 AND NOT MINGW)
+    if(@TIDESDB_WITH_ZSTD@)
+        find_dependency(zstd CONFIG)
+    endif()
+    if(@TIDESDB_WITH_SNAPPY@)
+        find_dependency(Snappy CONFIG)
+    endif()
+    if(@TIDESDB_WITH_LZ4@)
+        find_dependency(lz4 CONFIG)
+    endif()
+endif()
+if(@TIDESDB_WITH_S3@)
+    find_dependency(CURL)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/TidesDBTargets.cmake")
+
+check_required_components(TidesDB)

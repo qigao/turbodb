@@ -1,0 +1,12 @@
+#ifndef ORM_SCHEMA_TEMPLATE_HPP
+#define ORM_SCHEMA_TEMPLATE_HPP
+
+namespace orm::schema::detail {
+
+inline constexpr char cpp_metadata_template[] = R"orm_tmpl(@ORM_CPP_METADATA_TEMPLATE@)orm_tmpl";
+
+inline constexpr char c_facade_template[] = R"orm_tmpl(@ORM_C_FACADE_TEMPLATE@)orm_tmpl";
+
+}  // namespace orm::schema::detail
+
+#endif  // ORM_SCHEMA_TEMPLATE_HPP

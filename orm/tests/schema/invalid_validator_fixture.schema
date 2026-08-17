@@ -1,0 +1,5 @@
+schema BrokenStore [orm(1)];
+
+message BrokenUser {
+  string name;
+}

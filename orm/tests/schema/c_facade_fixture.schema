@@ -1,0 +1,14 @@
+schema CStore [orm(1)];
+
+enum UserState <uint8> {
+  inactive = 0;
+  active = 1;
+}
+
+[table(users)] message User {
+  [primary_key(1), column(user_id)] uint64 id;
+  [version(1), column(entity_version)] uint64 version;
+  UserState state;
+  [column(display_name), c(display_name)] string name;
+  optional string nickname;
+}

@@ -1,0 +1,3508 @@
+/**
+ *
+ * Copyright (C) TidesDB
+ *
+ * Original Author: Alex Gaetano Padula
+ *
+ * Licensed under the Mozilla Public License, v. 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.mozilla.org/en-US/MPL/2.0/
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "../src/skip_list.h"
+#include "test_utils.h"
+
+static int tests_passed = 0;
+static int tests_failed = 0;
+
+#define BENCH_N 1000000 /* number of entries to write and retrieve */
+
+/* helper macros for accessing node data */
+#define NODE_KEY(node)   ((node)->key)
+#define NODE_VALUE(node) (atomic_load_explicit(&(node)->versions, memory_order_acquire)->value)
+#define NODE_IS_DELETED(node) \
+    (VERSION_IS_DELETED(atomic_load_explicit(&(node)->versions, memory_order_acquire)))
+
+void test_skip_list_create_node()
+{
+    uint8_t key[] = "test_key";
+    uint8_t value[] = "test_value";
+    skip_list_node_t *node =
+        skip_list_create_node(1, key, sizeof(key), value, sizeof(value), -1, 0);
+    ASSERT_TRUE(node != NULL);
+
+    int test_passed = 1;
+    if (memcmp(NODE_KEY(node), key, sizeof(key)) != 0) test_passed = 0;
+    if (memcmp(NODE_VALUE(node), value, sizeof(value)) != 0) test_passed = 0;
+    if (NODE_IS_DELETED(node)) test_passed = 0;
+
+    /* properly free node with all its allocations */
+    skip_list_free_node(node);
+
+    ASSERT_TRUE(test_passed);
+}
+
+void test_skip_list_put_get()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    uint8_t key[] = "test_key";
+    uint8_t value[] = "test_value";
+    ASSERT_TRUE(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0) ==
+                0);
+
+    uint8_t *retrieved_value;
+    size_t retrieved_value_size;
+    uint8_t deleted;
+    int64_t ttl;
+    int get_result = skip_list_get(list, key, sizeof(key), &retrieved_value, &retrieved_value_size,
+                                   &ttl, &deleted);
+    ASSERT_EQ(get_result, 0);
+    ASSERT_TRUE(memcmp(retrieved_value, value, sizeof(value)) == 0);
+
+    free(retrieved_value);
+    skip_list_free(list);
+}
+
+void test_skip_list_destroy()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    skip_list_free(list);
+}
+
+void test_skip_list_clear()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    uint8_t key[] = "test_key";
+    uint8_t value[] = "test_value";
+    ASSERT_TRUE(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0) ==
+                0);
+    int result = skip_list_clear(list);
+    ASSERT_EQ(result, 0);
+    ASSERT_TRUE(skip_list_count_entries(list) == 0);
+    (void)skip_list_free(list);
+}
+
+void test_skip_list_count_entries()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    ASSERT_TRUE(skip_list_count_entries(list) == 0);
+
+    uint8_t key[] = "test_key";
+    uint8_t value[] = "test_value";
+    ASSERT_TRUE(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0) ==
+                0);
+    ASSERT_TRUE(skip_list_count_entries(list) == 1);
+
+    (void)skip_list_free(list);
+}
+
+void test_skip_list_get_size()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    ASSERT_TRUE(skip_list_get_size(list) == 0);
+
+    uint8_t key[] = "test_key";
+    uint8_t value[] = "test_value";
+    ASSERT_TRUE(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0) ==
+                0);
+    ASSERT_TRUE(skip_list_get_size(list) > 0);
+
+    (void)skip_list_free(list);
+}
+
+void test_skip_list_cursor_init()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+    ASSERT_EQ(cursor->list, list);
+    ASSERT_EQ(cursor->current, list->header->forward[0]);
+
+    (void)skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_cursor_next()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    uint8_t key1[] = "key1";
+    uint8_t value1[] = "value1";
+    uint8_t key2[] = "key2";
+    uint8_t value2[] = "value2";
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key1, sizeof(key1), value1, sizeof(value1), -1, 1, 0) == 0);
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key2, sizeof(key2), value2, sizeof(value2), -1, 2, 0) == 0);
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+    ASSERT_NE(cursor->current, NULL);
+
+    int result = skip_list_cursor_next(cursor);
+    ASSERT_EQ(result, 0);
+    ASSERT_NE(cursor->current, NULL);
+    ASSERT_TRUE(memcmp(NODE_KEY(cursor->current), key2, sizeof(key2)) == 0);
+
+    (void)skip_list_cursor_free(cursor);
+    (void)skip_list_free(list);
+}
+
+void test_skip_list_cursor_prev()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    uint8_t key1[] = "key1";
+    uint8_t value1[] = "value1";
+    uint8_t key2[] = "key2";
+    uint8_t value2[] = "value2";
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key1, sizeof(key1), value1, sizeof(value1), -1, 1, 0) == 0);
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key2, sizeof(key2), value2, sizeof(value2), -1, 2, 0) == 0);
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+    ASSERT_NE(cursor->current, NULL);
+
+    ASSERT_TRUE(skip_list_cursor_next(cursor) == 0);
+    int result = skip_list_cursor_prev(cursor);
+    ASSERT_EQ(result, 0);
+    ASSERT_NE(cursor->current, NULL);
+    ASSERT_TRUE(memcmp(NODE_KEY(cursor->current), key1, sizeof(key1)) == 0);
+
+    (void)skip_list_cursor_free(cursor);
+    (void)skip_list_free(list);
+}
+
+void benchmark_skip_list()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    const size_t key_size = 16;
+    const size_t value_size = 8;
+
+    uint8_t **keys = malloc(BENCH_N * sizeof(uint8_t *));
+    uint8_t **values = malloc(BENCH_N * sizeof(uint8_t *));
+    if (keys == NULL || values == NULL)
+    {
+        printf(RED "Failed to allocate memory for keys and values\n" RESET);
+        return;
+    }
+
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        keys[i] = malloc(key_size * sizeof(uint8_t));
+        values[i] = malloc(value_size * sizeof(uint8_t));
+        if (keys[i] == NULL || values[i] == NULL)
+        {
+            for (size_t j = 0; j <= i; j++)
+            {
+                free(keys[j]);
+                free(values[j]);
+            }
+            free(keys);
+            free(values);
+            printf(RED "Failed to allocate memory for keys and values\n" RESET);
+            return;
+        }
+    }
+
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        generate_random_key_value(keys[i], key_size, values[i], value_size);
+    }
+
+    clock_t start_write = clock();
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        ASSERT_EQ(
+            skip_list_put_with_seq(list, keys[i], key_size, values[i], value_size, -1, i + 1, 0),
+            0);
+    }
+    clock_t end_write = clock();
+    double write_time = (double)(end_write - start_write) / CLOCKS_PER_SEC;
+    printf(CYAN "Time taken to write %d entries: %f seconds\n" RESET, BENCH_N, write_time);
+
+    clock_t start_read = clock();
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        uint8_t *retrieved_value;
+        size_t retrieved_value_size;
+        uint8_t deleted;
+        int64_t ttl;
+
+        int result = skip_list_get(list, keys[i], key_size, &retrieved_value, &retrieved_value_size,
+                                   &ttl, &deleted);
+        ASSERT_EQ(result, 0);
+        ASSERT_EQ(memcmp(retrieved_value, values[i], value_size), 0);
+        free(retrieved_value);
+    }
+    clock_t end_read = clock();
+    double read_time = (double)(end_read - start_read) / CLOCKS_PER_SEC;
+    printf(CYAN "Time taken to read and verify %d entries: %f seconds\n" RESET, BENCH_N, read_time);
+
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        free(keys[i]);
+        free(values[i]);
+    }
+    free(keys);
+    free(values);
+
+    (void)skip_list_free(list);
+}
+
+void benchmark_skip_list_sequential()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    const size_t key_size = 16;
+    const size_t value_size = 8;
+
+    uint8_t **keys = malloc(BENCH_N * sizeof(uint8_t *));
+    uint8_t **values = malloc(BENCH_N * sizeof(uint8_t *));
+    if (keys == NULL || values == NULL)
+    {
+        printf(RED "Failed to allocate memory\n" RESET);
+        return;
+    }
+
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        keys[i] = malloc(key_size);
+        values[i] = malloc(value_size);
+    }
+
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        memset(keys[i], 0, key_size);
+        memcpy(keys[i], &i, sizeof(size_t));
+        memset(values[i], (int)i, value_size);
+    }
+
+    clock_t start = clock();
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        skip_list_put_with_seq(list, keys[i], key_size, values[i], value_size, -1, i + 1, 0);
+    }
+    clock_t end = clock();
+    double write_time = (double)(end - start) / CLOCKS_PER_SEC;
+    printf(CYAN "Sequential keys - Write time: %f seconds (%.2f M ops/sec)\n" RESET, write_time,
+           BENCH_N / write_time / 1000000.0);
+
+    start = clock();
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        uint8_t *retrieved_value;
+        size_t retrieved_value_size;
+        uint8_t deleted;
+        int64_t ttl;
+        skip_list_get(list, keys[i], key_size, &retrieved_value, &retrieved_value_size, &ttl,
+                      &deleted);
+        free(retrieved_value);
+    }
+    end = clock();
+    double read_time = (double)(end - start) / CLOCKS_PER_SEC;
+    printf(CYAN "Sequential keys - Read time: %f seconds (%.2f M ops/sec)\n" RESET, read_time,
+           BENCH_N / read_time / 1000000.0);
+
+    for (size_t i = 0; i < BENCH_N; i++)
+    {
+        free(keys[i]);
+        free(values[i]);
+    }
+    free(keys);
+    free(values);
+    skip_list_free(list);
+}
+
+void test_skip_list_ttl()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    uint8_t key[] = "test_key";
+    uint8_t value[] = "test_value";
+    int64_t ttl = 1;
+
+    ASSERT_TRUE(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value),
+                                       time(NULL) + ttl, 1, 0) == 0);
+
+#ifdef _WIN32
+    Sleep((ttl + 1) * 1000);
+#else
+    sleep(ttl + 1);
+#endif
+
+    uint8_t *retrieved_value;
+    size_t retrieved_value_size;
+    uint8_t deleted;
+    int64_t retrieved_ttl;
+    int result = skip_list_get(list, key, sizeof(key), &retrieved_value, &retrieved_value_size,
+                               &retrieved_ttl, &deleted);
+
+    ASSERT_EQ(result, 0);
+    ASSERT_EQ(deleted, 1);
+
+    free(retrieved_value);
+    (void)skip_list_free(list);
+}
+
+void test_skip_list_cursor_functions()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    ASSERT_TRUE(list != NULL);
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor) == -1);
+    ASSERT_TRUE(skip_list_cursor_has_prev(cursor) == -1);
+    ASSERT_TRUE(skip_list_cursor_goto_first(cursor) == -1);
+    ASSERT_TRUE(skip_list_cursor_goto_last(cursor) == -1);
+
+    (void)skip_list_cursor_free(cursor);
+
+    uint8_t key1[] = {1};
+    uint8_t value1[] = {10};
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key1, sizeof(key1), value1, sizeof(value1), -1, 1, 0) == 0);
+
+    uint8_t key2[] = {2};
+    uint8_t value2[] = {20};
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key2, sizeof(key2), value2, sizeof(value2), -1, 2, 0) == 0);
+
+    uint8_t key3[] = {3};
+    uint8_t value3[] = {30};
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key3, sizeof(key3), value3, sizeof(value3), -1, 3, 0) == 0);
+
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+
+    ASSERT_TRUE(skip_list_cursor_goto_first(cursor) == 0);
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor) == 1);
+    ASSERT_TRUE(skip_list_cursor_has_prev(cursor) == 0);
+
+    uint8_t *key;
+    size_t key_size;
+    uint8_t *value;
+    size_t value_size;
+    int64_t ttl;
+    uint8_t deleted;
+
+    ASSERT_TRUE(
+        skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted) == 0);
+    ASSERT_EQ(key_size, sizeof(key1));
+    ASSERT_EQ(memcmp(key, key1, key_size), 0);
+    ASSERT_EQ(value_size, sizeof(value1));
+    ASSERT_EQ(memcmp(value, value1, value_size), 0);
+
+    ASSERT_TRUE(skip_list_cursor_next(cursor) == 0);
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor) == 1);
+    ASSERT_TRUE(skip_list_cursor_has_prev(cursor) == 1);
+
+    ASSERT_TRUE(skip_list_cursor_next(cursor) == 0);
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor) == 0);
+    ASSERT_TRUE(skip_list_cursor_has_prev(cursor) == 1);
+
+    ASSERT_TRUE(skip_list_cursor_goto_last(cursor) == 0);
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor) == 0);
+    ASSERT_TRUE(skip_list_cursor_has_prev(cursor) == 1);
+
+    ASSERT_TRUE(
+        skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted) == 0);
+    ASSERT_EQ(key_size, sizeof(key3));
+    ASSERT_EQ(memcmp(key, key3, key_size), 0);
+    ASSERT_EQ(value_size, sizeof(value3));
+    ASSERT_EQ(memcmp(value, value3, value_size), 0);
+
+    (void)skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_min_max_key()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+    ASSERT_TRUE(list != NULL);
+
+    uint8_t *min_key = NULL;
+    size_t min_key_size;
+    uint8_t *max_key = NULL;
+    size_t max_key_size;
+
+    ASSERT_TRUE(skip_list_get_min_key(list, &min_key, &min_key_size) == -1);
+    ASSERT_TRUE(skip_list_get_max_key(list, &max_key, &max_key_size) == -1);
+
+    uint8_t key2[] = {2};
+    uint8_t value2[] = {20};
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key2, sizeof(key2), value2, sizeof(value2), -1, 1, 0) == 0);
+
+    uint8_t key1[] = {1};
+    uint8_t value1[] = {10};
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key1, sizeof(key1), value1, sizeof(value1), -1, 2, 0) == 0);
+
+    uint8_t key3[] = {3};
+    uint8_t value3[] = {30};
+    ASSERT_TRUE(
+        skip_list_put_with_seq(list, key3, sizeof(key3), value3, sizeof(value3), -1, 3, 0) == 0);
+
+    ASSERT_TRUE(skip_list_get_min_key(list, &min_key, &min_key_size) == 0);
+    ASSERT_TRUE(min_key != NULL);
+    ASSERT_EQ(min_key_size, sizeof(key1));
+    ASSERT_EQ(memcmp(min_key, key1, min_key_size), 0);
+    free(min_key);
+
+    ASSERT_TRUE(skip_list_get_max_key(list, &max_key, &max_key_size) == 0);
+    ASSERT_TRUE(max_key != NULL);
+    ASSERT_EQ(max_key_size, sizeof(key3));
+    ASSERT_EQ(memcmp(max_key, key3, max_key_size), 0);
+    free(max_key);
+
+    uint8_t key0[] = {0};
+    uint8_t value0[] = {5};
+    int64_t ttl = 1;
+    ASSERT_TRUE(skip_list_put_with_seq(list, key0, sizeof(key0), value0, sizeof(value0),
+                                       time(NULL) + ttl, 4, 0) == 0);
+
+    ASSERT_TRUE(skip_list_get_min_key(list, &min_key, &min_key_size) == 0);
+    ASSERT_TRUE(min_key != NULL);
+    ASSERT_EQ(min_key_size, sizeof(key0));
+    ASSERT_EQ(memcmp(min_key, key0, min_key_size), 0);
+    free(min_key);
+
+#ifdef _WIN32
+    Sleep((ttl + 1) * 1000);
+#else
+    sleep(ttl + 1);
+#endif
+
+    ASSERT_TRUE(skip_list_get_min_key(list, &min_key, &min_key_size) == 0);
+    ASSERT_TRUE(min_key != NULL);
+    ASSERT_EQ(min_key_size, sizeof(key1));
+    ASSERT_EQ(memcmp(min_key, key1, min_key_size), 0);
+    free(min_key);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_cursor_seek()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+
+    for (int i = 0; i <= 90; i += 10)
+    {
+        char key[16];
+        char value[16];
+        snprintf(key, sizeof(key), "key_%02d", i);
+        snprintf(value, sizeof(value), "value_%02d", i);
+        ASSERT_TRUE(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key), (uint8_t *)value,
+                                           strlen(value), -1, (i / 10) + 1, 0) == 0);
+    }
+
+    /* test seek to exact key */
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+
+    const char *seek_key = "key_50";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek_key, strlen(seek_key)), 0);
+
+    /* cursor should be positioned before key_50, so next() should return key_50 */
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor));
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+
+    uint8_t *key = NULL;
+    size_t key_size = 0;
+    uint8_t *value = NULL;
+    size_t value_size = 0;
+    int64_t ttl = 0;
+    uint8_t deleted = 0;
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_50", strlen("key_50")), 0);
+
+    /* test seek to non-existent key (should find next key) */
+    const char *seek_key2 = "key_55";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek_key2, strlen(seek_key2)), 0);
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor));
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_60", strlen("key_60")), 0);
+
+    /* test seek to key before all keys */
+    const char *seek_key3 = "key_";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek_key3, strlen(seek_key3)), 0);
+    ASSERT_TRUE(skip_list_cursor_has_next(cursor));
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_00", strlen("key_00")), 0);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_cursor_seek_for_prev()
+{
+    skip_list_t *list = NULL;
+    if (skip_list_new(&list, 12, 0.24f) == -1)
+    {
+        printf(RED "Failed to create skip list\n" RESET);
+        return;
+    }
+
+    for (int i = 0; i <= 90; i += 10)
+    {
+        char key[16];
+        char value[16];
+        snprintf(key, sizeof(key), "key_%02d", i);
+        snprintf(value, sizeof(value), "value_%02d", i);
+        ASSERT_TRUE(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key), (uint8_t *)value,
+                                           strlen(value), -1, (i / 10) + 1, 0) == 0);
+    }
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+
+    const char *seek_key = "key_50";
+    ASSERT_EQ(skip_list_cursor_seek_for_prev(cursor, (uint8_t *)seek_key, strlen(seek_key)), 0);
+
+    uint8_t *key = NULL;
+    size_t key_size = 0;
+    uint8_t *value = NULL;
+    size_t value_size = 0;
+    int64_t ttl = 0;
+    uint8_t deleted = 0;
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_50", strlen("key_50")), 0);
+
+    /* test seek_for_prev to non-existent key (should find previous key) */
+    const char *seek_key2 = "key_55";
+    ASSERT_EQ(skip_list_cursor_seek_for_prev(cursor, (uint8_t *)seek_key2, strlen(seek_key2)), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_50", strlen("key_50")), 0);
+
+    const char *seek_key3 = "key_99";
+    ASSERT_EQ(skip_list_cursor_seek_for_prev(cursor, (uint8_t *)seek_key3, strlen(seek_key3)), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_90", strlen("key_90")), 0);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+typedef struct
+{
+    skip_list_t *list;
+    int thread_id;
+    int num_ops;
+    int reads_completed;
+    int writes_completed;
+    _Atomic(uint64_t) *shared_seq; /* shared sequence counter for concurrent tests */
+} concurrent_test_ctx_t;
+
+void *concurrent_reader(void *arg)
+{
+    concurrent_test_ctx_t *ctx = (concurrent_test_ctx_t *)arg;
+
+    for (int i = 0; i < ctx->num_ops; i++)
+    {
+        char key_buf[32];
+        snprintf(key_buf, sizeof(key_buf), "key%d", i % 10);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+        int result = skip_list_get(ctx->list, (uint8_t *)key_buf, strlen(key_buf) + 1, &value,
+                                   &value_size, &ttl, &deleted);
+
+        if (result == 0 && value != NULL)
+        {
+            ASSERT_TRUE(value_size > 0);
+            free(value);
+        }
+
+        ctx->reads_completed++;
+    }
+
+    return NULL;
+}
+
+void *concurrent_writer(void *arg)
+{
+    concurrent_test_ctx_t *ctx = (concurrent_test_ctx_t *)arg;
+
+    for (int i = 0; i < ctx->num_ops; i++)
+    {
+        char key_buf[32];
+        char value_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "key%d", i % 10);
+        snprintf(value_buf, sizeof(value_buf), "thread%d_value%d", ctx->thread_id, i);
+
+        /* if write fails due to sequence conflict, get new seq and retry */
+        int result = -1;
+        int retry_count = 0;
+        while (result != 0 && retry_count < 100)
+        {
+            /* get next sequence number atomically */
+            uint64_t seq = atomic_fetch_add_explicit(ctx->shared_seq, 1, memory_order_relaxed) + 1;
+
+            result =
+                skip_list_put_with_seq(ctx->list, (uint8_t *)key_buf, strlen(key_buf) + 1,
+                                       (uint8_t *)value_buf, strlen(value_buf) + 1, -1, seq, 0);
+            retry_count++;
+        }
+
+        /* if still failed after retries, just continue (shouldn't happen with retry logic) */
+        if (result == 0)
+        {
+            ctx->writes_completed++;
+        }
+    }
+
+    return NULL;
+}
+
+void test_skip_list_concurrent_read_write()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+    ASSERT_TRUE(list != NULL);
+
+    for (int i = 0; i < 10; i++)
+    {
+        char key_buf[32];
+        char value_buf[32];
+        snprintf(key_buf, sizeof(key_buf), "key%d", i);
+        snprintf(value_buf, sizeof(value_buf), "initial_value%d", i);
+        skip_list_put_with_seq(list, (uint8_t *)key_buf, strlen(key_buf) + 1, (uint8_t *)value_buf,
+                               strlen(value_buf) + 1, -1, i + 1, 0);
+    }
+
+    const int num_readers = 4;
+    const int num_writers = 1;
+    const int ops_per_thread = 10000;
+
+    pthread_t *readers = malloc(num_readers * sizeof(pthread_t));
+    pthread_t *writers = malloc(num_writers * sizeof(pthread_t));
+    concurrent_test_ctx_t *reader_ctx = malloc(num_readers * sizeof(concurrent_test_ctx_t));
+    concurrent_test_ctx_t *writer_ctx = malloc(num_writers * sizeof(concurrent_test_ctx_t));
+
+    /* shared atomic sequence counter starting after initial keys */
+    _Atomic(uint64_t) shared_seq = 10;
+
+    for (int i = 0; i < num_readers; i++)
+    {
+        reader_ctx[i].list = list;
+        reader_ctx[i].thread_id = i;
+        reader_ctx[i].num_ops = ops_per_thread;
+        reader_ctx[i].reads_completed = 0;
+        pthread_create(&readers[i], NULL, concurrent_reader, &reader_ctx[i]);
+    }
+
+    for (int i = 0; i < num_writers; i++)
+    {
+        writer_ctx[i].list = list;
+        writer_ctx[i].thread_id = i;
+        writer_ctx[i].num_ops = ops_per_thread;
+        writer_ctx[i].writes_completed = 0;
+        writer_ctx[i].shared_seq = &shared_seq;
+        pthread_create(&writers[i], NULL, concurrent_writer, &writer_ctx[i]);
+    }
+
+    for (int i = 0; i < num_readers; i++)
+    {
+        pthread_join(readers[i], NULL);
+        printf(YELLOW "  Reader %d completed %d reads\n" RESET, i, reader_ctx[i].reads_completed);
+    }
+
+    for (int i = 0; i < num_writers; i++)
+    {
+        pthread_join(writers[i], NULL);
+        printf(YELLOW "  Writer %d completed %d writes\n" RESET, i, writer_ctx[i].writes_completed);
+    }
+
+    int total_reads = 0;
+    int total_writes = 0;
+    for (int i = 0; i < num_readers; i++) total_reads += reader_ctx[i].reads_completed;
+    for (int i = 0; i < num_writers; i++) total_writes += writer_ctx[i].writes_completed;
+
+    ASSERT_EQ(total_reads, num_readers * ops_per_thread);
+    ASSERT_EQ(total_writes, num_writers * ops_per_thread);
+
+    free(readers);
+    free(writers);
+    free(reader_ctx);
+    free(writer_ctx);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_null_validation()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    uint8_t key[] = "key";
+    uint8_t value[] = "value";
+    uint8_t *out_value = NULL;
+    size_t out_size = 0;
+    uint8_t deleted = 0;
+    int64_t ttl;
+
+    /* null list */
+    ASSERT_EQ(skip_list_put_with_seq(NULL, key, sizeof(key), value, sizeof(value), -1, 1, 0), -1);
+    ASSERT_EQ(skip_list_get(NULL, key, sizeof(key), &out_value, &out_size, &ttl, &deleted), -1);
+
+    /* null key */
+    ASSERT_EQ(skip_list_put_with_seq(list, NULL, sizeof(key), value, sizeof(value), -1, 1, 0), -1);
+    ASSERT_EQ(skip_list_get(list, NULL, sizeof(key), &out_value, &out_size, &ttl, &deleted), -1);
+
+    /* null value on put */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), NULL, sizeof(value), -1, 1, 0), -1);
+
+    /* null output pointers on get */
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), NULL, &out_size, &ttl, &deleted), -1);
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), &out_value, NULL, &ttl, &deleted), -1);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_zero_size_key()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    uint8_t key[] = "";
+    uint8_t value[] = "value";
+
+    /* zero-size key should fail */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, 0, value, sizeof(value), -1, 1, 0), -1);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_large_keys_values()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    /* test key larger than inline threshold (24 bytes) */
+    uint8_t large_key[100];
+    memset(large_key, 'K', sizeof(large_key));
+
+    /* test value larger than inline threshold */
+    uint8_t large_value[200];
+    memset(large_value, 'V', sizeof(large_value));
+
+    ASSERT_EQ(skip_list_put_with_seq(list, large_key, sizeof(large_key), large_value,
+                                     sizeof(large_value), -1, 1, 0),
+              0);
+
+    uint8_t *retrieved_value = NULL;
+    size_t retrieved_size = 0;
+    uint8_t deleted = 0;
+    int64_t ttl;
+
+    ASSERT_EQ(skip_list_get(list, large_key, sizeof(large_key), &retrieved_value, &retrieved_size,
+                            &ttl, &deleted),
+              0);
+    ASSERT_EQ(retrieved_size, sizeof(large_value));
+    ASSERT_EQ(memcmp(retrieved_value, large_value, sizeof(large_value)), 0);
+
+    free(retrieved_value);
+    skip_list_free(list);
+}
+
+void test_skip_list_duplicate_key_update()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    uint8_t key[] = "test_key";
+    uint8_t value1[] = "value1";
+    uint8_t value2[] = "updated_value";
+
+    /* insert first value */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value1, sizeof(value1), -1, 1, 0), 0);
+
+    /* insert second value with same key (LSM tree allows duplicates) */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value2, sizeof(value2), -1, 2, 0), 0);
+
+    /* verify we get the first matching value (search finds first occurrence) */
+    uint8_t *retrieved_value = NULL;
+    size_t retrieved_size = 0;
+    uint8_t deleted = 0;
+    int64_t ttl;
+
+    ASSERT_EQ(
+        skip_list_get(list, key, sizeof(key), &retrieved_value, &retrieved_size, &ttl, &deleted),
+        0);
+
+    /* GET should return the latest version (value2), atomic replacement, no duplicates */
+    ASSERT_EQ(retrieved_size, sizeof(value2));
+    ASSERT_EQ(memcmp(retrieved_value, value2, sizeof(value2)), 0);
+    ASSERT_EQ(deleted, 0);
+
+    /* count should be 1 (atomic replacement, no duplicates in memtable) */
+    ASSERT_EQ(skip_list_count_entries(list), 1);
+
+    free(retrieved_value);
+    skip_list_free(list);
+}
+
+void test_skip_list_delete_operations()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    uint8_t key[] = "delete_me";
+    uint8_t value[] = "value";
+
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 2, 0), 0);
+
+    /* get should return with deleted flag */
+    uint8_t *retrieved_value = NULL;
+    size_t retrieved_size = 0;
+    uint8_t deleted = 0;
+    int64_t ttl;
+
+    int result =
+        skip_list_get(list, key, sizeof(key), &retrieved_value, &retrieved_size, &ttl, &deleted);
+
+    if (result == 0 && retrieved_value != NULL)
+    {
+        free(retrieved_value);
+    }
+
+    /* delete non-existent key */
+    uint8_t nonexistent[] = "nonexistent";
+    result = skip_list_get(list, nonexistent, sizeof(nonexistent), &retrieved_value,
+                           &retrieved_size, &ttl, &deleted);
+    ASSERT_EQ(result, -1);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_delete_existing_keys()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    for (int i = 0; i < 100; i++)
+    {
+        char key[32], value[64];
+        snprintf(key, sizeof(key), "key_%d", i);
+        snprintf(value, sizeof(value), "value_%d", i);
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                                         strlen(value) + 1, -1, i + 1, 0),
+                  0);
+    }
+
+    ASSERT_EQ(skip_list_count_entries(list), 100);
+
+    /* delete every other key */
+    for (int i = 0; i < 100; i += 2)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "key_%d", i);
+        ASSERT_EQ(skip_list_delete(list, (uint8_t *)key, strlen(key) + 1, 101 + (i / 2)), 0);
+    }
+
+    /* verify deleted keys return deleted flag */
+    for (int i = 0; i < 100; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "key_%d", i);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        int result = skip_list_get(list, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &ttl,
+                                   &deleted);
+
+        if (i % 2 == 0)
+        {
+            /* should be deleted */
+            ASSERT_EQ(result, 0);
+            ASSERT_EQ(deleted, 1);
+        }
+        else
+        {
+            /* should exist */
+            ASSERT_EQ(result, 0);
+            ASSERT_EQ(deleted, 0);
+        }
+
+        if (value) free(value);
+    }
+
+    skip_list_free(list);
+}
+
+void test_skip_list_delete_nonexistent_keys()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    /* delete non-existent keys should be no-op */
+    for (int i = 0; i < 100; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "nonexist_%d", i);
+        ASSERT_EQ(skip_list_delete(list, (uint8_t *)key, strlen(key) + 1, i + 1), 0);
+    }
+
+    /* list should still be empty (no tombstones created) */
+    ASSERT_EQ(skip_list_count_entries(list), 0);
+
+    /* verify keys don't exist */
+    for (int i = 0; i < 100; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "nonexist_%d", i);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        int result = skip_list_get(list, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &ttl,
+                                   &deleted);
+        ASSERT_EQ(result, -1);
+    }
+
+    skip_list_free(list);
+}
+
+void test_skip_list_delete_and_reinsert()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    uint8_t key[] = "test_key";
+    uint8_t value1[] = "value1";
+    uint8_t value2[] = "value2";
+
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value1, sizeof(value1), -1, 1, 0), 0);
+
+    ASSERT_EQ(skip_list_delete(list, key, sizeof(key), 2), 0);
+
+    /* verify deleted */
+    uint8_t *retrieved = NULL;
+    size_t size = 0;
+    uint8_t deleted = 0;
+    int64_t ttl;
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), &retrieved, &size, &ttl, &deleted), 0);
+    ASSERT_EQ(deleted, 1);
+    if (retrieved) free(retrieved);
+
+    /* re-insert with new value */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value2, sizeof(value2), -1, 3, 0), 0);
+
+    /* verify new value exists and not deleted */
+    retrieved = NULL;
+    size = 0;
+    deleted = 0;
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), &retrieved, &size, &ttl, &deleted), 0);
+    ASSERT_EQ(deleted, 0);
+    ASSERT_EQ(size, sizeof(value2));
+    ASSERT_TRUE(memcmp(retrieved, value2, sizeof(value2)) == 0);
+    if (retrieved) free(retrieved);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_iterate_with_deletes()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    for (int i = 0; i < 50; i++)
+    {
+        char key[32], value[64];
+        snprintf(key, sizeof(key), "key_%03d", i);
+        snprintf(value, sizeof(value), "value_%d", i);
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                                         strlen(value) + 1, -1, i + 1, 0),
+                  0);
+    }
+
+    for (int i = 10; i < 20; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "key_%03d", i);
+        ASSERT_EQ(skip_list_delete(list, (uint8_t *)key, strlen(key) + 1, 51 + i), 0);
+    }
+
+    /* iterate and count non-deleted entries */
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+
+    int total_count = 0;
+    int deleted_count = 0;
+    int active_count = 0;
+
+    if (skip_list_cursor_goto_first(cursor) == 0)
+    {
+        do
+        {
+            uint8_t *key, *value;
+            size_t key_size, value_size;
+            int64_t ttl;
+            uint8_t deleted;
+
+            ASSERT_EQ(
+                skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+                0);
+
+            total_count++;
+            if (deleted)
+                deleted_count++;
+            else
+                active_count++;
+
+        } while (skip_list_cursor_next(cursor) == 0);
+    }
+
+    ASSERT_EQ(total_count, 50);
+    ASSERT_EQ(deleted_count, 10);
+    ASSERT_EQ(active_count, 40);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void *lockfree_stress_writer(void *arg)
+{
+    concurrent_test_ctx_t *ctx = (concurrent_test_ctx_t *)arg;
+
+    for (int i = 0; i < ctx->num_ops; i++)
+    {
+        /* use overlapping keys to maximize contention */
+        int key_id = i % 100; /* only 100 unique keys, lots of updates */
+        char key_buf[32];
+        char value_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "key%d", key_id);
+        snprintf(value_buf, sizeof(value_buf), "t%d_v%d", ctx->thread_id, i);
+
+        /* if write fails due to sequence conflict, get new seq and retry */
+        int result = -1;
+        int retry_count = 0;
+        while (result != 0 && retry_count < 100)
+        {
+            /* get next sequence number atomically */
+            uint64_t seq = atomic_fetch_add_explicit(ctx->shared_seq, 1, memory_order_relaxed) + 1;
+
+            result =
+                skip_list_put_with_seq(ctx->list, (uint8_t *)key_buf, strlen(key_buf) + 1,
+                                       (uint8_t *)value_buf, strlen(value_buf) + 1, -1, seq, 0);
+            retry_count++;
+        }
+
+        if (result != 0)
+        {
+            printf(
+                RED
+                "ERROR: Thread %d failed to insert key %s at iteration %d after %d retries\n" RESET,
+                ctx->thread_id, key_buf, i, retry_count);
+            return NULL;
+        }
+
+        ctx->writes_completed++;
+    }
+
+    return NULL;
+}
+
+void test_skip_list_concurrent_duplicate_keys()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+    ASSERT_TRUE(list != NULL);
+
+    const int num_writers = 8;
+    const int ops_per_thread = 5000;
+    const int num_unique_keys = 50; /* many threads writing to same keys */
+
+    pthread_t *writers = malloc(num_writers * sizeof(pthread_t));
+    concurrent_test_ctx_t *writer_ctx = malloc(num_writers * sizeof(concurrent_test_ctx_t));
+
+    /* shared atomic sequence counter for all threads */
+    _Atomic(uint64_t) shared_seq = 0;
+
+    printf(YELLOW
+           "  Testing concurrent duplicate key handling: %d threads, %d ops each, %d unique "
+           "keys\n" RESET,
+           num_writers, ops_per_thread, num_unique_keys);
+
+    /* create writer threads that will heavily contend on the same keys */
+    for (int i = 0; i < num_writers; i++)
+    {
+        writer_ctx[i].list = list;
+        writer_ctx[i].thread_id = i;
+        writer_ctx[i].num_ops = ops_per_thread;
+        writer_ctx[i].writes_completed = 0;
+        writer_ctx[i].shared_seq = &shared_seq;
+        pthread_create(&writers[i], NULL, lockfree_stress_writer, &writer_ctx[i]);
+    }
+
+    for (int i = 0; i < num_writers; i++)
+    {
+        pthread_join(writers[i], NULL);
+        printf(YELLOW "  Writer %d completed %d writes\n" RESET, i, writer_ctx[i].writes_completed);
+    }
+
+    int total_writes = 0;
+    for (int i = 0; i < num_writers; i++)
+    {
+        total_writes += writer_ctx[i].writes_completed;
+    }
+
+    printf(CYAN "  Total writes attempted: %d\n" RESET, total_writes);
+    ASSERT_EQ(total_writes, num_writers * ops_per_thread);
+
+    /* verify entry count is correct (should be <= 100 unique keys) */
+    int entry_count = skip_list_count_entries(list);
+    printf(CYAN "  Entry count in list: %d\n" RESET, entry_count);
+    ASSERT_TRUE(entry_count <= 100); /* we use key%100 in stress writer */
+    ASSERT_TRUE(entry_count > 0);
+
+    /* verify all keys are accessible and have valid data */
+    int keys_found = 0;
+    for (int i = 0; i < 100; i++)
+    {
+        char key_buf[32];
+        snprintf(key_buf, sizeof(key_buf), "key%d", i);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        int result = skip_list_get(list, (uint8_t *)key_buf, strlen(key_buf) + 1, &value,
+                                   &value_size, &ttl, &deleted);
+        if (result == 0 && value != NULL && !deleted)
+        {
+            keys_found++;
+            free(value);
+        }
+    }
+
+    printf(CYAN "  Keys found: %d\n" RESET, keys_found);
+    ASSERT_EQ(keys_found, entry_count); /* all entries should be findable */
+
+    /* verify no duplicate nodes exist by iterating */
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+
+    int iterated = 0;
+    char *last_key = NULL;
+    if (skip_list_cursor_goto_first(cursor) == 0)
+    {
+        do
+        {
+            uint8_t *key, *value;
+            size_t key_size, value_size;
+            int64_t ttl;
+            uint8_t deleted;
+
+            ASSERT_EQ(
+                skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+                0);
+
+            /* verify no duplicate keys in sequence */
+            if (last_key != NULL)
+            {
+                ASSERT_TRUE(strcmp(last_key, (char *)key) != 0); /* keys should be unique */
+                free(last_key);
+            }
+            last_key = malloc(key_size);
+            memcpy(last_key, key, key_size);
+
+            iterated++;
+        } while (skip_list_cursor_next(cursor) == 0);
+    }
+
+    if (last_key) free(last_key);
+
+    printf(CYAN "  Iterated entries: %d\n" RESET, iterated);
+    ASSERT_EQ(iterated, entry_count); /* iteration count should match entry count */
+
+    skip_list_cursor_free(cursor);
+    free(writers);
+    free(writer_ctx);
+    skip_list_free(list);
+}
+
+void test_skip_list_lockfree_stress()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+    ASSERT_TRUE(list != NULL);
+
+    const int num_writers = 16; /* many concurrent writers */
+    const int ops_per_thread = 10000;
+
+    pthread_t *writers = malloc(num_writers * sizeof(pthread_t));
+    concurrent_test_ctx_t *writer_ctx = malloc(num_writers * sizeof(concurrent_test_ctx_t));
+
+    /* shared atomic sequence counter for all threads */
+    _Atomic(uint64_t) shared_seq = 0;
+
+    printf(YELLOW "  Starting %d writer threads, %d ops each...\n" RESET, num_writers,
+           ops_per_thread);
+
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    for (int i = 0; i < num_writers; i++)
+    {
+        writer_ctx[i].list = list;
+        writer_ctx[i].thread_id = i;
+        writer_ctx[i].num_ops = ops_per_thread;
+        writer_ctx[i].writes_completed = 0;
+        writer_ctx[i].shared_seq = &shared_seq;
+        pthread_create(&writers[i], NULL, lockfree_stress_writer, &writer_ctx[i]);
+    }
+
+    for (int i = 0; i < num_writers; i++)
+    {
+        pthread_join(writers[i], NULL);
+        printf(YELLOW "  Writer %d completed %d writes\n" RESET, i, writer_ctx[i].writes_completed);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+
+    int total_writes = 0;
+    for (int i = 0; i < num_writers; i++)
+    {
+        total_writes += writer_ctx[i].writes_completed;
+    }
+
+    printf(CYAN "  Total writes: %d in %.2f seconds (%.2f M ops/sec)\n" RESET, total_writes,
+           elapsed, total_writes / elapsed / 1000000.0);
+
+    /* verify all writes completed */
+    ASSERT_EQ(total_writes, num_writers * ops_per_thread);
+
+    /* verify list integrity, check that we can read all keys */
+    printf(YELLOW "  Verifying list integrity...\n" RESET);
+    int keys_found = 0;
+    for (int i = 0; i < 100; i++)
+    {
+        char key_buf[32];
+        snprintf(key_buf, sizeof(key_buf), "key%d", i);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        int result = skip_list_get(list, (uint8_t *)key_buf, strlen(key_buf) + 1, &value,
+                                   &value_size, &ttl, &deleted);
+        if (result == 0 && value != NULL)
+        {
+            keys_found++;
+            free(value);
+        }
+    }
+
+    printf(YELLOW "  Found %d/100 keys (some may have been deleted)\n" RESET, keys_found);
+    ASSERT_TRUE(keys_found > 0); /* at least some keys should exist */
+
+    /* verify we can iterate without crashes */
+    printf(YELLOW "  Testing iteration...\n" RESET);
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+
+    int iterated = 0;
+    if (skip_list_cursor_goto_first(cursor) == 0)
+    {
+        do
+        {
+            iterated++;
+            if (iterated > 200) /* safety limit */
+                break;
+        } while (skip_list_cursor_next(cursor) == 0);
+    }
+
+    printf(YELLOW "  Iterated through %d entries\n" RESET, iterated);
+    skip_list_cursor_free(cursor);
+
+    free(writers);
+    free(writer_ctx);
+    skip_list_free(list);
+}
+
+static uint64_t zipfian_next(uint64_t *state, uint64_t n)
+{
+    /* simple zipfian approximation at 80% of accesses go to 20% of keys */
+    *state = (*state * 1103515245 + 12345) & 0x7fffffff;
+    if ((*state % 100) < 80)
+    {
+        /* hot keys first 20% */
+        return (*state % (n / 5));
+    }
+    else
+    {
+        /* cold keys remaining 80% */
+        return (n / 5) + (*state % (n - n / 5));
+    }
+}
+
+void benchmark_skip_list_zipfian()
+{
+    skip_list_t *list = NULL;
+    int result = skip_list_new(&list, 12, 0.25);
+    ASSERT_EQ(result, 0);
+    ASSERT_TRUE(list != NULL);
+
+    const int num_ops = 500000;
+    const int num_unique_keys = 56000;
+    uint64_t zipf_state = 12345;
+
+    /* track unique keys accessed */
+    int *key_seen = calloc(num_unique_keys, sizeof(int));
+    int unique_keys_accessed = 0;
+
+    /* zipfian writes (hot keys get updated many times) */
+    printf(YELLOW "  Zipfian writes (%d ops, ~%d unique keys)...\n" RESET, num_ops,
+           num_unique_keys);
+
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    for (int i = 0; i < num_ops; i++)
+    {
+        uint64_t key_num = zipfian_next(&zipf_state, num_unique_keys);
+        char key[32];
+        snprintf(key, sizeof(key), "key_%08" PRIu64, key_num);
+
+        char value[100];
+        snprintf(value, sizeof(value), "value_%d", i);
+
+        /* track unique keys */
+        if (!key_seen[key_num])
+        {
+            key_seen[key_num] = 1;
+            unique_keys_accessed++;
+        }
+
+        int put_result = skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1,
+                                                (uint8_t *)value, strlen(value) + 1, -1, i + 1, 0);
+        ASSERT_EQ(put_result, 0);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double write_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double write_ops_per_sec = num_ops / write_time;
+
+    printf(CYAN "    Writes: %.2f M ops/sec (%.3f seconds)\n" RESET, write_ops_per_sec / 1e6,
+           write_time);
+    printf(CYAN "    Unique keys accessed: %d\n" RESET, unique_keys_accessed);
+    printf(CYAN "    New inserts: %d, Updates: %d\n" RESET, unique_keys_accessed,
+           num_ops - unique_keys_accessed);
+    printf(CYAN "    Actual entries in skip list: %d\n" RESET, skip_list_count_entries(list));
+    printf(YELLOW "    Duplicates created: %d\n" RESET,
+           skip_list_count_entries(list) - unique_keys_accessed);
+
+    free(key_seen);
+
+    /* mixed workload (50% read, 50% write) with zipfian distribution */
+    printf(YELLOW "  Zipfian mixed (50/50 read/write, %d ops)...\n" RESET, num_ops);
+
+    zipf_state = 12345; /* reset for consistent distribution */
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    int read_count = 0, write_count = 0;
+    int read_hits = 0;
+
+    for (int i = 0; i < num_ops; i++)
+    {
+        uint64_t key_num = zipfian_next(&zipf_state, num_unique_keys);
+        char key[32];
+        snprintf(key, sizeof(key), "key_%08" PRIu64, key_num);
+
+        if (i % 2 == 0)
+        {
+            uint8_t *value = NULL;
+            size_t value_size = 0;
+            uint8_t deleted = 0;
+            int64_t ttl;
+
+            int get_result = skip_list_get(list, (uint8_t *)key, strlen(key) + 1, &value,
+                                           &value_size, &ttl, &deleted);
+            if (get_result == 0 && !deleted)
+            {
+                read_hits++;
+                free(value);
+            }
+            read_count++;
+        }
+        else
+        {
+            char value[100];
+            snprintf(value, sizeof(value), "updated_value_%d", i);
+
+            skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                                   strlen(value) + 1, -1, num_ops + i + 1, 0);
+            write_count++;
+        }
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double mixed_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double mixed_ops_per_sec = num_ops / mixed_time;
+    double read_ops_per_sec = read_count / mixed_time;
+    double mixed_write_ops_per_sec = write_count / mixed_time;
+
+    printf(CYAN "    Mixed: %.2f M ops/sec (%.3f seconds)\n" RESET, mixed_ops_per_sec / 1e6,
+           mixed_time);
+    printf(CYAN "    Reads: %.2f M ops/sec (%d ops, %d hits, %.1f%% hit rate)\n" RESET,
+           read_ops_per_sec / 1e6, read_count, read_hits, (read_hits * 100.0) / read_count);
+    printf(CYAN "    Writes: %.2f M ops/sec (%d ops)\n" RESET, mixed_write_ops_per_sec / 1e6,
+           write_count);
+
+    /* pure reads (all hot keys) */
+    printf(YELLOW "  Zipfian reads only (%d ops)...\n" RESET, num_ops);
+
+    zipf_state = 12345;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    int pure_read_hits = 0;
+    for (int i = 0; i < num_ops; i++)
+    {
+        uint64_t key_num = zipfian_next(&zipf_state, num_unique_keys);
+        char key[32];
+        snprintf(key, sizeof(key), "key_%08" PRIu64, key_num);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        int get_result = skip_list_get(list, (uint8_t *)key, strlen(key) + 1, &value, &value_size,
+                                       &ttl, &deleted);
+        if (get_result == 0 && !deleted)
+        {
+            pure_read_hits++;
+            free(value);
+        }
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double read_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double pure_read_ops_per_sec = num_ops / read_time;
+
+    printf(CYAN "    Reads: %.2f M ops/sec (%.3f seconds, %d hits, %.1f%% hit rate)\n" RESET,
+           pure_read_ops_per_sec / 1e6, read_time, pure_read_hits,
+           (pure_read_hits * 100.0) / num_ops);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_update_patterns()
+{
+    skip_list_t *list = NULL;
+    int result = skip_list_new(&list, 12, 0.25);
+    ASSERT_EQ(result, 0);
+    ASSERT_TRUE(list != NULL);
+
+    printf(YELLOW "  Writing version 1 for 50 keys...\n" RESET);
+    for (int i = 0; i < 50; i++)
+    {
+        char key[32], value[64];
+        snprintf(key, sizeof(key), "update_key_%d", i);
+        snprintf(value, sizeof(value), "version_1_value_%d", i);
+
+        result = skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                                        strlen(value) + 1, -1, i + 1, 0);
+        ASSERT_EQ(result, 0);
+    }
+
+    int count_v1 = skip_list_count_entries(list);
+    printf(YELLOW "    After version 1: %d entries\n" RESET, count_v1);
+    ASSERT_EQ(count_v1, 50);
+
+    /* update same keys multiple times */
+    for (int version = 2; version <= 5; version++)
+    {
+        printf(YELLOW "  Writing version %d for 50 keys...\n" RESET, version);
+        for (int i = 0; i < 50; i++)
+        {
+            char key[32], value[64];
+            snprintf(key, sizeof(key), "update_key_%d", i);
+            snprintf(value, sizeof(value), "version_%d_value_%d", version, i);
+
+            result = skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                                            strlen(value) + 1, -1, (version - 1) * 50 + i + 1, 0);
+            ASSERT_EQ(result, 0);
+        }
+
+        int count = skip_list_count_entries(list);
+        printf(YELLOW "    After version %d: %d entries\n" RESET, version, count);
+    }
+
+    printf(YELLOW "  Verifying all keys return version 5...\n" RESET);
+    for (int i = 0; i < 50; i++)
+    {
+        char key[32], expected[64];
+        snprintf(key, sizeof(key), "update_key_%d", i);
+        snprintf(expected, sizeof(expected), "version_5_value_%d", i);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        result = skip_list_get(list, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &ttl,
+                               &deleted);
+        ASSERT_EQ(result, 0);
+        ASSERT_TRUE(!deleted);
+        ASSERT_EQ(value_size, strlen(expected) + 1);
+
+        if (memcmp(value, expected, strlen(expected)) != 0)
+        {
+            printf(RED "    ERROR: key=%s expected=%s got=%s\n" RESET, key, expected,
+                   (char *)value);
+            ASSERT_TRUE(0);
+        }
+
+        free(value);
+    }
+
+    printf(YELLOW "    All 50 keys verified successfully!\n" RESET);
+
+    skip_list_free(list);
+}
+
+static void test_skip_list_large_value_updates(void)
+{
+    skip_list_t *list = NULL;
+    int result = skip_list_new(&list, 12, 0.25);
+    ASSERT_EQ(result, 0);
+    ASSERT_TRUE(list != NULL);
+
+    printf(YELLOW "  Testing large value updates (100 bytes, 10 versions)...\n" RESET);
+
+    const int num_keys = 20;
+    const int num_versions = 10;
+    char large_value[100];
+
+    for (int version = 1; version <= num_versions; version++)
+    {
+        for (int i = 0; i < num_keys; i++)
+        {
+            char key[32];
+            snprintf(key, sizeof(key), "large_key_%d", i);
+            snprintf(large_value, sizeof(large_value), "large_version_%d_value_%d_padding", version,
+                     i);
+
+            result = skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1,
+                                            (uint8_t *)large_value, strlen(large_value) + 1, -1,
+                                            (version - 1) * num_keys + i + 1, 0);
+            ASSERT_EQ(result, 0);
+        }
+
+        int count = skip_list_count_entries(list);
+        printf(YELLOW "    After version %d: %d entries\n" RESET, version, count);
+
+        /* after first version, count should stay constant (in-place updates) */
+        if (version > 1)
+        {
+            ASSERT_EQ(count, num_keys);
+        }
+    }
+
+    /* verify we get the latest version for all keys */
+    printf(YELLOW "  Verifying all keys return version %d...\n" RESET, num_versions);
+    for (int i = 0; i < num_keys; i++)
+    {
+        char key[32], expected[100];
+        snprintf(key, sizeof(key), "large_key_%d", i);
+        snprintf(expected, sizeof(expected), "large_version_%d_value_%d_padding", num_versions, i);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        result = skip_list_get(list, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &ttl,
+                               &deleted);
+        ASSERT_EQ(result, 0);
+        ASSERT_TRUE(!deleted);
+        ASSERT_EQ(value_size, strlen(expected) + 1);
+
+        if (memcmp(value, expected, strlen(expected)) != 0)
+        {
+            printf(RED "    ERROR: key=%s expected=%s got=%s\n" RESET, key, expected,
+                   (char *)value);
+            ASSERT_TRUE(0);
+        }
+
+        free(value);
+    }
+
+    printf(CYAN "    All %d keys verified successfully!\n" RESET, num_keys);
+    printf(CYAN "    Final entry count: %d (should be %d, no duplicates)\n" RESET,
+           skip_list_count_entries(list), num_keys);
+
+    skip_list_free(list);
+}
+
+void benchmark_skip_list_deletions()
+{
+    skip_list_t *list = NULL;
+    int result = skip_list_new(&list, 12, 0.25);
+    ASSERT_EQ(result, 0);
+    ASSERT_TRUE(list != NULL);
+
+    const int num_keys = 100000;
+    struct timespec start, end;
+
+    printf(YELLOW "  Populating %d keys...\n" RESET, num_keys);
+    for (int i = 0; i < num_keys; i++)
+    {
+        char key[32], value[64];
+        snprintf(key, sizeof(key), "key_%d", i);
+        snprintf(value, sizeof(value), "value_%d", i);
+
+        result = skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                                        strlen(value) + 1, -1, i + 1, 0);
+        ASSERT_EQ(result, 0);
+    }
+
+    printf(YELLOW "  Initial entry count: %d\n" RESET, skip_list_count_entries(list));
+
+    /* benchmark delete existing keys */
+    printf(YELLOW "  Deleting existing keys (%d ops)...\n" RESET, num_keys);
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    for (int i = 0; i < num_keys; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "key_%d", i);
+        skip_list_delete(list, (uint8_t *)key, strlen(key) + 1, num_keys + i + 1);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double delete_existing_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double delete_existing_ops_per_sec = num_keys / delete_existing_time;
+
+    printf(YELLOW "    Delete existing: %.2f M ops/sec (%.3f seconds)\n" RESET,
+           delete_existing_ops_per_sec / 1e6, delete_existing_time);
+
+    /* verify all keys are marked deleted */
+    int deleted_count = 0;
+    for (int i = 0; i < num_keys; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "key_%d", i);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+
+        result = skip_list_get(list, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &ttl,
+                               &deleted);
+        if (result == 0 && deleted)
+        {
+            deleted_count++;
+            free(value);
+        }
+    }
+    printf(YELLOW "    Verified %d keys marked as deleted\n" RESET, deleted_count);
+
+    skip_list_free(list);
+
+    /* benchmark delete non-existing keys (no-op, should be very fast) */
+    const int tombstone_ops = 10000;
+    printf(YELLOW "  Deleting non-existing keys (%d ops)...\n" RESET, tombstone_ops);
+    result = skip_list_new(&list, 12, 0.25);
+    ASSERT_EQ(result, 0);
+
+    /* pre-populate some keys for realistic distribution */
+    for (int i = 0; i < tombstone_ops; i += 10)
+    {
+        char key[32], value[64];
+        snprintf(key, sizeof(key), "anchor_%d", i);
+        snprintf(value, sizeof(value), "value_%d", i);
+        skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                               strlen(value) + 1, -1, (i / 10) + 1, 0);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    for (int i = 0; i < tombstone_ops; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "nonexist_%d", i);
+        skip_list_delete(list, (uint8_t *)key, strlen(key) + 1, (tombstone_ops / 10) + i + 1);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double delete_nonexist_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double delete_nonexist_ops_per_sec = tombstone_ops / delete_nonexist_time;
+
+    printf(YELLOW "    Delete non-existing: %.2f M ops/sec (%.3f seconds)\n" RESET,
+           delete_nonexist_ops_per_sec / 1e6, delete_nonexist_time);
+    printf(YELLOW "    Tombstone count: %d\n" RESET, skip_list_count_entries(list));
+
+    skip_list_free(list);
+
+    /* benchmark mixed workload (50% existing, 50% non-existing) */
+    printf(YELLOW "  Mixed deletions (50%% existing, 50%% non-existing, %d ops)...\n" RESET,
+           num_keys);
+    result = skip_list_new(&list, 12, 0.25);
+    ASSERT_EQ(result, 0);
+
+    /* populate half the keys */
+    for (int i = 0; i < num_keys / 2; i++)
+    {
+        char key[32], value[64];
+        snprintf(key, sizeof(key), "mixed_%d", i * 2);
+        snprintf(value, sizeof(value), "value_%d", i * 2);
+
+        skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                               strlen(value) + 1, -1, i + 1, 0);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    for (int i = 0; i < num_keys; i++)
+    {
+        char key[32];
+        snprintf(key, sizeof(key), "mixed_%d", i);
+        skip_list_delete(list, (uint8_t *)key, strlen(key) + 1, (num_keys / 2) + i + 1);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double delete_mixed_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+    double delete_mixed_ops_per_sec = num_keys / delete_mixed_time;
+
+    printf(CYAN "    Delete mixed: %.2f M ops/sec (%.3f seconds)\n" RESET,
+           delete_mixed_ops_per_sec / 1e6, delete_mixed_time);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_seek_for_prev_nonexistent()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    /* insert keys 020-029 like in the failing test */
+    for (int i = 20; i < 30; i++)
+    {
+        char key[32], value[32];
+        snprintf(key, sizeof(key), "key_%03d", i);
+        snprintf(value, sizeof(value), "value_%03d", i);
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key), (uint8_t *)value,
+                                         strlen(value), -1, i + 1, 0),
+                  0);
+    }
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_TRUE(skip_list_cursor_init(&cursor, list) == 0);
+    ASSERT_TRUE(cursor != NULL);
+
+    /* seek_for_prev with "key_025_5" should find "key_025" */
+    ASSERT_EQ(skip_list_cursor_seek_for_prev(cursor, (uint8_t *)"key_025_5", 9), 0);
+
+    uint8_t *key = NULL;
+    size_t key_size = 0;
+    uint8_t *value = NULL;
+    size_t value_size = 0;
+    int64_t ttl = 0;
+    uint8_t deleted = 0;
+
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_025", 7), 0);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+/* reverse comparator for testing */
+static int reverse_memcmp_comparator(const uint8_t *key1, size_t key1_size, const uint8_t *key2,
+                                     size_t key2_size, void *ctx)
+{
+    (void)ctx;
+    size_t min_size = key1_size < key2_size ? key1_size : key2_size;
+    int result = memcmp(key1, key2, min_size);
+    if (result != 0) return -result;      /* negate to reverse */
+    if (key1_size < key2_size) return 1;  /* reverse shorter is greater */
+    if (key1_size > key2_size) return -1; /* reverse longer is smaller */
+    return 0;
+}
+
+void test_skip_list_reverse_comparator()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new_with_comparator(&list, 12, 0.25, reverse_memcmp_comparator, NULL), 0);
+    ASSERT_TRUE(list != NULL);
+
+    /* insert keys 0-9 */
+    for (int i = 0; i < 10; i++)
+    {
+        char key[32], value[32];
+        snprintf(key, sizeof(key), "key_%03d", i);
+        snprintf(value, sizeof(value), "value_%03d", i);
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)value,
+                                         strlen(value) + 1, -1, i + 1, 0),
+                  0);
+    }
+
+    /* iterate forward -- should get keys in reverse order (9, 8, 7, ..., 0) */
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+    ASSERT_EQ(skip_list_cursor_goto_first(cursor), 0);
+
+    int expected = 9;
+    while (skip_list_cursor_valid(cursor))
+    {
+        uint8_t *key = NULL;
+        size_t key_size = 0;
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        int64_t ttl = 0;
+        uint8_t deleted = 0;
+
+        ASSERT_EQ(
+            skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted), 0);
+
+        char expected_key[32];
+        snprintf(expected_key, sizeof(expected_key), "key_%03d", expected);
+
+        printf("  Expected: %s, Got: %s\n", expected_key, (char *)key);
+        ASSERT_EQ(strcmp((char *)key, expected_key), 0);
+
+        expected--;
+        if (skip_list_cursor_next(cursor) != 0) break;
+    }
+
+    ASSERT_EQ(expected, -1); /* should have iterated through all 10 keys */
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_prefix_seek_behavior()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+
+    /* common prefixes user:100, user:200, user:300, user:400, user:500 */
+    const char *keys[] = {"user:100", "user:200", "user:300", "user:400", "user:500"};
+    const char *values[] = {"alice", "bob", "charlie", "david", "eve"};
+    const int num_keys = 5;
+
+    for (int i = 0; i < num_keys; i++)
+    {
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)keys[i], strlen(keys[i]) + 1,
+                                         (uint8_t *)values[i], strlen(values[i]) + 1, -1, i + 1, 0),
+                  0);
+    }
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+
+    uint8_t *key = NULL;
+    size_t key_size = 0;
+    uint8_t *value = NULL;
+    size_t value_size = 0;
+    int64_t ttl = 0;
+    uint8_t deleted = 0;
+
+    const char *seek1 = "user:150";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek1, strlen(seek1) + 1), 0);
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)key, "user:200"), 0);
+    ASSERT_EQ(strcmp((char *)value, "bob"), 0);
+
+    const char *seek2 = "user:250";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek2, strlen(seek2) + 1), 0);
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)key, "user:300"), 0);
+
+    const char *seek3 = "user:";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek3, strlen(seek3) + 1), 0);
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)key, "user:100"), 0);
+
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek3, strlen(seek3) + 1), 0);
+    int count = 0;
+    while (skip_list_cursor_next(cursor) == 0 && skip_list_cursor_valid(cursor) == 1)
+    {
+        ASSERT_EQ(
+            skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted), 0);
+        /* verify key starts with "user:" */
+        ASSERT_EQ(strncmp((char *)key, "user:", 5), 0);
+        count++;
+    }
+    ASSERT_EQ(count, num_keys);
+
+    const char *seek5 = "user:350";
+    ASSERT_EQ(skip_list_cursor_seek_for_prev(cursor, (uint8_t *)seek5, strlen(seek5) + 1), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)key, "user:300"), 0);
+    const char *seek6 = "user:999";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek6, strlen(seek6) + 1), 0);
+
+    int next_result = skip_list_cursor_next(cursor);
+    if (next_result == 0)
+    {
+        ASSERT_EQ(skip_list_cursor_valid(cursor), 0);
+    }
+
+    ASSERT_EQ(skip_list_cursor_seek_for_prev(cursor, (uint8_t *)seek6, strlen(seek6) + 1), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)key, "user:500"), 0);
+
+    const char *seek8 = "aaa";
+    ASSERT_EQ(skip_list_cursor_seek(cursor, (uint8_t *)seek8, strlen(seek8) + 1), 0);
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+
+    ASSERT_EQ(strcmp((char *)key, "user:100"), 0);
+
+    uint8_t *get_value = NULL;
+    size_t get_value_size = 0;
+    uint8_t get_deleted = 0;
+    int64_t get_ttl;
+    int get_result = skip_list_get(list, (uint8_t *)seek1, strlen(seek1) + 1, &get_value,
+                                   &get_value_size, &get_ttl, &get_deleted);
+    ASSERT_EQ(get_result, -1);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_put_batch()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    /* we test batch put with multiple entries */
+    skip_list_batch_entry_t entries[5];
+    const char *keys[] = {"batch_key1", "batch_key2", "batch_key3", "batch_key4", "batch_key5"};
+    const char *values[] = {"value1", "value2", "value3", "value4", "value5"};
+
+    for (int i = 0; i < 5; i++)
+    {
+        entries[i].key = (const uint8_t *)keys[i];
+        entries[i].key_size = strlen(keys[i]) + 1;
+        entries[i].value = (const uint8_t *)values[i];
+        entries[i].value_size = strlen(values[i]) + 1;
+        entries[i].ttl = -1;
+        entries[i].seq = (uint64_t)(i + 1);
+        entries[i].flags = 0;
+    }
+
+    int result = skip_list_put_batch(list, entries, 5);
+    ASSERT_EQ(result, 5);
+
+    /* we verify all entries are retrievable */
+    for (int i = 0; i < 5; i++)
+    {
+        uint8_t *retrieved_value = NULL;
+        size_t retrieved_value_size = 0;
+        int64_t ttl;
+        uint8_t deleted;
+        int get_result = skip_list_get(list, (const uint8_t *)keys[i], strlen(keys[i]) + 1,
+                                       &retrieved_value, &retrieved_value_size, &ttl, &deleted);
+        ASSERT_EQ(get_result, 0);
+        ASSERT_EQ(deleted, 0);
+        ASSERT_EQ(strcmp((char *)retrieved_value, values[i]), 0);
+        free(retrieved_value);
+    }
+
+    ASSERT_EQ(skip_list_count_entries(list), 5);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_put_batch_sorted()
+{
+    /* we test batch put with sorted keys for optimal performance */
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    const int batch_size = 100;
+    skip_list_batch_entry_t *entries = malloc(batch_size * sizeof(skip_list_batch_entry_t));
+    char **keys = malloc(batch_size * sizeof(char *));
+    char **values = malloc(batch_size * sizeof(char *));
+
+    /* we create sorted keys */
+    for (int i = 0; i < batch_size; i++)
+    {
+        keys[i] = malloc(32);
+        values[i] = malloc(32);
+        snprintf(keys[i], 32, "sorted_key_%04d", i);
+        snprintf(values[i], 32, "value_%04d", i);
+
+        entries[i].key = (const uint8_t *)keys[i];
+        entries[i].key_size = strlen(keys[i]) + 1;
+        entries[i].value = (const uint8_t *)values[i];
+        entries[i].value_size = strlen(values[i]) + 1;
+        entries[i].ttl = -1;
+        entries[i].seq = (uint64_t)(i + 1);
+        entries[i].flags = 0;
+    }
+
+    int result = skip_list_put_batch(list, entries, batch_size);
+    ASSERT_EQ(result, batch_size);
+    ASSERT_EQ(skip_list_count_entries(list), batch_size);
+
+    /* we verify first, middle, and last entries */
+    uint8_t *retrieved_value = NULL;
+    size_t retrieved_value_size = 0;
+    int64_t ttl;
+    uint8_t deleted;
+
+    ASSERT_EQ(skip_list_get(list, (const uint8_t *)keys[0], strlen(keys[0]) + 1, &retrieved_value,
+                            &retrieved_value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)retrieved_value, values[0]), 0);
+    free(retrieved_value);
+
+    ASSERT_EQ(skip_list_get(list, (const uint8_t *)keys[50], strlen(keys[50]) + 1, &retrieved_value,
+                            &retrieved_value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)retrieved_value, values[50]), 0);
+    free(retrieved_value);
+
+    ASSERT_EQ(skip_list_get(list, (const uint8_t *)keys[99], strlen(keys[99]) + 1, &retrieved_value,
+                            &retrieved_value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(strcmp((char *)retrieved_value, values[99]), 0);
+    free(retrieved_value);
+
+    for (int i = 0; i < batch_size; i++)
+    {
+        free(keys[i]);
+        free(values[i]);
+    }
+    free(keys);
+    free(values);
+    free(entries);
+    skip_list_free(list);
+}
+
+void benchmark_skip_list_batch_vs_single()
+{
+    printf(BOLDWHITE "\n----------------- Batch vs Single Put Benchmark -----------------\n" RESET);
+
+    const int num_entries = 100000;
+    skip_list_batch_entry_t *entries = malloc(num_entries * sizeof(skip_list_batch_entry_t));
+    char **keys = malloc(num_entries * sizeof(char *));
+    char **values = malloc(num_entries * sizeof(char *));
+
+    /* we prepare entries */
+    for (int i = 0; i < num_entries; i++)
+    {
+        keys[i] = malloc(32);
+        values[i] = malloc(64);
+        snprintf(keys[i], 32, "bench_key_%08d", i);
+        snprintf(values[i], 64, "bench_value_%08d", i);
+
+        entries[i].key = (const uint8_t *)keys[i];
+        entries[i].key_size = strlen(keys[i]) + 1;
+        entries[i].value = (const uint8_t *)values[i];
+        entries[i].value_size = strlen(values[i]) + 1;
+        entries[i].ttl = -1;
+        entries[i].seq = (uint64_t)(i + 1);
+        entries[i].flags = 0;
+    }
+
+    /* we benchmark single puts */
+    skip_list_t *list_single = NULL;
+    skip_list_new(&list_single, 12, 0.24f);
+
+    clock_t start_single = clock();
+    for (int i = 0; i < num_entries; i++)
+    {
+        skip_list_put_with_seq(list_single, entries[i].key, entries[i].key_size, entries[i].value,
+                               entries[i].value_size, entries[i].ttl, entries[i].seq,
+                               entries[i].flags);
+    }
+    clock_t end_single = clock();
+    double time_single = (double)(end_single - start_single) / CLOCKS_PER_SEC;
+
+    /* we benchmark batch puts */
+    skip_list_t *list_batch = NULL;
+    skip_list_new(&list_batch, 12, 0.24f);
+
+    clock_t start_batch = clock();
+    skip_list_put_batch(list_batch, entries, num_entries);
+    clock_t end_batch = clock();
+    double time_batch = (double)(end_batch - start_batch) / CLOCKS_PER_SEC;
+
+    printf(CYAN "Single put (%d entries): %.4f seconds (%.0f ops/sec)\n" RESET, num_entries,
+           time_single, num_entries / time_single);
+    printf(CYAN "Batch put (%d entries):  %.4f seconds (%.0f ops/sec)\n" RESET, num_entries,
+           time_batch, num_entries / time_batch);
+    printf(BOLDWHITE "Speedup: %.2fx\n" RESET, time_single / time_batch);
+
+    ASSERT_EQ(skip_list_count_entries(list_single), num_entries);
+    ASSERT_EQ(skip_list_count_entries(list_batch), num_entries);
+
+    for (int i = 0; i < num_entries; i++)
+    {
+        free(keys[i]);
+        free(values[i]);
+    }
+    free(keys);
+    free(values);
+    free(entries);
+    skip_list_free(list_single);
+    skip_list_free(list_batch);
+}
+
+void test_skip_list_arena_put_get()
+{
+    /* test basic put/get with arena-backed skip list */
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new_with_arena(&list, 12, 0.24f, skip_list_comparator_memcmp, NULL, NULL,
+                                       1024 * 1024),
+              0);
+    ASSERT_TRUE(list != NULL);
+    ASSERT_TRUE(list->arena != NULL);
+
+    uint8_t key[] = "arena_key";
+    uint8_t value[] = "arena_value";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0), 0);
+
+    uint8_t *retrieved_value = NULL;
+    size_t retrieved_value_size = 0;
+    int64_t ttl;
+    uint8_t deleted;
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), &retrieved_value, &retrieved_value_size, &ttl,
+                            &deleted),
+              0);
+    ASSERT_EQ(memcmp(retrieved_value, value, sizeof(value)), 0);
+    free(retrieved_value);
+
+    ASSERT_EQ(skip_list_count_entries(list), 1);
+    skip_list_free(list);
+}
+
+void test_skip_list_arena_batch()
+{
+    /* test batch put with arena-backed skip list */
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new_with_arena(&list, 12, 0.24f, skip_list_comparator_memcmp, NULL, NULL,
+                                       4 * 1024 * 1024),
+              0);
+
+    const int batch_size = 1000;
+    skip_list_batch_entry_t *entries = malloc(batch_size * sizeof(skip_list_batch_entry_t));
+    char **keys = malloc(batch_size * sizeof(char *));
+    char **values = malloc(batch_size * sizeof(char *));
+
+    for (int i = 0; i < batch_size; i++)
+    {
+        keys[i] = malloc(32);
+        values[i] = malloc(64);
+        snprintf(keys[i], 32, "arena_batch_%06d", i);
+        snprintf(values[i], 64, "arena_val_%06d", i);
+        entries[i].key = (const uint8_t *)keys[i];
+        entries[i].key_size = strlen(keys[i]) + 1;
+        entries[i].value = (const uint8_t *)values[i];
+        entries[i].value_size = strlen(values[i]) + 1;
+        entries[i].ttl = -1;
+        entries[i].seq = (uint64_t)(i + 1);
+        entries[i].flags = 0;
+    }
+
+    ASSERT_EQ(skip_list_put_batch(list, entries, batch_size), batch_size);
+    ASSERT_EQ(skip_list_count_entries(list), batch_size);
+
+    /* verify first, middle, last */
+    uint8_t *rv = NULL;
+    size_t rvs = 0;
+    int64_t ttl;
+    uint8_t del;
+    ASSERT_EQ(
+        skip_list_get(list, (const uint8_t *)keys[0], strlen(keys[0]) + 1, &rv, &rvs, &ttl, &del),
+        0);
+    ASSERT_EQ(strcmp((char *)rv, values[0]), 0);
+    free(rv);
+
+    ASSERT_EQ(skip_list_get(list, (const uint8_t *)keys[500], strlen(keys[500]) + 1, &rv, &rvs,
+                            &ttl, &del),
+              0);
+    ASSERT_EQ(strcmp((char *)rv, values[500]), 0);
+    free(rv);
+
+    ASSERT_EQ(skip_list_get(list, (const uint8_t *)keys[999], strlen(keys[999]) + 1, &rv, &rvs,
+                            &ttl, &del),
+              0);
+    ASSERT_EQ(strcmp((char *)rv, values[999]), 0);
+    free(rv);
+
+    for (int i = 0; i < batch_size; i++)
+    {
+        free(keys[i]);
+        free(values[i]);
+    }
+    free(keys);
+    free(values);
+    free(entries);
+    skip_list_free(list);
+}
+
+void test_skip_list_arena_cursor()
+{
+    /* test cursor iteration with arena-backed skip list */
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new_with_arena(&list, 12, 0.24f, skip_list_comparator_memcmp, NULL, NULL,
+                                       1024 * 1024),
+              0);
+
+    for (int i = 0; i < 100; i++)
+    {
+        char key[32], val[32];
+        snprintf(key, sizeof(key), "cursor_%04d", i);
+        snprintf(val, sizeof(val), "val_%04d", i);
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)val,
+                                         strlen(val) + 1, -1, (uint64_t)(i + 1), 0),
+                  0);
+    }
+
+    ASSERT_EQ(skip_list_count_entries(list), 100);
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+
+    int count = 0;
+    do
+    {
+        count++;
+    } while (skip_list_cursor_next(cursor) == 0);
+    ASSERT_EQ(count, 99); /* 99 more after the first next */
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_arena_delete()
+{
+    /* test tombstone creation with arena-backed skip list */
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new_with_arena(&list, 12, 0.24f, skip_list_comparator_memcmp, NULL, NULL,
+                                       1024 * 1024),
+              0);
+
+    uint8_t key[] = "delete_me";
+    uint8_t value[] = "some_value";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0), 0);
+
+    /* delete the key */
+    ASSERT_EQ(skip_list_delete(list, key, sizeof(key), 2), 0);
+
+    /* get should return deleted flag */
+    uint8_t *rv = NULL;
+    size_t rvs = 0;
+    int64_t ttl;
+    uint8_t del = 0;
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), &rv, &rvs, &ttl, &del), 0);
+    ASSERT_EQ(del, 1);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_arena_zero_capacity()
+{
+    /* arena_initial_capacity=0 should create a normal (non-arena) skip list */
+    skip_list_t *list = NULL;
+    ASSERT_EQ(
+        skip_list_new_with_arena(&list, 12, 0.24f, skip_list_comparator_memcmp, NULL, NULL, 0), 0);
+    ASSERT_TRUE(list != NULL);
+    ASSERT_TRUE(list->arena == NULL);
+
+    uint8_t key[] = "no_arena";
+    uint8_t value[] = "fallback";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0), 0);
+    ASSERT_EQ(skip_list_count_entries(list), 1);
+
+    skip_list_free(list);
+}
+
+void benchmark_skip_list_arena_vs_malloc()
+{
+    printf(BOLDWHITE "\n----------------- Arena vs Malloc Benchmark -----------------\n" RESET);
+
+    const int num_entries = BENCH_N;
+    const size_t key_size = 16;
+    const size_t value_size = 64;
+
+    uint8_t **keys = malloc(num_entries * sizeof(uint8_t *));
+    uint8_t **values = malloc(num_entries * sizeof(uint8_t *));
+    for (int i = 0; i < num_entries; i++)
+    {
+        keys[i] = malloc(key_size);
+        values[i] = malloc(value_size);
+        snprintf((char *)keys[i], key_size, "k%014d", i);
+        snprintf((char *)values[i], value_size, "v%062d", i);
+    }
+
+    /* benchmark malloc-backed skip list (write) */
+    skip_list_t *list_malloc = NULL;
+    skip_list_new(&list_malloc, 12, 0.24f);
+
+    clock_t start = clock();
+    for (int i = 0; i < num_entries; i++)
+    {
+        skip_list_put_with_seq(list_malloc, keys[i], key_size, values[i], value_size, -1,
+                               (uint64_t)(i + 1), 0);
+    }
+    clock_t end = clock();
+    double write_malloc = (double)(end - start) / CLOCKS_PER_SEC;
+
+    /* benchmark malloc-backed skip list (read) */
+    start = clock();
+    for (int i = 0; i < num_entries; i++)
+    {
+        uint8_t *rv;
+        size_t rvs;
+        int64_t ttl;
+        uint8_t del;
+        skip_list_get(list_malloc, keys[i], key_size, &rv, &rvs, &ttl, &del);
+        free(rv);
+    }
+    end = clock();
+    double read_malloc = (double)(end - start) / CLOCKS_PER_SEC;
+
+    /* benchmark arena-backed skip list (write) */
+    skip_list_t *list_arena = NULL;
+    size_t arena_size = (size_t)num_entries * (key_size + value_size + 128);
+    skip_list_new_with_arena(&list_arena, 12, 0.24f, skip_list_comparator_memcmp, NULL, NULL,
+                             arena_size);
+
+    start = clock();
+    for (int i = 0; i < num_entries; i++)
+    {
+        skip_list_put_with_seq(list_arena, keys[i], key_size, values[i], value_size, -1,
+                               (uint64_t)(i + 1), 0);
+    }
+    end = clock();
+    double write_arena = (double)(end - start) / CLOCKS_PER_SEC;
+
+    /* benchmark arena-backed skip list (read) */
+    start = clock();
+    for (int i = 0; i < num_entries; i++)
+    {
+        uint8_t *rv;
+        size_t rvs;
+        int64_t ttl;
+        uint8_t del;
+        skip_list_get(list_arena, keys[i], key_size, &rv, &rvs, &ttl, &del);
+        free(rv);
+    }
+    end = clock();
+    double read_arena = (double)(end - start) / CLOCKS_PER_SEC;
+
+    ASSERT_EQ(skip_list_count_entries(list_malloc), num_entries);
+    ASSERT_EQ(skip_list_count_entries(list_arena), num_entries);
+
+    printf(CYAN "WRITE malloc: %.4f sec (%.0f ops/sec)\n" RESET, write_malloc,
+           num_entries / write_malloc);
+    printf(CYAN "WRITE arena:  %.4f sec (%.0f ops/sec)\n" RESET, write_arena,
+           num_entries / write_arena);
+    printf(BOLDWHITE "Write speedup: %.2fx\n" RESET, write_malloc / write_arena);
+
+    printf(CYAN "READ  malloc: %.4f sec (%.0f ops/sec)\n" RESET, read_malloc,
+           num_entries / read_malloc);
+    printf(CYAN "READ  arena:  %.4f sec (%.0f ops/sec)\n" RESET, read_arena,
+           num_entries / read_arena);
+    printf(BOLDWHITE "Read speedup:  %.2fx\n" RESET, read_malloc / read_arena);
+
+    /* benchmark free time */
+    start = clock();
+    skip_list_free(list_malloc);
+    end = clock();
+    double free_malloc = (double)(end - start) / CLOCKS_PER_SEC;
+
+    start = clock();
+    skip_list_free(list_arena);
+    end = clock();
+    double free_arena = (double)(end - start) / CLOCKS_PER_SEC;
+
+    printf(CYAN "FREE  malloc: %.4f sec\n" RESET, free_malloc);
+    printf(CYAN "FREE  arena:  %.4f sec\n" RESET, free_arena);
+    printf(BOLDWHITE "Free speedup:  %.2fx\n" RESET, free_malloc / free_arena);
+
+    for (int i = 0; i < num_entries; i++)
+    {
+        free(keys[i]);
+        free(values[i]);
+    }
+    free(keys);
+    free(values);
+}
+
+void test_skip_list_get_ref()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    uint8_t key[] = "ref_key";
+    uint8_t value[] = "ref_value_data";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), -1, 1, 0), 0);
+
+    const uint8_t *rv = NULL;
+    size_t rvs = 0;
+    int64_t ttl;
+    uint8_t del;
+    ASSERT_EQ(skip_list_get_ref(list, key, sizeof(key), &rv, &rvs, &ttl, &del), 0);
+    ASSERT_EQ(del, 0);
+    ASSERT_EQ(rvs, sizeof(value));
+    ASSERT_EQ(memcmp(rv, value, sizeof(value)), 0);
+    /* do not free rv -- it points into version data */
+
+    /* test nonexistent key */
+    uint8_t bad[] = "no_such_key";
+    ASSERT_EQ(skip_list_get_ref(list, bad, sizeof(bad), &rv, &rvs, &ttl, &del), -1);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_cursor_next_get()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    for (int i = 0; i < 50; i++)
+    {
+        char key[32], val[32];
+        snprintf(key, sizeof(key), "fused_%04d", i);
+        snprintf(val, sizeof(val), "val_%04d", i);
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key) + 1, (uint8_t *)val,
+                                         strlen(val) + 1, -1, (uint64_t)(i + 1), 0),
+                  0);
+    }
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+
+    /* cursor starts at first node -- get it via cursor_get */
+    int count = 0;
+    uint8_t *key, *value;
+    size_t key_size, value_size;
+    int64_t ttl;
+    uint8_t deleted;
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_TRUE(key != NULL);
+    count++;
+
+    /* remaining 49 via fused next_get */
+    while (skip_list_cursor_next_get(cursor, &key, &key_size, &value, &value_size, &ttl,
+                                     &deleted) == 0)
+    {
+        ASSERT_TRUE(key != NULL);
+        ASSERT_TRUE(key_size > 0);
+        count++;
+    }
+    ASSERT_EQ(count, 50);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_cursor_advance_in_node()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    /* kA carries three versions, kB carries one. the chain is descending by seq */
+    uint8_t ka[] = "kA";
+    uint8_t kb[] = "kB";
+    ASSERT_EQ(skip_list_put_with_seq(list, ka, sizeof(ka), (uint8_t *)"v1", 3, -1, 1, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, ka, sizeof(ka), (uint8_t *)"v5", 3, -1, 5, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, ka, sizeof(ka), (uint8_t *)"v9", 3, -1, 9, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, kb, sizeof(kb), (uint8_t *)"v3", 3, -1, 3, 0), 0);
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+    ASSERT_EQ(skip_list_cursor_goto_first(cursor), 0);
+
+    uint8_t *key, *value;
+    size_t key_size, value_size;
+    int64_t ttl;
+    uint8_t deleted;
+    uint64_t seq;
+
+    /* head of kA is the newest version */
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &key, &key_size, &value, &value_size, &ttl,
+                                            &deleted, &seq),
+              0);
+    ASSERT_TRUE(memcmp(key, ka, sizeof(ka)) == 0);
+    ASSERT_EQ(seq, 9);
+
+    /* advance through the chain -- seq 9 -> 5 -> 1 */
+    ASSERT_EQ(skip_list_cursor_advance_in_node(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &key, &key_size, &value, &value_size, &ttl,
+                                            &deleted, &seq),
+              0);
+    ASSERT_TRUE(memcmp(key, ka, sizeof(ka)) == 0);
+    ASSERT_EQ(seq, 5);
+
+    ASSERT_EQ(skip_list_cursor_advance_in_node(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &key, &key_size, &value, &value_size, &ttl,
+                                            &deleted, &seq),
+              0);
+    ASSERT_TRUE(memcmp(key, ka, sizeof(ka)) == 0);
+    ASSERT_EQ(seq, 1);
+
+    /* chain exhausted */
+    ASSERT_EQ(skip_list_cursor_advance_in_node(cursor), -1);
+
+    /* moving to the next key resets the version pointer back to the head */
+    ASSERT_EQ(skip_list_cursor_next(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &key, &key_size, &value, &value_size, &ttl,
+                                            &deleted, &seq),
+              0);
+    ASSERT_TRUE(memcmp(key, kb, sizeof(kb)) == 0);
+    ASSERT_EQ(seq, 3);
+
+    /* single-version node has no chain to walk */
+    ASSERT_EQ(skip_list_cursor_advance_in_node(cursor), -1);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+typedef struct
+{
+    skip_list_t *list1;
+    skip_list_t *list2;
+    _Atomic(int) *sync_state;
+} aba_ctx_t;
+
+void *aba_thread_a(void *arg)
+{
+    aba_ctx_t *ctx = (aba_ctx_t *)arg;
+
+    uint8_t key[] = "A_init";
+    uint8_t val[] = "val";
+    skip_list_put_with_seq(ctx->list1, key, sizeof(key), val, sizeof(val), -1, 1, 0);
+
+    /* Signal the Main thread to destroy list1 and create list2 */
+    atomic_store_explicit(ctx->sync_state, 1, memory_order_release);
+
+    /* Wait for the green light (state == 2) from Main */
+    while (atomic_load_explicit(ctx->sync_state, memory_order_acquire) < 2)
+    {
+    }
+
+    for (int i = 0; i < 50000; i++)
+    {
+        char k[32];
+        snprintf(k, sizeof(k), "A_concurrent_%d", i);
+        skip_list_put_with_seq(ctx->list2, (uint8_t *)k, strlen(k) + 1, val, sizeof(val), -1,
+                               10 + i, 0);
+    }
+    return NULL;
+}
+
+void *aba_thread_b(void *arg)
+{
+    aba_ctx_t *ctx = (aba_ctx_t *)arg;
+
+    while (atomic_load_explicit(ctx->sync_state, memory_order_acquire) < 2)
+    {
+    }
+
+    uint8_t val[] = "val";
+    for (int i = 0; i < 50000; i++)
+    {
+        char k[32];
+        snprintf(k, sizeof(k), "B_concurrent_%d", i);
+        skip_list_put_with_seq(ctx->list2, (uint8_t *)k, strlen(k) + 1, val, sizeof(val), -1,
+                               100000 + i, 0);
+    }
+    return NULL;
+}
+
+void test_skip_list_arena_aba()
+{
+    _Atomic(int) sync_state = 0;
+    aba_ctx_t ctx = {0};
+    ctx.sync_state = &sync_state;
+
+    size_t arena_cap = 16 * 1024 * 1024; /* 16MB */
+
+    ASSERT_EQ(skip_list_new_with_arena(&ctx.list1, 12, 0.25f, skip_list_comparator_memcmp, NULL,
+                                       NULL, arena_cap),
+              0);
+    void *arena_1_ptr = ctx.list1->arena;
+
+    pthread_t thread_a;
+    pthread_create(&thread_a, NULL, aba_thread_a, &ctx);
+
+    while (atomic_load_explicit(&sync_state, memory_order_acquire) < 1)
+    {
+    }
+
+    skip_list_free(ctx.list1);
+
+    ASSERT_EQ(skip_list_new_with_arena(&ctx.list2, 12, 0.25f, skip_list_comparator_memcmp, NULL,
+                                       NULL, arena_cap),
+              0);
+    void *arena_2_ptr = ctx.list2->arena;
+
+    if (arena_1_ptr != arena_2_ptr)
+    {
+        printf(YELLOW
+               "  [Warn] malloc did not recycle the arena pointer (%p vs %p). The bug may not "
+               "trigger on this run.\n" RESET,
+               arena_1_ptr, arena_2_ptr);
+    }
+    else
+    {
+        printf(RED
+               "  [Danger] malloc recycled the arena pointer (%p). ABA collision imminent!\n" RESET,
+               arena_2_ptr);
+    }
+
+    pthread_t thread_b;
+    pthread_create(&thread_b, NULL, aba_thread_b, &ctx);
+
+    atomic_store_explicit(&sync_state, 2, memory_order_release);
+
+    pthread_join(thread_a, NULL);
+    pthread_join(thread_b, NULL);
+
+    int expected_count = 100000;
+    int actual_count = skip_list_count_entries(ctx.list2);
+
+    printf(CYAN "  Final list count: %d (Expected: %d)\n" RESET, actual_count, expected_count);
+    ASSERT_EQ(actual_count, expected_count);
+
+    skip_list_free(ctx.list2);
+}
+
+void benchmark_skip_list_read_path()
+{
+    printf(BOLDWHITE "\n----------------- Read Path Benchmark -----------------\n" RESET);
+
+    const int num_entries = BENCH_N;
+    const size_t key_size = 16;
+    const size_t value_size = 64;
+
+    skip_list_t *list = NULL;
+    skip_list_new(&list, 12, 0.24f);
+
+    uint8_t **keys = malloc(num_entries * sizeof(uint8_t *));
+    for (int i = 0; i < num_entries; i++)
+    {
+        keys[i] = malloc(key_size);
+        snprintf((char *)keys[i], key_size, "k%014d", i);
+        uint8_t val[64];
+        snprintf((char *)val, value_size, "v%062d", i);
+        skip_list_put_with_seq(list, keys[i], key_size, val, value_size, -1, (uint64_t)(i + 1), 0);
+    }
+
+    /* benchmark skip_list_get (malloc+memcpy) */
+    clock_t start = clock();
+    for (int i = 0; i < num_entries; i++)
+    {
+        uint8_t *rv;
+        size_t rvs;
+        int64_t ttl;
+        uint8_t del;
+        skip_list_get(list, keys[i], key_size, &rv, &rvs, &ttl, &del);
+        free(rv);
+    }
+    clock_t end = clock();
+    double time_get = (double)(end - start) / CLOCKS_PER_SEC;
+
+    /* benchmark skip_list_get_ref (zero-copy) */
+    start = clock();
+    for (int i = 0; i < num_entries; i++)
+    {
+        const uint8_t *rv;
+        size_t rvs;
+        int64_t ttl;
+        uint8_t del;
+        skip_list_get_ref(list, keys[i], key_size, &rv, &rvs, &ttl, &del);
+    }
+    end = clock();
+    double time_ref = (double)(end - start) / CLOCKS_PER_SEC;
+
+    printf(CYAN "get (malloc+copy): %.4f sec (%.0f ops/sec)\n" RESET, time_get,
+           num_entries / time_get);
+    printf(CYAN "get_ref (zero-copy): %.4f sec (%.0f ops/sec)\n" RESET, time_ref,
+           num_entries / time_ref);
+    printf(BOLDWHITE "Point read speedup: %.2fx\n" RESET, time_get / time_ref);
+
+    /* benchmark cursor iteration -- next+get vs next_get */
+    skip_list_cursor_t *cursor = NULL;
+    skip_list_cursor_init(&cursor, list);
+
+    start = clock();
+    {
+        uint8_t *k, *v;
+        size_t ks, vs;
+        int64_t t;
+        uint8_t d;
+        while (skip_list_cursor_next(cursor) == 0)
+        {
+            skip_list_cursor_get(cursor, &k, &ks, &v, &vs, &t, &d);
+        }
+    }
+    end = clock();
+    double time_sep = (double)(end - start) / CLOCKS_PER_SEC;
+    skip_list_cursor_free(cursor);
+
+    skip_list_cursor_init(&cursor, list);
+    start = clock();
+    {
+        uint8_t *k, *v;
+        size_t ks, vs;
+        int64_t t;
+        uint8_t d;
+        while (skip_list_cursor_next_get(cursor, &k, &ks, &v, &vs, &t, &d) == 0)
+        {
+        }
+    }
+    end = clock();
+    double time_fused = (double)(end - start) / CLOCKS_PER_SEC;
+    skip_list_cursor_free(cursor);
+
+    printf(CYAN "cursor next+get:   %.4f sec (%.0f ops/sec)\n" RESET, time_sep,
+           num_entries / time_sep);
+    printf(CYAN "cursor next_get:   %.4f sec (%.0f ops/sec)\n" RESET, time_fused,
+           num_entries / time_fused);
+    printf(BOLDWHITE "Scan speedup: %.2fx\n" RESET, time_sep / time_fused);
+
+    for (int i = 0; i < num_entries; i++)
+    {
+        free(keys[i]);
+    }
+    free(keys);
+    skip_list_free(list);
+}
+
+typedef struct
+{
+    skip_list_t *list;
+    int thread_id;
+    int num_ops;
+    int num_unique_keys;
+    _Atomic(uint64_t) *shared_seq;
+    _Atomic(int) *reads_done;
+    _Atomic(int) *writes_done;
+} rw_bench_ctx_t;
+
+void *rw_bench_reader(void *arg)
+{
+    rw_bench_ctx_t *ctx = (rw_bench_ctx_t *)arg;
+    int completed = 0;
+
+    for (int i = 0; i < ctx->num_ops; i++)
+    {
+        char key_buf[32];
+        snprintf(key_buf, sizeof(key_buf), "rwkey_%06d", i % ctx->num_unique_keys);
+
+        uint8_t *value = NULL;
+        size_t value_size = 0;
+        uint8_t deleted = 0;
+        int64_t ttl;
+        int result = skip_list_get(ctx->list, (uint8_t *)key_buf, strlen(key_buf) + 1, &value,
+                                   &value_size, &ttl, &deleted);
+        if (result == 0 && value != NULL)
+        {
+            free(value);
+        }
+        completed++;
+    }
+
+    atomic_fetch_add_explicit(ctx->reads_done, completed, memory_order_relaxed);
+    return NULL;
+}
+
+void *rw_bench_writer(void *arg)
+{
+    rw_bench_ctx_t *ctx = (rw_bench_ctx_t *)arg;
+    int completed = 0;
+
+    for (int i = 0; i < ctx->num_ops; i++)
+    {
+        char key_buf[32];
+        char value_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "rwkey_%06d", i % ctx->num_unique_keys);
+        snprintf(value_buf, sizeof(value_buf), "t%d_v%d", ctx->thread_id, i);
+
+        int result = -1;
+        int retry_count = 0;
+        while (result != 0 && retry_count < 100)
+        {
+            uint64_t seq = atomic_fetch_add_explicit(ctx->shared_seq, 1, memory_order_relaxed) + 1;
+            result =
+                skip_list_put_with_seq(ctx->list, (uint8_t *)key_buf, strlen(key_buf) + 1,
+                                       (uint8_t *)value_buf, strlen(value_buf) + 1, -1, seq, 0);
+            retry_count++;
+        }
+        if (result == 0) completed++;
+    }
+
+    atomic_fetch_add_explicit(ctx->writes_done, completed, memory_order_relaxed);
+    return NULL;
+}
+
+static void run_rw_contention_ratio(int num_readers, int num_writers, int ops_per_thread,
+                                    int num_unique_keys, int use_arena)
+{
+    skip_list_t *list = NULL;
+    if (use_arena)
+    {
+        ASSERT_EQ(skip_list_new_with_arena(&list, 12, 0.25f, skip_list_comparator_memcmp, NULL,
+                                           NULL, 128 * 1024 * 1024),
+                  0);
+    }
+    else
+    {
+        ASSERT_EQ(skip_list_new(&list, 12, 0.25f), 0);
+    }
+
+    _Atomic(uint64_t) shared_seq = 0;
+    _Atomic(int) reads_done = 0;
+    _Atomic(int) writes_done = 0;
+
+    /* pre-populate so readers always have data */
+    for (int i = 0; i < num_unique_keys; i++)
+    {
+        char key_buf[32];
+        char value_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "rwkey_%06d", i);
+        snprintf(value_buf, sizeof(value_buf), "init_%d", i);
+        uint64_t seq = atomic_fetch_add_explicit(&shared_seq, 1, memory_order_relaxed) + 1;
+        skip_list_put_with_seq(list, (uint8_t *)key_buf, strlen(key_buf) + 1, (uint8_t *)value_buf,
+                               strlen(value_buf) + 1, -1, seq, 0);
+    }
+
+    int total_threads = num_readers + num_writers;
+    pthread_t *threads = malloc(total_threads * sizeof(pthread_t));
+    rw_bench_ctx_t *ctxs = malloc(total_threads * sizeof(rw_bench_ctx_t));
+
+    for (int i = 0; i < total_threads; i++)
+    {
+        ctxs[i].list = list;
+        ctxs[i].thread_id = i;
+        ctxs[i].num_ops = ops_per_thread;
+        ctxs[i].num_unique_keys = num_unique_keys;
+        ctxs[i].shared_seq = &shared_seq;
+        ctxs[i].reads_done = &reads_done;
+        ctxs[i].writes_done = &writes_done;
+    }
+
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    for (int i = 0; i < num_readers; i++)
+    {
+        pthread_create(&threads[i], NULL, rw_bench_reader, &ctxs[i]);
+    }
+    for (int i = 0; i < num_writers; i++)
+    {
+        pthread_create(&threads[num_readers + i], NULL, rw_bench_writer, &ctxs[num_readers + i]);
+    }
+
+    for (int i = 0; i < total_threads; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+
+    int tr = atomic_load(&reads_done);
+    int tw = atomic_load(&writes_done);
+    int total_ops = tr + tw;
+
+    int read_pct = (total_threads > 0) ? (num_readers * 100 / total_threads) : 0;
+    int write_pct = 100 - read_pct;
+
+    printf(CYAN "  %3d/%3d R/W  | %2dR + %2dW threads | %.3f sec | %7.2f M total ops/sec", read_pct,
+           write_pct, num_readers, num_writers, elapsed, total_ops / elapsed / 1000000.0);
+    if (tr > 0) printf(" | R: %.2f M/s", tr / elapsed / 1000000.0);
+    if (tw > 0) printf(" | W: %.2f M/s", tw / elapsed / 1000000.0);
+    printf("\n" RESET);
+
+    free(threads);
+    free(ctxs);
+    skip_list_free(list);
+}
+
+static void run_rw_contention_suite(int total_threads, int ops_per_thread, int num_unique_keys,
+                                    int use_arena)
+{
+    run_rw_contention_ratio(total_threads, 0, ops_per_thread, num_unique_keys, use_arena);
+    run_rw_contention_ratio(7, 1, ops_per_thread, num_unique_keys, use_arena);
+    run_rw_contention_ratio(6, 2, ops_per_thread, num_unique_keys, use_arena);
+    run_rw_contention_ratio(4, 4, ops_per_thread, num_unique_keys, use_arena);
+    run_rw_contention_ratio(2, 6, ops_per_thread, num_unique_keys, use_arena);
+    run_rw_contention_ratio(0, total_threads, ops_per_thread, num_unique_keys, use_arena);
+}
+
+void benchmark_skip_list_rw_contention()
+{
+    printf(BOLDWHITE
+           "\n----------------- Read-Write Contention Benchmark -----------------\n" RESET);
+
+    const int ops_per_thread = 100000;
+    const int num_unique_keys = 10000;
+    const int total_threads = 8;
+
+    printf(YELLOW "  %d threads total, %d ops/thread, %d unique keys\n" RESET, total_threads,
+           ops_per_thread, num_unique_keys);
+
+    printf(BOLDWHITE "  [malloc]\n" RESET);
+    run_rw_contention_suite(total_threads, ops_per_thread, num_unique_keys, 0);
+
+    printf(BOLDWHITE "  [arena]\n" RESET);
+    run_rw_contention_suite(total_threads, ops_per_thread, num_unique_keys, 1);
+}
+
+static int vis_seq_le(void *ctx, uint64_t seq)
+{
+    return seq <= *(uint64_t *)ctx;
+}
+
+void test_skip_list_get_with_seq_ref()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    uint8_t key[] = "mvcc_key";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"v1", 3, -1, 1, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"v5", 3, -1, 5, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"v9", 3, -1, 9, 0), 0);
+
+    const uint8_t *val = NULL;
+    size_t vs = 0;
+    int64_t ttl;
+    uint8_t deleted;
+    uint64_t seq;
+
+    /* UINT64_MAX reads the latest version with no snapshot filtering */
+    ASSERT_EQ(skip_list_get_with_seq_ref(list, key, sizeof(key), &val, &vs, &ttl, &deleted, &seq,
+                                         UINT64_MAX, NULL, NULL),
+              0);
+    ASSERT_EQ(seq, 9);
+    ASSERT_EQ(memcmp(val, "v9", 3), 0);
+
+    /* snapshot reads the newest version with seq <= snapshot_seq */
+    ASSERT_EQ(skip_list_get_with_seq_ref(list, key, sizeof(key), &val, &vs, &ttl, &deleted, &seq, 5,
+                                         NULL, NULL),
+              0);
+    ASSERT_EQ(seq, 5);
+    ASSERT_EQ(memcmp(val, "v5", 3), 0);
+
+    ASSERT_EQ(skip_list_get_with_seq_ref(list, key, sizeof(key), &val, &vs, &ttl, &deleted, &seq, 4,
+                                         NULL, NULL),
+              0);
+    ASSERT_EQ(seq, 1);
+    ASSERT_EQ(memcmp(val, "v1", 3), 0);
+
+    /* seq 0 matches nothing because sequence numbers start at 1 */
+    ASSERT_EQ(skip_list_get_with_seq_ref(list, key, sizeof(key), &val, &vs, &ttl, &deleted, &seq, 0,
+                                         NULL, NULL),
+              -1);
+
+    /* visibility check skips a version newer than the committed threshold */
+    uint64_t committed = 5;
+    ASSERT_EQ(skip_list_get_with_seq_ref(list, key, sizeof(key), &val, &vs, &ttl, &deleted, &seq, 9,
+                                         vis_seq_le, &committed),
+              0);
+    ASSERT_EQ(seq, 5);
+    ASSERT_EQ(memcmp(val, "v5", 3), 0);
+
+    uint8_t bad[] = "absent";
+    ASSERT_EQ(skip_list_get_with_seq_ref(list, bad, sizeof(bad), &val, &vs, &ttl, &deleted, &seq,
+                                         UINT64_MAX, NULL, NULL),
+              -1);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_out_of_order_versions()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    uint8_t key[] = "ooo";
+    /* versions arrive out of seq order -- the chain must stay descending 10 -> 6 -> 2 */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"v10", 4, -1, 10, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"v2", 3, -1, 2, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"v6", 3, -1, 6, 0), 0);
+
+    /* a duplicate seq is rejected */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"dup", 4, -1, 6, 0), -1);
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+    ASSERT_EQ(skip_list_cursor_goto_first(cursor), 0);
+
+    uint8_t *k, *v;
+    size_t ks, vsz;
+    int64_t ttl;
+    uint8_t deleted;
+    uint64_t seq;
+
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &k, &ks, &v, &vsz, &ttl, &deleted, &seq), 0);
+    ASSERT_EQ(seq, 10);
+    ASSERT_EQ(skip_list_cursor_advance_in_node(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &k, &ks, &v, &vsz, &ttl, &deleted, &seq), 0);
+    ASSERT_EQ(seq, 6);
+    ASSERT_EQ(skip_list_cursor_advance_in_node(cursor), 0);
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &k, &ks, &v, &vsz, &ttl, &deleted, &seq), 0);
+    ASSERT_EQ(seq, 2);
+    ASSERT_EQ(skip_list_cursor_advance_in_node(cursor), -1);
+
+    /* a snapshot resolves to the right version across the reordered chain */
+    uint8_t *val = NULL;
+    size_t val_size = 0;
+    ASSERT_EQ(skip_list_get_with_seq(list, key, sizeof(key), &val, &val_size, &ttl, &deleted, &seq,
+                                     5, NULL, NULL),
+              0);
+    ASSERT_EQ(seq, 2);
+    ASSERT_EQ(memcmp(val, "v2", 3), 0);
+    free(val);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_min_max_seq()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    ASSERT_EQ(skip_list_get_min_seq(list), UINT64_MAX);
+
+    uint64_t out = 123;
+    uint8_t miss[] = "miss";
+    ASSERT_EQ(skip_list_get_max_seq(list, miss, sizeof(miss), &out), -1);
+    ASSERT_EQ(out, 0);
+
+    uint8_t key[] = "k";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"a", 2, -1, 5, 0), 0);
+    ASSERT_EQ(skip_list_get_min_seq(list), 5);
+
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"b", 2, -1, 9, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"c", 2, -1, 3, 0), 0);
+
+    /* max seq is the newest version, min seq is the smallest ever inserted */
+    ASSERT_EQ(skip_list_get_max_seq(list, key, sizeof(key), &out), 0);
+    ASSERT_EQ(out, 9);
+    ASSERT_EQ(skip_list_get_min_seq(list), 3);
+
+    /* clear resets the min seq floor */
+    ASSERT_EQ(skip_list_clear(list), 0);
+    ASSERT_EQ(skip_list_get_min_seq(list), UINT64_MAX);
+
+    /* a tombstone is tracked by min seq too */
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"d", 2, -1, 20, 0), 0);
+    ASSERT_EQ(skip_list_get_min_seq(list), 20);
+    ASSERT_EQ(skip_list_delete(list, key, sizeof(key), 4), 0);
+    ASSERT_EQ(skip_list_get_min_seq(list), 4);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_single_delete_flag()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    uint8_t key[] = "sd";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), (uint8_t *)"v", 2, -1, 1, 0), 0);
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), NULL, 0, -1, 2,
+                                     SKIP_LIST_FLAG_DELETED | SKIP_LIST_FLAG_SINGLE_DELETE),
+              0);
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+    ASSERT_EQ(skip_list_cursor_goto_first(cursor), 0);
+
+    uint8_t *k, *v;
+    size_t ks, vs;
+    int64_t ttl;
+    uint8_t deleted;
+    uint64_t seq;
+    ASSERT_EQ(skip_list_cursor_get_with_seq(cursor, &k, &ks, &v, &vs, &ttl, &deleted, &seq), 0);
+    ASSERT_EQ(seq, 2);
+    ASSERT_TRUE(deleted & SKIP_LIST_FLAG_DELETED);
+    ASSERT_TRUE(deleted & SKIP_LIST_FLAG_SINGLE_DELETE);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_put_batch_partial()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    /* entries[1] duplicates the (key, seq) of entries[0] and is skipped */
+    skip_list_batch_entry_t entries[3];
+    entries[0].key = (const uint8_t *)"K";
+    entries[0].key_size = 2;
+    entries[0].value = (const uint8_t *)"a";
+    entries[0].value_size = 2;
+    entries[0].seq = 1;
+    entries[0].ttl = -1;
+    entries[0].flags = 0;
+    entries[1] = entries[0];
+    entries[1].value = (const uint8_t *)"b";
+    entries[2].key = (const uint8_t *)"L";
+    entries[2].key_size = 2;
+    entries[2].value = (const uint8_t *)"c";
+    entries[2].value_size = 2;
+    entries[2].seq = 2;
+    entries[2].ttl = -1;
+    entries[2].flags = 0;
+
+    ASSERT_EQ(skip_list_put_batch(list, entries, 3), 2);
+    ASSERT_EQ(skip_list_count_entries(list), 2);
+
+    skip_list_free(list);
+}
+
+void test_skip_list_tall_heap_update()
+{
+    /* max_level == SKIP_LIST_STACK_UPDATE_SIZE (64) forces the heap update[] path in put/batch */
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 64, 0.5f), 0);
+
+    skip_list_batch_entry_t entries[64];
+    char keys[64][16];
+    for (int i = 0; i < 64; i++)
+    {
+        snprintf(keys[i], sizeof(keys[i]), "tall_%03d", i);
+        entries[i].key = (const uint8_t *)keys[i];
+        entries[i].key_size = strlen(keys[i]) + 1;
+        entries[i].value = (const uint8_t *)keys[i];
+        entries[i].value_size = strlen(keys[i]) + 1;
+        entries[i].seq = (uint64_t)(i + 1);
+        entries[i].ttl = -1;
+        entries[i].flags = 0;
+    }
+    ASSERT_EQ(skip_list_put_batch(list, entries, 64), 64);
+
+    uint8_t k[] = "tall_single";
+    uint8_t v[] = "x";
+    ASSERT_EQ(skip_list_put_with_seq(list, k, sizeof(k), v, sizeof(v), -1, 100, 0), 0);
+    ASSERT_EQ(skip_list_count_entries(list), 65);
+
+    for (int i = 0; i < 64; i++)
+    {
+        uint8_t *rv = NULL;
+        size_t rvs = 0;
+        int64_t ttl;
+        uint8_t del;
+        ASSERT_EQ(
+            skip_list_get(list, (uint8_t *)keys[i], strlen(keys[i]) + 1, &rv, &rvs, &ttl, &del), 0);
+        ASSERT_EQ(strcmp((char *)rv, keys[i]), 0);
+        free(rv);
+    }
+
+    skip_list_free(list);
+}
+
+void test_skip_list_cached_time_ttl()
+{
+    _Atomic(time_t) clock_val;
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new_with_comparator_and_cached_time(
+                  &list, 12, 0.24f, skip_list_comparator_memcmp, NULL, &clock_val),
+              0);
+
+    time_t base = atomic_load_explicit(&clock_val, memory_order_relaxed);
+
+    uint8_t key[] = "ttlk";
+    uint8_t value[] = "v";
+    ASSERT_EQ(skip_list_put_with_seq(list, key, sizeof(key), value, sizeof(value), base + 10, 1, 0),
+              0);
+
+    uint8_t *rv = NULL;
+    size_t rvs = 0;
+    int64_t ttl;
+    uint8_t deleted = 0;
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), &rv, &rvs, &ttl, &deleted), 0);
+    ASSERT_EQ(deleted, 0);
+    free(rv);
+
+#if defined(__MINGW32__) && !defined(__MINGW64__)
+    /* cached time is not honored on MinGW x86 -- the lib reads the clock directly there */
+    (void)base;
+#else
+    /* advance the injected clock past the ttl without sleeping */
+    atomic_store_explicit(&clock_val, base + 20, memory_order_relaxed);
+    rv = NULL;
+    ASSERT_EQ(skip_list_get(list, key, sizeof(key), &rv, &rvs, &ttl, &deleted), 0);
+    ASSERT_EQ(deleted, 1);
+    free(rv);
+#endif
+
+    skip_list_free(list);
+}
+
+void test_skip_list_cursor_seek_ge()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 12, 0.24f), 0);
+
+    for (int i = 0; i <= 90; i += 10)
+    {
+        char key[16], value[16];
+        snprintf(key, sizeof(key), "key_%02d", i);
+        snprintf(value, sizeof(value), "val_%02d", i);
+        ASSERT_EQ(skip_list_put_with_seq(list, (uint8_t *)key, strlen(key), (uint8_t *)value,
+                                         strlen(value), -1, (i / 10) + 1, 0),
+                  0);
+    }
+
+    skip_list_cursor_t *cursor = NULL;
+    ASSERT_EQ(skip_list_cursor_init(&cursor, list), 0);
+
+    uint8_t *key = NULL;
+    size_t key_size = 0;
+    uint8_t *value = NULL;
+    size_t value_size = 0;
+    int64_t ttl = 0;
+    uint8_t deleted = 0;
+
+    /* exact match lands directly on the key, no separate next */
+    ASSERT_EQ(skip_list_cursor_seek_ge(cursor, (uint8_t *)"key_50", 6), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_50", 6), 0);
+
+    /* a missing key lands on the next greater key */
+    ASSERT_EQ(skip_list_cursor_seek_ge(cursor, (uint8_t *)"key_55", 6), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_60", 6), 0);
+
+    /* a key before all keys lands on the first */
+    ASSERT_EQ(skip_list_cursor_seek_ge(cursor, (uint8_t *)"key_", 4), 0);
+    ASSERT_EQ(skip_list_cursor_get(cursor, &key, &key_size, &value, &value_size, &ttl, &deleted),
+              0);
+    ASSERT_EQ(memcmp(key, "key_00", 6), 0);
+
+    /* a key past all keys returns -1 with the cursor at end */
+    ASSERT_EQ(skip_list_cursor_seek_ge(cursor, (uint8_t *)"key_99", 6), -1);
+
+    skip_list_cursor_free(cursor);
+    skip_list_free(list);
+}
+
+void test_skip_list_new_validation()
+{
+    skip_list_t *list = NULL;
+    ASSERT_EQ(skip_list_new(&list, 0, 0.25f), -1);
+    ASSERT_EQ(skip_list_new(&list, -1, 0.25f), -1);
+    ASSERT_EQ(skip_list_new(&list, 12, 0.0f), -1);
+    ASSERT_EQ(skip_list_new(&list, 12, 1.0f), -1);
+    ASSERT_EQ(skip_list_new(&list, 12, 1.5f), -1);
+}
+
+void test_skip_list_comparator_numeric_size_guard()
+{
+    /* 8-byte keys compare as host-native integers */
+    uint64_t a = 5, b = 9;
+    ASSERT_TRUE(skip_list_comparator_numeric((uint8_t *)&a, 8, (uint8_t *)&b, 8, NULL) < 0);
+    ASSERT_TRUE(skip_list_comparator_numeric((uint8_t *)&b, 8, (uint8_t *)&a, 8, NULL) > 0);
+    ASSERT_EQ(skip_list_comparator_numeric((uint8_t *)&a, 8, (uint8_t *)&a, 8, NULL), 0);
+
+    /* a key that is not 8 bytes must not drive an 8-byte read; it falls back to memcmp order */
+    const uint8_t short_key[3] = {'a', 'b', 'c'};
+    const uint8_t long_key[8] = {'a', 'b', 'c', 'd', 0, 0, 0, 0};
+    ASSERT_TRUE(skip_list_comparator_numeric(short_key, sizeof(short_key), long_key,
+                                             sizeof(long_key), NULL) < 0);
+    ASSERT_TRUE(skip_list_comparator_numeric(long_key, sizeof(long_key), short_key,
+                                             sizeof(short_key), NULL) > 0);
+    ASSERT_EQ(skip_list_comparator_numeric(short_key, sizeof(short_key), short_key,
+                                           sizeof(short_key), NULL),
+              0);
+}
+
+int main(int argc, char **argv)
+{
+    INIT_TEST_FILTER(argc, argv);
+    RUN_TEST(test_skip_list_create_node, tests_passed);
+    RUN_TEST(test_skip_list_put_get, tests_passed);
+    RUN_TEST(test_skip_list_destroy, tests_passed);
+    RUN_TEST(test_skip_list_clear, tests_passed);
+    RUN_TEST(test_skip_list_min_max_key, tests_passed);
+    RUN_TEST(test_skip_list_count_entries, tests_passed);
+    RUN_TEST(test_skip_list_get_size, tests_passed);
+    RUN_TEST(test_skip_list_cursor_init, tests_passed);
+    RUN_TEST(test_skip_list_cursor_next, tests_passed);
+    RUN_TEST(test_skip_list_cursor_prev, tests_passed);
+    RUN_TEST(test_skip_list_cursor_functions, tests_passed);
+    RUN_TEST(test_skip_list_ttl, tests_passed);
+    RUN_TEST(test_skip_list_cursor_seek, tests_passed);
+    RUN_TEST(test_skip_list_cursor_seek_for_prev, tests_passed);
+    RUN_TEST(test_skip_list_seek_for_prev_nonexistent, tests_passed);
+    RUN_TEST(test_skip_list_null_validation, tests_passed);
+    RUN_TEST(test_skip_list_zero_size_key, tests_passed);
+    RUN_TEST(test_skip_list_large_keys_values, tests_passed);
+    RUN_TEST(test_skip_list_delete_operations, tests_passed);
+    RUN_TEST(test_skip_list_delete_existing_keys, tests_passed);
+    RUN_TEST(test_skip_list_delete_nonexistent_keys, tests_passed);
+    RUN_TEST(test_skip_list_delete_and_reinsert, tests_passed);
+    RUN_TEST(test_skip_list_iterate_with_deletes, tests_passed);
+    RUN_TEST(test_skip_list_large_value_updates, tests_passed);
+    RUN_TEST(test_skip_list_duplicate_key_update, tests_passed);
+    RUN_TEST(test_skip_list_update_patterns, tests_passed);
+    RUN_TEST(test_skip_list_concurrent_read_write, tests_passed);
+    RUN_TEST(test_skip_list_concurrent_duplicate_keys, tests_passed);
+    RUN_TEST(test_skip_list_lockfree_stress, tests_passed);
+    RUN_TEST(test_skip_list_reverse_comparator, tests_passed);
+    RUN_TEST(test_skip_list_prefix_seek_behavior, tests_passed);
+    RUN_TEST(test_skip_list_put_batch, tests_passed);
+    RUN_TEST(test_skip_list_put_batch_sorted, tests_passed);
+    RUN_TEST(test_skip_list_arena_put_get, tests_passed);
+    RUN_TEST(test_skip_list_arena_batch, tests_passed);
+    RUN_TEST(test_skip_list_arena_cursor, tests_passed);
+    RUN_TEST(test_skip_list_arena_delete, tests_passed);
+    RUN_TEST(test_skip_list_arena_zero_capacity, tests_passed);
+    RUN_TEST(test_skip_list_get_ref, tests_passed);
+    RUN_TEST(test_skip_list_cursor_next_get, tests_passed);
+    RUN_TEST(test_skip_list_cursor_advance_in_node, tests_passed);
+    RUN_TEST(test_skip_list_arena_aba, tests_passed);
+    RUN_TEST(test_skip_list_get_with_seq_ref, tests_passed);
+    RUN_TEST(test_skip_list_out_of_order_versions, tests_passed);
+    RUN_TEST(test_skip_list_min_max_seq, tests_passed);
+    RUN_TEST(test_skip_list_single_delete_flag, tests_passed);
+    RUN_TEST(test_skip_list_put_batch_partial, tests_passed);
+    RUN_TEST(test_skip_list_tall_heap_update, tests_passed);
+    RUN_TEST(test_skip_list_cached_time_ttl, tests_passed);
+    RUN_TEST(test_skip_list_cursor_seek_ge, tests_passed);
+    RUN_TEST(test_skip_list_new_validation, tests_passed);
+    RUN_TEST(test_skip_list_comparator_numeric_size_guard, tests_passed);
+
+    RUN_TEST(benchmark_skip_list, tests_passed);
+    RUN_TEST(benchmark_skip_list_sequential, tests_passed);
+    RUN_TEST(benchmark_skip_list_zipfian, tests_passed);
+    RUN_TEST(benchmark_skip_list_deletions, tests_passed);
+    RUN_TEST(benchmark_skip_list_batch_vs_single, tests_passed);
+    RUN_TEST(benchmark_skip_list_arena_vs_malloc, tests_passed);
+    RUN_TEST(benchmark_skip_list_read_path, tests_passed);
+    RUN_TEST(benchmark_skip_list_rw_contention, tests_passed);
+
+    PRINT_TEST_RESULTS(tests_passed, tests_failed);
+    return tests_failed > 0 ? 1 : 0;
+}

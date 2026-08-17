@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Threads)
+find_dependency(TurboUtils CONFIG)
+find_dependency(TurboParser CONFIG)
+find_dependency(TurboNet CONFIG)
+
+include("${CMAKE_CURRENT_LIST_DIR}/TurboDBTargets.cmake")
+
+check_required_components(TurboDB)
