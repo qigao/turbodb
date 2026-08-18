@@ -56,7 +56,7 @@
             "hidden": true,
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "ENABLE_TESTS": false
+                "ENABLE_TESTS": true
             },
             "inherits": [
                 "default-options"

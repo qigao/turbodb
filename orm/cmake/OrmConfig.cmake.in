@@ -1,7 +1,9 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(PostgreSQL)
+if(@ORM_WITH_PGSQL@)
+  find_dependency(PostgreSQL)
+endif()
 find_dependency(SQLite3)
 find_dependency(TurboUtils CONFIG)
 find_dependency(TurboParser CONFIG)
