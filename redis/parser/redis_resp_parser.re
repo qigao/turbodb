@@ -76,7 +76,7 @@ int redis_resp_scan_token(const char *data, size_t len, redis_resp_token_t *toke
   header_rc = redis_resp_scan_header(data, token->header_len, &token->type);
   if (header_rc != 1) return -1;
   value_len = (size_t)(newline - data) - 2u;
-  token->value = tstr_v_from_buf(data + 1, value_len);
+  token->value = vstr_from_buf(data + 1, value_len);
 
   if (token->type == ':' || token->type == '$' || token->type == '*') {
     if (redis_resp_parse_integer(token->value.data, token->value.len,

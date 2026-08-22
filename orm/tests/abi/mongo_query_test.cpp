@@ -1,7 +1,7 @@
 #include "query.hpp"
 
 #include <bson/bson.h>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <memory>
 #include <optional>
@@ -34,7 +34,7 @@ struct plan_fixture {
     condition_node where_root;
     condition_node having_root;
     std::vector<bound_parameter> raw_parameters;
-    std::optional<std::pair<std::string, orm_order_t>> ordering;
+    std::optional<ordering_spec> ordering;
     std::optional<std::uint64_t> limit;
     std::optional<std::uint64_t> offset;
     std::size_t parameter_count = 0;
@@ -124,7 +124,7 @@ void check_filter_json(const condition_node& root,
         json = bson_json(&document);
     }
     
-    check_str_eq(json.c_str(), expected);
+    check_equal(json.c_str(), expected);
     bson_destroy(&document);
 }
 
@@ -167,10 +167,10 @@ suite("orm mongo query plan") {
                           " \"\\\\A(?:A.*)\\\\z\" } } ] }");
 
         const std::string pattern1 = mongo_like_pattern("a_b%");
-        check_str_eq(pattern1.c_str(),
+        check_equal(pattern1.c_str(),
                      "\\A(?:a.b.*)\\z");
         const std::string pattern2 = mongo_like_pattern("a.b*c\\d");
-        check_str_eq(pattern2.c_str(),
+        check_equal(pattern2.c_str(),
                      "\\A(?:a\\.b\\*c\\\\d)\\z");
     }
 
@@ -231,15 +231,14 @@ suite("orm mongo query plan") {
     it("builds projection sort and pagination find options") {
         plan_fixture fixture;
         fixture.columns = {"id", "name"};
-        fixture.ordering = std::make_pair(std::string("score"),
-                                          ORM_ORDER_DESCENDING);
+        fixture.ordering = ordering_spec{false, "score", {}, ORM_ORDER_DESCENDING};
         fixture.offset = 50;
         fixture.limit = 25;
 
         bson_t options = BSON_INITIALIZER;
         mongo_append_find_options(&options, fixture.view(), settings());
         const std::string json = bson_json(&options);
-        check_str_eq(json.c_str(),
+        check_equal(json.c_str(),
                      "{ \"projection\" : { \"_id\" : 1, \"name\" : 1 },"
                      " \"sort\" : { \"score\" : -1 },"
                      " \"skip\" : 50, \"limit\" : 25 }");
@@ -253,7 +252,7 @@ suite("orm mongo query plan") {
         bson_t options = BSON_INITIALIZER;
         mongo_append_find_options(&options, fixture.view(), settings());
         const std::string json = bson_json(&options);
-        check_str_eq(json.c_str(),
+        check_equal(json.c_str(),
                      "{ \"projection\" : { \"name\" : 1, \"_id\" : 0 } }");
         bson_destroy(&options);
     }
@@ -272,15 +271,14 @@ suite("orm mongo query plan") {
         having->value.comparison = ORM_COMPARE_GREATER;
         having->value.parameter = integer_value(1);
         fixture.having_root.children.push_back(std::move(having));
-        fixture.ordering = std::make_pair(std::string("country"),
-                                          ORM_ORDER_ASCENDING);
+        fixture.ordering = ordering_spec{false, "country", {}, ORM_ORDER_ASCENDING};
         fixture.offset = 5;
         fixture.limit = 10;
 
         bson_t pipeline = BSON_INITIALIZER;
         mongo_append_pipeline(&pipeline, fixture.view(), settings());
         const std::string json = bson_json(&pipeline);
-        check_str_eq(
+        check_equal(
             json.c_str(),
             "{ \"0\" : { \"$match\" : { \"$and\" :"
             " [ { \"active\" : 1 } ] } },"
@@ -301,7 +299,7 @@ suite("orm mongo query plan") {
         bson_t pipeline = BSON_INITIALIZER;
         mongo_append_pipeline(&pipeline, fixture.view(), settings());
         const std::string json = bson_json(&pipeline);
-        check_str_eq(
+        check_equal(
             json.c_str(),
             "{ \"0\" : { \"$group\" : { \"_id\" : null, \"a0\" : { \"$sum\" :"
             " { \"$cond\" : { \"if\" : { \"$ne\" : [ \"$score\", null ] },"
@@ -320,7 +318,7 @@ suite("orm mongo query plan") {
         bson_t document = BSON_INITIALIZER;
         mongo_append_insert_document(&document, fixture.view(), settings());
         const std::string json = bson_json(&document);
-        check_str_eq(json.c_str(),
+        check_equal(json.c_str(),
                      "{ \"_id\" : 1, \"name\" : \"Alice\","
                      " \"deleted\" : null }");
         bson_destroy(&document);
@@ -349,7 +347,7 @@ suite("orm mongo query plan") {
         bson_t update = BSON_INITIALIZER;
         mongo_append_update_document(&update, fixture.view(), settings());
         const std::string json = bson_json(&update);
-        check_str_eq(json.c_str(),
+        check_equal(json.c_str(),
                      "{ \"$set\" : { \"score\" : 25.0,"
                      " \"deleted\" : null } }");
         bson_destroy(&update);
@@ -374,7 +372,7 @@ suite("orm mongo query plan") {
         bson_t filter = BSON_INITIALIZER;
         mongo_append_id_filter(&filter, id, settings());
         const std::string json = bson_json(&filter);
-        check_str_eq(json.c_str(), "{ \"_id\" : 7 }");
+        check_equal(json.c_str(), "{ \"_id\" : 7 }");
         bson_destroy(&filter);
     }
 
@@ -383,8 +381,8 @@ suite("orm mongo query plan") {
         const aggregate_expression sum{ORM_AGGREGATE_SUM, "score", "score_sum"};
         const std::string name1 = mongo_aggregate_sql_name(count_all);
         const std::string name2 = mongo_aggregate_sql_name(sum);
-        check_str_eq(name1.c_str(), "count(*)");
-        check_str_eq(name2.c_str(), "sum(score)");
+        check_equal(name1.c_str(), "count(*)");
+        check_equal(name2.c_str(), "sum(score)");
     }
 
     it("rejects unsigned ids that exceed the signed BSON range") {

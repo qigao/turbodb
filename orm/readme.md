@@ -17,11 +17,12 @@ the optional schema workflow generates typed C and C++ model facades.
 - One backend-neutral connection, query, and result API
 - C11 chaining with `ORM_EQ`, `ORM_AND`, `ORM_OR`, and bounded expression values
 - C++17 typed tables, columns, predicates, joins, aggregates, and RAII ownership
-- SELECT, INSERT, UPDATE, DELETE, INNER/LEFT JOIN, GROUP BY, HAVING, and pagination
+- SELECT, DISTINCT, INSERT, UPDATE, DELETE, INNER/LEFT JOIN, GROUP BY, HAVING, and pagination
+- Typed and C expression helpers for NULL checks, BETWEEN ranges, and IN membership
 - Bound values for structured and raw queries; values are never interpolated into SQL
 - Explicit limits for query size, parameters, predicates, nesting, and result retention
 - Opaque C handles and no backend names in exported function symbols
-- TurboUtils `tstr_v` views, `tstr_t` helpers, typed formatting, and optional `tlog` diagnostics
+- TurboUtils `vstr` views, `tstr` helpers, typed formatting, and optional `tlog` diagnostics
 - PostgreSQL, SQLite, optional Redis Query Engine, and optional TidesDB selected through runtime configuration
 
 ## Choose an interface
@@ -63,9 +64,9 @@ target_link_libraries(c_application PRIVATE Orm::C)
 target_link_libraries(cpp_application PRIVATE Orm::Cpp)
 ```
 
-`Orm::C` propagates `TurboUtils::Core`. C callers can pass `tstr_v` directly as
+`Orm::C` propagates `TurboUtils::Core`. C callers can pass `vstr` directly as
 `orm_string_view_t`, or use `orm_view_tstr()` / `orm_text_tstr()` for owned
-`tstr_t` values. Borrowed views remain valid only while their source storage is
+`tstr` values. Borrowed views remain valid only while their source storage is
 unchanged and alive.
 
 The SQL backend renderer uses TurboUtils Mustache4C for the structured
@@ -285,7 +286,7 @@ orm_schema_generate --language c --model-header store.tbe.h \
 The generated C API uses schema-qualified symbols such as
 `Store_User_orm_find`, `Store_User_orm_insert`, `Store_User_orm_update`, and
 `Store_User_orm_remove`. It maps column aliases, enums, nullable presence bits,
-owning `tstr_t` strings, bytes, primary keys, and optional optimistic version
+owning `tstr` strings, bytes, primary keys, and optional optimistic version
 columns. TBE's `[c(member_name)]` field attribute is honored by both the owning
 model generator and the ORM facade, so the schema name and C member name may
 differ without duplicating mapping metadata. A find destination must first be
@@ -576,6 +577,156 @@ The lower-level string builder remains available for runtime schemas through
 `query.execute()`.
 
 ### Model-based typed fetch
+
+A typed projection infers its tuple result directly from the selected columns
+and aggregate expressions:
+
+```cpp
+auto people = connection.select(person.id, person.name, person.score)
+    .from(person)
+    .order_by(person.id.asc())
+    .fetch_typed();
+
+// decltype(people) is
+// std::vector<std::tuple<std::int64_t, std::string, double>>
+```
+
+Existing `fetch()` continues to return the generic `orm::result` object.
+Explicit `fetch<T>()` remains available for entity and DTO mapping.
+`fetch_one_typed()` returns `std::optional<row_type>` for zero or one row and
+reports `ORM_STATUS_INVALID_STATE` when the query returns multiple rows.
+Declare nullable projections as `column<std::optional<T>>`; the inferred tuple
+then preserves that nullability. Nullable columns accept either `T`,
+`std::optional<T>`, `std::nullopt`, or `nullptr` in typed assignments and
+predicates. Equality and inequality with an empty optional lower to SQL
+`IS NULL` and `IS NOT NULL` through the existing C ABI.
+
+Queries with exactly one projection also expose `fetch_scalars()` and
+`fetch_one_scalar()`. They return `std::vector<T>` and `std::optional<T>`
+respectively; template substitution removes these overloads for multi-column
+projections:
+
+```cpp
+auto names = connection.select(person.name)
+    .from(person)
+    .order_by(person.id.asc())
+    .fetch_scalars();
+```
+
+Numeric columns can form typed scalar projections with `+`, `-`, `*`, and
+`/`. Operations are stored as a validated postfix token stream in the shared C
+query model; literals remain bound parameters rather than SQL text:
+
+```cpp
+auto adjusted = connection.select((person.score * 2.0 + 5.0).as("adjusted"))
+    .from(person)
+    .fetch_scalars(); // std::vector<double>
+```
+
+SQL backends render these expressions with explicit parentheses. Backends that
+execute a native query plan currently report `ORM_STATUS_UNSUPPORTED` instead
+of silently changing the expression semantics. The C ABI exposes the same
+model through `orm_query_add_expression` and `orm_scalar_expression_t`.
+
+Constructor projections use `fetch_mapped(factory)` or
+`fetch_one_mapped(factory)`. The factory parameters must match the inferred
+projection fields, and its return type does not need `ORM_MODEL` or a default
+constructor:
+
+```cpp
+auto summaries = connection.select(person.id, person.name)
+    .from(person)
+    .fetch_mapped([](std::int64_t id, std::string name) {
+      return person_summary{id, std::move(name)};
+    });
+```
+
+Typed projections retain their table provenance until execution. Every
+selected column or column aggregate must belong to the `FROM` table or to a
+table whose join has completed through `.on(...)`; otherwise fetch fails with
+`std::invalid_argument` before calling the backend. `count_all()` remains
+table-neutral.
+
+Call `.distinct()` on either a typed or untyped SELECT query to remove duplicate
+projection rows. Pass `false` to disable it again while composing a query. SQL
+backends render `SELECT DISTINCT`; Redis, MongoDB, and TidesDB currently reject
+DISTINCT with `ORM_STATUS_UNSUPPORTED` instead of silently returning duplicates.
+
+SELECT subqueries can be attached through `.exists()` and
+`.not_exists()`:
+
+```cpp
+auto ids = connection.select(person.id)
+    .from(person)
+    .where(connection.select(department.id)
+        .from(department)
+        .where(department.id.eq_column(person.department_id) &&
+               department.name == "Sales")
+        .exists())
+    .fetch_scalars();
+```
+
+Quantified comparisons use `where_any` or `where_all`:
+
+```cpp
+auto peer_scores = connection.select(person.score).from(person);
+auto ids = connection.select(person.id)
+    .from(person)
+    .where_all(person.score, orm::comparison::greater_equal, peer_scores)
+    .fetch_scalars();
+```
+
+`ANY` and `ALL` require backend SQL support; SQLite does not implement these
+quantifiers, while PostgreSQL does.
+
+Dynamic C++ queries expose the same operation without typed projection checks:
+
+```cpp
+auto scores = connection.select("person");
+scores.column("score");
+auto people = connection.select("person");
+people.column("id").where_quantified_subquery(
+    "score", orm::comparison::greater, orm::subquery_quantifier::any, scores);
+```
+
+The outer query stores an owning snapshot when the predicate is attached, so
+destroying or modifying the original subquery cannot change it. Both queries
+must originate from the same connection. Parameter counts, payload limits, and
+subquery depth are charged to the outer query. SQL backends are supported;
+native-plan backends currently return `ORM_STATUS_UNSUPPORTED`. Column-to-column
+predicates use `eq_column`, `ne_column`, `lt_column`, `le_column`, `gt_column`,
+or `ge_column`; unlike the overloaded comparison operators used by JOIN, these
+methods produce WHERE predicates and can reference an outer query column.
+
+Single-column SELECT queries can also be used with `where_in` and
+`where_not_in`:
+
+```cpp
+auto sales_department_ids = connection.select(department.id)
+    .from(department)
+    .where(department.name == "Sales");
+
+auto people = connection.select(person.id, person.name)
+    .from(person)
+    .where_in(person.department_id, sales_department_ids)
+    .fetch_typed();
+```
+
+For typed queries, the subquery must have exactly one projection whose type is
+compatible with the tested column; incompatible or multi-column queries are
+removed by C++17 substitution. The C ABI performs the single-projection check
+at attachment time. `NOT IN` retains normal SQL NULL semantics.
+
+Scalar comparisons use the same owning snapshot and require exactly one
+compatible projection:
+
+```cpp
+auto average_score = connection.select(orm::avg(person.score)).from(person);
+auto ids = connection.select(person.id)
+    .from(person)
+    .where(person.score, orm::comparison::greater, average_score)
+    .fetch_scalars();
+```
 
 Include `orm.hpp`, describe an owning result type with `ORM_MODEL`, and pass
 that type explicitly to `fetch<T>()`:

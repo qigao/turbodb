@@ -2,7 +2,7 @@
 // pulls in tinymock.hpp, which defines TINYTEST_NO_MAIN to suppress the
 // built-in runner main().  Including tinytest.h first keeps the suite/it
 // runner available to this executable.
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include "mock_orm_backend.hpp"
 
@@ -23,8 +23,8 @@ suite("orm mock backend") {
     it("serves canned rows, columns, nulls, and cells") {
         orm_mock::mock_result_backend result(
             1, 2, 0, {{false, "A"}, {true, ""}});
-        check_uint_eq(result.rows(), 1u);
-        check_uint_eq(result.columns(), 2u);
+        check_equal(result.rows(), 1u);
+        check_equal(result.columns(), 2u);
         check_true(result.is_null(0, 1));
         check(std::string(result.cell(0, 0).data, result.cell(0, 0).len) == "A");
     }
@@ -43,7 +43,7 @@ suite("orm mock backend") {
             db.execute_sql("select 1", {}, false, connection_limits{});
         check(query_result != nullptr);
         if (query_result != nullptr)
-            check_uint_eq(query_result->affected_rows(), 1u);
+            check_equal(query_result->affected_rows(), 1u);
         db.execute_sql_mock.verify();
     }
 

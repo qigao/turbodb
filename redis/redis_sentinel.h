@@ -7,6 +7,7 @@
 #define REDIS_SENTINEL_H
 
 #include "platform.h"
+#include "redis_export.h"
 #include "redis_client.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -80,16 +81,16 @@ typedef struct {
  * The object is event-loop affine and is not thread-safe. connect(), refresh(),
  * and command functions must run inside a CoroNet coroutine.
  */
-CXX_C_API redis_sentinel_t *redis_sentinel_create(const redis_sentinel_config_t *config);
+REDIS_API redis_sentinel_t *redis_sentinel_create(const redis_sentinel_config_t *config);
 
 /** Discover and validate the current master, then start its connection pool. */
-CXX_C_API int redis_sentinel_connect(redis_sentinel_t *sentinel);
+REDIS_API int redis_sentinel_connect(redis_sentinel_t *sentinel);
 
 /** Re-query Sentinel and atomically replace the current validated master pool. */
-CXX_C_API int redis_sentinel_refresh(redis_sentinel_t *sentinel);
+REDIS_API int redis_sentinel_refresh(redis_sentinel_t *sentinel);
 
 /** Stop accepting commands and retire the current pool generation. */
-CXX_C_API void redis_sentinel_disconnect(redis_sentinel_t *sentinel);
+REDIS_API void redis_sentinel_disconnect(redis_sentinel_t *sentinel);
 
 /**
  * Destroy the Sentinel client.
@@ -97,7 +98,7 @@ CXX_C_API void redis_sentinel_disconnect(redis_sentinel_t *sentinel);
  * Pool generations borrowed by in-flight commands are drained before their
  * storage is released. The pointer must not be used after this call.
  */
-CXX_C_API void redis_sentinel_destroy(redis_sentinel_t *sentinel);
+REDIS_API void redis_sentinel_destroy(redis_sentinel_t *sentinel);
 
 /**
  * Execute a binary-safe command against the discovered master.
@@ -107,31 +108,31 @@ CXX_C_API void redis_sentinel_destroy(redis_sentinel_t *sentinel);
  * are never retried. `out` owns its reply and must be cleared with
  * redis_command_result_clear().
  */
-CXX_C_API int redis_sentinel_commandv_result(redis_sentinel_t *sentinel, int argc,
+REDIS_API int redis_sentinel_commandv_result(redis_sentinel_t *sentinel, int argc,
                                              const char **argv, const size_t *argvlen,
                                              redis_command_result_t *out);
 
 /** Callback variant; returns 0 whenever a final Redis reply was received. */
-CXX_C_API int redis_sentinel_commandv(redis_sentinel_t *sentinel, int argc, const char **argv,
+REDIS_API int redis_sentinel_commandv(redis_sentinel_t *sentinel, int argc, const char **argv,
                                       const size_t *argvlen, redis_command_cb_t callback,
                                       void *user_data);
 
 /** Common command helpers. */
-CXX_C_API int redis_sentinel_set(redis_sentinel_t *sentinel, const char *key, const char *value,
+REDIS_API int redis_sentinel_set(redis_sentinel_t *sentinel, const char *key, const char *value,
                                  redis_command_cb_t callback, void *user_data);
-CXX_C_API int redis_sentinel_get(redis_sentinel_t *sentinel, const char *key,
+REDIS_API int redis_sentinel_get(redis_sentinel_t *sentinel, const char *key,
                                  redis_command_cb_t callback, void *user_data);
-CXX_C_API int redis_sentinel_del(redis_sentinel_t *sentinel, const char *key,
+REDIS_API int redis_sentinel_del(redis_sentinel_t *sentinel, const char *key,
                                  redis_command_cb_t callback, void *user_data);
 
 /** Copy the current master endpoint into caller-owned storage. */
-CXX_C_API int redis_sentinel_get_master(const redis_sentinel_t *sentinel, char *host,
+REDIS_API int redis_sentinel_get_master(const redis_sentinel_t *sentinel, char *host,
                                         size_t host_size, uint16_t *port);
 
-CXX_C_API int redis_sentinel_is_healthy(const redis_sentinel_t *sentinel);
-CXX_C_API void redis_sentinel_get_stats(const redis_sentinel_t *sentinel,
+REDIS_API int redis_sentinel_is_healthy(const redis_sentinel_t *sentinel);
+REDIS_API void redis_sentinel_get_stats(const redis_sentinel_t *sentinel,
                                         redis_sentinel_stats_t *stats);
-CXX_C_API void redis_sentinel_reset_stats(redis_sentinel_t *sentinel);
+REDIS_API void redis_sentinel_reset_stats(redis_sentinel_t *sentinel);
 
 #ifdef __cplusplus
 }

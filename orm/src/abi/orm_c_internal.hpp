@@ -50,15 +50,35 @@ enum class query_kind {
 struct predicate {
     std::string column;
     std::string operation;
+    std::string right_column;
     orm_compare_t comparison = ORM_COMPARE_EQUAL;
     bound_parameter parameter;
     bool has_parameter = true;
+    bool has_column_operand = false;
 };
 
 struct aggregate_expression {
     orm_aggregate_t kind;
     std::string column;
     std::string alias;
+};
+
+struct scalar_token {
+    orm_scalar_token_kind_t kind;
+    std::string column;
+    bound_parameter parameter;
+};
+
+struct scalar_projection {
+    std::vector<scalar_token> tokens;
+    std::string alias;
+};
+
+struct ordering_spec {
+    bool is_expression = false;
+    std::string column;
+    std::vector<scalar_token> tokens;
+    orm_order_t order = ORM_ORDER_ASCENDING;
 };
 
 struct assignment {
@@ -77,8 +97,16 @@ struct join_clause {
 
 struct condition_node {
     bool is_group = true;
+    bool is_exists = false;
+    bool is_in_subquery = false;
+    bool is_scalar_subquery = false;
+    bool negated = false;
     orm_logic_t logic = ORM_LOGIC_AND;
     predicate value;
+    std::shared_ptr<const ::orm_query> subquery;
+    std::string subquery_column;
+    std::string subquery_operation;
+    std::string subquery_quantifier;
     std::vector<std::unique_ptr<condition_node>> children;
 };
 
@@ -94,11 +122,12 @@ struct query_plan {
     const condition_node& where_root;
     const condition_node& having_root;
     const std::vector<bound_parameter>& raw_parameters;
-    const std::optional<std::pair<std::string, orm_order_t>>& ordering;
+    const std::optional<ordering_spec>& ordering;
     const std::optional<std::uint64_t>& limit;
     const std::optional<std::uint64_t>& offset;
     std::size_t parameter_count;
     bool select_all;
+    bool distinct;
 };
 
 class status_error final : public std::runtime_error {
@@ -132,7 +161,7 @@ public:
     virtual std::uint64_t columns() const = 0;
     virtual std::uint64_t affected_rows() const = 0;
     virtual bool is_null(std::uint64_t row, std::uint64_t column) const = 0;
-    virtual tstr_v cell(std::uint64_t row, std::uint64_t column) const = 0;
+    virtual vstr cell(std::uint64_t row, std::uint64_t column) const = 0;
 };
 
 class transaction_backend {

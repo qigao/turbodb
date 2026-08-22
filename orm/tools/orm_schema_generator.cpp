@@ -226,7 +226,7 @@ std::optional<c_type_info> c_type_for(const field_model& field,
   if (field.type == "double")
     return c_type_info{c_field_kind::floating64, "double", "", "", ""};
   if (field.type == "string")
-    return c_type_info{c_field_kind::string, "tstr_t", "", "", ""};
+    return c_type_info{c_field_kind::string, "tstr", "", "", ""};
   if (field.type == "bytes")
     return c_type_info{c_field_kind::bytes, "tbe_bytes_t", "", "", ""};
   for (const enum_model& value : schema.enums) {
@@ -262,7 +262,7 @@ std::string c_entity_value_expression(const c_type_info& type,
 }
 
 std::string c_parameter_type(const c_type_info& type) {
-  if (type.kind == c_field_kind::string) return "tstr_v";
+  if (type.kind == c_field_kind::string) return "vstr";
   if (type.kind == c_field_kind::bytes) return "orm_blob_t";
   return type.c_type;
 }
@@ -364,7 +364,7 @@ std::string c_read_value_statement(const std::string& schema_name,
       break;
     case c_field_kind::string:
       code += "    orm_string_view_t value;\n"
-              "    tstr_t copied;\n"
+              "    tstr copied;\n"
               "    status = orm_result_get_text(result, 0u, " + column_text +
               ", &value, error);\n"
               "    if (status != ORM_STATUS_OK) goto cleanup;\n"

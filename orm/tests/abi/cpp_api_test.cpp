@@ -1,6 +1,6 @@
 #include "orm.hpp"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstdint>
 #include <stdexcept>
@@ -69,7 +69,16 @@ namespace {
       std::is_same_v<decltype(orm::min(person.name)), orm::aggregate_expression<std::string>>);
   static_assert(
       std::is_same_v<decltype(orm::max(person.score)), orm::aggregate_expression<double>>);
+  static_assert(std::is_same_v<decltype(person.score + person.id), orm::expression<double>>);
+  static_assert(std::is_same_v<decltype(person.score * person.id - (person.id - 1)),
+                                 orm::expression<double>>);
+  static_assert(std::is_same_v<decltype(100.0 - person.score), orm::expression<double>>);
   static_assert(!supports_equal<orm::column<std::int64_t>, std::string>::value);
+  static_assert(std::is_same_v<decltype(person.id.between(1, 3)), orm::predicate>);
+  static_assert(std::is_same_v<decltype(person.id.in(1, 2, 3)), orm::predicate>);
+  static_assert(std::is_same_v<decltype(person.note.is_null()), orm::predicate>);
+  static_assert(
+      std::is_same_v<decltype(department.id.eq_column(person.department_id)), orm::predicate>);
 
   orm::query retained_query() {
     orm::connection connection(sqlite_config());
@@ -183,6 +192,41 @@ namespace {
                     .affected_rows() == 1,
             "typed person insert failed");
 
+    static_assert(std::is_same_v<decltype(person.score * 2.0 + 5.0),
+                                 orm::expression<double>>);
+    const auto adjusted_scores =
+        connection.select((person.score * 2.0 + 5.0).as("adjusted_score"))
+            .from(person)
+            .order_by(person.id.asc())
+            .fetch_scalars();
+    require(adjusted_scores.size() == 3 && adjusted_scores[0] == 25.0 &&
+                adjusted_scores[1] == 45.0 && adjusted_scores[2] == 65.0,
+            "typed scalar expression returned the wrong values");
+
+    const auto score_and_id = connection.select(person.score + person.id)
+                                 .from(person)
+                                 .order_by(person.id.asc())
+                                 .fetch_scalars();
+    require(score_and_id.size() == 3 && score_and_id[0] == 11.0 &&
+                score_and_id[1] == 22.0 && score_and_id[2] == 33.0,
+            "typed expression across columns returned the wrong values");
+
+    const auto mixed_expression = connection.select((person.score * person.id) - (person.id - 1))
+                                   .from(person)
+                                   .order_by(person.id.asc())
+                                   .fetch_scalars();
+    require(mixed_expression.size() == 3 && mixed_expression[0] == 10.0 &&
+                mixed_expression[1] == 39.0 && mixed_expression[2] == 88.0,
+            "typed composed expression returned the wrong values");
+
+    const auto inverse_score = connection.select(100.0 - person.score)
+                                 .from(person)
+                                 .order_by(person.id.asc())
+                                 .fetch_scalars();
+    require(inverse_score.size() == 3 && inverse_score[0] == 90.0 &&
+                inverse_score[1] == 80.0 && inverse_score[2] == 70.0,
+            "typed scalar-left expression returned the wrong values");
+
     const auto grouped =
         connection
             .select(department.name, orm::count_all().as("total"),
@@ -206,6 +250,122 @@ namespace {
     require(grouped.uint64(1, 1) == 1, "typed COUNT returned the wrong second value");
     require(grouped.real(1, 2) == 20.0, "typed AVG returned the wrong second value");
 
+    const auto grouped_typed =
+        connection
+            .select(department.name, orm::count_all().as("total"),
+                    orm::avg(person.score).as("average_score"))
+            .from(person)
+            .left_join(department)
+            .on(person.department_id == department.id)
+            .where((person.active == true || person.name.like("B%")) && person.id >= 1)
+            .group_by(department.name)
+            .having(orm::count_all() > 0u)
+            .order_by(department.name.asc())
+            .fetch_typed();
+    require(grouped_typed.size() == 2, "inferred aggregate query returned the wrong row count");
+    require(std::get<0>(grouped_typed[0]) == "Engineering" &&
+                std::get<1>(grouped_typed[0]) == 1 &&
+                std::get<2>(grouped_typed[0]) == 10.0,
+            "inferred aggregate query returned the wrong first row");
+
+    bool rejected_unjoined_projection = false;
+    try {
+      (void)connection.select(department.name).from(person).fetch();
+    } catch (const std::invalid_argument &) {
+      rejected_unjoined_projection = true;
+    }
+    require(rejected_unjoined_projection,
+            "typed SELECT accepted a projection from an unjoined table");
+
+    const auto distinct_active = connection.select(person.active)
+                                     .from(person)
+                                     .distinct()
+                                     .order_by(person.active.asc())
+                                     .fetch_scalars();
+    require(distinct_active.size() == 2 && !distinct_active[0] && distinct_active[1],
+            "typed DISTINCT did not remove duplicate projection rows");
+
+    const auto exists_ids =
+        connection.select(person.id)
+            .from(person)
+            .where(connection.select(department.id)
+                       .from(department)
+                       .where(department.id.eq_column(person.department_id) &&
+                              department.name == "Sales")
+                       .exists())
+            .order_by(person.id.asc())
+            .fetch_scalars();
+    require(exists_ids.size() == 1 && exists_ids[0] == 2,
+            "typed EXISTS returned the wrong outer rows");
+
+    const auto not_exists_ids =
+        connection.select(person.id)
+            .from(person)
+            .where(connection.select(department.id)
+                       .from(department)
+                       .where(department.name == "Missing")
+                       .not_exists())
+            .fetch_scalars();
+    require(not_exists_ids.size() == 3,
+            "typed NOT EXISTS returned the wrong outer rows");
+
+    auto sales_department_ids = connection.select(department.id)
+                                    .from(department)
+                                    .where(department.name == "Sales");
+    const auto in_ids = connection.select(person.id)
+                            .from(person)
+                            .where_in(person.department_id, sales_department_ids)
+                            .fetch_scalars();
+    require(in_ids.size() == 1 && in_ids[0] == 2,
+            "typed IN subquery returned the wrong rows");
+
+    const auto not_in_ids = connection.select(person.id)
+                                .from(person)
+                                .where_not_in(person.department_id, sales_department_ids)
+                                .order_by(person.id.asc())
+                                .fetch_scalars();
+    require(not_in_ids.size() == 2 && not_in_ids[0] == 1 && not_in_ids[1] == 3,
+            "typed NOT IN subquery returned the wrong rows");
+
+    auto average_score = connection.select(orm::avg(person.score)).from(person);
+    const auto above_average_ids =
+        connection.select(person.id)
+            .from(person)
+            .where(person.score, orm::comparison::greater, average_score)
+            .fetch_scalars();
+    require(above_average_ids.size() == 1 && above_average_ids[0] == 3,
+            "typed scalar subquery returned the wrong rows");
+
+    auto stored_active_query = connection.select(person.id)
+                                   .from(person)
+                                   .where(person.active == true)
+                                   .distinct();
+    const auto stored_active_ids = stored_active_query.fetch_scalars();
+    require(stored_active_ids.size() == 1 && stored_active_ids[0] == 1,
+            "stored rvalue-fluent typed query returned the wrong rows");
+
+    auto stored_grouped_query =
+        connection.select(department.name, orm::count_all())
+            .from(person)
+            .inner_join(department)
+            .on(person.department_id == department.id)
+            .group_by(department.name)
+            .having(orm::count_all() > 0u)
+            .order_by(department.name.asc())
+            .limit(1)
+            .offset(1);
+    const auto stored_grouped_rows = stored_grouped_query.fetch_typed();
+    require(stored_grouped_rows.size() == 1 &&
+                std::get<0>(stored_grouped_rows[0]) == "Sales" &&
+                std::get<1>(stored_grouped_rows[0]) == 1,
+            "stored grouped rvalue-fluent query returned the wrong rows");
+
+    auto score_values = connection.select(person.score).from(person);
+    auto any_score_query = connection.select(person.id).from(person);
+    any_score_query.where_any(person.score, orm::comparison::greater, score_values);
+    auto all_score_query = connection.select(person.id).from(person);
+    all_score_query.where_all(person.score, orm::comparison::less_equal, score_values);
+
     require(connection.update(person)
                     .set(person.score, 22.0)
                     .where((person.id == 2 || person.name == "Nobody") && person.active == false)
@@ -223,6 +383,16 @@ namespace {
     const auto all_columns = connection.select().from(person).where(person.id == 1).fetch();
     require(all_columns.rows() == 1 && all_columns.columns() == 6,
             "empty typed projection did not select all columns");
+
+    const auto membership = connection.select(person.id)
+                                .from(person)
+                                .where(person.id.in(1, 2, 99) &&
+                                       person.score.between(10.0, 22.0) &&
+                                       person.note.is_not_null())
+                                .order_by(person.id.asc())
+                                .fetch_scalars();
+    require(membership.size() == 1 && membership[0] == 2,
+            "typed IN/BETWEEN/IS NOT NULL returned the wrong rows");
 
     try {
       (void)connection.update(person).where(department.id == 1);

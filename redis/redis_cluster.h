@@ -13,6 +13,7 @@
 #ifndef REDIS_CLUSTER_H
 #define REDIS_CLUSTER_H
 
+#include "redis_export.h"
 #include "redis_client.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -105,7 +106,7 @@ typedef struct {
  * @return Cluster instance or NULL for invalid endpoints, invalid authentication
  *         configuration, or allocation failure
  */
-CXX_C_API redis_cluster_t *redis_cluster_create(const redis_cluster_config_t *config);
+REDIS_API redis_cluster_t *redis_cluster_create(const redis_cluster_config_t *config);
 
 /**
  * Connect to cluster and discover topology
@@ -113,21 +114,21 @@ CXX_C_API redis_cluster_t *redis_cluster_create(const redis_cluster_config_t *co
  * @param cluster Cluster instance
  * @return 0 on success, -1 on failure
  */
-CXX_C_API int redis_cluster_connect(redis_cluster_t *cluster);
+REDIS_API int redis_cluster_connect(redis_cluster_t *cluster);
 
 /**
  * Disconnect from all nodes
  *
  * @param cluster Cluster instance
  */
-CXX_C_API void redis_cluster_disconnect(redis_cluster_t *cluster);
+REDIS_API void redis_cluster_disconnect(redis_cluster_t *cluster);
 
 /**
  * Destroy cluster client
  *
  * @param cluster Cluster instance
  */
-CXX_C_API void redis_cluster_destroy(redis_cluster_t *cluster);
+REDIS_API void redis_cluster_destroy(redis_cluster_t *cluster);
 
 /**
  * Refresh cluster topology
@@ -135,7 +136,7 @@ CXX_C_API void redis_cluster_destroy(redis_cluster_t *cluster);
  * @param cluster Cluster instance
  * @return 0 on success, -1 on failure
  */
-CXX_C_API int redis_cluster_refresh(redis_cluster_t *cluster);
+REDIS_API int redis_cluster_refresh(redis_cluster_t *cluster);
 
 /* =============================================================================
  * Command Routing
@@ -151,7 +152,7 @@ CXX_C_API int redis_cluster_refresh(redis_cluster_t *cluster);
  * @param format Command format (first arg should be key for routing)
  * @return 0 on success, -1 on failure
  */
-CXX_C_API int redis_cluster_command(redis_cluster_t *cluster, redis_command_cb_t callback,
+REDIS_API int redis_cluster_command(redis_cluster_t *cluster, redis_command_cb_t callback,
                           void *user_data, const char *format, ...);
 
 /**
@@ -164,7 +165,7 @@ CXX_C_API int redis_cluster_command(redis_cluster_t *cluster, redis_command_cb_t
  * @param format Command format
  * @return 0 on success, -1 on failure
  */
-CXX_C_API int redis_cluster_command_key(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_command_key(redis_cluster_t *cluster, const char *key,
                               redis_command_cb_t callback, void *user_data,
                               const char *format, ...);
 
@@ -180,7 +181,7 @@ CXX_C_API int redis_cluster_command_key(redis_cluster_t *cluster, const char *ke
  * @param user_data User data
  * @return 0 on success, -1 on failure
  */
-CXX_C_API int redis_cluster_commandv(redis_cluster_t *cluster, int argc, const char **argv,
+REDIS_API int redis_cluster_commandv(redis_cluster_t *cluster, int argc, const char **argv,
                            const size_t *argvlen, int key_index,
                            redis_command_cb_t callback, void *user_data);
 
@@ -202,7 +203,7 @@ CXX_C_API int redis_cluster_commandv(redis_cluster_t *cluster, int argc, const c
  * @return TURBO_OK for a non-error final reply, TURBO_EIO for a Redis error,
  *         TURBO_ELOOP after max redirections, or a transport/validation error
  */
-CXX_C_API int redis_cluster_commandv_result(redis_cluster_t *cluster, int argc,
+REDIS_API int redis_cluster_commandv_result(redis_cluster_t *cluster, int argc,
                                   const char **argv, const size_t *argvlen,
                                   int key_index, redis_command_result_t *out);
 
@@ -214,13 +215,13 @@ CXX_C_API int redis_cluster_commandv_result(redis_cluster_t *cluster, int argc,
  * physical replica connection is prepared with READONLY before entering its
  * pool. Callers must not pass commands that can mutate Redis state.
  */
-CXX_C_API int redis_cluster_read_commandv(redis_cluster_t *cluster, int argc,
+REDIS_API int redis_cluster_read_commandv(redis_cluster_t *cluster, int argc,
                                  const char **argv, const size_t *argvlen,
                                  int key_index, redis_command_cb_t callback,
                                  void *user_data);
 
 /** Exact-result variant of redis_cluster_read_commandv(). */
-CXX_C_API int redis_cluster_read_commandv_result(redis_cluster_t *cluster,
+REDIS_API int redis_cluster_read_commandv_result(redis_cluster_t *cluster,
                                         int argc, const char **argv,
                                         const size_t *argvlen, int key_index,
                                         redis_command_result_t *out);
@@ -231,41 +232,41 @@ CXX_C_API int redis_cluster_read_commandv_result(redis_cluster_t *cluster,
  */
 
 /* String commands */
-CXX_C_API int redis_cluster_set(redis_cluster_t *cluster, const char *key, const char *value,
+REDIS_API int redis_cluster_set(redis_cluster_t *cluster, const char *key, const char *value,
                       redis_command_cb_t callback, void *user_data);
 
-CXX_C_API int redis_cluster_get(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_get(redis_cluster_t *cluster, const char *key,
                       redis_command_cb_t callback, void *user_data);
 
-CXX_C_API int redis_cluster_del(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_del(redis_cluster_t *cluster, const char *key,
                       redis_command_cb_t callback, void *user_data);
 
-CXX_C_API int redis_cluster_expire(redis_cluster_t *cluster, const char *key, int seconds,
+REDIS_API int redis_cluster_expire(redis_cluster_t *cluster, const char *key, int seconds,
                          redis_command_cb_t callback, void *user_data);
 
-CXX_C_API int redis_cluster_incr(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_incr(redis_cluster_t *cluster, const char *key,
                        redis_command_cb_t callback, void *user_data);
 
 /* Hash commands */
-CXX_C_API int redis_cluster_hset(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_hset(redis_cluster_t *cluster, const char *key,
                        const char *field, const char *value,
                        redis_command_cb_t callback, void *user_data);
 
-CXX_C_API int redis_cluster_hget(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_hget(redis_cluster_t *cluster, const char *key,
                        const char *field, redis_command_cb_t callback,
                        void *user_data);
 
-CXX_C_API int redis_cluster_hdel(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_hdel(redis_cluster_t *cluster, const char *key,
                        const char *field, redis_command_cb_t callback,
                        void *user_data);
 
 /* Stream commands */
-CXX_C_API int redis_cluster_xadd(redis_cluster_t *cluster, const char *key, size_t maxlen,
+REDIS_API int redis_cluster_xadd(redis_cluster_t *cluster, const char *key, size_t maxlen,
                        size_t field_count, const char **fields,
                        const char **values, const size_t *value_lens,
                        redis_command_cb_t callback, void *user_data);
 
-CXX_C_API int redis_cluster_xread(redis_cluster_t *cluster, const char *key,
+REDIS_API int redis_cluster_xread(redis_cluster_t *cluster, const char *key,
                         size_t count, int block_ms, const char *last_id,
                         redis_stream_cb_t callback, void *user_data);
 
@@ -284,7 +285,7 @@ CXX_C_API int redis_cluster_xread(redis_cluster_t *cluster, const char *key,
  * @param len Key length
  * @return Hash slot (0-16383)
  */
-CXX_C_API uint16_t redis_cluster_keyslot(const char *key, size_t len);
+REDIS_API uint16_t redis_cluster_keyslot(const char *key, size_t len);
 
 /**
  * Get node responsible for slot
@@ -296,7 +297,7 @@ CXX_C_API uint16_t redis_cluster_keyslot(const char *key, size_t len);
  * @param slot Hash slot
  * @return Node info or NULL if unknown
  */
-CXX_C_API const redis_cluster_node_t *redis_cluster_get_node(redis_cluster_t *cluster,
+REDIS_API const redis_cluster_node_t *redis_cluster_get_node(redis_cluster_t *cluster,
                                                     uint16_t slot);
 
 /* =============================================================================
@@ -314,7 +315,7 @@ CXX_C_API const redis_cluster_node_t *redis_cluster_get_node(redis_cluster_t *cl
  * @param user_data User data
  * @return 0 on success, -1 if keys cross slots
  */
-CXX_C_API int redis_cluster_mdelete(redis_cluster_t *cluster, int key_count,
+REDIS_API int redis_cluster_mdelete(redis_cluster_t *cluster, int key_count,
                           const char **keys, redis_command_cb_t callback,
                           void *user_data);
 
@@ -328,7 +329,7 @@ CXX_C_API int redis_cluster_mdelete(redis_cluster_t *cluster, int key_count,
  * @param user_data User data
  * @return 0 on success, -1 if keys cross slots
  */
-CXX_C_API int redis_cluster_mget(redis_cluster_t *cluster, int key_count,
+REDIS_API int redis_cluster_mget(redis_cluster_t *cluster, int key_count,
                        const char **keys, redis_command_cb_t callback,
                        void *user_data);
 
@@ -343,14 +344,14 @@ CXX_C_API int redis_cluster_mget(redis_cluster_t *cluster, int key_count,
  * @param cluster Cluster instance
  * @param stats Output statistics
  */
-CXX_C_API void redis_cluster_get_stats(redis_cluster_t *cluster, redis_cluster_stats_t *stats);
+REDIS_API void redis_cluster_get_stats(redis_cluster_t *cluster, redis_cluster_stats_t *stats);
 
 /**
  * Reset cluster statistics
  *
  * @param cluster Cluster instance
  */
-CXX_C_API void redis_cluster_reset_stats(redis_cluster_t *cluster);
+REDIS_API void redis_cluster_reset_stats(redis_cluster_t *cluster);
 
 /**
  * Check cluster health
@@ -358,7 +359,7 @@ CXX_C_API void redis_cluster_reset_stats(redis_cluster_t *cluster);
  * @param cluster Cluster instance
  * @return 1 if all slots covered, 0 if degraded
  */
-CXX_C_API int redis_cluster_is_healthy(redis_cluster_t *cluster);
+REDIS_API int redis_cluster_is_healthy(redis_cluster_t *cluster);
 
 /**
  * Get node count
@@ -367,7 +368,7 @@ CXX_C_API int redis_cluster_is_healthy(redis_cluster_t *cluster);
  * @param masters Output master count (optional)
  * @param replicas Output replica count (optional)
  */
-CXX_C_API void redis_cluster_node_count(redis_cluster_t *cluster, size_t *masters,
+REDIS_API void redis_cluster_node_count(redis_cluster_t *cluster, size_t *masters,
                               size_t *replicas);
 
 #ifdef __cplusplus

@@ -1,6 +1,6 @@
 #include "row.hpp"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -79,12 +79,12 @@ spec("TidesDB ORM row codec") {
                     reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size(),
                     test_maximum_bytes, test_maximum_fields);
 
-                check_int_eq(decoded.size(), source.size());
+                check_equal(decoded.size(), source.size());
                 const tidesdb_cell* name = tidesdb_find_cell(decoded, "name");
                 check_not_null(name);
                 if (name != nullptr) {
-                    check_int_eq(name->kind, ORM_VALUE_TEXT);
-                    check_int_eq(name->text.size(), 3);
+                    check_equal(name->kind, ORM_VALUE_TEXT);
+                    check_equal(name->text.size(), 3);
                     check(name->text == std::string("A:B", 3));
                 }
                 const tidesdb_cell* note = tidesdb_find_cell(decoded, "note");
@@ -94,7 +94,7 @@ spec("TidesDB ORM row codec") {
                 const tidesdb_cell* payload = tidesdb_find_cell(decoded, "payload");
                 check_not_null(payload);
                 if (payload != nullptr) {
-                    check_int_eq(payload->kind, ORM_VALUE_BLOB);
+                    check_equal(payload->kind, ORM_VALUE_BLOB);
                     check(payload->text == std::string("A\0B\0C", 5));
                 }
             }

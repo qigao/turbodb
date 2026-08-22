@@ -460,6 +460,21 @@ set_target_properties(orm_cpp_api_test PROPERTIES CXX_STANDARD_REQUIRED ON FOLDE
 orm_enable_strict_warnings(orm_cpp_api_test)
 add_test(NAME orm_cpp_api COMMAND orm_cpp_api_test)
 
+add_executable(orm_jpa_api_test tests/abi/jpa_api_test.cpp src/abi/orm_c.cpp
+                                src/dbs/sqlite/backend.cpp)
+target_compile_features(orm_jpa_api_test PRIVATE cxx_std_17)
+target_compile_definitions(orm_jpa_api_test PRIVATE ORM_WITH_SQLITE)
+target_include_directories(
+  orm_jpa_api_test
+  PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR})
+target_link_libraries(
+  orm_jpa_api_test
+  PRIVATE TurboUtils::Core TurboParser::Mustache TurboUtils::TinyTest
+          SQLite::SQLite3)
+set_target_properties(orm_jpa_api_test PROPERTIES CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_jpa_api_test)
+add_test(NAME orm_jpa_api COMMAND orm_jpa_api_test)
+
 add_executable(orm_typed_fetch_test tests/abi/typed_fetch_test.cpp
                                     tests/abi/c_api_fake_libpq.cpp ${ORM_C_SOURCES})
 target_compile_features(orm_typed_fetch_test PRIVATE cxx_std_17)
@@ -679,7 +694,7 @@ if(WIN32)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
-    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_c_api orm_cpp_api)
+    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_c_api orm_cpp_api orm_jpa_api)
   endif()
   if(ORM_WITH_PGSQL)
     list(APPEND ORM_RUNTIME_TESTS orm_postgres_c_api orm_cpp17)
@@ -724,6 +739,15 @@ if(WIN32)
       list(APPEND ORM_RUNTIME_TESTS orm_schema_generated_c)
     endif()
   endif()
+
+  if(EXISTS "${CMAKE_C_COMPILER}")
+    get_filename_component(ORM_TEST_VC_BIN_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    if(EXISTS "${ORM_TEST_VC_BIN_DIR}")
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:${ORM_TEST_VC_BIN_DIR}")
+    endif()
+  endif()
+
   set_tests_properties(${ORM_RUNTIME_TESTS}
                        PROPERTIES ENVIRONMENT_MODIFICATION
                                   "${ORM_TEST_RUNTIME_PATH}")
@@ -733,7 +757,8 @@ endif()
 
 include(GNUInstallDirs)
 
-cmake_install_headers(FILES include/orm/orm.h include/orm/orm.hpp include/orm/model.hpp DESTINATION
+cmake_install_headers(FILES include/orm/orm.h include/orm/orm.hpp include/orm/jpa.hpp
+                      include/orm/model.hpp DESTINATION
                       ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 cmake_install_headers(FILES include/orm/dbs/postgres/model_detail.hpp DESTINATION
                       ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm/dbs/postgres)

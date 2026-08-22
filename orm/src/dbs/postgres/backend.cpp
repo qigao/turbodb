@@ -132,7 +132,7 @@ public:
         return PQgetisnull(result_.get(), static_cast<int>(row), static_cast<int>(column)) != 0;
     }
 
-    tstr_v cell(std::uint64_t row, std::uint64_t column) const override
+    vstr cell(std::uint64_t row, std::uint64_t column) const override
     {
         check_coordinates(row, column);
         const int row_index = static_cast<int>(row);
@@ -146,7 +146,7 @@ public:
                 static_cast<std::size_t>(column_index);
             require(index < cells_.size(), ORM_STATUS_INTERNAL_ERROR,
                     "materialized PostgreSQL result has inconsistent dimensions");
-            return tstr_v_from_buf(cells_[index].data(), cells_[index].size());
+            return vstr_from_buf(cells_[index].data(), cells_[index].size());
         }
         const int length = PQgetlength(result_.get(), row_index, column_index);
         require(length >= 0, ORM_STATUS_INTERNAL_ERROR,
@@ -154,7 +154,7 @@ public:
         const char* data = PQgetvalue(result_.get(), row_index, column_index);
         require(data != nullptr, ORM_STATUS_INTERNAL_ERROR,
                 "libpq returned a null field pointer for a non-null value");
-        return tstr_v_from_buf(data, static_cast<std::size_t>(length));
+        return vstr_from_buf(data, static_cast<std::size_t>(length));
     }
 
 private:

@@ -3,9 +3,6 @@
   "version-semver": "0.1.0",
   "dependencies": [
     {
-      "name": "boringssl"
-    },
-    {
       "name": "pkgconf",
       "host": true
     },

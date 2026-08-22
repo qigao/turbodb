@@ -15,7 +15,7 @@
 
 typedef struct redis_sentinel_generation_s {
   redis_pool_t *pool;
-  tstr_t host;
+  tstr host;
   uint16_t port;
   size_t active_leases;
   int retired;
@@ -47,15 +47,15 @@ static void redis_sentinel_config_clear(redis_sentinel_config_t *config) {
   if (!config) return;
   if (config->sentinel_hosts) {
     for (size_t i = 0; i < config->sentinel_count; ++i)
-      tstr_free((tstr_t)config->sentinel_hosts[i]);
+      tstr_free((tstr)config->sentinel_hosts[i]);
     free((char **)config->sentinel_hosts);
   }
   free(config->sentinel_ports);
-  tstr_free((tstr_t)config->service_name);
-  tstr_free((tstr_t)config->sentinel_username);
-  tstr_free((tstr_t)config->sentinel_password);
-  tstr_free((tstr_t)config->username);
-  tstr_free((tstr_t)config->password);
+  tstr_free((tstr)config->service_name);
+  tstr_free((tstr)config->sentinel_username);
+  tstr_free((tstr)config->sentinel_password);
+  tstr_free((tstr)config->username);
+  tstr_free((tstr)config->password);
   memset(config, 0, sizeof(*config));
 }
 
@@ -164,7 +164,7 @@ static int redis_sentinel_parse_port(const redis_reply_t *reply, uint16_t *port)
 }
 
 static int redis_sentinel_query_master(redis_sentinel_t *sentinel, size_t sentinel_index,
-                                       tstr_t *host, uint16_t *port) {
+                                       tstr *host, uint16_t *port) {
   redis_config_t config = {0};
   redis_client_t *client = NULL;
   redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
@@ -376,7 +376,7 @@ static int redis_sentinel_refresh_internal(redis_sentinel_t *sentinel) {
   for (size_t offset = 0; offset < sentinel->config.sentinel_count; ++offset) {
     size_t index = (sentinel->preferred_sentinel + offset) % sentinel->config.sentinel_count;
     redis_sentinel_generation_t *candidate = NULL;
-    tstr_t host = NULL;
+    tstr host = NULL;
     uint16_t port = 0;
     int rc;
 

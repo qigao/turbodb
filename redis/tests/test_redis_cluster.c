@@ -16,7 +16,7 @@
 #define TEST_ASSERT_NULL(value) check_null((value))
 #define TEST_ASSERT_NOT_NULL(value) check_not_null((value))
 #define TEST_ASSERT_EQUAL(expected, actual) check((intptr_t)(actual) == (intptr_t)(expected))
-#define TEST_ASSERT_EQUAL_STRING(expected, actual) check_str_eq((actual), (expected))
+#define TEST_ASSERT_EQUAL_STRING(expected, actual) check_equal((actual), (expected))
 #define TEST_ASSERT_GREATER_THAN(threshold, actual) check((long long)(actual) > (long long)(threshold))
 #define TEST_ASSERT_LESS_THAN(limit, actual) check((long long)(actual) < (long long)(limit))
 #define REDIS_RUN_TEST(fn, label) it(label) { fn(); }

@@ -149,10 +149,10 @@ void append_format(std::string& destination,
                    const char* format,
                    const Args&... args)
 {
-    tstr_t owned = tstr_format_typed_cpp(format, args...);
+    tstr owned = tstr_format_typed_cpp(format, args...);
     if (owned == nullptr)
         fail(ORM_STATUS_OUT_OF_MEMORY, "format Redis query fragment failed");
-    const tstr_v view = tstr_to_v(owned);
+    const vstr view = tstr_to_v(owned);
     if (view.len > maximum || destination.size() > maximum - view.len)
         fail(ORM_STATUS_LIMIT_EXCEEDED, "Redis query exceeds max_query_bytes");
     destination.append(view.data, view.len);
@@ -207,11 +207,13 @@ void append_sort(redis_query_command& command, const query_plan& plan, bool aggr
     if (!plan.ordering)
         return;
     command.arguments.push_back("SORTBY");
+    if (plan.ordering && plan.ordering->is_expression)
+        fail(ORM_STATUS_UNSUPPORTED, "Redis ORDER BY expression is not supported");
     if (aggregate)
         command.arguments.push_back("2");
-    command.arguments.push_back(aggregate ? "@" + plan.ordering->first
-                                          : plan.ordering->first);
-    command.arguments.push_back(plan.ordering->second == ORM_ORDER_DESCENDING
+    command.arguments.push_back(aggregate ? "@" + plan.ordering->column
+                                          : plan.ordering->column);
+    command.arguments.push_back(plan.ordering->order == ORM_ORDER_DESCENDING
                                     ? "DESC"
                                     : "ASC");
 }
@@ -321,6 +323,8 @@ build_redis_query_command(const query_plan& plan,
                           const connection_limits& limits,
                           std::string_view index_prefix)
 {
+    require(!plan.distinct, ORM_STATUS_UNSUPPORTED,
+            "Redis DISTINCT queries are not supported");
     require(plan.kind == query_kind::select, ORM_STATUS_UNSUPPORTED,
             "Redis Query Engine commands require a SELECT plan");
     require(plan.joins.empty(), ORM_STATUS_UNSUPPORTED,

@@ -109,12 +109,12 @@ public:
         return get(row, column).is_null;
     }
 
-    tstr_v cell(std::uint64_t row, std::uint64_t column) const override
+    vstr cell(std::uint64_t row, std::uint64_t column) const override
     {
         const materialized_cell& selected = get(row, column);
         require(!selected.is_null, ORM_STATUS_NULL_VALUE,
                 "result cell is SQL NULL");
-        return tstr_v_from_buf(selected.value.data(), selected.value.size());
+        return vstr_from_buf(selected.value.data(), selected.value.size());
     }
 
 private:

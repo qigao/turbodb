@@ -1,6 +1,6 @@
 #include "query.hpp"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <memory>
 #include <optional>
@@ -30,7 +30,7 @@ struct plan_fixture {
     condition_node where_root;
     condition_node having_root;
     std::vector<bound_parameter> raw_parameters;
-    std::optional<std::pair<std::string, orm_order_t>> ordering;
+    std::optional<ordering_spec> ordering;
     std::optional<std::uint64_t> limit;
     std::optional<std::uint64_t> offset;
     std::size_t parameter_count = 0;
@@ -87,9 +87,9 @@ bound_parameter double_value(double value)
 void check_arguments(const std::vector<std::string>& actual,
                      const std::vector<std::string>& expected)
 {
-    check_int_eq(actual.size(), expected.size());
+    check_equal(actual.size(), expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index)
-        check_str_eq(actual[index].c_str(), expected[index].c_str());
+        check_equal(actual[index].c_str(), expected[index].c_str());
 }
 
 } // namespace
@@ -97,10 +97,10 @@ void check_arguments(const std::vector<std::string>& actual,
 suite("orm redis query plan") {
     it("maps selection predicates sorting and paging to FT.SEARCH") {
         plan_fixture fixture;
-        fixture.columns = {"id", "name"};
-        fixture.add_predicate("status", ORM_COMPARE_EQUAL, text_value("active,user"));
-        fixture.add_predicate("age", ORM_COMPARE_GREATER_EQUAL, integer_value(18));
-        fixture.ordering = std::make_pair(std::string("age"), ORM_ORDER_DESCENDING);
+    fixture.columns = {"id", "name"};
+    fixture.add_predicate("status", ORM_COMPARE_EQUAL, text_value("active,user"));
+    fixture.add_predicate("age", ORM_COMPARE_GREATER_EQUAL, integer_value(18));
+    fixture.ordering = ordering_spec{false, "age", {}, ORM_ORDER_DESCENDING};
         fixture.limit = 25;
         fixture.offset = 50;
 
@@ -203,7 +203,7 @@ suite("orm redis query plan") {
         fixture.add_predicate("name", ORM_COMPARE_LIKE, text_value("a*b?c_d'e\\f"));
         const redis_query_command command =
             build_redis_query_command(fixture.view(), limits(), "idx:");
-        check_str_eq(command.arguments[2].c_str(),
+        check_equal(command.arguments[2].c_str(),
                      "(@name:(\"w'a\\*b\\?c?d\\'e\\\\f'\"))");
     }
 
@@ -213,7 +213,7 @@ suite("orm redis query plan") {
         fixture.add_predicate("age", ORM_COMPARE_NOT_EQUAL, integer_value(18));
         const redis_query_command command =
             build_redis_query_command(fixture.view(), limits(), "idx:");
-        check_str_eq(command.arguments[2].c_str(),
+        check_equal(command.arguments[2].c_str(),
                      "((@age:[-inf +inf] -@age:[18 18]))");
     }
 
@@ -223,7 +223,7 @@ suite("orm redis query plan") {
         fixture.add_predicate("score", ORM_COMPARE_GREATER_EQUAL, double_value(1e20));
         const redis_query_command command =
             build_redis_query_command(fixture.view(), limits(), "idx:");
-        check_str_eq(command.arguments[2].c_str(),
+        check_equal(command.arguments[2].c_str(),
                      "(@score:[100000000000000000000 +inf])");
 
         plan_fixture fraction;
@@ -231,7 +231,7 @@ suite("orm redis query plan") {
         fraction.add_predicate("score", ORM_COMPARE_EQUAL, double_value(0.0000001));
         const redis_query_command fraction_command =
             build_redis_query_command(fraction.view(), limits(), "idx:");
-        check_str_eq(fraction_command.arguments[2].c_str(),
+        check_equal(fraction_command.arguments[2].c_str(),
                      "(@score:[0.0000001 0.0000001])");
     }
 
@@ -241,6 +241,6 @@ suite("orm redis query plan") {
         fixture.add_predicate("status", ORM_COMPARE_NOT_EQUAL, text_value("active"));
         const redis_query_command command =
             build_redis_query_command(fixture.view(), limits(), "idx:");
-        check_str_eq(command.arguments[2].c_str(), "(-@status:{active})");
+        check_equal(command.arguments[2].c_str(), "(-@status:{active})");
     }
 }

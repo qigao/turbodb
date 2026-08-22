@@ -722,9 +722,9 @@ static void register_conn_wrapper(redis_pool_t *pool, redis_pool_conn_t *conn) {
 }
 
 static int reconfigure_pooled_client(redis_pool_conn_t *conn, const redis_config_t *config) {
-    tstr_t new_host = NULL;
-    tstr_t new_username = NULL;
-    tstr_t new_password = NULL;
+    tstr new_host = NULL;
+    tstr new_username = NULL;
+    tstr new_password = NULL;
     int replace_username;
     int replace_password;
 
@@ -764,17 +764,17 @@ static int reconfigure_pooled_client(redis_pool_conn_t *conn, const redis_config
     }
 
     if (new_host) {
-        tstr_free((tstr_t)conn->client->config.host);
+        tstr_free((tstr)conn->client->config.host);
         conn->client->config.host = new_host;
     }
 
     if (replace_username) {
-        tstr_free((tstr_t)conn->client->config.username);
+        tstr_free((tstr)conn->client->config.username);
         conn->client->config.username = new_username;
     }
 
     if (replace_password) {
-        tstr_free((tstr_t)conn->client->config.password);
+        tstr_free((tstr)conn->client->config.password);
         conn->client->config.password = new_password;
     }
 
@@ -845,13 +845,13 @@ static void free_config_copy(redis_pool_t *pool) {
         return;
     }
 
-    tstr_free((tstr_t)pool->config.master_host);
-    tstr_free((tstr_t)pool->config.username);
-    tstr_free((tstr_t)pool->config.password);
+    tstr_free((tstr)pool->config.master_host);
+    tstr_free((tstr)pool->config.username);
+    tstr_free((tstr)pool->config.password);
 
     if (pool->config.replica_hosts) {
         for (size_t i = 0; i < pool->config.replica_count; i++) {
-            tstr_free((tstr_t)pool->config.replica_hosts[i]);
+            tstr_free((tstr)pool->config.replica_hosts[i]);
         }
         free((char **)pool->config.replica_hosts);
     }
@@ -1032,7 +1032,7 @@ static int pool_release_conn(redis_pool_t *pool, redis_pool_conn_t *conn) {
 }
 
 static char *format_command(const char *format, va_list ap) {
-    tstr_t buffer;
+    tstr buffer;
 
     if (!format) {
         return NULL;

@@ -1,12 +1,13 @@
 #include "orm.hpp"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -151,12 +152,34 @@ namespace {
 
   struct reflected_person_entity {};
 
+  struct person_summary final {
+    person_summary(std::int32_t input_id, std::string input_name)
+        : id(input_id), name(std::move(input_name)) {}
+
+    std::int32_t id;
+    std::string name;
+  };
+
+  struct person_summary_mapper final {
+    person_summary operator()(std::int32_t id, std::string name) const {
+      return person_summary(id, std::move(name));
+    }
+  };
+
+  struct incompatible_summary_mapper final {
+    person_summary operator()(std::string name) const {
+      return person_summary(0, std::move(name));
+    }
+  };
+
+  static_assert(!std::is_default_constructible_v<person_summary>);
+
   struct reflected_person_table final : orm::table<reflected_person_entity> {
     reflected_person_table()
         : orm::table<reflected_person_entity>("typed_people"), id(*this, "id"),
           name(*this, "name"), access(*this, "access"), active(*this, "active"),
-          score(*this, "score"), note(*this, "note"), code(*this, "code"),
-          payload(*this, "payload") {}
+          score(*this, "score"), note(*this, "note"), nullable_note(*this, "note"),
+          code(*this, "code"), payload(*this, "payload") {}
 
     orm::column<std::int32_t> id;
     orm::column<std::string> name;
@@ -164,11 +187,55 @@ namespace {
     orm::column<bool> active;
     orm::column<float> score;
     orm::column<std::string> note;
+    orm::column<std::optional<std::string>> nullable_note;
     orm::column<std::string> code;
     orm::column<std::vector<std::uint8_t>> payload;
   };
 
   const reflected_person_table people;
+
+  using inferred_person_projection =
+      decltype(std::declval<const orm::connection &>()
+                   .select(people.id, people.name, people.score)
+                   .from(people));
+  static_assert(std::is_same_v<typename inferred_person_projection::row_type,
+                               std::tuple<std::int32_t, std::string, float>>);
+  using inferred_aggregate_projection =
+      decltype(std::declval<const orm::connection &>()
+                   .select(people.name, orm::count(people.id), orm::avg(people.score))
+                   .from(people));
+  static_assert(std::is_same_v<typename inferred_aggregate_projection::row_type,
+                               std::tuple<std::string, std::uint64_t, double>>);
+  static_assert(std::is_same_v<decltype(people.nullable_note == std::string("review")),
+                               orm::predicate>);
+  static_assert(std::is_same_v<decltype(people.nullable_note == std::nullopt), orm::predicate>);
+
+  template <typename Query, typename = void> struct has_scalar_fetch : std::false_type {};
+  template <typename Query>
+  struct has_scalar_fetch<Query,
+                          std::void_t<decltype(std::declval<Query &>().fetch_scalars())>>
+      : std::true_type {};
+
+  using inferred_single_projection =
+      decltype(std::declval<const orm::connection &>().select(people.name).from(people));
+  static_assert(has_scalar_fetch<inferred_single_projection>::value);
+  static_assert(!has_scalar_fetch<inferred_person_projection>::value);
+
+  template <typename Query, typename Mapper, typename = void>
+  struct has_mapped_fetch : std::false_type {};
+  template <typename Query, typename Mapper>
+  struct has_mapped_fetch<
+      Query, Mapper,
+      std::void_t<decltype(std::declval<Query &>().fetch_mapped(std::declval<Mapper>()))>>
+      : std::true_type {};
+
+  using inferred_summary_projection =
+      decltype(std::declval<const orm::connection &>()
+                   .select(people.id, people.name)
+                   .from(people));
+  static_assert(has_mapped_fetch<inferred_summary_projection, person_summary_mapper>::value);
+  static_assert(
+      !has_mapped_fetch<inferred_summary_projection, incompatible_summary_mapper>::value);
 
   orm::config sqlite_config() {
     orm::config configuration("sqlite");
@@ -247,18 +314,18 @@ spec("ORM reflected typed fetch") {
           .order_by("id", orm::sort_order::ascending);
 
       const auto rows = query.fetch<reflected_person>();
-      check_size_eq(rows.size(), 2u);
-      check_int_eq(rows[0].id, 1);
-      check_str_eq(rows[0].name.c_str(), "Alice");
-      check_int_eq(static_cast<int>(rows[0].access), static_cast<int>(access_level::writer));
+      check_equal(rows.size(), 2u);
+      check_equal(rows[0].id, 1);
+      check_equal(rows[0].name.c_str(), "Alice");
+      check_equal(static_cast<int>(rows[0].access), static_cast<int>(access_level::writer));
       check_true(rows[0].active);
-      check_float_eq(rows[0].score, 9.5f, 0.0001f);
+      check_within(rows[0].score, 9.5f, 0.0001f);
       check_false(rows[0].note.has_value());
-      check_str_eq(rows[0].code, "A1");
+      check_equal(rows[0].code, "A1");
       const std::uint8_t expected_payload[] = {0, 1, 255};
-      check_size_eq(rows[0].payload.size(), 3u);
-      check_uint8_array_eq(rows[0].payload.data(), expected_payload, 3u);
-      check_str_eq(rows[1].note.value().c_str(), "review");
+      check_equal(rows[0].payload.size(), 3u);
+      check_equal(rows[0].payload.data(), expected_payload, 3u);
+      check_equal(rows[1].note.value().c_str(), "review");
     }
 
     it("maps a typed select projection and a single result row") {
@@ -269,16 +336,149 @@ spec("ORM reflected typed fetch") {
                             .from(people)
                             .where(people.id == 2)
                             .fetch<reflected_person>();
-      check_size_eq(rows.size(), 1u);
-      check_int_eq(rows[0].id, 2);
+      check_equal(rows.size(), 1u);
+      check_equal(rows[0].id, 2);
       check_false(rows[0].active);
 
       auto query = connection.select("typed_people");
       query.column("id").column("name").where("id", orm::comparison::equal, 1);
       const auto result = query.execute();
       const auto row = result.row<std::tuple<std::int32_t, std::string>>(0);
-      check_int_eq(std::get<0>(row), 1);
-      check_str_eq(std::get<1>(row).c_str(), "Alice");
+      check_equal(std::get<0>(row), 1);
+      check_equal(std::get<1>(row).c_str(), "Alice");
+    }
+
+    it("infers a tuple row from the selected projections") {
+      auto connection = populated_connection();
+      const auto rows = connection.select(people.id, people.name, people.score)
+                            .from(people)
+                            .where(people.id == 1)
+                            .fetch_typed();
+
+      check_equal(rows.size(), 1u);
+      check_equal(std::get<0>(rows[0]), 1);
+      check_equal(std::get<1>(rows[0]).c_str(), "Alice");
+      check_within(std::get<2>(rows[0]), 9.5f, 0.0001f);
+    }
+
+    it("preserves nullable column types in inferred tuples") {
+      auto connection = populated_connection();
+      const auto rows = connection.select(people.id, people.nullable_note)
+                            .from(people)
+                            .order_by(people.id.asc())
+                            .fetch_typed();
+
+      check_equal(rows.size(), 2u);
+      check_false(std::get<1>(rows[0]).has_value());
+      check_true(std::get<1>(rows[1]).has_value());
+      check_equal(std::get<1>(rows[1])->c_str(), "review");
+    }
+
+    it("uses optional values in typed assignments and predicates") {
+      auto connection = populated_connection();
+      const std::optional<std::string> updated_note("restored");
+      check_equal(connection.update(people)
+                        .set(people.nullable_note, updated_note)
+                        .where(people.id == 1)
+                        .execute()
+                        .affected_rows(),
+                    1u);
+
+      const auto restored = connection.select(people.id, people.nullable_note)
+                                .from(people)
+                                .where(people.nullable_note == updated_note)
+                                .fetch_one_typed();
+      check_true(restored.has_value());
+      check_equal(std::get<0>(*restored), 1);
+      check_equal(std::get<1>(*restored)->c_str(), "restored");
+
+      check_equal(connection.update(people)
+                        .set(people.nullable_note, std::nullopt)
+                        .where(people.id == 1)
+                        .execute()
+                        .affected_rows(),
+                    1u);
+      const auto null_rows = connection.select(people.id)
+                                 .from(people)
+                                 .where(people.nullable_note == std::nullopt)
+                                 .order_by(people.id.asc())
+                                 .fetch_typed();
+      check_equal(null_rows.size(), 1u);
+      check_equal(std::get<0>(null_rows[0]), 1);
+    }
+
+    it("returns an optional inferred row for zero or one result") {
+      auto connection = populated_connection();
+      const auto alice = connection.select(people.id, people.name)
+                             .from(people)
+                             .where(people.id == 1)
+                             .fetch_one_typed();
+      check_true(alice.has_value());
+      check_equal(std::get<0>(*alice), 1);
+      check_equal(std::get<1>(*alice).c_str(), "Alice");
+
+      const auto missing = connection.select(people.id, people.name)
+                               .from(people)
+                               .where(people.id == 99)
+                               .fetch_one_typed();
+      check_false(missing.has_value());
+    }
+
+    it("rejects multiple rows in a typed single-result query") {
+      auto connection = populated_connection();
+      check_equal(caught_status([&] {
+                     (void)connection.select(people.id)
+                         .from(people)
+                         .order_by(people.id.asc())
+                         .fetch_one_typed();
+                   }),
+                   ORM_STATUS_INVALID_STATE);
+    }
+
+    it("materializes one-column projections as scalar values") {
+      auto connection = populated_connection();
+      const auto names = connection.select(people.name)
+                             .from(people)
+                             .order_by(people.id.asc())
+                             .fetch_scalars();
+      check_equal(names.size(), 2u);
+      check_equal(names[0].c_str(), "Alice");
+      check_equal(names[1].c_str(), "Bob");
+
+      const auto note = connection.select(people.nullable_note)
+                            .from(people)
+                            .where(people.id == 2)
+                            .fetch_one_scalar();
+      check_true(note.has_value());
+      check_true(note->has_value());
+      check_equal(note->value().c_str(), "review");
+
+      const auto count = connection.select(orm::count_all())
+                             .from(people)
+                             .fetch_one_scalar();
+      check_true(count.has_value());
+      check_equal(*count, 2u);
+    }
+
+    it("constructs non-modeled DTOs from inferred projection fields") {
+      auto connection = populated_connection();
+      const auto summaries = connection.select(people.id, people.name)
+                                 .from(people)
+                                 .order_by(people.id.asc())
+                                 .fetch_mapped(person_summary_mapper{});
+      check_equal(summaries.size(), 2u);
+      check_equal(summaries[0].id, 1);
+      check_equal(summaries[0].name.c_str(), "Alice");
+      check_equal(summaries[1].id, 2);
+      check_equal(summaries[1].name.c_str(), "Bob");
+
+      const auto summary = connection.select(people.id, people.name)
+                               .from(people)
+                               .where(people.id == 2)
+                               .fetch_one_mapped(person_summary_mapper{});
+      check_true(summary.has_value());
+      check_equal(summary->id, 2);
+      check_equal(summary->name.c_str(), "Bob");
     }
 
     it("builds the projection from reflected metadata") {
@@ -286,11 +486,11 @@ spec("ORM reflected typed fetch") {
       const auto rows = connection.select<reflected_person>()
                             .order_by(people.id.asc())
                             .fetch<reflected_person>();
-      check_size_eq(rows.size(), 2u);
-      check_int_eq(rows[0].id, 1);
-      check_str_eq(rows[0].name.c_str(), "Alice");
-      check_int_eq(rows[1].id, 2);
-      check_str_eq(rows[1].code, "B2");
+      check_equal(rows.size(), 2u);
+      check_equal(rows[0].id, 1);
+      check_equal(rows[0].name.c_str(), "Alice");
+      check_equal(rows[1].id, 2);
+      check_equal(rows[1].code, "B2");
     }
   }
 
@@ -302,24 +502,24 @@ spec("ORM reflected typed fetch") {
                "id integer primary key, version integer not null, label text not null)")
           .execute();
       const orm::repository<versioned_entity> repository(connection);
-      check_uint_eq(repository.insert({1, 0, "original"}).affected_rows(), 1u);
+      check_equal(repository.insert({1, 0, "original"}).affected_rows(), 1u);
 
       auto first = repository.find_by_id(1);
       auto stale = repository.find_by_id(1);
       check_true(first.has_value());
       check_true(stale.has_value());
       first->label = "first";
-      check_uint_eq(repository.update(*first).affected_rows(), 1u);
-      check_uint_eq(first->version, 1u);
+      check_equal(repository.update(*first).affected_rows(), 1u);
+      check_equal(first->version, 1u);
 
       stale->label = "stale";
-      check_int_eq(caught_status([&] { (void)repository.update(*stale); }),
+      check_equal(caught_status([&] { (void)repository.update(*stale); }),
                    ORM_STATUS_INVALID_STATE);
-      check_uint_eq(stale->version, 0u);
+      check_equal(stale->version, 0u);
       const auto stored = repository.find_by_id(1);
       check_true(stored.has_value());
-      check_uint_eq(stored->version, 1u);
-      check_str_eq(stored->label.c_str(), "first");
+      check_equal(stored->version, 1u);
+      check_equal(stored->label.c_str(), "first");
     }
 
     it("uses reflected custom primary-key metadata across repository and session") {
@@ -330,25 +530,25 @@ spec("ORM reflected typed fetch") {
           .execute();
       const orm::repository<custom_key_entity> repository(connection);
 
-      check_uint_eq(repository.insert({10, "ten"}).affected_rows(), 1u);
-      check_uint_eq(repository.insert({20, "twenty"}).affected_rows(), 1u);
+      check_equal(repository.insert({10, "ten"}).affected_rows(), 1u);
+      check_equal(repository.insert({20, "twenty"}).affected_rows(), 1u);
       const auto found = repository.find_by_id(20);
       check_true(found.has_value());
-      check_str_eq(found->label.c_str(), "twenty");
+      check_equal(found->label.c_str(), "twenty");
 
       orm::session unit_of_work(connection);
       const auto loaded =
           unit_of_work.load_many<custom_key_entity>(std::vector<std::int32_t>{20, 10});
-      check_uint_eq(loaded.size(), 2u);
-      check_int_eq(loaded[0]->entity_key, 20);
-      check_int_eq(loaded[1]->entity_key, 10);
+      check_equal(loaded.size(), 2u);
+      check_equal(loaded[0]->entity_key, 20);
+      check_equal(loaded[1]->entity_key, 10);
       loaded[0]->label = "updated";
-      check_uint_eq(unit_of_work.flush(), 1u);
+      check_equal(unit_of_work.flush(), 1u);
       const auto updated = repository.find_by_id(20);
       check_true(updated.has_value());
-      check_str_eq(updated->label.c_str(), "updated");
+      check_equal(updated->label.c_str(), "updated");
 
-      check_uint_eq(repository.delete_by_id(10).affected_rows(), 1u);
+      check_equal(repository.delete_by_id(10).affected_rows(), 1u);
       check_false(repository.find_by_id(10).has_value());
     }
 
@@ -357,12 +557,12 @@ spec("ORM reflected typed fetch") {
       const orm::repository<reflected_person> repository(connection);
 
       const auto all = repository.find_all();
-      check_size_eq(all.size(), 2u);
+      check_equal(all.size(), 2u);
 
       const auto found = repository.find_by_id(2);
       check_true(found.has_value());
-      check_str_eq(found->name.c_str(), "Bob");
-      check_int_eq(static_cast<int>(found->access), static_cast<int>(access_level::reader));
+      check_equal(found->name.c_str(), "Bob");
+      check_equal(static_cast<int>(found->access), static_cast<int>(access_level::reader));
 
       const auto missing = repository.find_by_id(99);
       check_false(missing.has_value());
@@ -380,26 +580,26 @@ spec("ORM reflected typed fetch") {
                               {'C', '3', '\0'},
                               {7, 8, 9}};
 
-      check_uint_eq(repository.insert(entity).affected_rows(), 1u);
+      check_equal(repository.insert(entity).affected_rows(), 1u);
       auto inserted = repository.find_by_id(entity.id);
       check_true(inserted.has_value());
-      check_str_eq(inserted->code, "C3");
-      check_size_eq(inserted->payload.size(), 3u);
+      check_equal(inserted->code, "C3");
+      check_equal(inserted->payload.size(), 3u);
 
       entity.name = "Carol";
       entity.active = false;
       entity.note.reset();
       entity.payload = {10, 11};
-      check_uint_eq(repository.update(entity).affected_rows(), 1u);
+      check_equal(repository.update(entity).affected_rows(), 1u);
 
       const auto updated = repository.find_by_id(entity.id);
       check_true(updated.has_value());
-      check_str_eq(updated->name.c_str(), "Carol");
+      check_equal(updated->name.c_str(), "Carol");
       check_false(updated->active);
       check_false(updated->note.has_value());
-      check_size_eq(updated->payload.size(), 2u);
+      check_equal(updated->payload.size(), 2u);
 
-      check_uint_eq(repository.delete_by_id(entity.id).affected_rows(), 1u);
+      check_equal(repository.delete_by_id(entity.id).affected_rows(), 1u);
       check_false(repository.find_by_id(entity.id).has_value());
     }
 
@@ -416,14 +616,35 @@ spec("ORM reflected typed fetch") {
                               {'D', '4', '\0'},
                               {12}};
 
-      check_uint_eq(repository.insert(entity, transaction).affected_rows(), 1u);
+      check_equal(repository.insert(entity, transaction).affected_rows(), 1u);
       check_true(repository.find_by_id(4, transaction).has_value());
       entity.name = "Daniel";
-      check_uint_eq(repository.update(entity, transaction).affected_rows(), 1u);
+      check_equal(repository.update(entity, transaction).affected_rows(), 1u);
       const auto transaction_updated = repository.find_by_id(4, transaction);
       check_true(transaction_updated.has_value());
-      check_str_eq(transaction_updated->name.c_str(), "Daniel");
-      check_uint_eq(repository.delete_by_id(4, transaction).affected_rows(), 1u);
+      check_equal(transaction_updated->name.c_str(), "Daniel");
+      const auto typed_transaction_row = connection.select(people.id, people.name)
+                                             .from(people)
+                                             .where(people.id == 4)
+                                             .fetch_one_typed(transaction);
+      check_true(typed_transaction_row.has_value());
+      check_equal(std::get<0>(*typed_transaction_row), 4);
+      check_equal(std::get<1>(*typed_transaction_row).c_str(), "Daniel");
+      const auto typed_transaction_name = connection.select(people.name)
+                                              .from(people)
+                                              .where(people.id == 4)
+                                              .fetch_one_scalar(transaction);
+      check_true(typed_transaction_name.has_value());
+      check_equal(typed_transaction_name->c_str(), "Daniel");
+      const auto typed_transaction_summary =
+          connection.select(people.id, people.name)
+              .from(people)
+              .where(people.id == 4)
+              .fetch_one_mapped(person_summary_mapper{}, transaction);
+      check_true(typed_transaction_summary.has_value());
+      check_equal(typed_transaction_summary->id, 4);
+      check_equal(typed_transaction_summary->name.c_str(), "Daniel");
+      check_equal(repository.delete_by_id(4, transaction).affected_rows(), 1u);
       transaction.commit();
       check_false(repository.find_by_id(4).has_value());
     }
@@ -440,26 +661,26 @@ spec("ORM reflected typed fetch") {
         auto alice = current.load<reflected_person>(1);
         check_not_null(alice.get());
         alice->name = "transactional Alice";
-        check_uint_eq(current.flush(), 1u);
+        check_equal(current.flush(), 1u);
         check_false(current.dirty());
 
         auto bob = current.load<reflected_person>(2);
         check_not_null(bob.get());
-        check_str_eq(bob->name.c_str(), "Bob");
+        check_equal(bob->name.c_str(), "Bob");
         bob->name = "auto-flushed Bob";
         return 42;
       });
 
-      check_int_eq(result, 42);
+      check_equal(result, 42);
       check_false(unit_of_work.transaction_active());
       const auto stored =
           orm::repository<reflected_person>(connection).find_by_id(1);
       check_true(stored.has_value());
-      check_str_eq(stored->name.c_str(), "transactional Alice");
+      check_equal(stored->name.c_str(), "transactional Alice");
       const auto auto_flushed =
           orm::repository<reflected_person>(connection).find_by_id(2);
       check_true(auto_flushed.has_value());
-      check_str_eq(auto_flushed->name.c_str(), "auto-flushed Bob");
+      check_equal(auto_flushed->name.c_str(), "auto-flushed Bob");
     }
 
     it("rolls back database and managed state when an owned scope throws") {
@@ -473,9 +694,9 @@ spec("ORM reflected typed fetch") {
       try {
         unit_of_work.transactional([&](orm::session &current) {
           auto same_alice = current.load<reflected_person>(1);
-          check_ptr_eq(same_alice.get(), alice.get());
+          check_equal(same_alice.get(), alice.get());
           same_alice->name = "must roll back";
-          check_uint_eq(current.flush(), 1u);
+          check_equal(current.flush(), 1u);
           scoped_bob = current.load<reflected_person>(2);
           check_not_null(scoped_bob.get());
           throw std::runtime_error("application failure");
@@ -486,15 +707,15 @@ spec("ORM reflected typed fetch") {
 
       check_true(caught);
       check_false(unit_of_work.transaction_active());
-      check_uint_eq(unit_of_work.size(), 1u);
+      check_equal(unit_of_work.size(), 1u);
       check_true(unit_of_work.contains(alice));
       check_false(unit_of_work.contains(scoped_bob));
       check_false(unit_of_work.dirty());
-      check_str_eq(alice->name.c_str(), "Alice");
+      check_equal(alice->name.c_str(), "Alice");
       const auto stored =
           orm::repository<reflected_person>(connection).find_by_id(1);
       check_true(stored.has_value());
-      check_str_eq(stored->name.c_str(), "Alice");
+      check_equal(stored->name.c_str(), "Alice");
     }
 
     it("marks a joined REQUIRED scope rollback-only after an inner failure") {
@@ -517,26 +738,26 @@ spec("ORM reflected typed fetch") {
         });
       });
 
-      check_int_eq(status, ORM_STATUS_INVALID_STATE);
+      check_equal(status, ORM_STATUS_INVALID_STATE);
       check_false(unit_of_work.transaction_active());
-      check_uint_eq(unit_of_work.size(), 0u);
+      check_equal(unit_of_work.size(), 0u);
       const auto stored =
           orm::repository<reflected_person>(connection).find_by_id(1);
       check_true(stored.has_value());
-      check_str_eq(stored->name.c_str(), "Alice");
+      check_equal(stored->name.c_str(), "Alice");
     }
 
     it("enforces propagation modes without faking transaction suspension") {
       auto connection = populated_connection();
       orm::session unit_of_work(connection);
 
-      check_int_eq(
+      check_equal(
           caught_status([&] {
             unit_of_work.transactional(
                 [](orm::session &) {}, orm::transaction_propagation::mandatory);
           }),
           ORM_STATUS_INVALID_STATE);
-      check_int_eq(
+      check_equal(
           unit_of_work.transactional(
               [](orm::session &current) {
                 check_false(current.transaction_active());
@@ -544,7 +765,7 @@ spec("ORM reflected typed fetch") {
               },
               orm::transaction_propagation::supports),
           7);
-      check_int_eq(
+      check_equal(
           unit_of_work.transactional(
               [](orm::session &current) {
                 check_true(current.transaction_active());
@@ -554,21 +775,21 @@ spec("ORM reflected typed fetch") {
           9);
 
       unit_of_work.transactional([](orm::session &outer) {
-        check_int_eq(
+        check_equal(
             caught_status([&] {
               outer.transactional(
                   [](orm::session &) {},
                   orm::transaction_propagation::requires_new);
             }),
             ORM_STATUS_UNSUPPORTED);
-        check_int_eq(
+        check_equal(
             caught_status([&] {
               outer.transactional(
                   [](orm::session &) {},
                   orm::transaction_propagation::not_supported);
             }),
             ORM_STATUS_UNSUPPORTED);
-        check_int_eq(
+        check_equal(
             caught_status([&] {
               outer.transactional(
                   [](orm::session &) {}, orm::transaction_propagation::never);
@@ -577,12 +798,12 @@ spec("ORM reflected typed fetch") {
         check_false(outer.is_rollback_only());
       });
 
-      check_int_eq(
+      check_equal(
           caught_status([&] {
             unit_of_work.transactional([](orm::session &current) {
               current.set_rollback_only();
               check_true(current.is_rollback_only());
-              check_int_eq(caught_status([&] { (void)current.flush(); }),
+              check_equal(caught_status([&] { (void)current.flush(); }),
                            ORM_STATUS_INVALID_STATE);
             });
           }),
@@ -596,7 +817,7 @@ spec("ORM reflected typed fetch") {
                "id integer primary key, version integer not null, label text not null)")
           .execute();
       const orm::repository<versioned_entity> repository(connection);
-      check_uint_eq(repository.insert({1, 0, "original"}).affected_rows(), 1u);
+      check_equal(repository.insert({1, 0, "original"}).affected_rows(), 1u);
 
       orm::session first_session(connection);
       orm::session stale_session(connection);
@@ -606,18 +827,18 @@ spec("ORM reflected typed fetch") {
       check_not_null(stale.get());
 
       first->label = "committed";
-      check_uint_eq(first_session.flush(), 1u);
-      check_uint_eq(first->version, 1u);
+      check_equal(first_session.flush(), 1u);
+      check_equal(first->version, 1u);
 
       stale->label = "rejected";
-      check_int_eq(caught_status([&] { (void)stale_session.flush(); }),
+      check_equal(caught_status([&] { (void)stale_session.flush(); }),
                    ORM_STATUS_INVALID_STATE);
-      check_uint_eq(stale->version, 0u);
+      check_equal(stale->version, 0u);
       check_true(stale_session.dirty());
       const auto stored = repository.find_by_id(1);
       check_true(stored.has_value());
-      check_str_eq(stored->label.c_str(), "committed");
-      check_uint_eq(stored->version, 1u);
+      check_equal(stored->label.c_str(), "committed");
+      check_equal(stored->version, 1u);
     }
 
     it("rejects removing a stale managed entity") {
@@ -627,7 +848,7 @@ spec("ORM reflected typed fetch") {
                "id integer primary key, version integer not null, label text not null)")
           .execute();
       const orm::repository<versioned_entity> repository(connection);
-      check_uint_eq(repository.insert({1, 0, "original"}).affected_rows(), 1u);
+      check_equal(repository.insert({1, 0, "original"}).affected_rows(), 1u);
 
       orm::session writer(connection);
       orm::session stale_session(connection);
@@ -636,16 +857,16 @@ spec("ORM reflected typed fetch") {
       check_not_null(current.get());
       check_not_null(stale.get());
       current->label = "newer";
-      check_uint_eq(writer.flush(), 1u);
+      check_equal(writer.flush(), 1u);
 
       stale_session.remove(stale);
-      check_int_eq(caught_status([&] { (void)stale_session.flush(); }),
+      check_equal(caught_status([&] { (void)stale_session.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       check_true(stale_session.dirty());
       const auto retained = repository.find_by_id(1);
       check_true(retained.has_value());
-      check_uint_eq(retained->version, 1u);
-      check_str_eq(retained->label.c_str(), "newer");
+      check_equal(retained->version, 1u);
+      check_equal(retained->label.c_str(), "newer");
     }
 
     it("keeps a stale detached merge dirty after optimistic lock conflict") {
@@ -655,27 +876,27 @@ spec("ORM reflected typed fetch") {
                "id integer primary key, version integer not null, label text not null)")
           .execute();
       const orm::repository<versioned_entity> repository(connection);
-      check_uint_eq(repository.insert({1, 0, "original"}).affected_rows(), 1u);
+      check_equal(repository.insert({1, 0, "original"}).affected_rows(), 1u);
       const auto detached = repository.find_by_id(1);
       check_true(detached.has_value());
 
       auto current = repository.find_by_id(1);
       check_true(current.has_value());
       current->label = "newer";
-      check_uint_eq(repository.update(*current).affected_rows(), 1u);
+      check_equal(repository.update(*current).affected_rows(), 1u);
 
       orm::session unit_of_work(connection);
       auto managed = unit_of_work.merge(*detached);
       check_not_null(managed.get());
       managed->label = "stale merge";
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
-      check_uint_eq(managed->version, 0u);
+      check_equal(managed->version, 0u);
       check_true(unit_of_work.dirty());
       const auto retained = repository.find_by_id(1);
       check_true(retained.has_value());
-      check_str_eq(retained->label.c_str(), "newer");
-      check_uint_eq(retained->version, 1u);
+      check_equal(retained->label.c_str(), "newer");
+      check_equal(retained->version, 1u);
     }
 
     it("returns one managed instance and flushes only dirty fields") {
@@ -686,25 +907,25 @@ spec("ORM reflected typed fetch") {
       auto second = unit_of_work.load<reflected_person>(1);
       check_true(first != nullptr);
       check_true(first.get() == second.get());
-      check_uint_eq(unit_of_work.size(), 1u);
+      check_equal(unit_of_work.size(), 1u);
       check_false(unit_of_work.dirty());
 
       first->name = "Alice updated";
       first->note = "tracked";
       check_true(unit_of_work.dirty());
-      check_uint_eq(unit_of_work.flush(), 1u);
+      check_equal(unit_of_work.flush(), 1u);
       check_false(unit_of_work.dirty());
-      check_uint_eq(unit_of_work.flush(), 0u);
+      check_equal(unit_of_work.flush(), 0u);
 
       const orm::repository<reflected_person> repository(connection);
       const auto persisted = repository.find_by_id(1);
       check_true(persisted.has_value());
-      check_str_eq(persisted->name.c_str(), "Alice updated");
+      check_equal(persisted->name.c_str(), "Alice updated");
       check_true(persisted->note.has_value());
-      check_str_eq(persisted->note->c_str(), "tracked");
+      check_equal(persisted->note->c_str(), "tracked");
 
       unit_of_work.clear();
-      check_uint_eq(unit_of_work.size(), 0u);
+      check_equal(unit_of_work.size(), 0u);
     }
 
     it("detaches without destroying the entity and merges a managed copy") {
@@ -715,34 +936,34 @@ spec("ORM reflected typed fetch") {
       auto detached = unit_of_work.load<reflected_person>(1);
       check_not_null(detached.get());
       check_true(unit_of_work.contains(detached));
-      check_int_eq(static_cast<int>(unit_of_work.state(detached)),
+      check_equal(static_cast<int>(unit_of_work.state(detached)),
                    static_cast<int>(orm::entity_state::managed));
       detached->name = "detached edit";
 
       unit_of_work.detach(detached);
       check_false(unit_of_work.contains(detached));
-      check_int_eq(static_cast<int>(unit_of_work.state(detached)),
+      check_equal(static_cast<int>(unit_of_work.state(detached)),
                    static_cast<int>(orm::entity_state::detached));
-      check_uint_eq(unit_of_work.size(), 0u);
+      check_equal(unit_of_work.size(), 0u);
       check_false(unit_of_work.dirty());
-      check_uint_eq(unit_of_work.flush(), 0u);
-      check_str_eq(detached->name.c_str(), "detached edit");
+      check_equal(unit_of_work.flush(), 0u);
+      check_equal(detached->name.c_str(), "detached edit");
       const auto stored_before_merge = repository.find_by_id(1);
       check_true(stored_before_merge.has_value());
-      check_str_eq(stored_before_merge->name.c_str(), "Alice");
+      check_equal(stored_before_merge->name.c_str(), "Alice");
 
       auto managed = unit_of_work.merge(*detached);
       check_not_null(managed.get());
       check_true(managed.get() != detached.get());
       check_true(unit_of_work.contains(managed));
       check_false(unit_of_work.contains(detached));
-      check_int_eq(static_cast<int>(unit_of_work.state(managed)),
+      check_equal(static_cast<int>(unit_of_work.state(managed)),
                    static_cast<int>(orm::entity_state::managed));
       check_true(unit_of_work.dirty());
-      check_uint_eq(unit_of_work.flush(), 1u);
+      check_equal(unit_of_work.flush(), 1u);
       const auto stored_after_merge = repository.find_by_id(1);
       check_true(stored_after_merge.has_value());
-      check_str_eq(stored_after_merge->name.c_str(), "detached edit");
+      check_equal(stored_after_merge->name.c_str(), "detached edit");
     }
 
     it("reports added and removed states and lets detach cancel pending work") {
@@ -752,25 +973,25 @@ spec("ORM reflected typed fetch") {
                "entity_key integer primary key, label text not null)")
           .execute();
       const orm::repository<custom_key_entity> repository(connection);
-      check_uint_eq(repository.insert({1, "stored"}).affected_rows(), 1u);
+      check_equal(repository.insert({1, "stored"}).affected_rows(), 1u);
       orm::session unit_of_work(connection);
 
       auto added = unit_of_work.merge(custom_key_entity{2, "new"});
-      check_int_eq(static_cast<int>(unit_of_work.state(added)),
+      check_equal(static_cast<int>(unit_of_work.state(added)),
                    static_cast<int>(orm::entity_state::added));
       unit_of_work.detach(added);
-      check_int_eq(static_cast<int>(unit_of_work.state(added)),
+      check_equal(static_cast<int>(unit_of_work.state(added)),
                    static_cast<int>(orm::entity_state::detached));
-      check_uint_eq(unit_of_work.flush(), 0u);
+      check_equal(unit_of_work.flush(), 0u);
       check_false(repository.find_by_id(2).has_value());
 
       auto removed = unit_of_work.load<custom_key_entity>(1);
       check_not_null(removed.get());
       unit_of_work.remove(removed);
-      check_int_eq(static_cast<int>(unit_of_work.state(removed)),
+      check_equal(static_cast<int>(unit_of_work.state(removed)),
                    static_cast<int>(orm::entity_state::removed));
       unit_of_work.detach(removed);
-      check_uint_eq(unit_of_work.flush(), 0u);
+      check_equal(unit_of_work.flush(), 0u);
       check_true(repository.find_by_id(1).has_value());
     }
 
@@ -780,7 +1001,7 @@ spec("ORM reflected typed fetch") {
           .raw("create table cascade_parents(id integer primary key, name text not null)")
           .execute();
       const orm::repository<cascade_parent> repository(connection);
-      check_uint_eq(repository.insert({20, "stored", {}}).affected_rows(), 1u);
+      check_equal(repository.insert({20, "stored", {}}).affected_rows(), 1u);
       orm::session unit_of_work(connection);
 
       auto parent = unit_of_work.load<cascade_parent>(20);
@@ -788,16 +1009,16 @@ spec("ORM reflected typed fetch") {
       parent->name = "local edit";
       parent->children.push_back({200, 20, "kept relation"});
       check_true(unit_of_work.dirty());
-      check_uint_eq(repository.update({20, "database edit", {}}).affected_rows(), 1u);
+      check_equal(repository.update({20, "database edit", {}}).affected_rows(), 1u);
 
       unit_of_work.refresh(parent);
-      check_str_eq(parent->name.c_str(), "database edit");
-      check_uint_eq(parent->children.size(), 1u);
-      check_int_eq(parent->children.front().id, 200);
+      check_equal(parent->name.c_str(), "database edit");
+      check_equal(parent->children.size(), 1u);
+      check_equal(parent->children.front().id, 200);
       check_false(unit_of_work.dirty());
 
       unit_of_work.detach(parent);
-      check_int_eq(caught_status([&] { unit_of_work.refresh(parent); }),
+      check_equal(caught_status([&] { unit_of_work.refresh(parent); }),
                    ORM_STATUS_INVALID_STATE);
     }
 
@@ -812,8 +1033,8 @@ spec("ORM reflected typed fetch") {
           .execute();
       const orm::repository<cascade_parent> parents(connection);
       const orm::repository<cascade_child> children(connection);
-      check_uint_eq(parents.insert({20, "stored parent", {}}).affected_rows(), 1u);
-      check_uint_eq(children.insert({200, 20, "stored child"}).affected_rows(), 1u);
+      check_equal(parents.insert({20, "stored parent", {}}).affected_rows(), 1u);
+      check_equal(children.insert({200, 20, "stored child"}).affected_rows(), 1u);
 
       orm::session unit_of_work(connection);
       auto parent = unit_of_work.merge_graph(
@@ -822,31 +1043,31 @@ spec("ORM reflected typed fetch") {
       auto child = unit_of_work.load<cascade_child>(200);
       check_not_null(parent.get());
       check_not_null(child.get());
-      check_int_eq(parent->children.front().parent_id, 20);
-      check_uint_eq(unit_of_work.size(), 2u);
-      check_uint_eq(unit_of_work.flush(), 2u);
+      check_equal(parent->children.front().parent_id, 20);
+      check_equal(unit_of_work.size(), 2u);
+      check_equal(unit_of_work.flush(), 2u);
       const auto merged_parent = parents.find_by_id(20);
       const auto merged_child = children.find_by_id(200);
       check_true(merged_parent.has_value());
       check_true(merged_child.has_value());
-      check_str_eq(merged_parent->name.c_str(), "merged parent");
-      check_str_eq(merged_child->value.c_str(), "merged child");
+      check_equal(merged_parent->name.c_str(), "merged parent");
+      check_equal(merged_child->value.c_str(), "merged child");
 
-      check_uint_eq(parents.update({20, "database parent", {}}).affected_rows(), 1u);
-      check_uint_eq(children.update({200, 20, "database child"}).affected_rows(), 1u);
+      check_equal(parents.update({20, "database parent", {}}).affected_rows(), 1u);
+      check_equal(children.update({200, 20, "database child"}).affected_rows(), 1u);
       parent->name = "local parent";
       parent->children.front().value = "local relation child";
       child->value = "local managed child";
       unit_of_work.refresh_graph(parent, cascade_children);
-      check_str_eq(parent->name.c_str(), "database parent");
-      check_str_eq(parent->children.front().value.c_str(), "database child");
-      check_str_eq(child->value.c_str(), "database child");
+      check_equal(parent->name.c_str(), "database parent");
+      check_equal(parent->children.front().value.c_str(), "database child");
+      check_equal(child->value.c_str(), "database child");
       check_false(unit_of_work.dirty());
 
       unit_of_work.detach_graph(parent, cascade_children);
       check_false(unit_of_work.contains(parent));
       check_false(unit_of_work.contains(child));
-      check_uint_eq(unit_of_work.size(), 0u);
+      check_equal(unit_of_work.size(), 0u);
     }
 
     it("restores the complete managed graph when lifecycle cascade fails") {
@@ -860,14 +1081,14 @@ spec("ORM reflected typed fetch") {
           .execute();
       const orm::repository<cascade_parent> parents(connection);
       const orm::repository<cascade_child> children(connection);
-      check_uint_eq(parents.insert({20, "stored parent", {}}).affected_rows(), 1u);
-      check_uint_eq(children.insert({200, 20, "stored child"}).affected_rows(), 1u);
+      check_equal(parents.insert({20, "stored parent", {}}).affected_rows(), 1u);
+      check_equal(children.insert({200, 20, "stored child"}).affected_rows(), 1u);
 
       orm::session bounded(connection, 1);
       auto parent = bounded.load<cascade_parent>(20);
       check_not_null(parent.get());
       parent->name = "preexisting edit";
-      check_int_eq(
+      check_equal(
           caught_status([&] {
             (void)bounded.merge_graph(
                 cascade_parent{20, "incoming", {{200, 0, "incoming child"}}},
@@ -875,9 +1096,9 @@ spec("ORM reflected typed fetch") {
           }),
           ORM_STATUS_LIMIT_EXCEEDED);
 
-      check_uint_eq(bounded.size(), 1u);
+      check_equal(bounded.size(), 1u);
       check_true(bounded.contains(parent));
-      check_str_eq(parent->name.c_str(), "preexisting edit");
+      check_equal(parent->name.c_str(), "preexisting edit");
       check_true(parent->children.empty());
       check_true(bounded.dirty());
     }
@@ -890,12 +1111,12 @@ spec("ORM reflected typed fetch") {
       entity->name = "will not commit";
       (void)connection.raw("drop table typed_people").execute();
 
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }), ORM_STATUS_SQL_ERROR);
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }), ORM_STATUS_SQL_ERROR);
       check_true(unit_of_work.dirty());
       unit_of_work.discard();
       check_false(unit_of_work.dirty());
-      check_str_eq(entity->name.c_str(), "Alice");
-      check_int_eq(caught_status([&] { unit_of_work.clear(); }), ORM_STATUS_OK);
+      check_equal(entity->name.c_str(), "Alice");
+      check_equal(caught_status([&] { unit_of_work.clear(); }), ORM_STATUS_OK);
     }
 
     it("rejects primary-key changes that would invalidate the identity map") {
@@ -905,11 +1126,11 @@ spec("ORM reflected typed fetch") {
       check_true(entity != nullptr);
       entity->id = 99;
 
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       check_true(unit_of_work.dirty());
       unit_of_work.discard();
-      check_int_eq(entity->id, 1);
+      check_equal(entity->id, 1);
     }
 
     it("loads explicit lazy relations into the identity map on first access") {
@@ -936,22 +1157,22 @@ spec("ORM reflected typed fetch") {
         auto many = unit_of_work.defer_many<reflected_child>("parent_id", 1);
         check_false(one.loaded());
         check_false(many.loaded());
-        check_uint_eq(unit_of_work.size(), 0u);
+        check_equal(unit_of_work.size(), 0u);
 
         auto child = one.get();
         check_true(child != nullptr);
         check_true(one.loaded());
-        check_uint_eq(unit_of_work.size(), 1u);
-        check_uint_eq(many.size(), 2u);
+        check_equal(unit_of_work.size(), 1u);
+        check_equal(many.size(), 2u);
         check_true(many.loaded());
         check_true(many.at(0).get() == child.get());
 
         child->value = "changed";
-        check_uint_eq(unit_of_work.flush(), 1u);
+        check_equal(unit_of_work.flush(), 1u);
         expired.emplace(std::move(one));
       }
 
-      check_int_eq(caught_status([&] { (void)expired->get(); }), ORM_STATUS_INVALID_STATE);
+      check_equal(caught_status([&] { (void)expired->get(); }), ORM_STATUS_INVALID_STATE);
     }
 
     it("loads a lazy to-one relation by foreign key and rejects duplicate rows") {
@@ -969,12 +1190,12 @@ spec("ORM reflected typed fetch") {
       orm::session unit_of_work(connection);
       auto one = unit_of_work.defer_one<reflected_child>("parent_id", 1);
       check_false(one.loaded());
-      check_uint_eq(unit_of_work.size(), 0u);
+      check_equal(unit_of_work.size(), 0u);
       const auto child = one.get();
       check_true(one.loaded());
       check_not_null(child.get());
-      check_int_eq(child->id, 10);
-      check_uint_eq(unit_of_work.size(), 1u);
+      check_equal(child->id, 10);
+      check_equal(unit_of_work.size(), 1u);
 
       (void)connection.insert("typed_children")
           .set("id", 11)
@@ -987,11 +1208,11 @@ spec("ORM reflected typed fetch") {
           .set("value", "duplicate-b")
           .execute();
       orm::session duplicate_reader(connection);
-      check_int_eq(
+      check_equal(
           caught_status(
               [&] { (void)duplicate_reader.find_one<reflected_child>("parent_id", 2); }),
           ORM_STATUS_DATASTORE_ERROR);
-      check_uint_eq(duplicate_reader.size(), 0u);
+      check_equal(duplicate_reader.size(), 0u);
     }
 
     it("prefetches missing primary keys once and preserves identity order") {
@@ -1000,15 +1221,15 @@ spec("ORM reflected typed fetch") {
       const std::vector<std::int32_t> ids{1, 2, 1, 99};
 
       const auto prefetched = unit_of_work.load_many<reflected_person>(ids);
-      check_uint_eq(prefetched.size(), 3u);
-      check_uint_eq(unit_of_work.size(), 2u);
+      check_equal(prefetched.size(), 3u);
+      check_equal(unit_of_work.size(), 2u);
       check_true(prefetched[0].get() == prefetched[2].get());
-      check_int_eq(prefetched[0]->id, 1);
-      check_int_eq(prefetched[1]->id, 2);
+      check_equal(prefetched[0]->id, 1);
+      check_equal(prefetched[1]->id, 2);
 
       auto deferred = unit_of_work.defer<reflected_person>(1);
       check_true(deferred.get().get() == prefetched[0].get());
-      check_int_eq(
+      check_equal(
           caught_status([&] {
             (void)unit_of_work.load_many<reflected_person>(ids, 2);
           }),
@@ -1020,15 +1241,15 @@ spec("ORM reflected typed fetch") {
       orm::session unit_of_work(connection, 1);
       const std::vector<std::int32_t> ids{1, 2};
 
-      check_int_eq(
+      check_equal(
           caught_status([&] { (void)unit_of_work.load_many<reflected_person>(ids); }),
           ORM_STATUS_LIMIT_EXCEEDED);
-      check_uint_eq(unit_of_work.size(), 0u);
+      check_equal(unit_of_work.size(), 0u);
 
       const auto loaded = unit_of_work.load<reflected_person>(1);
       check_true(loaded != nullptr);
-      check_int_eq(loaded->id, 1);
-      check_uint_eq(unit_of_work.size(), 1u);
+      check_equal(loaded->id, 1);
+      check_equal(unit_of_work.size(), 1u);
     }
 
     it("persists and removes an explicit relation graph in dependency order") {
@@ -1048,28 +1269,28 @@ spec("ORM reflected typed fetch") {
                          "root",
                          {{200, 0, "first"}, {201, 0, "second"}}},
           cascade_children);
-      check_uint_eq(unit_of_work.flush(), 3u);
+      check_equal(unit_of_work.flush(), 3u);
 
       const orm::repository<cascade_parent> parents(connection);
       const orm::repository<cascade_child> children(connection);
       check_true(parents.find_by_id(20).has_value());
       const auto first_child = children.find_by_id(200);
       check_true(first_child.has_value());
-      check_int_eq(first_child->parent_id, 20);
+      check_equal(first_child->parent_id, 20);
       check_true(children.find_by_id(201).has_value());
 
       parent->children.pop_back();
-      check_uint_eq(unit_of_work.flush(), 1u);
+      check_equal(unit_of_work.flush(), 1u);
       check_false(children.find_by_id(201).has_value());
 
       parent->children.push_back({202, 0, "added later"});
-      check_uint_eq(unit_of_work.flush(), 1u);
+      check_equal(unit_of_work.flush(), 1u);
       const auto added_child = children.find_by_id(202);
       check_true(added_child.has_value());
-      check_int_eq(added_child->parent_id, 20);
+      check_equal(added_child->parent_id, 20);
 
       unit_of_work.remove_graph(parent, cascade_children);
-      check_uint_eq(unit_of_work.flush(), 3u);
+      check_equal(unit_of_work.flush(), 3u);
       check_false(parents.find_by_id(20).has_value());
       check_false(children.find_by_id(200).has_value());
       check_false(children.find_by_id(202).has_value());
@@ -1099,22 +1320,22 @@ spec("ORM reflected typed fetch") {
                          {std::make_shared<pointer_child>(
                              pointer_child{510, 0, "first"})}},
           shared_children_relation);
-      check_uint_eq(unit_of_work.flush(), 4u);
+      check_equal(unit_of_work.flush(), 4u);
 
       value_parent->children.push_back(value_parent->children.front());
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       check_true(orm::repository<cascade_child>(connection).find_by_id(210).has_value());
       unit_of_work.discard();
-      check_uint_eq(value_parent->children.size(), 1u);
+      check_equal(value_parent->children.size(), 1u);
 
       shared_parent->shared_children.push_back(
           shared_parent->shared_children.front());
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       check_true(orm::repository<pointer_child>(connection).find_by_id(510).has_value());
       unit_of_work.discard();
-      check_uint_eq(shared_parent->shared_children.size(), 1u);
+      check_equal(shared_parent->shared_children.size(), 1u);
     }
 
     it("rolls back the complete persisted graph when a child violates its foreign key") {
@@ -1132,14 +1353,14 @@ spec("ORM reflected typed fetch") {
       (void)unit_of_work.persist_graph(
           cascade_parent{30, "invalid", {{300, 999, "orphan"}}},
           cascade_children_unbound);
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }), ORM_STATUS_SQL_ERROR);
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }), ORM_STATUS_SQL_ERROR);
       check_true(unit_of_work.dirty());
 
       const orm::repository<cascade_parent> parents(connection);
       check_false(parents.find_by_id(30).has_value());
       unit_of_work.discard();
       check_false(unit_of_work.dirty());
-      check_uint_eq(unit_of_work.size(), 0u);
+      check_equal(unit_of_work.size(), 0u);
     }
 
     it("cascades a to-one relation and enforces the configured entity limit") {
@@ -1156,22 +1377,22 @@ spec("ORM reflected typed fetch") {
       orm::session unit_of_work(connection);
       auto account = unit_of_work.persist_graph(
           cascade_account{40, "account", {400, 0, "profile"}}, cascade_account_profile);
-      check_uint_eq(unit_of_work.flush(), 2u);
+      check_equal(unit_of_work.flush(), 2u);
 
       const orm::repository<cascade_account> accounts(connection);
       const orm::repository<cascade_profile> profiles(connection);
       check_true(accounts.find_by_id(40).has_value());
       const auto profile = profiles.find_by_id(400);
       check_true(profile.has_value());
-      check_int_eq(profile->account_id, 40);
+      check_equal(profile->account_id, 40);
 
       unit_of_work.remove_graph(account, cascade_account_profile);
-      check_uint_eq(unit_of_work.flush(), 2u);
+      check_equal(unit_of_work.flush(), 2u);
       check_false(accounts.find_by_id(40).has_value());
       check_false(profiles.find_by_id(400).has_value());
 
       orm::session bounded(connection, 1);
-      check_int_eq(
+      check_equal(
           caught_status([&] {
             (void)bounded.persist_graph(
                 cascade_account{41, "too large", {401, 41, "profile"}},
@@ -1179,7 +1400,7 @@ spec("ORM reflected typed fetch") {
           }),
           ORM_STATUS_LIMIT_EXCEEDED);
       check_false(bounded.dirty());
-      check_uint_eq(bounded.size(), 0u);
+      check_equal(bounded.size(), 0u);
     }
 
     it("supports optional and shared relations with automatic foreign keys") {
@@ -1195,73 +1416,73 @@ spec("ORM reflected typed fetch") {
                          {std::make_shared<pointer_child>(pointer_child{502, 0, "many-a"}),
                           std::make_shared<pointer_child>(pointer_child{503, 0, "many-b"})}},
           optional_child_relation, shared_child_relation, shared_children_relation);
-      check_uint_eq(unit_of_work.flush(), 5u);
+      check_equal(unit_of_work.flush(), 5u);
 
       const orm::repository<pointer_child> children(connection);
       for (const std::int32_t id : {500, 501, 502, 503}) {
         const auto child = children.find_by_id(id);
         check_true(child.has_value());
-        check_int_eq(child->owner_id, 50);
+        check_equal(child->owner_id, 50);
       }
 
       auto canonical_shared = unit_of_work.load<pointer_child>(501);
       auto canonical_many = unit_of_work.load<pointer_child>(502);
-      check_ptr_eq(parent->shared_child.get(), canonical_shared.get());
-      check_ptr_eq(parent->shared_children.front().get(), canonical_many.get());
+      check_equal(parent->shared_child.get(), canonical_shared.get());
+      check_equal(parent->shared_children.front().get(), canonical_many.get());
       parent->shared_child->value = "shared-updated";
       parent->shared_children.front()->value = "many-updated";
       check_true(unit_of_work.dirty());
-      check_uint_eq(unit_of_work.flush(), 2u);
+      check_equal(unit_of_work.flush(), 2u);
       const auto updated_shared = children.find_by_id(501);
       const auto updated_many = children.find_by_id(502);
       check_true(updated_shared.has_value());
       check_true(updated_many.has_value());
-      check_str_eq(updated_shared->value.c_str(), "shared-updated");
-      check_str_eq(updated_many->value.c_str(), "many-updated");
+      check_equal(updated_shared->value.c_str(), "shared-updated");
+      check_equal(updated_many->value.c_str(), "many-updated");
 
       parent->shared_children.pop_back();
-      check_uint_eq(unit_of_work.flush(), 1u);
+      check_equal(unit_of_work.flush(), 1u);
       check_false(children.find_by_id(503).has_value());
 
       parent->optional_child = pointer_child{504, 0, "optional replacement"};
       parent->shared_child = std::make_shared<pointer_child>(
           pointer_child{505, 0, "shared replacement"});
-      check_uint_eq(unit_of_work.flush(), 4u);
+      check_equal(unit_of_work.flush(), 4u);
       check_false(children.find_by_id(500).has_value());
       check_false(children.find_by_id(501).has_value());
       check_true(children.find_by_id(504).has_value());
       check_true(children.find_by_id(505).has_value());
 
       auto canonical_replacement = unit_of_work.load<pointer_child>(505);
-      check_ptr_eq(parent->shared_child.get(), canonical_replacement.get());
+      check_equal(parent->shared_child.get(), canonical_replacement.get());
       parent->shared_child = std::make_shared<pointer_child>(*canonical_replacement);
       parent->shared_child->value = "detached-copy-update";
       check_true(unit_of_work.dirty());
-      check_uint_eq(unit_of_work.flush(), 1u);
-      check_ptr_eq(parent->shared_child.get(), canonical_replacement.get());
+      check_equal(unit_of_work.flush(), 1u);
+      check_equal(parent->shared_child.get(), canonical_replacement.get());
       const auto updated_replacement = children.find_by_id(505);
       check_true(updated_replacement.has_value());
-      check_str_eq(updated_replacement->value.c_str(), "detached-copy-update");
+      check_equal(updated_replacement->value.c_str(), "detached-copy-update");
 
       parent->shared_child = std::make_shared<pointer_child>(*canonical_replacement);
       parent->shared_child->value = "relation-conflict";
       canonical_replacement->value = "canonical-conflict";
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       unit_of_work.discard();
       check_false(unit_of_work.dirty());
-      check_ptr_eq(parent->shared_child.get(), canonical_replacement.get());
-      check_str_eq(parent->shared_child->value.c_str(), "detached-copy-update");
+      check_equal(parent->shared_child.get(), canonical_replacement.get());
+      check_equal(parent->shared_child->value.c_str(), "detached-copy-update");
 
       parent->optional_child.reset();
       parent->shared_child.reset();
-      check_uint_eq(unit_of_work.flush(), 2u);
+      check_equal(unit_of_work.flush(), 2u);
       check_false(children.find_by_id(504).has_value());
       check_false(children.find_by_id(505).has_value());
 
       unit_of_work.remove_graph(parent, optional_child_relation, shared_child_relation,
                                 shared_children_relation);
-      check_uint_eq(unit_of_work.flush(), 2u);
+      check_equal(unit_of_work.flush(), 2u);
       for (const std::int32_t id : {500, 501, 502, 503, 504, 505})
         check_false(children.find_by_id(id).has_value());
     }
@@ -1276,36 +1497,36 @@ spec("ORM reflected typed fetch") {
       auto parent = unit_of_work.persist_graph(
           pointer_parent{60, "uncascaded", std::nullopt, transient_child, {}},
           shared_child_without_cascade);
-      check_uint_eq(unit_of_work.flush(), 1u);
-      check_ptr_eq(parent->shared_child.get(), transient_child.get());
+      check_equal(unit_of_work.flush(), 1u);
+      check_equal(parent->shared_child.get(), transient_child.get());
 
       parent->shared_child->value = "not-managed";
       check_true(unit_of_work.dirty());
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       unit_of_work.discard();
       check_false(unit_of_work.dirty());
-      check_ptr_eq(parent->shared_child.get(), transient_child.get());
-      check_str_eq(parent->shared_child->value.c_str(), "transient");
+      check_equal(parent->shared_child.get(), transient_child.get());
+      check_equal(parent->shared_child->value.c_str(), "transient");
       const orm::repository<pointer_child> children(connection);
       check_false(children.find_by_id(601).has_value());
 
       parent->shared_child =
           std::make_shared<pointer_child>(pointer_child{602, 0, "replacement"});
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       unit_of_work.discard();
-      check_ptr_eq(parent->shared_child.get(), transient_child.get());
+      check_equal(parent->shared_child.get(), transient_child.get());
 
-      check_uint_eq(children.insert({603, 60, "managed replacement"})
+      check_equal(children.insert({603, 60, "managed replacement"})
                         .affected_rows(),
                     1u);
       auto managed_replacement = unit_of_work.load<pointer_child>(603);
       check_not_null(managed_replacement.get());
       parent->shared_child =
           std::make_shared<pointer_child>(*managed_replacement);
-      check_uint_eq(unit_of_work.flush(), 0u);
-      check_ptr_eq(parent->shared_child.get(), managed_replacement.get());
+      check_equal(unit_of_work.flush(), 0u);
+      check_equal(parent->shared_child.get(), managed_replacement.get());
     }
 
     it("rejects an unmanaged replacement before orphan removal") {
@@ -1313,11 +1534,11 @@ spec("ORM reflected typed fetch") {
       create_pointer_schema(connection);
       const orm::repository<pointer_parent> parents(connection);
       const orm::repository<pointer_child> children(connection);
-      check_uint_eq(
+      check_equal(
           parents.insert({61, "orphan owner", std::nullopt, nullptr, {}})
               .affected_rows(),
           1u);
-      check_uint_eq(children.insert({610, 61, "stored child"}).affected_rows(),
+      check_equal(children.insert({610, 61, "stored child"}).affected_rows(),
                     1u);
 
       orm::session unit_of_work(connection);
@@ -1330,17 +1551,17 @@ spec("ORM reflected typed fetch") {
                          std::make_shared<pointer_child>(*managed_child),
                          {}},
           shared_child_orphan_without_persist);
-      check_uint_eq(unit_of_work.flush(), 0u);
-      check_ptr_eq(parent->shared_child.get(), managed_child.get());
+      check_equal(unit_of_work.flush(), 0u);
+      check_equal(parent->shared_child.get(), managed_child.get());
 
       parent->shared_child =
           std::make_shared<pointer_child>(pointer_child{611, 0, "unmanaged"});
-      check_int_eq(caught_status([&] { (void)unit_of_work.flush(); }),
+      check_equal(caught_status([&] { (void)unit_of_work.flush(); }),
                    ORM_STATUS_INVALID_STATE);
       check_true(children.find_by_id(610).has_value());
       check_false(children.find_by_id(611).has_value());
       unit_of_work.discard();
-      check_ptr_eq(parent->shared_child.get(), managed_child.get());
+      check_equal(parent->shared_child.get(), managed_child.get());
     }
   }
 
@@ -1349,7 +1570,7 @@ spec("ORM reflected typed fetch") {
       auto connection = populated_connection();
       auto query = connection.select("typed_people");
       query.column("id");
-      check_int_eq(caught_status([&] { (void)query.fetch<reflected_person>(); }),
+      check_equal(caught_status([&] { (void)query.fetch<reflected_person>(); }),
                    ORM_STATUS_TYPE_ERROR);
     }
 
@@ -1357,21 +1578,21 @@ spec("ORM reflected typed fetch") {
       auto connection = populated_connection();
       auto query = connection.select("typed_people");
       query.column("note").where("id", orm::comparison::equal, 1);
-      check_int_eq(caught_status([&] { (void)query.fetch<required_note>(); }),
+      check_equal(caught_status([&] { (void)query.fetch<required_note>(); }),
                    ORM_STATUS_NULL_VALUE);
     }
 
     it("rejects integers outside the reflected destination range") {
       auto connection = populated_connection();
       auto query = connection.raw("select 300");
-      check_int_eq(caught_status([&] { (void)query.fetch<narrow_id>(); }),
+      check_equal(caught_status([&] { (void)query.fetch<narrow_id>(); }),
                    ORM_STATUS_OUT_OF_RANGE);
     }
 
     it("rejects text that cannot be NUL-terminated in a fixed array") {
       auto connection = populated_connection();
       auto query = connection.raw("select 'toolong'");
-      check_int_eq(caught_status([&] { (void)query.fetch<short_code>(); }),
+      check_equal(caught_status([&] { (void)query.fetch<short_code>(); }),
                    ORM_STATUS_LIMIT_EXCEEDED);
     }
   }

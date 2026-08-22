@@ -84,12 +84,12 @@ public:
         return get(row, column).is_null;
     }
 
-    tstr_v cell(std::uint64_t row, std::uint64_t column) const override
+    vstr cell(std::uint64_t row, std::uint64_t column) const override
     {
         const materialized_cell& selected = get(row, column);
         require(!selected.is_null, ORM_STATUS_NULL_VALUE,
                 "TidesDB result cell is null");
-        return tstr_v_from_buf(selected.value.data(), selected.value.size());
+        return vstr_from_buf(selected.value.data(), selected.value.size());
     }
 
 private:
@@ -632,6 +632,8 @@ private:
                                 const connection_limits& limits,
                                 tidesdb_txn_t* transaction)
     {
+        require(!plan.distinct, ORM_STATUS_UNSUPPORTED,
+                "TidesDB DISTINCT queries are not supported");
         require(plan.joins.empty(), ORM_STATUS_UNSUPPORTED,
                 "TidesDB joins require an external index/query layer");
         switch (plan.kind) {
@@ -795,9 +797,11 @@ private:
     {
         if (!plan.ordering)
             return;
+        require(!plan.ordering->is_expression, ORM_STATUS_UNSUPPORTED,
+                "TidesDB ORDER BY expression is not supported");
         const std::string column =
-            tidesdb_unqualified_column(plan.table, plan.ordering->first);
-        const bool descending = plan.ordering->second == ORM_ORDER_DESCENDING;
+            tidesdb_unqualified_column(plan.table, plan.ordering->column);
+        const bool descending = plan.ordering->order == ORM_ORDER_DESCENDING;
         std::stable_sort(rows.begin(), rows.end(), [&](const scanned_row& left,
                                                        const scanned_row& right) {
             const tidesdb_cell null_cell = tidesdb_null_cell();

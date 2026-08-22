@@ -87,20 +87,20 @@ suite("ORM generated C facade") {
     check(CStore_User_orm_insert(connection, &inserted, &affected, &error) ==
               ORM_STATUS_OK,
           error.message);
-    check_ull_eq(affected, 1u);
+    check_equal(affected, 1u);
 
     check(CStore_User_orm_find(connection, inserted.id, &current, &found,
                                &error) == ORM_STATUS_OK,
           error.message);
-    check_int_eq(found, 1);
-    check_str_eq(current.display_name, "Alice");
-    check_int_eq(current.state, UserState_active);
+    check_equal(found, 1);
+    check_equal(current.display_name, "Alice");
+    check_equal(current.state, UserState_active);
     check_false(user_has_nickname(&current));
 
     check(CStore_User_orm_find(connection, inserted.id, &stale, &found,
                                &error) == ORM_STATUS_OK,
           error.message);
-    check_int_eq(found, 1);
+    check_equal(found, 1);
     current.display_name = tstr_cpy(current.display_name, "Alice Cooper");
     current.nickname = tstr_cpy(current.nickname, "ally");
     check_not_null(current.display_name);
@@ -110,31 +110,31 @@ suite("ORM generated C facade") {
     check(CStore_User_orm_update(connection, &current, &affected, &error) ==
               ORM_STATUS_OK,
           error.message);
-    check_ull_eq(affected, 1u);
-    check_ull_eq(current.version, 1u);
+    check_equal(affected, 1u);
+    check_equal(current.version, 1u);
     check(CStore_User_orm_update(connection, &stale, &affected, &error) ==
               ORM_STATUS_INVALID_STATE,
           "stale entity update must fail optimistic locking");
-    check_ull_eq(affected, 0u);
-    check_ull_eq(stale.version, 0u);
+    check_equal(affected, 0u);
+    check_equal(stale.version, 0u);
 
     check(CStore_User_orm_find(connection, inserted.id, &verified, &found,
                                &error) == ORM_STATUS_OK,
           error.message);
-    check_int_eq(found, 1);
-    check_str_eq(verified.display_name, "Alice Cooper");
+    check_equal(found, 1);
+    check_equal(verified.display_name, "Alice Cooper");
     check_true(user_has_nickname(&verified));
-    check_str_eq(verified.nickname, "ally");
-    check_ull_eq(verified.version, 1u);
+    check_equal(verified.nickname, "ally");
+    check_equal(verified.version, 1u);
 
     check(CStore_User_orm_remove(connection, &current, &affected, &error) ==
               ORM_STATUS_OK,
           error.message);
-    check_ull_eq(affected, 1u);
+    check_equal(affected, 1u);
     check(CStore_User_orm_find(connection, inserted.id, &missing, &found,
                                &error) == ORM_STATUS_OK,
           error.message);
-    check_int_eq(found, 0);
+    check_equal(found, 0);
 
     User_clear(&missing);
     User_clear(&verified);

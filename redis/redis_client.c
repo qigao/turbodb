@@ -73,18 +73,18 @@ redis_client_t *redis_client_create_with_config(const redis_config_t *config) {
   client->config.password = normalized.password ? tstr_dup(normalized.password) : NULL;
   if (!client->config.host || (normalized.username && !client->config.username) ||
       (normalized.password && !client->config.password)) {
-    tstr_free((tstr_t)client->config.host);
-    tstr_free((tstr_t)client->config.username);
-    tstr_free((tstr_t)client->config.password);
+    tstr_free((tstr)client->config.host);
+    tstr_free((tstr)client->config.username);
+    tstr_free((tstr)client->config.password);
     turbo_mutex_destroy(&client->socket_mutex);
     free(client);
     return NULL;
   }
 
   if (redis_recv_buffer_init(client) != 0) {
-    tstr_free((tstr_t)client->config.host);
-    tstr_free((tstr_t)client->config.username);
-    tstr_free((tstr_t)client->config.password);
+    tstr_free((tstr)client->config.host);
+    tstr_free((tstr)client->config.username);
+    tstr_free((tstr)client->config.password);
     turbo_mutex_destroy(&client->socket_mutex);
     free(client);
     return NULL;
@@ -271,8 +271,8 @@ redis_server_error_t redis_server_error_classify(const redis_reply_t *reply) {
 /* Build RESP command */
 static char *build_resp_command(int argc, const char **argv, const size_t *argvlen,
                                 size_t *out_len) {
-  tstr_t command;
-  tstr_t next;
+  tstr command;
+  tstr next;
   if (argc <= 0 || !argv || !out_len) {
     return NULL;
   }
@@ -310,7 +310,7 @@ static char *build_resp_command(int argc, const char **argv, const size_t *argvl
       return NULL;
     }
     command = next;
-    next = tstr_cat_v(command, tstr_v_from_buf(argv[i], len));
+    next = tstr_cat_v(command, vstr_from_buf(argv[i], len));
     if (!next) {
       tstr_free(command);
       return NULL;
@@ -360,13 +360,13 @@ int redis_commandv_result(redis_client_t *client, int argc, const char **argv,
 
   rc = coro_socket_send(client->socket, cmd_str, cmd_len);
   if (rc != 0) {
-    tstr_free((tstr_t)cmd_str);
+    tstr_free((tstr)cmd_str);
     client->is_connected = 0;
     out->status = rc;
     out->outcome = REDIS_COMMAND_SEND_UNCERTAIN;
     return out->status;
   }
-  tstr_free((tstr_t)cmd_str);
+  tstr_free((tstr)cmd_str);
 
   for (;;) {
     redis_reply_t *reply = NULL;
@@ -496,14 +496,14 @@ void redis_client_destroy(redis_client_t *client) {
   if (!client)
     return;
 
-  TLOG_DEBUG("Destroying Redis client for {:s}:{:d}", client->config.host, client->config.port);
+  TLOG_DEBUGF("Destroying Redis client for {:s}:{:d}", client->config.host, client->config.port);
   redis_client_disconnect(client);
   reset_command_queue_state(client);
 
   redis_recv_buffer_destroy(client);
-  tstr_free((tstr_t)client->config.host);
-  tstr_free((tstr_t)client->config.username);
-  tstr_free((tstr_t)client->config.password);
+  tstr_free((tstr)client->config.host);
+  tstr_free((tstr)client->config.username);
+  tstr_free((tstr)client->config.password);
   turbo_mutex_destroy(&client->socket_mutex);
   free(client);
 }
@@ -1221,10 +1221,10 @@ int redis_xtrim(redis_client_t *client, const char *key, size_t maxlen,
 void redis_stream_entry_free(redis_stream_entry_t *entry) {
   if (!entry) return;
 
-  tstr_free((tstr_t)entry->id);
+  tstr_free((tstr)entry->id);
   for (size_t i = 0; i < entry->field_count; i++) {
     if (entry->fields)
-      tstr_free((tstr_t)entry->fields[i]);
+      tstr_free((tstr)entry->fields[i]);
     if (entry->values)
       free(entry->values[i]);
   }
@@ -1254,7 +1254,7 @@ void redis_stream_result_free(redis_stream_result_t *results, size_t count) {
   if (!results) return;
 
   for (size_t i = 0; i < count; i++) {
-    tstr_free((tstr_t)results[i].stream_name);
+    tstr_free((tstr)results[i].stream_name);
     for (size_t j = 0; j < results[i].entry_count; j++) {
       redis_stream_entry_free(&results[i].entries[j]);
     }

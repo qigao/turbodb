@@ -98,6 +98,22 @@ enum {
   ORM_COMPARE_NOT_LIKE = 7
 };
 
+typedef int32_t orm_subquery_quantifier_t;
+enum {
+  ORM_SUBQUERY_ANY = 0,
+  ORM_SUBQUERY_ALL = 1
+};
+
+typedef int32_t orm_scalar_token_kind_t;
+enum {
+  ORM_SCALAR_COLUMN = 0,
+  ORM_SCALAR_VALUE = 1,
+  ORM_SCALAR_ADD = 2,
+  ORM_SCALAR_SUBTRACT = 3,
+  ORM_SCALAR_MULTIPLY = 4,
+  ORM_SCALAR_DIVIDE = 5
+};
+
 typedef int32_t orm_order_t;
 enum { ORM_ORDER_ASCENDING = 0, ORM_ORDER_DESCENDING = 1 };
 
@@ -132,7 +148,7 @@ typedef struct orm_result orm_result_t;
 typedef struct orm_transaction orm_transaction_t;
 
 /* ABI-compatible alias for TurboUtils' borrowed, non-owning string view. */
-typedef tstr_v orm_string_view_t;
+typedef vstr orm_string_view_t;
 
 /* Borrowed, non-owning binary view. */
 typedef struct orm_blob {
@@ -186,6 +202,17 @@ typedef struct orm_value {
   uint32_t reserved;
   orm_value_data_t data;
 } orm_value_t;
+
+typedef struct orm_scalar_token {
+  orm_scalar_token_kind_t kind;
+  orm_string_view_t column;
+  orm_value_t value;
+} orm_scalar_token_t;
+
+typedef struct orm_scalar_expression {
+  const orm_scalar_token_t *tokens;
+  uint32_t token_count;
+} orm_scalar_expression_t;
 
 /*
  * Unless documented otherwise, functions returning orm_status_t report
@@ -298,6 +325,9 @@ ORM_C_API void ORM_C_CALL orm_query_destroy(orm_query_t *query);
 
 ORM_C_API orm_status_t ORM_C_CALL orm_query_select_all(orm_query_t *query, orm_error_t *error);
 
+ORM_C_API orm_status_t ORM_C_CALL orm_query_set_distinct(orm_query_t *query, int enabled,
+                                                          orm_error_t *error);
+
 ORM_C_API orm_status_t ORM_C_CALL orm_query_add_column(orm_query_t *query, orm_string_view_t column,
                                                        orm_error_t *error);
 
@@ -305,7 +335,12 @@ ORM_C_API orm_status_t ORM_C_CALL orm_query_add_aggregate(orm_query_t *query,
                                                           orm_aggregate_t aggregate,
                                                           orm_string_view_t column,
                                                           orm_string_view_t alias,
-                                                          orm_error_t *error);
+                                                           orm_error_t *error);
+
+/* Copies and validates a postfix scalar expression. */
+ORM_C_API orm_status_t ORM_C_CALL orm_query_add_expression(
+    orm_query_t *query, orm_scalar_expression_t expression,
+    orm_string_view_t alias, orm_error_t *error);
 
 ORM_C_API orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, orm_string_view_t column,
                                                 orm_value_t value, orm_error_t *error);
@@ -317,6 +352,29 @@ ORM_C_API orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, orm_string_v
 ORM_C_API orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, orm_string_view_t column,
                                                   orm_compare_t comparison, orm_value_t value,
                                                   orm_error_t *error);
+
+ORM_C_API orm_status_t ORM_C_CALL orm_query_where_columns(
+    orm_query_t *query, orm_string_view_t left_column, orm_compare_t comparison,
+    orm_string_view_t right_column, orm_error_t *error);
+
+/* The outer query stores an owning snapshot; the subquery may be destroyed after this call. */
+ORM_C_API orm_status_t ORM_C_CALL orm_query_where_exists(orm_query_t *query,
+                                                         const orm_query_t *subquery,
+                                                         int negated,
+                                                         orm_error_t *error);
+
+ORM_C_API orm_status_t ORM_C_CALL orm_query_where_in_subquery(
+    orm_query_t *query, orm_string_view_t column, const orm_query_t *subquery,
+    int negated, orm_error_t *error);
+
+ORM_C_API orm_status_t ORM_C_CALL orm_query_where_scalar_subquery(
+    orm_query_t *query, orm_string_view_t column, orm_compare_t comparison,
+    const orm_query_t *subquery, orm_error_t *error);
+
+ORM_C_API orm_status_t ORM_C_CALL orm_query_where_quantified_subquery(
+    orm_query_t *query, orm_string_view_t column, orm_compare_t comparison,
+    orm_subquery_quantifier_t quantifier, const orm_query_t *subquery,
+    orm_error_t *error);
 
 ORM_C_API orm_status_t ORM_C_CALL orm_query_begin_where_group(orm_query_t *query, orm_logic_t logic,
                                                               orm_error_t *error);
@@ -353,6 +411,12 @@ ORM_C_API orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t
 
 ORM_C_API orm_status_t ORM_C_CALL orm_query_order_by(orm_query_t *query, orm_string_view_t column,
                                                      orm_order_t order, orm_error_t *error);
+
+ORM_C_API orm_status_t ORM_C_CALL
+orm_query_order_by_expression(orm_query_t *query,
+                             orm_scalar_expression_t expression,
+                             orm_order_t order,
+                             orm_error_t *error);
 
 ORM_C_API orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit,
                                                       orm_error_t *error);
@@ -452,10 +516,10 @@ typedef struct orm_expression {
 } orm_expression_t;
 
 static inline orm_string_view_t orm_view(const char *text) {
-  return tstr_v_from_cstr(text);
+  return vstr_from_cstr(text);
 }
 
-static inline orm_string_view_t orm_view_tstr(tstr_t text) { return tstr_to_v(text); }
+static inline orm_string_view_t orm_view_tstr(tstr text) { return tstr_to_v(text); }
 
 static inline orm_value_t orm_null(void) {
   orm_value_t value;
@@ -505,7 +569,7 @@ static inline orm_value_t orm_text(const char *input) {
   return value;
 }
 
-static inline orm_value_t orm_text_v(tstr_v input) {
+static inline orm_value_t orm_text_v(vstr input) {
   orm_value_t value;
   value.kind = ORM_VALUE_TEXT;
   value.reserved = 0;
@@ -513,7 +577,7 @@ static inline orm_value_t orm_text_v(tstr_v input) {
   return value;
 }
 
-static inline orm_value_t orm_text_tstr(tstr_t input) { return orm_text_v(tstr_to_v(input)); }
+static inline orm_value_t orm_text_tstr(tstr input) { return orm_text_v(tstr_to_v(input)); }
 
 static inline orm_value_t orm_blob_v(orm_blob_t input) {
   orm_value_t value;
@@ -637,6 +701,51 @@ static inline orm_expression_t orm_expression_or(orm_expression_t left, orm_expr
   return orm_expression_combine(ORM_LOGIC_OR, left, right);
 }
 
+static inline orm_expression_t orm_expression_between(orm_string_view_t column,
+                                                       orm_value_t lower,
+                                                       orm_value_t upper) {
+  return orm_expression_and(
+      orm_expression_compare(column, ORM_COMPARE_GREATER_EQUAL, lower),
+      orm_expression_compare(column, ORM_COMPARE_LESS_EQUAL, upper));
+}
+
+static inline orm_expression_t orm_expression_not_between(orm_string_view_t column,
+                                                           orm_value_t lower,
+                                                           orm_value_t upper) {
+  return orm_expression_or(orm_expression_compare(column, ORM_COMPARE_LESS, lower),
+                           orm_expression_compare(column, ORM_COMPARE_GREATER, upper));
+}
+
+static inline orm_expression_t orm_expression_in(orm_string_view_t column,
+                                                  const orm_value_t *values,
+                                                  uint32_t value_count) {
+  orm_expression_t output;
+  uint32_t index;
+
+  if (values == NULL || value_count == 0)
+    return orm_expression_detail_error(ORM_STATUS_INVALID_ARGUMENT);
+  output = orm_expression_compare(column, ORM_COMPARE_EQUAL, values[0]);
+  for (index = 1; index < value_count; ++index)
+    output = orm_expression_or(
+        output, orm_expression_compare(column, ORM_COMPARE_EQUAL, values[index]));
+  return output;
+}
+
+static inline orm_expression_t orm_expression_not_in(orm_string_view_t column,
+                                                      const orm_value_t *values,
+                                                      uint32_t value_count) {
+  orm_expression_t output;
+  uint32_t index;
+
+  if (values == NULL || value_count == 0)
+    return orm_expression_detail_error(ORM_STATUS_INVALID_ARGUMENT);
+  output = orm_expression_compare(column, ORM_COMPARE_NOT_EQUAL, values[0]);
+  for (index = 1; index < value_count; ++index)
+    output = orm_expression_and(
+        output, orm_expression_compare(column, ORM_COMPARE_NOT_EQUAL, values[index]));
+  return output;
+}
+
 #ifndef __cplusplus
   #define ORM_EQ(column, value)                                                                    \
     orm_expression_compare(orm_view((column)), ORM_COMPARE_EQUAL, (value))
@@ -654,6 +763,12 @@ static inline orm_expression_t orm_expression_or(orm_expression_t left, orm_expr
     orm_expression_compare(orm_view((column)), ORM_COMPARE_LIKE, (value))
   #define ORM_NOT_LIKE(column, value)                                                              \
     orm_expression_compare(orm_view((column)), ORM_COMPARE_NOT_LIKE, (value))
+  #define ORM_IS_NULL(column) ORM_EQ((column), orm_null())
+  #define ORM_IS_NOT_NULL(column) ORM_NE((column), orm_null())
+  #define ORM_BETWEEN(column, lower, upper)                                                        \
+    orm_expression_between(orm_view((column)), (lower), (upper))
+  #define ORM_NOT_BETWEEN(column, lower, upper)                                                    \
+    orm_expression_not_between(orm_view((column)), (lower), (upper))
   #define ORM_AGG_EQ(aggregate, column, value)                                                     \
     orm_expression_aggregate((aggregate), orm_view((column)), ORM_COMPARE_EQUAL, (value))
   #define ORM_AGG_NE(aggregate, column, value)                                                     \
@@ -682,6 +797,7 @@ typedef struct orm_chain orm_chain_t;
 
 typedef struct orm_chain_select_ops {
   orm_chain_t *(ORM_C_CALL *all)(orm_chain_t *self);
+  orm_chain_t *(ORM_C_CALL *distinct)(orm_chain_t *self, int enabled);
   orm_chain_t *(ORM_C_CALL *column)(orm_chain_t *self, orm_string_view_t column);
   orm_chain_t *(ORM_C_CALL *aggregate)(orm_chain_t *self, orm_aggregate_t aggregate,
                                        orm_string_view_t column, orm_string_view_t alias);
@@ -701,6 +817,7 @@ typedef struct orm_chain_condition_ops {
                                               orm_value_t value);
   orm_chain_t *(ORM_C_CALL *begin_having)(orm_chain_t *self, orm_logic_t logic);
   orm_chain_t *(ORM_C_CALL *end_having)(orm_chain_t *self);
+  orm_chain_t *(ORM_C_CALL *exists)(orm_chain_t *self, const orm_query_t *subquery, int negated);
 } orm_chain_condition_ops_t;
 
 struct orm_chain {
@@ -710,6 +827,18 @@ struct orm_chain {
   orm_chain_t *(ORM_C_CALL *set)(orm_chain_t *self, orm_string_view_t column, orm_value_t value);
   orm_chain_t *(ORM_C_CALL *where)(orm_chain_t *self, orm_string_view_t column,
                                    orm_compare_t comparison, orm_value_t value);
+  orm_chain_t *(ORM_C_CALL *where_columns)(orm_chain_t *self, orm_string_view_t left_column,
+                                           orm_compare_t comparison,
+                                           orm_string_view_t right_column);
+  orm_chain_t *(ORM_C_CALL *where_in_subquery)(orm_chain_t *self, orm_string_view_t column,
+                                               const orm_query_t *subquery, int negated);
+  orm_chain_t *(ORM_C_CALL *where_scalar_subquery)(orm_chain_t *self,
+                                                   orm_string_view_t column,
+                                                   orm_compare_t comparison,
+                                                   const orm_query_t *subquery);
+  orm_chain_t *(ORM_C_CALL *where_quantified_subquery)(
+      orm_chain_t *self, orm_string_view_t column, orm_compare_t comparison,
+      orm_subquery_quantifier_t quantifier, const orm_query_t *subquery);
   orm_chain_t *(ORM_C_CALL *bind)(orm_chain_t *self, orm_value_t value);
   orm_chain_t *(ORM_C_CALL *order_by)(orm_chain_t *self, orm_string_view_t column,
                                       orm_order_t order);
@@ -738,8 +867,8 @@ static inline orm_chain_t *orm_chain_detail_fail(orm_chain_t *self, orm_status_t
     ++index;
   }
   self->error->message[index] = '\0';
-  TURBO_LOG_TYPED(tlog_peek_default(), TURBO_LOG_LEVEL_DEBUG, "orm", "chain failure ({}): {}",
-                  status, tstr_v_from_cstr(message));
+  TURBO_LOG_DEBUGF(tlog_peek_default(), "orm", "chain failure ({}): {}", status,
+                   vstr_from_cstr(message));
   return self;
 }
 
@@ -846,6 +975,40 @@ static inline orm_chain_t *ORM_C_CALL orm_chain_detail_where(orm_chain_t *self,
   return self;
 }
 
+static inline orm_chain_t *ORM_C_CALL orm_chain_detail_where_columns(
+    orm_chain_t *self, orm_string_view_t left_column, orm_compare_t comparison,
+    orm_string_view_t right_column) {
+  if (orm_chain_detail_ready(self))
+    self->status = orm_query_where_columns(self->query, left_column, comparison, right_column,
+                                           self->error);
+  return self;
+}
+
+static inline orm_chain_t *ORM_C_CALL orm_chain_detail_where_in_subquery(
+    orm_chain_t *self, orm_string_view_t column, const orm_query_t *subquery, int negated) {
+  if (orm_chain_detail_ready(self))
+    self->status = orm_query_where_in_subquery(self->query, column, subquery, negated, self->error);
+  return self;
+}
+
+static inline orm_chain_t *ORM_C_CALL orm_chain_detail_where_scalar_subquery(
+    orm_chain_t *self, orm_string_view_t column, orm_compare_t comparison,
+    const orm_query_t *subquery) {
+  if (orm_chain_detail_ready(self))
+    self->status = orm_query_where_scalar_subquery(self->query, column, comparison, subquery,
+                                                   self->error);
+  return self;
+}
+
+static inline orm_chain_t *ORM_C_CALL orm_chain_detail_where_quantified_subquery(
+    orm_chain_t *self, orm_string_view_t column, orm_compare_t comparison,
+    orm_subquery_quantifier_t quantifier, const orm_query_t *subquery) {
+  if (orm_chain_detail_ready(self))
+    self->status = orm_query_where_quantified_subquery(
+        self->query, column, comparison, quantifier, subquery, self->error);
+  return self;
+}
+
 static inline orm_chain_t *ORM_C_CALL orm_chain_detail_where_expr(orm_chain_t *self,
                                                                   orm_expression_t expression) {
   return orm_chain_detail_apply_expression(self, expression, 0);
@@ -886,6 +1049,13 @@ static inline orm_chain_t *ORM_C_CALL orm_chain_detail_select_all(orm_chain_t *s
   return self;
 }
 
+static inline orm_chain_t *ORM_C_CALL orm_chain_detail_select_distinct(orm_chain_t *self,
+                                                                        int enabled) {
+  if (orm_chain_detail_ready(self))
+    self->status = orm_query_set_distinct(self->query, enabled, self->error);
+  return self;
+}
+
 static inline orm_chain_t *ORM_C_CALL orm_chain_detail_select_column(orm_chain_t *self,
                                                                      orm_string_view_t column) {
   if (orm_chain_detail_ready(self))
@@ -922,6 +1092,14 @@ static inline orm_chain_t *ORM_C_CALL orm_chain_detail_begin_where(orm_chain_t *
                                                                    orm_logic_t logic) {
   if (orm_chain_detail_ready(self))
     self->status = orm_query_begin_where_group(self->query, logic, self->error);
+  return self;
+}
+
+static inline orm_chain_t *ORM_C_CALL orm_chain_detail_exists(orm_chain_t *self,
+                                                               const orm_query_t *subquery,
+                                                               int negated) {
+  if (orm_chain_detail_ready(self))
+    self->status = orm_query_where_exists(self->query, subquery, negated, self->error);
   return self;
 }
 
@@ -980,12 +1158,17 @@ static inline orm_chain_t orm_chain(orm_query_t *query, orm_error_t *error) {
   chain.status = ORM_STATUS_OK;
   chain.set = orm_chain_detail_set;
   chain.where = orm_chain_detail_where;
+  chain.where_columns = orm_chain_detail_where_columns;
+  chain.where_in_subquery = orm_chain_detail_where_in_subquery;
+  chain.where_scalar_subquery = orm_chain_detail_where_scalar_subquery;
+  chain.where_quantified_subquery = orm_chain_detail_where_quantified_subquery;
   chain.bind = orm_chain_detail_bind;
   chain.order_by = orm_chain_detail_order_by;
   chain.limit = orm_chain_detail_limit;
   chain.offset = orm_chain_detail_offset;
   chain.execute = orm_chain_detail_execute;
   chain.select.all = orm_chain_detail_select_all;
+  chain.select.distinct = orm_chain_detail_select_distinct;
   chain.select.column = orm_chain_detail_select_column;
   chain.select.aggregate = orm_chain_detail_select_aggregate;
   chain.select.join = orm_chain_detail_select_join;
@@ -996,6 +1179,7 @@ static inline orm_chain_t orm_chain(orm_query_t *query, orm_error_t *error) {
   chain.condition.having_aggregate = orm_chain_detail_having_aggregate;
   chain.condition.begin_having = orm_chain_detail_begin_having;
   chain.condition.end_having = orm_chain_detail_end_having;
+  chain.condition.exists = orm_chain_detail_exists;
   chain.where_expr = orm_chain_detail_where_expr;
   chain.having_expr = orm_chain_detail_having_expr;
   return chain;

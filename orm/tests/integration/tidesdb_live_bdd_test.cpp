@@ -1,6 +1,6 @@
 #include "orm.hpp"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 #include <turbo_thread.h>
 
 #include <cstdint>
@@ -53,7 +53,7 @@ namespace {
   }
 
   void insert_people(orm::connection &connection) {
-    check_uint_eq(connection.insert(entity_table)
+    check_equal(connection.insert(entity_table)
                       .set("id", 1)
                       .set("name", "Alice")
                       .set("status", "active")
@@ -63,7 +63,7 @@ namespace {
                       .execute()
                       .affected_rows(),
                   1);
-    check_uint_eq(connection.insert(entity_table)
+    check_equal(connection.insert(entity_table)
                       .set("id", 2)
                       .set("name", "Bob")
                       .set("status", "inactive")
@@ -73,7 +73,7 @@ namespace {
                       .execute()
                       .affected_rows(),
                   1);
-    check_uint_eq(connection.insert(entity_table)
+    check_equal(connection.insert(entity_table)
                       .set("id", 3)
                       .set("name", "Cara")
                       .set("status", "active")
@@ -115,12 +115,12 @@ spec("TidesDB ORM embedded integration") {
                                     .where("status", orm::comparison::equal, "active")
                                     .order_by("score", orm::sort_order::descending)
                                     .execute();
-          check_uint_eq(selected.rows(), 2);
-          check_uint_eq(selected.columns(), 3);
-          check_int_eq(selected.int64(0, 0), 3);
+          check_equal(selected.rows(), 2);
+          check_equal(selected.columns(), 3);
+          check_equal(selected.int64(0, 0), 3);
           check(selected.text(0, 1) == "Cara");
-          check_double_eq(selected.real(0, 2), 30.0, 0.000001);
-          check_int_eq(selected.int64(1, 0), 1);
+          check_within(selected.real(0, 2), 30.0, 0.000001);
+          check_equal(selected.int64(1, 0), 1);
 
           const auto grouped =
               connection.select(entity_table)
@@ -131,16 +131,16 @@ spec("TidesDB ORM embedded integration") {
                   .having(orm::aggregate_function::count_all, {}, orm::comparison::greater, 0u)
                   .order_by("country", orm::sort_order::ascending)
                   .execute();
-          check_uint_eq(grouped.rows(), 2);
-          check_uint_eq(grouped.columns(), 3);
+          check_equal(grouped.rows(), 2);
+          check_equal(grouped.columns(), 3);
           check(grouped.text(0, 0) == "UK");
-          check_uint_eq(grouped.uint64(0, 1), 1);
-          check_double_eq(grouped.real(0, 2), 20.0, 0.000001);
+          check_equal(grouped.uint64(0, 1), 1);
+          check_within(grouped.real(0, 2), 20.0, 0.000001);
           check(grouped.text(1, 0) == "US");
-          check_uint_eq(grouped.uint64(1, 1), 2);
-          check_double_eq(grouped.real(1, 2), 40.0, 0.000001);
+          check_equal(grouped.uint64(1, 1), 2);
+          check_within(grouped.real(1, 2), 40.0, 0.000001);
 
-          check_uint_eq(connection.update(entity_table)
+          check_equal(connection.update(entity_table)
                             .set("score", 25.0)
                             .set("version", 1u)
                             .where("id", orm::comparison::equal, 2)
@@ -148,7 +148,7 @@ spec("TidesDB ORM embedded integration") {
                             .execute()
                             .affected_rows(),
                         1);
-          check_uint_eq(connection.update(entity_table)
+          check_equal(connection.update(entity_table)
                             .set("score", 99.0)
                             .set("version", 1u)
                             .where("id", orm::comparison::equal, 2)
@@ -156,7 +156,7 @@ spec("TidesDB ORM embedded integration") {
                             .execute()
                             .affected_rows(),
                         0);
-          check_uint_eq(connection.delete_from(entity_table)
+          check_equal(connection.delete_from(entity_table)
                             .where("id", orm::comparison::equal, 3)
                             .where("version", orm::comparison::equal, 0u)
                             .execute()
@@ -171,10 +171,10 @@ spec("TidesDB ORM embedded integration") {
                                      .column("score")
                                      .order_by("id", orm::sort_order::ascending)
                                      .execute();
-          check_uint_eq(persisted.rows(), 2);
-          check_int_eq(persisted.int64(0, 0), 1);
-          check_int_eq(persisted.int64(1, 0), 2);
-          check_double_eq(persisted.real(1, 1), 25.0, 0.000001);
+          check_equal(persisted.rows(), 2);
+          check_equal(persisted.int64(0, 0), 1);
+          check_equal(persisted.int64(1, 0), 2);
+          check_within(persisted.real(1, 1), 25.0, 0.000001);
         }
       }
     }
@@ -187,7 +187,7 @@ spec("TidesDB ORM embedded integration") {
 
         orm::connection connection(tidesdb_config(directory.path()));
         auto transaction = connection.begin_transaction();
-        check_uint_eq(connection.insert(entity_table)
+        check_equal(connection.insert(entity_table)
                           .set("id", 10)
                           .set("name", "Committed")
                           .execute(transaction)
@@ -197,11 +197,11 @@ spec("TidesDB ORM embedded integration") {
                                  .column("name")
                                  .where("id", orm::comparison::equal, 10)
                                  .execute(transaction);
-        check_uint_eq(pending.rows(), 1);
+        check_equal(pending.rows(), 1);
         check(pending.text(0, 0) == "Committed");
         transaction.savepoint("released").release("released");
         transaction.savepoint("before_discard");
-        check_uint_eq(connection.insert(entity_table)
+        check_equal(connection.insert(entity_table)
                           .set("id", 11)
                           .set("name", "Discarded")
                           .execute(transaction)
@@ -210,11 +210,11 @@ spec("TidesDB ORM embedded integration") {
         transaction.rollback_to("before_discard");
         transaction.commit();
 
-        check_uint_eq(row_count(connection, 10), 1);
-        check_uint_eq(row_count(connection, 11), 0);
+        check_equal(row_count(connection, 10), 1);
+        check_equal(row_count(connection, 11), 0);
 
         auto rolled_back = connection.begin_transaction(orm::isolation_level::read_committed);
-        check_uint_eq(connection.update(entity_table)
+        check_equal(connection.update(entity_table)
                           .set("name", "Not visible")
                           .where("id", orm::comparison::equal, 10)
                           .execute(rolled_back)
@@ -226,7 +226,7 @@ spec("TidesDB ORM embedded integration") {
                                   .column("name")
                                   .where("id", orm::comparison::equal, 10)
                                   .execute();
-        check_uint_eq(retained.rows(), 1);
+        check_equal(retained.rows(), 1);
         check(retained.text(0, 0) == "Committed");
 
         {
@@ -236,7 +236,7 @@ spec("TidesDB ORM embedded integration") {
               .set("name", "Auto rollback")
               .execute(abandoned);
         }
-        check_uint_eq(row_count(connection, 12), 0);
+        check_equal(row_count(connection, 12), 0);
       }
     }
 
@@ -305,7 +305,7 @@ spec("TidesDB ORM embedded integration") {
         }
         check(direct_select_rejected);
 
-        check_uint_eq(connection.insert(entity_table)
+        check_equal(connection.insert(entity_table)
                           .set("id", 20)
                           .set("name", "Committed")
                           .execute(transaction)
@@ -313,7 +313,7 @@ spec("TidesDB ORM embedded integration") {
                       1);
         transaction.commit();
 
-        check_uint_eq(row_count(connection, 20), 1);
+        check_equal(row_count(connection, 20), 1);
       }
     }
 
@@ -335,7 +335,7 @@ spec("TidesDB ORM embedded integration") {
                                   .column("payload")
                                   .where("id", orm::comparison::equal, 45)
                                   .execute();
-        check_uint_eq(selected.rows(), 1);
+        check_equal(selected.rows(), 1);
         check(selected.blob(0, 0) == payload);
       }
     }
@@ -348,7 +348,7 @@ spec("TidesDB ORM embedded integration") {
 
         orm::connection expiring(tidesdb_config(ttl_directory.path(), "128", "1"));
         (void)expiring.insert(entity_table).set("id", 30).set("name", "Temporary").execute();
-        check_uint_eq(row_count(expiring, 30), 1);
+        check_equal(row_count(expiring, 30), 1);
 
         bool expired = false;
         for (std::uint32_t attempt = 0; attempt < expiration_poll_attempts && !expired; ++attempt) {

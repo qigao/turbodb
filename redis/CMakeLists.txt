@@ -1,6 +1,7 @@
 # Redis Client (RESP Protocol) Async Redis client implementing RESP protocol
 
-set(REDIS_HEADERS redis_client.h redis_pool.h redis_cluster.h redis_sentinel.h)
+set(REDIS_HEADERS redis_export.h redis_client.h redis_pool.h redis_cluster.h
+                  redis_sentinel.h)
 
 if(NOT RE2C_EXECUTABLE)
   message(FATAL_ERROR "Redis RESP parser requires re2c")
@@ -27,7 +28,7 @@ cmake_config_target(
   EXPORT_NAME
   Redis)
 
-target_compile_definitions(tedis PRIVATE SHARED_CXX)
+target_compile_definitions(tedis PRIVATE REDIS_BUILD)
 if(BUILD_TESTS)
   target_compile_definitions(tedis PRIVATE REDIS_TESTING)
 endif()

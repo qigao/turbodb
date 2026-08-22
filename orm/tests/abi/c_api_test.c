@@ -54,13 +54,13 @@ static void require_status(orm_status_t actual, orm_status_t expected, const orm
 }
 
 static void test_turboutils_string_interop(void) {
-  tstr_t owned = tstr_format("{}-{}", "user", 42);
+  tstr owned = tstr_format("{}-{}", "user", 42);
   const orm_string_view_t view = orm_view_tstr(owned);
   const orm_value_t value = orm_text_v(view);
   require_true(owned != NULL && view.len == 7 && memcmp(view.data, "user-42", 7) == 0,
-               "tstr_t view conversion failed");
+               "tstr view conversion failed");
   require_true(value.kind == ORM_VALUE_TEXT && value.data.text_value.data == owned,
-               "tstr_v text value conversion failed");
+               "vstr text value conversion failed");
   tstr_free(owned);
 }
 
@@ -329,6 +329,7 @@ static void test_query_builder_features(void) {
   orm_config_t config;
   orm_connection_t *connection;
   orm_query_t *query = NULL;
+  orm_query_t *subquery = NULL;
   orm_result_t *result = NULL;
   orm_chain_t chain;
   orm_expression_t overflow_expression;
@@ -375,6 +376,245 @@ static void test_query_builder_features(void) {
                    strcmp(fake_pg_parameter_at(3), "2") == 0 &&
                    strcmp(fake_pg_parameter_at(4), "Archived") == 0,
                "aggregate query parameter order is incorrect");
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  result = NULL;
+  {
+    orm_scalar_token_t malformed_tokens[] = {
+        {ORM_SCALAR_COLUMN, string_view("score"), orm_null()},
+        {ORM_SCALAR_ADD, string_view(""), orm_null()}};
+    const orm_scalar_expression_t malformed = {malformed_tokens, 2};
+    orm_scalar_token_t tokens[] = {
+        {ORM_SCALAR_COLUMN, string_view("score"), orm_null()},
+        {ORM_SCALAR_VALUE, string_view(""), orm_f64(2.0)},
+        {ORM_SCALAR_MULTIPLY, string_view(""), orm_null()},
+        {ORM_SCALAR_VALUE, string_view(""), orm_f64(5.0)},
+        {ORM_SCALAR_ADD, string_view(""), orm_null()}};
+    const orm_scalar_expression_t expression = {tokens, 5};
+    require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                   ORM_STATUS_OK, &error, "create scalar expression query");
+    require_status(orm_query_add_expression(query, malformed, string_view("invalid"), &error),
+                   ORM_STATUS_INVALID_ARGUMENT, &error,
+                   "reject malformed scalar postfix expression");
+    require_status(orm_query_add_expression(query, expression, string_view("adjusted"), &error),
+                   ORM_STATUS_OK, &error, "select scalar expression");
+    fake_pg_set_result(0, 0, NULL, NULL);
+    require_status(orm_query_execute(query, &result, &error), ORM_STATUS_OK, &error,
+                   "execute scalar expression query");
+    require_true(strcmp(fake_pg_last_sql(),
+                        "select ((score * $1) + $2) as adjusted from person") == 0,
+                 "scalar expression SQL is incorrect");
+    require_true(fake_pg_parameter_count() == 2 &&
+                     strcmp(fake_pg_parameter_at(0), "2") == 0 &&
+                     strcmp(fake_pg_parameter_at(1), "5") == 0,
+                 "scalar expression parameters are not in postfix operand order");
+  }
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  result = NULL;
+  {
+    orm_scalar_token_t order_tokens[] = {
+        {ORM_SCALAR_COLUMN, string_view("score"), orm_null()},
+        {ORM_SCALAR_VALUE, string_view(""), orm_f64(5.0)},
+        {ORM_SCALAR_ADD, string_view(""), orm_null()}};
+    const orm_scalar_expression_t order_expression = {order_tokens, 3};
+    require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                   ORM_STATUS_OK, &error, "create order-by scalar query");
+    require_status(orm_query_add_column(query, string_view("id"), &error), ORM_STATUS_OK, &error,
+                   "select order-by scalar column");
+    require_status(orm_query_order_by_expression(query, order_expression, ORM_ORDER_DESCENDING, &error),
+                   ORM_STATUS_OK, &error, "append ORDER BY scalar expression");
+    fake_pg_set_result(0, 0, NULL, NULL);
+    require_status(orm_query_execute(query, &result, &error), ORM_STATUS_OK, &error,
+                   "execute ORDER BY scalar expression query");
+    require_true(strcmp(fake_pg_last_sql(),
+                       "select id from person order by (score + $1) desc") == 0,
+                 "scalar ORDER BY SQL is incorrect");
+    require_true(fake_pg_parameter_count() == 1 && strcmp(fake_pg_parameter_at(0), "5") == 0,
+                 "ORDER BY scalar expression parameter order is incorrect");
+  }
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  subquery = NULL;
+  result = NULL;
+  require_status(orm_query_create(connection, string_view("person"), &subquery, &error),
+                 ORM_STATUS_OK, &error, "create scalar subquery");
+  require_status(orm_query_add_aggregate(subquery, ORM_AGGREGATE_AVERAGE,
+                                         string_view("score"), string_view(""), &error),
+                 ORM_STATUS_OK, &error, "select scalar aggregate");
+  require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                 ORM_STATUS_OK, &error, "create outer scalar query");
+  require_status(orm_query_add_column(query, string_view("id"), &error), ORM_STATUS_OK,
+                 &error, "select outer scalar column");
+  require_status(orm_query_where_scalar_subquery(query, string_view("score"),
+                                                 ORM_COMPARE_GREATER, subquery, &error),
+                 ORM_STATUS_OK, &error, "attach scalar subquery snapshot");
+  orm_query_destroy(subquery);
+  subquery = NULL;
+  fake_pg_set_result(0, 0, NULL, NULL);
+  require_status(orm_query_execute(query, &result, &error), ORM_STATUS_OK, &error,
+                 "execute scalar subquery");
+  require_true(strcmp(fake_pg_last_sql(),
+                      "select id from person where score > (select avg(score) from person)") ==
+                   0,
+               "scalar subquery SQL is incorrect");
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  subquery = NULL;
+  result = NULL;
+  require_status(orm_query_create(connection, string_view("person"), &subquery, &error),
+                 ORM_STATUS_OK, &error, "create quantified subquery");
+  require_status(orm_query_add_column(subquery, string_view("score"), &error), ORM_STATUS_OK,
+                 &error, "select quantified subquery column");
+  require_status(orm_query_where(subquery, string_view("active"), ORM_COMPARE_EQUAL,
+                                 orm_bool(1), &error),
+                 ORM_STATUS_OK, &error, "filter quantified subquery");
+  require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                 ORM_STATUS_OK, &error, "create outer quantified query");
+  require_status(orm_query_add_column(query, string_view("id"), &error), ORM_STATUS_OK,
+                 &error, "select outer quantified column");
+  require_status(orm_query_where(query, string_view("name"), ORM_COMPARE_NOT_EQUAL,
+                                 text_value("Nobody"), &error),
+                 ORM_STATUS_OK, &error, "filter outer quantified query");
+  require_status(orm_query_where_quantified_subquery(
+                     query, string_view("score"), ORM_COMPARE_GREATER,
+                     (orm_subquery_quantifier_t)99, subquery, &error),
+                 ORM_STATUS_INVALID_ARGUMENT, &error, "reject unknown subquery quantifier");
+  require_status(orm_query_where_quantified_subquery(
+                     query, string_view("score"), ORM_COMPARE_GREATER,
+                     ORM_SUBQUERY_ANY, subquery, &error),
+                 ORM_STATUS_OK, &error, "attach ANY subquery snapshot");
+  orm_query_destroy(subquery);
+  subquery = NULL;
+  fake_pg_set_result(0, 0, NULL, NULL);
+  require_status(orm_query_execute(query, &result, &error), ORM_STATUS_OK, &error,
+                 "execute ANY subquery");
+  require_true(strcmp(fake_pg_last_sql(),
+                      "select id from person where name != $1 and score > any (select score "
+                      "from person where active = $2)") == 0,
+               "ANY subquery SQL is incorrect");
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  subquery = NULL;
+  result = NULL;
+  require_status(orm_query_create(connection, string_view("person"), &subquery, &error),
+                 ORM_STATUS_OK, &error, "create ALL subquery");
+  require_status(orm_query_add_column(subquery, string_view("score"), &error), ORM_STATUS_OK,
+                 &error, "select ALL subquery column");
+  require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                 ORM_STATUS_OK, &error, "create outer ALL query");
+  require_status(orm_query_add_column(query, string_view("id"), &error), ORM_STATUS_OK,
+                 &error, "select outer ALL column");
+  require_status(orm_query_where_quantified_subquery(
+                     query, string_view("score"), ORM_COMPARE_LESS_EQUAL,
+                     ORM_SUBQUERY_ALL, subquery, &error),
+                 ORM_STATUS_OK, &error, "attach ALL subquery snapshot");
+  orm_query_destroy(subquery);
+  subquery = NULL;
+  fake_pg_set_result(0, 0, NULL, NULL);
+  require_status(orm_query_execute(query, &result, &error), ORM_STATUS_OK, &error,
+                 "execute ALL subquery");
+  require_true(strcmp(fake_pg_last_sql(),
+                      "select id from person where score <= all (select score from person)") ==
+                   0,
+               "ALL subquery SQL is incorrect");
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  result = NULL;
+  require_status(orm_query_create(connection, string_view("department"), &subquery, &error),
+                 ORM_STATUS_OK, &error, "create IN subquery");
+  require_status(orm_query_add_column(subquery, string_view("id"), &error), ORM_STATUS_OK,
+                 &error, "select IN subquery column");
+  require_status(orm_query_where(subquery, string_view("name"), ORM_COMPARE_EQUAL,
+                                 text_value("Sales"), &error),
+                 ORM_STATUS_OK, &error, "filter IN subquery");
+  require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                 ORM_STATUS_OK, &error, "create outer IN query");
+  require_status(orm_query_add_column(query, string_view("id"), &error), ORM_STATUS_OK,
+                 &error, "select outer IN column");
+  require_status(orm_query_where_in_subquery(query, string_view("department_id"),
+                                             subquery, 0, &error),
+                 ORM_STATUS_OK, &error, "attach IN subquery snapshot");
+  orm_query_destroy(subquery);
+  subquery = NULL;
+  fake_pg_set_result(0, 0, NULL, NULL);
+  require_status(orm_query_execute(query, &result, &error), ORM_STATUS_OK, &error,
+                 "execute IN subquery");
+  require_true(strcmp(fake_pg_last_sql(),
+                      "select id from person where department_id in (select id from "
+                      "department where name = $1)") == 0,
+               "IN subquery SQL is incorrect");
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  result = NULL;
+  require_status(orm_query_create(connection, string_view("department"), &subquery, &error),
+                 ORM_STATUS_OK, &error, "create EXISTS subquery");
+  require_status(orm_query_add_column(subquery, string_view("id"), &error), ORM_STATUS_OK,
+                 &error, "select EXISTS subquery column");
+  require_status(orm_query_where(subquery, string_view("name"), ORM_COMPARE_EQUAL,
+                                 text_value("Sales"), &error),
+                 ORM_STATUS_OK, &error, "filter EXISTS subquery");
+  require_status(orm_query_where_columns(subquery, string_view("department.id"),
+                                         ORM_COMPARE_EQUAL,
+                                         string_view("person.department_id"), &error),
+                 ORM_STATUS_OK, &error, "correlate EXISTS subquery");
+  require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                 ORM_STATUS_OK, &error, "create outer EXISTS query");
+  require_status(orm_query_select_all(query, &error), ORM_STATUS_OK, &error,
+                 "select outer EXISTS rows");
+  require_status(orm_query_where(query, string_view("active"), ORM_COMPARE_EQUAL,
+                                 orm_bool(1), &error),
+                 ORM_STATUS_OK, &error, "filter outer EXISTS query");
+  require_status(orm_query_where_exists(query, subquery, 0, &error), ORM_STATUS_OK,
+                 &error, "attach EXISTS subquery snapshot");
+  orm_query_destroy(subquery);
+  subquery = NULL;
+  fake_pg_set_result(0, 0, NULL, NULL);
+  require_status(orm_query_execute(query, &result, &error), ORM_STATUS_OK, &error,
+                 "execute EXISTS query");
+  require_true(strcmp(fake_pg_last_sql(),
+                      "select * from person where active = $1 and exists (select id from "
+                      "department where name = $2 and department.id = person.department_id)") == 0,
+               "EXISTS SQL or parameter numbering is incorrect");
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+
+  query = NULL;
+  result = NULL;
+  require_status(orm_query_create(connection, string_view("person"), &query, &error),
+                 ORM_STATUS_OK, &error, "create range and membership query");
+  chain = orm_chain(query, &error);
+  {
+    const orm_value_t ids[] = {orm_i64(1), orm_i64(2), orm_i64(3)};
+    fake_pg_set_result(0, 0, NULL, NULL);
+    require_status(
+        chain.select.all(&chain)
+            ->select.distinct(&chain, 1)
+            ->where_expr(&chain,
+                         ORM_AND(ORM_BETWEEN("age", orm_i64(18), orm_i64(65)),
+                                 ORM_AND(orm_expression_in(orm_view("id"), ids, 3),
+                                         ORM_IS_NULL("deleted_at"))))
+            ->execute(&chain, &result),
+        ORM_STATUS_OK, &error, "execute range and membership query");
+  }
+  require_true(strcmp(fake_pg_last_sql(),
+                      "select distinct * from person where (age >= $1 and age <= $2 and "
+                      "(id = $3 or id = $4 or id = $5) and deleted_at is null)") == 0,
+               "range/membership/null SQL is incorrect");
   orm_result_destroy(result);
   orm_query_destroy(query);
 

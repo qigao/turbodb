@@ -4,7 +4,7 @@
 extern "C" {
 #include <schema_parser_dsl.h>
 }
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstring>
 #include <string>
@@ -37,7 +37,7 @@ bool has_message(const std::vector<orm::schema::diagnostic>& diagnostics,
 }  // namespace
 
 suite("ORM Schema Validator") {
-  section("Profile and entities") {
+  group("Profile and entities") {
     given("a valid ORM profile") {
       const char* schema =
           "schema Store [orm(1)]; "
@@ -45,7 +45,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
 
       then("it validates") { check(validate_text(schema, diagnostics)); }
-      then("it emits no diagnostics") { check_uint_eq(diagnostics.size(), 0); }
+      then("it emits no diagnostics") { check_equal(diagnostics.size(), 0); }
     }
 
     given("an ordinary TBE schema") {
@@ -76,7 +76,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it validates and generates one static lifecycle dispatcher") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -114,7 +114,7 @@ suite("ORM Schema Validator") {
       orm::schema::schema_model model;
       std::vector<orm::schema::diagnostic> diagnostics;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("validator and generator can consume values after the AST is released") {
         check(orm::schema::normalize(root, model, diagnostics));
@@ -122,10 +122,10 @@ suite("ORM Schema Validator") {
         root = nullptr;
 
         check(model.orm_enabled);
-        check_str_eq(model.cpp_namespace.c_str(), "app::model");
-        check_uint_eq(model.entities.size(), 1u);
-        check_str_eq(model.entities.front().table.c_str(), "users");
-        check_str_eq(model.entities.front().fields.front().column.c_str(), "user_id");
+        check_equal(model.cpp_namespace.c_str(), "app::model");
+        check_equal(model.entities.size(), 1u);
+        check_equal(model.entities.front().table.c_str(), "users");
+        check_equal(model.entities.front().fields.front().column.c_str(), "user_id");
         check(orm::schema::validate(model, diagnostics));
       }
       if (root != nullptr) {
@@ -134,7 +134,7 @@ suite("ORM Schema Validator") {
     }
   }
 
-  section("Entity constraints") {
+  group("Entity constraints") {
     given("optional primary-key and version fields") {
       const char* schema =
           "schema Store [orm(1)]; [table(users)] message User { "
@@ -204,7 +204,7 @@ suite("ORM Schema Validator") {
 
       then("it accepts a composite identifier") {
         check(validate_text(schema, diagnostics));
-        check_uint_eq(diagnostics.size(), 0u);
+        check_equal(diagnostics.size(), 0u);
       }
     }
 
@@ -219,7 +219,7 @@ suite("ORM Schema Validator") {
 
       then("it validates the embeddable key contract") {
         check(validate_text(schema, diagnostics));
-        check_uint_eq(diagnostics.size(), 0u);
+        check_equal(diagnostics.size(), 0u);
       }
     }
 
@@ -274,7 +274,7 @@ suite("ORM Schema Validator") {
 
       then("it enables optimistic locking metadata") {
         check(validate_text(schema, diagnostics));
-        check_uint_eq(diagnostics.size(), 0u);
+        check_equal(diagnostics.size(), 0u);
       }
     }
 
@@ -331,7 +331,7 @@ suite("ORM Schema Validator") {
     }
   }
 
-  section("Single-table inheritance") {
+  group("Single-table inheritance") {
     given("a valid generated hierarchy") {
       const char* schema =
           "schema Store [orm(1)]; "
@@ -344,7 +344,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it emits flattened models and a variant hierarchy") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -398,7 +398,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it emits one switch case that calls base before subtype") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -431,7 +431,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it flattens inherited members into the concrete table model") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -461,7 +461,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it assigns inherited and local columns to separate fragments") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -504,7 +504,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it rejects the incompatible C object layout explicitly") {
         check(!orm::schema::generate_c(root, "store.h", generated,
@@ -515,7 +515,7 @@ suite("ORM Schema Validator") {
     }
   }
 
-  section("Relations") {
+  group("Relations") {
     given("a relation with a valid mapping") {
       const char* schema =
           "schema Store [orm(1)]; "
@@ -661,7 +661,7 @@ suite("ORM Schema Validator") {
     }
   }
 
-  section("C++ metadata generation") {
+  group("C++ metadata generation") {
     given("optional and enum ORM fields") {
       const char* schema =
           "schema Store [orm(1)]; enum ProfileState <uint8> { inactive = 0; "
@@ -671,7 +671,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it emits compile-time member type checks") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -695,7 +695,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it generates member, column, table, and primary-key metadata") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -717,7 +717,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("generation fails instead of silently emitting empty metadata") {
         check(!orm::schema::generate_cpp(root, generated, diagnostics));
@@ -737,7 +737,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it generates the namespace foreign-key binding and cascade policy") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -764,7 +764,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it generates typed accessors with resolved database column names") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -796,7 +796,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it generates a many descriptor") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -816,7 +816,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it emits the lifecycle policy in the descriptor") {
         check(orm::schema::generate_cpp(root, generated, diagnostics));
@@ -826,7 +826,7 @@ suite("ORM Schema Validator") {
     }
   }
 
-  section("C facade generation") {
+  group("C facade generation") {
     given("an ORM schema backed by a generated TBE C model") {
       const char* schema =
           "schema CStore [orm(1)]; enum State <uint8> { inactive = 0; active = 1; } "
@@ -839,7 +839,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it emits typed CRUD and optimistic-lock operations") {
         check(orm::schema::generate_c(root, "c_store.tbe.h", generated,
@@ -864,7 +864,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("it rejects the facade before emitting invalid C") {
         check(!orm::schema::generate_c(root, "c_store.tbe.h", generated,
@@ -882,7 +882,7 @@ suite("ORM Schema Validator") {
       std::vector<orm::schema::diagnostic> diagnostics;
       std::string generated;
       check_not_null(root);
-      check_int_eq(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
+      check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
       then("the C facade rejects it instead of emitting a partial CRUD API") {
         check(!orm::schema::generate_c(root, "c_store.tbe.h", generated,

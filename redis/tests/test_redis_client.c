@@ -16,7 +16,7 @@
 #define TEST_ASSERT_NULL(value) check_null((value))
 #define TEST_ASSERT_NOT_NULL(value) check_not_null((value))
 #define TEST_ASSERT_EQUAL(expected, actual) check((intptr_t)(actual) == (intptr_t)(expected))
-#define TEST_ASSERT_EQUAL_STRING(expected, actual) check_str_eq((actual), (expected))
+#define TEST_ASSERT_EQUAL_STRING(expected, actual) check_equal((actual), (expected))
 #define TEST_ASSERT_GREATER_THAN(threshold, actual) check((long long)(actual) > (long long)(threshold))
 #define TEST_ASSERT_LESS_THAN(limit, actual) check((long long)(actual) < (long long)(limit))
 #define REDIS_RUN_TEST(fn, label) it(label) { fn(); }
@@ -213,8 +213,8 @@ void test_resp_parser_parses_nested_binary_reply(void) {
     TEST_ASSERT_EQUAL(3, reply->element_count);
     TEST_ASSERT_EQUAL_STRING("OK", reply->elements[0]->str);
     TEST_ASSERT_EQUAL(3, reply->elements[1]->len);
-    TEST_ASSERT_EQUAL(3, tstr_len((tstr_t)reply->elements[1]->str));
-    check_mem_eq(reply->elements[1]->str, "a\0b", 3u);
+    TEST_ASSERT_EQUAL(3, tstr_len((tstr)reply->elements[1]->str));
+    check_equal(reply->elements[1]->str, "a\0b", 3u);
     TEST_ASSERT_EQUAL(42, reply->elements[2]->integer);
 
     redis_reply_free(reply);
@@ -307,7 +307,7 @@ void test_stream_entry_take_value_transfers_binary_and_empty_values(void) {
                       redis_stream_entry_take_value(&entry, 0u, &binary_value, &binary_len));
     TEST_ASSERT_NOT_NULL(binary_value);
     TEST_ASSERT_EQUAL(sizeof(binary), binary_len);
-    check_mem_eq(binary_value, binary, sizeof(binary));
+    check_equal(binary_value, binary, sizeof(binary));
     TEST_ASSERT_NULL(entry.values[0]);
     TEST_ASSERT_EQUAL(0, entry.value_lens[0]);
 

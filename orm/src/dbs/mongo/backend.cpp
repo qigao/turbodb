@@ -142,12 +142,12 @@ public:
         return get(row, column).is_null;
     }
 
-    tstr_v cell(std::uint64_t row, std::uint64_t column) const override
+    vstr cell(std::uint64_t row, std::uint64_t column) const override
     {
         const materialized_cell& selected = get(row, column);
         require(!selected.is_null, ORM_STATUS_NULL_VALUE,
                 "MongoDB result cell is null");
-        return tstr_v_from_buf(selected.value.data(), selected.value.size());
+        return vstr_from_buf(selected.value.data(), selected.value.size());
     }
 
 private:
@@ -674,6 +674,8 @@ private:
                                 const connection_limits& limits,
                                 mongoc_client_session_t* session)
     {
+        require(!plan.distinct, ORM_STATUS_UNSUPPORTED,
+                "MongoDB DISTINCT queries are not supported");
         require(plan.joins.empty(), ORM_STATUS_UNSUPPORTED,
                 "MongoDB joins are not supported by the ORM backend");
         switch (plan.kind) {

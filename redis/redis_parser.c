@@ -12,7 +12,7 @@
 #define REDIS_RESP_MIN_VALUE_SIZE 3u
 
 typedef struct redis_reply_string_s {
-  tstr_t value;
+  tstr value;
   struct redis_reply_string_s *next;
 } redis_reply_string_t;
 
@@ -36,9 +36,9 @@ static redis_reply_t *redis_reply_alloc(redis_reply_owner_t *owner) {
   return &allocation->reply;
 }
 
-static tstr_t redis_reply_string_create(redis_reply_owner_t *owner, tstr_v value) {
+static tstr redis_reply_string_create(redis_reply_owner_t *owner, vstr value) {
   redis_reply_string_t *tracked;
-  tstr_t string = tstr_from_v(value);
+  tstr string = tstr_from_v(value);
   if (!string) return NULL;
   tracked = mem_alloc(&owner->pool, sizeof(*tracked));
   if (!tracked) {
@@ -107,7 +107,7 @@ static int redis_parse_resp_value(const char *data, size_t len, size_t depth,
     if (data[total - 2u] != '\r' || data[total - 1u] != '\n') return -1;
     parsed->type = REDIS_REPLY_BULK_STRING;
     parsed->str =
-        redis_reply_string_create(owner, tstr_v_from_buf(data + token.header_len, bulk_len));
+        redis_reply_string_create(owner, vstr_from_buf(data + token.header_len, bulk_len));
     if (!parsed->str) return -1;
     parsed->len = bulk_len;
     *reply = parsed;

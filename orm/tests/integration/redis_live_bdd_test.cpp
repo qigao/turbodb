@@ -3,7 +3,7 @@
 #include "redis_client.h"
 #include "redis_pool.h"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -562,7 +562,7 @@ spec("Redis ORM live integration") {
                     if (report.context != nullptr) {
                         const int spawn_status =
                             coro_context_spawn(report.context, live_redis_task, &report);
-                        check_int_eq(spawn_status, TURBO_OK);
+                        check_equal(spawn_status, TURBO_OK);
                         if (spawn_status == TURBO_OK)
                             coro_context_run(report.context, TURBO_RUN_DEFAULT);
                         coro_context_destroy(report.context);

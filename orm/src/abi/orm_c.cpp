@@ -38,6 +38,8 @@ constexpr std::uint32_t default_embedded_busy_timeout_ms = 5000;
 
 using orm_c_detail::bound_parameter;
 using orm_c_detail::aggregate_expression;
+using orm_c_detail::scalar_projection;
+using orm_c_detail::scalar_token;
 using orm_c_detail::assignment;
 using orm_c_detail::condition_node;
 using orm_c_detail::connection_limits;
@@ -47,6 +49,7 @@ using orm_c_detail::require;
 using orm_c_detail::result_backend;
 using orm_c_detail::join_clause;
 using orm_c_detail::predicate;
+using orm_c_detail::ordering_spec;
 using orm_c_detail::query_kind;
 using orm_c_detail::query_plan;
 using orm_c_detail::status_error;
@@ -453,6 +456,7 @@ struct orm_query {
     std::string raw_sql;
     std::vector<std::string> columns;
     std::vector<aggregate_expression> aggregates;
+    std::vector<scalar_projection> scalar_projections;
     std::vector<assignment> assignments;
     std::vector<join_clause> joins;
     std::vector<std::string> group_columns;
@@ -461,18 +465,140 @@ struct orm_query {
     std::vector<condition_node*> where_stack;
     std::vector<condition_node*> having_stack;
     std::vector<bound_parameter> raw_parameters;
-    std::optional<std::pair<std::string, orm_order_t>> ordering;
+    std::optional<ordering_spec> ordering;
     std::optional<std::uint64_t> limit;
     std::optional<std::uint64_t> offset;
     std::size_t parameter_count = 0;
     std::size_t parameter_bytes = 0;
     std::size_t predicate_count = 0;
     bool select_all = false;
+    bool distinct = false;
 };
 
 struct orm_result {
     std::unique_ptr<result_backend> backend;
 };
+
+std::unique_ptr<condition_node> clone_condition_node(const condition_node& source)
+{
+    auto output = std::make_unique<condition_node>();
+    output->is_group = source.is_group;
+    output->is_exists = source.is_exists;
+    output->is_in_subquery = source.is_in_subquery;
+    output->is_scalar_subquery = source.is_scalar_subquery;
+    output->negated = source.negated;
+    output->logic = source.logic;
+    output->value = source.value;
+    output->subquery = source.subquery;
+    output->subquery_column = source.subquery_column;
+    output->subquery_operation = source.subquery_operation;
+    output->subquery_quantifier = source.subquery_quantifier;
+    output->children.reserve(source.children.size());
+    for (const auto& child : source.children)
+        output->children.push_back(clone_condition_node(*child));
+    return output;
+}
+
+std::shared_ptr<const orm_query> clone_query(const orm_query& source)
+{
+    auto output = std::make_shared<orm_query>();
+    output->state = source.state;
+    output->kind = source.kind;
+    output->table = source.table;
+    output->raw_sql = source.raw_sql;
+    output->columns = source.columns;
+    output->aggregates = source.aggregates;
+    output->scalar_projections = source.scalar_projections;
+    output->assignments = source.assignments;
+    output->joins = source.joins;
+    output->group_columns = source.group_columns;
+    output->where_root = std::move(*clone_condition_node(source.where_root));
+    output->having_root = std::move(*clone_condition_node(source.having_root));
+    output->where_stack.push_back(&output->where_root);
+    output->having_stack.push_back(&output->having_root);
+    output->raw_parameters = source.raw_parameters;
+    output->ordering = source.ordering;
+    output->limit = source.limit;
+    output->offset = source.offset;
+    output->parameter_count = source.parameter_count;
+    output->parameter_bytes = source.parameter_bytes;
+    output->predicate_count = source.predicate_count;
+    output->select_all = source.select_all;
+    output->distinct = source.distinct;
+    return output;
+}
+
+std::size_t subquery_depth(const condition_node& node)
+{
+    std::size_t depth = 0;
+    if (node.is_exists && node.subquery != nullptr) {
+        depth = 1 + std::max(subquery_depth(node.subquery->where_root),
+                             subquery_depth(node.subquery->having_root));
+    }
+    for (const auto& child : node.children)
+        depth = std::max(depth, subquery_depth(*child));
+    return depth;
+}
+
+bool contains_subquery(const condition_node& node)
+{
+    if (node.is_exists || node.is_in_subquery || node.is_scalar_subquery)
+        return true;
+    return std::any_of(node.children.begin(), node.children.end(),
+                       [](const auto& child) { return contains_subquery(*child); });
+}
+
+bool contains_column_operand(const condition_node& node)
+{
+    if (!node.is_group && !node.is_exists && !node.is_in_subquery &&
+        !node.is_scalar_subquery &&
+        node.value.has_column_operand)
+        return true;
+    if ((node.is_exists || node.is_in_subquery || node.is_scalar_subquery) &&
+        node.subquery != nullptr)
+        return contains_column_operand(node.subquery->where_root) ||
+               contains_column_operand(node.subquery->having_root);
+    return std::any_of(node.children.begin(), node.children.end(),
+                       [](const auto& child) {
+                           return contains_column_operand(*child);
+                       });
+}
+
+bool column_belongs_to(const orm_query& query, std::string_view column)
+{
+    if (column.find('.') == std::string_view::npos)
+        return true;
+    const auto belongs_to_table = [&](std::string_view table) {
+        return column.size() > table.size() &&
+               column.compare(0, table.size(), table) == 0 &&
+               column[table.size()] == '.';
+    };
+    if (belongs_to_table(query.table))
+        return true;
+    return std::any_of(query.joins.begin(), query.joins.end(),
+                       [&](const join_clause& join) {
+                           return belongs_to_table(join.table);
+                       });
+}
+
+bool references_known_scope(const condition_node& node,
+                            const orm_query& inner,
+                            const orm_query& outer)
+{
+    if (node.is_group)
+        return std::all_of(node.children.begin(), node.children.end(),
+                           [&](const auto& child) {
+                               return references_known_scope(*child, inner, outer);
+                           });
+    if (node.is_exists || node.is_in_subquery || node.is_scalar_subquery)
+        return true;
+    const auto known = [&](std::string_view column) {
+        return column_belongs_to(inner, column) || column_belongs_to(outer, column);
+    };
+    if (!known(node.value.column))
+        return false;
+    return !node.value.has_column_operand || known(node.value.right_column);
+}
 
 enum class transaction_state {
     active,
@@ -541,12 +667,104 @@ void append_format(std::string& destination,
                    const char* format,
                    const Args&... args)
 {
-    tstr_t owned = tstr_format_typed_cpp(format, args...);
+    tstr owned = tstr_format_typed_cpp(format, args...);
     if (owned == nullptr)
         fail(ORM_STATUS_OUT_OF_MEMORY, "format query fragment failed");
-    const tstr_v view = tstr_to_v(owned);
+    const vstr view = tstr_to_v(owned);
     append_checked(destination, {view.data, view.len}, maximum);
     tstr_free(owned);
+}
+
+std::vector<scalar_token> parse_scalar_tokens(const orm_query& query,
+                                             orm_scalar_expression_t expression,
+                                             std::size_t& added_parameters,
+                                             std::size_t& added_bytes)
+{
+    require(expression.tokens != nullptr && expression.token_count != 0,
+            ORM_STATUS_INVALID_ARGUMENT, "scalar expression is empty");
+    require(expression.token_count <= query.state->limits.max_query_bytes,
+            ORM_STATUS_LIMIT_EXCEEDED,
+            "scalar expression token count exceeds max_query_bytes");
+
+    std::vector<scalar_token> tokens;
+    tokens.reserve(expression.token_count);
+
+    std::size_t depth = 0, local_parameters = 0, local_bytes = 0;
+    for (std::uint32_t index = 0; index < expression.token_count; ++index) {
+        const orm_scalar_token_t& input = expression.tokens[index];
+        scalar_token token{};
+        token.kind = input.kind;
+        if (input.kind == ORM_SCALAR_COLUMN) {
+            token.column = copy_identifier(input.column, "scalar expression column", true);
+            ++depth;
+        } else if (input.kind == ORM_SCALAR_VALUE) {
+            token.parameter = encode_parameter(input.value, query.state->limits.max_parameter_bytes);
+            ++depth;
+            ++local_parameters;
+            const std::size_t payload = parameter_payload_size(token.parameter);
+            require(payload <= query.state->limits.max_parameter_bytes - local_bytes,
+                    ORM_STATUS_LIMIT_EXCEEDED,
+                    "parameter payload exceeds max_parameter_bytes");
+            local_bytes += payload;
+        } else {
+            require(input.kind >= ORM_SCALAR_ADD && input.kind <= ORM_SCALAR_DIVIDE,
+                    ORM_STATUS_INVALID_ARGUMENT, "unknown scalar expression operator");
+            require(depth >= 2, ORM_STATUS_INVALID_ARGUMENT,
+                    "scalar expression postfix stack underflow");
+            --depth;
+        }
+
+        require(depth <= query.state->limits.max_condition_depth,
+                ORM_STATUS_LIMIT_EXCEEDED,
+                "scalar expression nesting exceeds max_condition_depth");
+        tokens.push_back(std::move(token));
+    }
+    require(depth == 1, ORM_STATUS_INVALID_ARGUMENT,
+            "scalar expression must produce exactly one value");
+    require(local_parameters <= query.state->limits.max_parameters - query.parameter_count,
+            ORM_STATUS_LIMIT_EXCEEDED, "parameter count exceeds max_parameters");
+    require(local_bytes <= query.state->limits.max_parameter_bytes - query.parameter_bytes,
+            ORM_STATUS_LIMIT_EXCEEDED, "parameter payload exceeds max_parameter_bytes");
+    added_parameters = local_parameters;
+    added_bytes = local_bytes;
+    return tokens;
+}
+
+std::string render_select_sql(const orm_query& query,
+                              std::vector<bound_parameter>& parameters);
+
+std::string render_scalar_expression(const std::vector<scalar_token>& tokens,
+                                     std::vector<bound_parameter>& parameters,
+                                     const orm_query& query)
+{
+    std::vector<std::string> stack;
+    stack.reserve(tokens.size());
+    for (const scalar_token& token : tokens) {
+        if (token.kind == ORM_SCALAR_COLUMN) {
+            stack.push_back(token.column);
+            continue;
+        }
+        if (token.kind == ORM_SCALAR_VALUE) {
+            stack.emplace_back(query.state->backend->placeholder(parameters.size() + 1));
+            parameters.push_back(token.parameter);
+            continue;
+        }
+        require(stack.size() >= 2, ORM_STATUS_INTERNAL_ERROR,
+                "invalid stored scalar expression");
+        std::string right = std::move(stack.back());
+        stack.pop_back();
+        std::string left = std::move(stack.back());
+        stack.pop_back();
+        const char* op = token.kind == ORM_SCALAR_ADD ? "+"
+                          : token.kind == ORM_SCALAR_SUBTRACT ? "-"
+                          : token.kind == ORM_SCALAR_MULTIPLY ? "*"
+                          : "/";
+        std::string result = "(" + left + " " + op + " " + right + ")";
+        stack.push_back(std::move(result));
+    }
+    require(stack.size() == 1, ORM_STATUS_INTERNAL_ERROR,
+            "invalid stored scalar expression");
+    return stack.back();
 }
 
 void render_condition_group(std::string& sql,
@@ -568,6 +786,44 @@ void render_condition_group(std::string& sql,
         const condition_node& node = *group.children[index];
         if (node.is_group) {
             render_condition_group(sql, parameters, query, node, true);
+            continue;
+        }
+        if (node.is_exists) {
+            require(node.subquery != nullptr, ORM_STATUS_INTERNAL_ERROR,
+                    "EXISTS node has no subquery");
+            if (node.negated)
+                append_checked(sql, "not ", maximum);
+            append_checked(sql, "exists (", maximum);
+            append_checked(sql, render_select_sql(*node.subquery, parameters), maximum);
+            append_checked(sql, ")", maximum);
+            continue;
+        }
+        if (node.is_in_subquery) {
+            require(node.subquery != nullptr, ORM_STATUS_INTERNAL_ERROR,
+                    "IN node has no subquery");
+            append_checked(sql, node.subquery_column, maximum);
+            append_checked(sql, node.negated ? " not in (" : " in (", maximum);
+            append_checked(sql, render_select_sql(*node.subquery, parameters), maximum);
+            append_checked(sql, ")", maximum);
+            continue;
+        }
+        if (node.is_scalar_subquery) {
+            require(node.subquery != nullptr, ORM_STATUS_INTERNAL_ERROR,
+                    "scalar-subquery node has no subquery");
+            append_format(sql, maximum, "{} {} ", node.subquery_column,
+                          node.subquery_operation);
+            if (!node.subquery_quantifier.empty()) {
+                append_checked(sql, node.subquery_quantifier, maximum);
+                append_checked(sql, " ", maximum);
+            }
+            append_checked(sql, "(", maximum);
+            append_checked(sql, render_select_sql(*node.subquery, parameters), maximum);
+            append_checked(sql, ")", maximum);
+            continue;
+        }
+        if (node.value.has_column_operand) {
+            append_format(sql, maximum, "{} {} {}", node.value.column,
+                          node.value.operation, node.value.right_column);
             continue;
         }
         if (node.value.has_parameter) {
@@ -597,10 +853,8 @@ void render_filters(std::string& sql,
     render_condition_group(sql, parameters, query, root, false);
 }
 
-namespace {
-
 constexpr const char select_mustache_template[] =
-    "select {{{select_list}}} from {{{table}}}{{#joins}}{{{.}}}{{/joins}}"
+    "select {{{distinct}}}{{{select_list}}} from {{{table}}}{{#joins}}{{{.}}}{{/joins}}"
     "{{#where}} where {{{where}}}{{/where}}"
     "{{#group_by}} group by {{{group_by}}}{{/group_by}}"
     "{{#having}} having {{{having}}}{{/having}}"
@@ -667,18 +921,19 @@ const MUSTACHE_TEMPLATE* compiled_delete_template()
 
 using mustache_detail::node;
 
-rendered_query render_select_mustache(const orm_query& query)
+std::string render_select_sql(const orm_query& query,
+                              std::vector<bound_parameter>& parameters)
 {
     const std::size_t maximum = query.state->limits.max_query_bytes;
-    rendered_query rendered;
-    rendered.sql.reserve(std::min<std::size_t>(maximum, 1024));
-    rendered.parameters.reserve(query.parameter_count);
+    std::string sql;
+    sql.reserve(std::min<std::size_t>(maximum, 1024));
 
     std::string select_list;
     if (query.select_all) {
         select_list = "*";
     } else {
-        require(!query.columns.empty() || !query.aggregates.empty(),
+        require(!query.columns.empty() || !query.aggregates.empty() ||
+                    !query.scalar_projections.empty(),
                 ORM_STATUS_INVALID_STATE,
                 "query has no selected columns or aggregates");
         bool needs_separator = false;
@@ -698,6 +953,14 @@ rendered_query render_select_mustache(const orm_query& query)
             }
             needs_separator = true;
         }
+        for (const scalar_projection& projection : query.scalar_projections) {
+            if (needs_separator)
+                select_list += ", ";
+            select_list += render_scalar_expression(projection.tokens, parameters, query);
+            if (!projection.alias.empty())
+                select_list += " as " + projection.alias;
+            needs_separator = true;
+        }
     }
 
     std::vector<std::string> join_items;
@@ -714,7 +977,7 @@ rendered_query render_select_mustache(const orm_query& query)
     }
 
     std::string where_sql;
-    render_filters(where_sql, rendered.parameters, query, query.where_root, "");
+    render_filters(where_sql, parameters, query, query.where_root, "");
 
     std::string group_by;
     for (std::size_t index = 0; index < query.group_columns.size(); ++index) {
@@ -724,19 +987,24 @@ rendered_query render_select_mustache(const orm_query& query)
     }
 
     std::string having_sql;
-    render_filters(having_sql, rendered.parameters, query, query.having_root, "");
+    render_filters(having_sql, parameters, query, query.having_root, "");
 
     std::string order_by;
     if (query.ordering) {
         order_by = " order by ";
-        order_by += query.ordering->first;
-        order_by += query.ordering->second == ORM_ORDER_DESCENDING ? " desc" : " asc";
+        if (query.ordering->is_expression)
+            order_by += render_scalar_expression(query.ordering->tokens, parameters, query);
+        else
+            order_by += query.ordering->column;
+        order_by += query.ordering->order == ORM_ORDER_DESCENDING ? " desc" : " asc";
     }
 
     const std::string pagination =
         query.state->backend->pagination(query.limit, query.offset);
 
     node root;
+    mustache_detail::add_string(root.children, "distinct",
+                                query.distinct ? "distinct " : "");
     mustache_detail::add_string(root.children, "select_list", std::move(select_list));
     mustache_detail::add_string(root.children, "table", query.table);
     if (!join_items.empty())
@@ -752,7 +1020,15 @@ rendered_query render_select_mustache(const orm_query& query)
     if (!pagination.empty())
         mustache_detail::add_string(root.children, "pagination", pagination);
 
-    mustache_detail::render(compiled_select_template(), root, rendered.sql, maximum);
+    mustache_detail::render(compiled_select_template(), root, sql, maximum);
+    return sql;
+}
+
+rendered_query render_select_mustache(const orm_query& query)
+{
+    rendered_query rendered;
+    rendered.parameters.reserve(query.parameter_count);
+    rendered.sql = render_select_sql(query, rendered.parameters);
     return rendered;
 }
 
@@ -845,8 +1121,6 @@ rendered_query render_delete_mustache(const orm_query& query)
     return rendered;
 }
 
-} // namespace
-
 rendered_query build_query(const orm_query& query)
 {
     const std::size_t maximum = query.state->limits.max_query_bytes;
@@ -887,12 +1161,26 @@ std::unique_ptr<result_backend> execute_query(orm_query& query,
 {
     if (query.state->backend->model() ==
         database_backend::execution_model::native_plan) {
+        require(!query.ordering || !query.ordering->is_expression,
+                ORM_STATUS_UNSUPPORTED,
+                "ORDER BY expression is not supported by native-plan backends");
+        require(query.scalar_projections.empty(), ORM_STATUS_UNSUPPORTED,
+                "scalar projection expressions are not supported by this backend");
+        require(!contains_subquery(query.where_root) &&
+                    !contains_subquery(query.having_root),
+                ORM_STATUS_UNSUPPORTED,
+                "subqueries are not supported by this backend");
+        require(!contains_column_operand(query.where_root) &&
+                    !contains_column_operand(query.having_root),
+                ORM_STATUS_UNSUPPORTED,
+                "column comparison predicates are not supported by this backend");
         const query_plan plan{
             query.kind, query.table, query.raw_sql, query.columns,
             query.aggregates, query.assignments, query.joins,
             query.group_columns, query.where_root, query.having_root,
             query.raw_parameters, query.ordering, query.limit,
-            query.offset, query.parameter_count, query.select_all};
+            query.offset, query.parameter_count, query.select_all,
+            query.distinct};
         return executor.execute_plan(plan, query.state->limits);
     }
 
@@ -1017,6 +1305,23 @@ predicate make_predicate(orm_query& query,
     return next;
 }
 
+predicate make_column_predicate(orm_query& query,
+                                std::string left_column,
+                                orm_compare_t comparison,
+                                std::string right_column)
+{
+    require(query.predicate_count < query.state->limits.max_predicates,
+            ORM_STATUS_LIMIT_EXCEEDED, "predicate count exceeds max_predicates");
+    predicate next;
+    next.column = std::move(left_column);
+    next.operation = comparison_sql(comparison);
+    next.right_column = std::move(right_column);
+    next.comparison = comparison;
+    next.has_parameter = false;
+    next.has_column_operand = true;
+    return next;
+}
+
 void append_predicate(orm_query& query,
                       std::vector<condition_node*>& stack,
                       predicate next)
@@ -1034,6 +1339,85 @@ void append_predicate(orm_query& query,
         ++query.parameter_count;
         query.parameter_bytes += parameter_size;
     }
+}
+
+void append_subquery_predicate(orm_query& query,
+                               const orm_query& subquery,
+                               bool negated,
+                               std::string in_column,
+                               std::string scalar_operation = {},
+                               std::string quantifier = {})
+{
+    require(references_known_scope(subquery.where_root, subquery, query) &&
+                references_known_scope(subquery.having_root, subquery, query),
+            ORM_STATUS_INVALID_ARGUMENT,
+            "subquery predicate references a table outside its inner and outer query scopes");
+    require(query.predicate_count < query.state->limits.max_predicates,
+            ORM_STATUS_LIMIT_EXCEEDED, "predicate count exceeds max_predicates");
+    require(subquery.predicate_count <=
+                query.state->limits.max_predicates - query.predicate_count - 1,
+            ORM_STATUS_LIMIT_EXCEEDED,
+            "subquery predicates exceed max_predicates");
+    require(subquery.parameter_count <=
+                query.state->limits.max_parameters - query.parameter_count,
+            ORM_STATUS_LIMIT_EXCEEDED,
+            "subquery parameters exceed max_parameters");
+    require(subquery.parameter_bytes <=
+                query.state->limits.max_parameter_bytes - query.parameter_bytes,
+            ORM_STATUS_LIMIT_EXCEEDED,
+            "subquery parameter payload exceeds max_parameter_bytes");
+    require(1 + std::max(subquery_depth(subquery.where_root),
+                         subquery_depth(subquery.having_root)) <=
+                query.state->limits.max_condition_depth,
+            ORM_STATUS_LIMIT_EXCEEDED,
+            "subquery nesting exceeds max_condition_depth");
+
+    auto node = std::make_unique<condition_node>();
+    node->is_group = false;
+    node->is_exists = in_column.empty();
+    node->is_scalar_subquery = !scalar_operation.empty();
+    node->is_in_subquery = !node->is_scalar_subquery && !in_column.empty();
+    node->negated = negated;
+    node->subquery = clone_query(subquery);
+    node->subquery_column = std::move(in_column);
+    node->subquery_operation = std::move(scalar_operation);
+    node->subquery_quantifier = std::move(quantifier);
+    query.where_stack.back()->children.push_back(std::move(node));
+    query.predicate_count += 1 + subquery.predicate_count;
+    query.parameter_count += subquery.parameter_count;
+    query.parameter_bytes += subquery.parameter_bytes;
+}
+
+void append_exists(orm_query& query,
+                   const orm_query& subquery,
+                   bool negated)
+{
+    append_subquery_predicate(query, subquery, negated, {});
+}
+
+void append_scalar_subquery(orm_query& query,
+                            orm_string_view_t column,
+                            orm_compare_t comparison,
+                            const orm_query& subquery,
+                            std::string quantifier = {})
+{
+    require(supports_where(query.kind), ORM_STATUS_INVALID_STATE,
+            "scalar subquery requires a select, update, or delete query");
+    require_query_kind(subquery, query_kind::select,
+                       "scalar comparison requires a select subquery");
+    require(query.state == subquery.state, ORM_STATUS_INVALID_ARGUMENT,
+            "outer query and subquery must share one connection");
+    require(subquery.where_stack.size() == 1 && subquery.having_stack.size() == 1,
+            ORM_STATUS_INVALID_STATE, "subquery has an unclosed condition group");
+    require(!subquery.select_all &&
+                subquery.columns.size() + subquery.aggregates.size() +
+                    subquery.scalar_projections.size() == 1,
+            ORM_STATUS_INVALID_STATE,
+            "scalar subquery must project exactly one expression");
+    append_subquery_predicate(
+        query, subquery, false,
+        copy_identifier(column, "scalar subquery column", true),
+        comparison_sql(comparison), std::move(quantifier));
 }
 
 void begin_group(orm_query& query,
@@ -1064,7 +1448,7 @@ void end_group(std::vector<condition_node*>& stack)
     stack.pop_back();
 }
 
-tstr_v get_cell(const orm_result& result,
+vstr get_cell(const orm_result& result,
                 std::uint64_t row,
                 std::uint64_t column,
                 bool reject_null)
@@ -1077,13 +1461,13 @@ tstr_v get_cell(const orm_result& result,
     if (result.backend->is_null(row, column)) {
         if (reject_null)
             fail(ORM_STATUS_NULL_VALUE, "result cell is SQL NULL");
-        return tstr_v_from_buf(nullptr, 0);
+        return vstr_from_buf(nullptr, 0);
     }
     return result.backend->cell(row, column);
 }
 
 template<typename Integer>
-Integer parse_integer(tstr_v cell)
+Integer parse_integer(vstr cell)
 {
     Integer value{};
     const auto parsed = std::from_chars(cell.data, cell.data + cell.len, value);
@@ -1456,6 +1840,18 @@ orm_query_select_all(orm_query_t* query, orm_error_t* error)
 }
 
 orm_status_t ORM_C_CALL
+orm_query_set_distinct(orm_query_t* query, int enabled, orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "query handle is null");
+        require_query_kind(*query, query_kind::select,
+                           "distinct requires a select query");
+        query->distinct = enabled != 0;
+    });
+}
+
+orm_status_t ORM_C_CALL
 orm_query_add_column(orm_query_t* query,
                         orm_string_view_t column,
                         orm_error_t* error)
@@ -1466,7 +1862,8 @@ orm_query_add_column(orm_query_t* query,
                            "add_column requires a select query");
         require(!query->select_all, ORM_STATUS_INVALID_STATE,
                 "cannot add a column after select_all");
-        require(query->columns.size() + query->aggregates.size() <
+        require(query->columns.size() + query->aggregates.size() +
+                    query->scalar_projections.size() <
                     query->state->limits.max_columns,
                 ORM_STATUS_LIMIT_EXCEEDED,
                 "selected column count exceeds max_columns");
@@ -1488,11 +1885,46 @@ orm_query_add_aggregate(orm_query_t* query,
                            "add_aggregate requires a select query");
         require(!query->select_all, ORM_STATUS_INVALID_STATE,
                 "cannot add an aggregate after select_all");
-        require(query->columns.size() + query->aggregates.size() <
+        require(query->columns.size() + query->aggregates.size() +
+                    query->scalar_projections.size() <
                     query->state->limits.max_columns,
                 ORM_STATUS_LIMIT_EXCEEDED,
                 "selected expression count exceeds max_columns");
         query->aggregates.push_back(make_aggregate(aggregate, column, alias));
+    });
+}
+
+orm_status_t ORM_C_CALL
+orm_query_add_expression(orm_query_t* query, orm_scalar_expression_t expression,
+                         orm_string_view_t alias, orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
+        require_query_kind(*query, query_kind::select,
+                           "scalar expression requires a select query");
+        require(!query->select_all, ORM_STATUS_INVALID_STATE,
+                "cannot add an expression after select_all");
+        require(expression.tokens != nullptr && expression.token_count != 0,
+                ORM_STATUS_INVALID_ARGUMENT, "scalar expression is empty");
+        require(expression.token_count <= query->state->limits.max_query_bytes,
+                ORM_STATUS_LIMIT_EXCEEDED,
+                "scalar expression token count exceeds max_query_bytes");
+        require(query->columns.size() + query->aggregates.size() +
+                    query->scalar_projections.size() < query->state->limits.max_columns,
+                ORM_STATUS_LIMIT_EXCEEDED, "selected expression count exceeds max_columns");
+        scalar_projection projection;
+        projection.alias = copy_string_view(alias, "scalar expression alias", true,
+                                             max_identifier_segment_bytes);
+        if (!projection.alias.empty()) {
+            const orm_string_view_t view{projection.alias.data(), projection.alias.size()};
+            projection.alias = copy_identifier(view, "scalar expression alias", false);
+        }
+        std::size_t added_parameters = 0, added_bytes = 0;
+        projection.tokens = parse_scalar_tokens(*query, expression,
+                                               added_parameters, added_bytes);
+        query->scalar_projections.push_back(std::move(projection));
+        query->parameter_count += added_parameters;
+        query->parameter_bytes += added_bytes;
     });
 }
 
@@ -1555,6 +1987,129 @@ orm_query_where(orm_query_t* query,
                          make_predicate(*query,
                                         copy_identifier(column, "predicate column", true),
                                         comparison, value));
+    });
+}
+
+orm_status_t ORM_C_CALL
+orm_query_where_columns(orm_query_t* query,
+                        orm_string_view_t left_column,
+                        orm_compare_t comparison,
+                        orm_string_view_t right_column,
+                        orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "query handle is null");
+        require(supports_where(query->kind), ORM_STATUS_INVALID_STATE,
+                "column comparison requires a select, update, or delete query");
+        append_predicate(
+            *query, query->where_stack,
+            make_column_predicate(
+                *query, copy_identifier(left_column, "left predicate column", true),
+                comparison,
+                copy_identifier(right_column, "right predicate column", true)));
+    });
+}
+
+orm_status_t ORM_C_CALL
+orm_query_where_exists(orm_query_t* query,
+                       const orm_query_t* subquery,
+                       int negated,
+                       orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "query handle is null");
+        require(subquery != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "subquery handle is null");
+        require(query != subquery, ORM_STATUS_INVALID_ARGUMENT,
+                "query cannot contain itself as a subquery");
+        require(supports_where(query->kind), ORM_STATUS_INVALID_STATE,
+                "EXISTS requires a select, update, or delete query");
+        require_query_kind(*subquery, query_kind::select,
+                           "EXISTS requires a select subquery");
+        require(query->state == subquery->state, ORM_STATUS_INVALID_ARGUMENT,
+                "outer query and subquery must share one connection");
+        require(subquery->where_stack.size() == 1 &&
+                    subquery->having_stack.size() == 1,
+                ORM_STATUS_INVALID_STATE,
+                "subquery has an unclosed condition group");
+        append_exists(*query, *subquery, negated != 0);
+    });
+}
+
+orm_status_t ORM_C_CALL
+orm_query_where_in_subquery(orm_query_t* query,
+                            orm_string_view_t column,
+                            const orm_query_t* subquery,
+                            int negated,
+                            orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "query handle is null");
+        require(subquery != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "subquery handle is null");
+        require(query != subquery, ORM_STATUS_INVALID_ARGUMENT,
+                "query cannot contain itself as a subquery");
+        require(supports_where(query->kind), ORM_STATUS_INVALID_STATE,
+                "IN subquery requires a select, update, or delete query");
+        require_query_kind(*subquery, query_kind::select,
+                           "IN requires a select subquery");
+        require(query->state == subquery->state, ORM_STATUS_INVALID_ARGUMENT,
+                "outer query and subquery must share one connection");
+        require(subquery->where_stack.size() == 1 &&
+                    subquery->having_stack.size() == 1,
+                ORM_STATUS_INVALID_STATE,
+                "subquery has an unclosed condition group");
+        require(!subquery->select_all &&
+                    subquery->columns.size() + subquery->aggregates.size() +
+                        subquery->scalar_projections.size() == 1,
+                ORM_STATUS_INVALID_STATE,
+                "IN subquery must project exactly one expression");
+        append_subquery_predicate(
+            *query, *subquery, negated != 0,
+            copy_identifier(column, "IN subquery column", true));
+    });
+}
+
+orm_status_t ORM_C_CALL
+orm_query_where_scalar_subquery(orm_query_t* query,
+                                orm_string_view_t column,
+                                orm_compare_t comparison,
+                                const orm_query_t* subquery,
+                                orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "query handle is null");
+        require(subquery != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "subquery handle is null");
+        require(query != subquery, ORM_STATUS_INVALID_ARGUMENT,
+                "query cannot contain itself as a subquery");
+        append_scalar_subquery(*query, column, comparison, *subquery);
+    });
+}
+
+orm_status_t ORM_C_CALL
+orm_query_where_quantified_subquery(orm_query_t* query,
+                                    orm_string_view_t column,
+                                    orm_compare_t comparison,
+                                    orm_subquery_quantifier_t quantifier,
+                                    const orm_query_t* subquery,
+                                    orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "query handle is null");
+        require(subquery != nullptr, ORM_STATUS_INVALID_ARGUMENT,
+                "subquery handle is null");
+        require(query != subquery, ORM_STATUS_INVALID_ARGUMENT,
+                "query cannot contain itself as a subquery");
+        require(quantifier == ORM_SUBQUERY_ANY || quantifier == ORM_SUBQUERY_ALL,
+                ORM_STATUS_INVALID_ARGUMENT, "unknown subquery quantifier");
+        append_scalar_subquery(*query, column, comparison, *subquery,
+                               quantifier == ORM_SUBQUERY_ANY ? "any" : "all");
     });
 }
 
@@ -1720,7 +2275,34 @@ orm_query_order_by(orm_query_t* query,
                 ORM_STATUS_INVALID_ARGUMENT,
                 "unknown ordering direction");
         std::string copied = copy_identifier(column, "ordering column", true);
-        query->ordering = std::make_pair(std::move(copied), order);
+        ordering_spec spec;
+        spec.column = std::move(copied);
+        spec.order = order;
+        query->ordering = std::move(spec);
+    });
+}
+
+orm_status_t ORM_C_CALL
+orm_query_order_by_expression(orm_query_t* query,
+                               orm_scalar_expression_t expression,
+                               orm_order_t order,
+                               orm_error_t* error)
+{
+    return api_call(error, [&] {
+        require(query != nullptr, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
+        require_query_kind(*query, query_kind::select,
+                           "ORDER BY expression requires a select query");
+        require(order == ORM_ORDER_ASCENDING || order == ORM_ORDER_DESCENDING,
+                ORM_STATUS_INVALID_ARGUMENT,
+                "unknown ordering direction");
+        std::size_t added_parameters = 0, added_bytes = 0;
+        ordering_spec spec;
+        spec.is_expression = true;
+        spec.order = order;
+        spec.tokens = parse_scalar_tokens(*query, expression, added_parameters, added_bytes);
+        query->parameter_count += added_parameters;
+        query->parameter_bytes += added_bytes;
+        query->ordering = std::move(spec);
     });
 }
 
@@ -1867,7 +2449,7 @@ orm_result_is_null(const orm_result_t* result,
         require(result != nullptr, ORM_STATUS_INVALID_ARGUMENT, "result handle is null");
         require(out_is_null != nullptr, ORM_STATUS_INVALID_ARGUMENT,
                 "out_is_null pointer is null");
-        const tstr_v cell = get_cell(*result, row, column, false);
+        const vstr cell = get_cell(*result, row, column, false);
         *out_is_null = cell.data == nullptr ? UINT8_C(1) : UINT8_C(0);
     });
 }
@@ -1885,7 +2467,7 @@ orm_result_get_text(const orm_result_t* result,
         require(result != nullptr, ORM_STATUS_INVALID_ARGUMENT, "result handle is null");
         require(out_value != nullptr, ORM_STATUS_INVALID_ARGUMENT,
                 "out_value pointer is null");
-        const tstr_v cell = get_cell(*result, row, column, true);
+        const vstr cell = get_cell(*result, row, column, true);
         out_value->data = cell.data;
         out_value->len = cell.len;
     });
@@ -1904,7 +2486,7 @@ orm_result_get_blob(const orm_result_t* result,
         require(result != nullptr, ORM_STATUS_INVALID_ARGUMENT, "result handle is null");
         require(out_value != nullptr, ORM_STATUS_INVALID_ARGUMENT,
                 "out_value pointer is null");
-        const tstr_v cell = get_cell(*result, row, column, true);
+        const vstr cell = get_cell(*result, row, column, true);
         out_value->data = cell.data;
         out_value->size = cell.len;
     });
@@ -1951,7 +2533,7 @@ orm_result_get_double(const orm_result_t* result,
         require(result != nullptr, ORM_STATUS_INVALID_ARGUMENT, "result handle is null");
         require(out_value != nullptr, ORM_STATUS_INVALID_ARGUMENT,
                 "out_value pointer is null");
-        const tstr_v cell = get_cell(*result, row, column, true);
+        const vstr cell = get_cell(*result, row, column, true);
         std::istringstream stream(std::string(cell.data, cell.len));
         stream.imbue(std::locale::classic());
         double value = 0.0;
@@ -1973,7 +2555,7 @@ orm_result_get_boolean(const orm_result_t* result,
         require(result != nullptr, ORM_STATUS_INVALID_ARGUMENT, "result handle is null");
         require(out_value != nullptr, ORM_STATUS_INVALID_ARGUMENT,
                 "out_value pointer is null");
-        const tstr_v cell = get_cell(*result, row, column, true);
+        const vstr cell = get_cell(*result, row, column, true);
         const std::string_view value(cell.data, cell.len);
         if (value == "t" || value == "true" || value == "1") {
             *out_value = UINT8_C(1);

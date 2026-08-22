@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "redis_export.h"
 #include "platform.h"
 #include "turbo_thread.h"
 
@@ -155,14 +156,14 @@ struct redis_client_s {
  * @param port Redis server port
  * @return Redis client instance or NULL on error
  */
-CXX_C_API redis_client_t* redis_client_create(const char *host, uint16_t port);
+REDIS_API redis_client_t* redis_client_create(const char *host, uint16_t port);
 
 /**
  * Create Redis client with custom configuration
  * @param config Redis configuration
  * @return Redis client instance or NULL on error
  */
-CXX_C_API redis_client_t* redis_client_create_with_config(const redis_config_t *config);
+REDIS_API redis_client_t* redis_client_create_with_config(const redis_config_t *config);
 
 /**
  * Connect to Redis server
@@ -171,7 +172,7 @@ CXX_C_API redis_client_t* redis_client_create_with_config(const redis_config_t *
  * @param user_data User data for callback
  * @return 0 on success, negative on error
  */
-CXX_C_API int redis_client_connect(redis_client_t *client, redis_connect_cb_t callback, void *user_data);
+REDIS_API int redis_client_connect(redis_client_t *client, redis_connect_cb_t callback, void *user_data);
 
 /**
  * Complete configured AUTH/SELECT setup on an already connected socket.
@@ -180,7 +181,7 @@ CXX_C_API int redis_client_connect(redis_client_t *client, redis_connect_cb_t ca
  * It is idempotent for the state tracked by `client` and returns a Redis,
  * protocol, or transport error without hiding an uncertain command outcome.
  */
-CXX_C_API int redis_client_prepare(redis_client_t *client);
+REDIS_API int redis_client_prepare(redis_client_t *client);
 
 /**
  * Attach an externally-owned CoroNet socket to a Redis client.
@@ -188,7 +189,7 @@ CXX_C_API int redis_client_prepare(redis_client_t *client);
  * The client will use the socket for command I/O. Ownership remains with the
  * caller unless transferred via `take_ownership`.
  */
-CXX_C_API int redis_client_attach_socket(redis_client_t *client,
+REDIS_API int redis_client_attach_socket(redis_client_t *client,
                                          coro_context_t *ctx,
                                          coro_socket_t *socket,
                                          int take_ownership);
@@ -198,7 +199,7 @@ CXX_C_API int redis_client_attach_socket(redis_client_t *client,
  *
  * Returns the detached socket or NULL if none.
  */
-CXX_C_API coro_socket_t *redis_client_detach_socket(redis_client_t *client);
+REDIS_API coro_socket_t *redis_client_detach_socket(redis_client_t *client);
 
 /**
  * Execute Redis command
@@ -209,7 +210,7 @@ CXX_C_API coro_socket_t *redis_client_detach_socket(redis_client_t *client);
  * @param ... Command arguments
  * @return 0 on success, negative on error
  */
-CXX_C_API int redis_command(redis_client_t *client, redis_command_cb_t callback, 
+REDIS_API int redis_command(redis_client_t *client, redis_command_cb_t callback,
                   void *user_data, const char *format, ...);
 
 /**
@@ -222,7 +223,7 @@ CXX_C_API int redis_command(redis_client_t *client, redis_command_cb_t callback,
  * @param user_data User data for callback
  * @return 0 on success, negative on error
  */
-CXX_C_API int redis_commandv(redis_client_t *client, int argc, const char **argv, 
+REDIS_API int redis_commandv(redis_client_t *client, int argc, const char **argv,
                    const size_t *argvlen, redis_command_cb_t callback, void *user_data);
 
 /**
@@ -241,21 +242,21 @@ CXX_C_API int redis_commandv(redis_client_t *client, int argc, const char **argv
  * @return TURBO_OK for a non-error reply, TURBO_EIO for a Redis error reply,
  *         or a transport/validation error
  */
-CXX_C_API int redis_commandv_result(redis_client_t *client, int argc,
+REDIS_API int redis_commandv_result(redis_client_t *client, int argc,
                                     const char **argv, const size_t *argvlen,
                                     redis_command_result_t *out);
 
 /** Release an owned command reply and reset the result to NOT_SENT. */
-CXX_C_API void redis_command_result_clear(redis_command_result_t *result);
+REDIS_API void redis_command_result_clear(redis_command_result_t *result);
 
 /** Classify a RESP error by its stable leading token; non-errors return NONE. */
-CXX_C_API redis_server_error_t redis_server_error_classify(const redis_reply_t *reply);
+REDIS_API redis_server_error_t redis_server_error_classify(const redis_reply_t *reply);
 
 /**
  * Disconnect from Redis server
  * @param client Redis client
  */
-CXX_C_API void redis_client_disconnect(redis_client_t *client);
+REDIS_API void redis_client_disconnect(redis_client_t *client);
 
 /**
  * Interrupt the current CoroNet socket wait from another thread.
@@ -263,117 +264,117 @@ CXX_C_API void redis_client_disconnect(redis_client_t *client);
  * Socket ownership remains with the Redis client. Returns TURBO_ENOTCONN when
  * no socket is currently published.
  */
-CXX_C_API int redis_client_interrupt(redis_client_t *client, int status);
+REDIS_API int redis_client_interrupt(redis_client_t *client, int status);
 
 /**
  * Destroy Redis client
  * @param client Redis client
  */
-CXX_C_API void redis_client_destroy(redis_client_t *client);
+REDIS_API void redis_client_destroy(redis_client_t *client);
 
 /**
  * Free Redis reply
  * @param reply Redis reply to free
  */
-CXX_C_API void redis_reply_free(redis_reply_t *reply);
+REDIS_API void redis_reply_free(redis_reply_t *reply);
 
 /**
  * Get error message from client
  * @param client Redis client
  * @return Error message or NULL
  */
-CXX_C_API const char* redis_client_get_error(redis_client_t *client);
+REDIS_API const char* redis_client_get_error(redis_client_t *client);
 
 /* Convenience functions for common commands */
 
 /**
  * SET key value
  */
-CXX_C_API int redis_set(redis_client_t *client, const char *key, const char *value,
+REDIS_API int redis_set(redis_client_t *client, const char *key, const char *value,
               redis_command_cb_t callback, void *user_data);
 
 /**
  * GET key
  */
-CXX_C_API int redis_get(redis_client_t *client, const char *key,
+REDIS_API int redis_get(redis_client_t *client, const char *key,
               redis_command_cb_t callback, void *user_data);
 
 /**
  * DEL key [key ...]
  */
-CXX_C_API int redis_del(redis_client_t *client, int key_count, const char **keys,
+REDIS_API int redis_del(redis_client_t *client, int key_count, const char **keys,
               redis_command_cb_t callback, void *user_data);
 
 /**
  * EXISTS key
  */
-CXX_C_API int redis_exists(redis_client_t *client, const char *key,
+REDIS_API int redis_exists(redis_client_t *client, const char *key,
                  redis_command_cb_t callback, void *user_data);
 
 /**
  * EXPIRE key seconds
  */
-CXX_C_API int redis_expire(redis_client_t *client, const char *key, int seconds,
+REDIS_API int redis_expire(redis_client_t *client, const char *key, int seconds,
                  redis_command_cb_t callback, void *user_data);
 
 /**
  * INCR key
  */
-CXX_C_API int redis_incr(redis_client_t *client, const char *key,
+REDIS_API int redis_incr(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /**
  * LPUSH key value [value ...]
  */
-CXX_C_API int redis_lpush(redis_client_t *client, const char *key, int value_count, const char **values,
+REDIS_API int redis_lpush(redis_client_t *client, const char *key, int value_count, const char **values,
                 redis_command_cb_t callback, void *user_data);
 
 /**
  * RPUSH key value [value ...]
  */
-CXX_C_API int redis_rpush(redis_client_t *client, const char *key, int value_count, const char **values,
+REDIS_API int redis_rpush(redis_client_t *client, const char *key, int value_count, const char **values,
                 redis_command_cb_t callback, void *user_data);
 
 /**
  * LPOP key
  */
-CXX_C_API int redis_lpop(redis_client_t *client, const char *key,
+REDIS_API int redis_lpop(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /**
  * RPOP key
  */
-CXX_C_API int redis_rpop(redis_client_t *client, const char *key,
+REDIS_API int redis_rpop(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /**
  * HSET key field value
  */
-CXX_C_API int redis_hset(redis_client_t *client, const char *key, const char *field, const char *value,
+REDIS_API int redis_hset(redis_client_t *client, const char *key, const char *field, const char *value,
                redis_command_cb_t callback, void *user_data);
 
 /**
  * HGET key field
  */
-CXX_C_API int redis_hget(redis_client_t *client, const char *key, const char *field,
+REDIS_API int redis_hget(redis_client_t *client, const char *key, const char *field,
                redis_command_cb_t callback, void *user_data);
 
 /**
  * SADD key member [member ...]
  */
-CXX_C_API int redis_sadd(redis_client_t *client, const char *key, int member_count, const char **members,
+REDIS_API int redis_sadd(redis_client_t *client, const char *key, int member_count, const char **members,
                redis_command_cb_t callback, void *user_data);
 
 /**
  * SMEMBERS key
  */
-CXX_C_API int redis_smembers(redis_client_t *client, const char *key,
+REDIS_API int redis_smembers(redis_client_t *client, const char *key,
                    redis_command_cb_t callback, void *user_data);
 
 /**
  * PING
  */
-CXX_C_API int redis_ping(redis_client_t *client, redis_command_cb_t callback, void *user_data);
+REDIS_API int redis_ping(redis_client_t *client, redis_command_cb_t callback, void *user_data);
 
 /* =============================================================================
  * Bloom Filter API
@@ -383,25 +384,25 @@ CXX_C_API int redis_ping(redis_client_t *client, redis_command_cb_t callback, vo
 /**
  * BF.RESERVE key error_rate capacity
  */
-CXX_C_API int redis_bf_reserve(redis_client_t *client, const char *key, double error_rate, int capacity,
+REDIS_API int redis_bf_reserve(redis_client_t *client, const char *key, double error_rate, int capacity,
                      redis_command_cb_t callback, void *user_data);
 
 /**
  * BF.ADD key item
  */
-CXX_C_API int redis_bf_add(redis_client_t *client, const char *key, const char *item,
+REDIS_API int redis_bf_add(redis_client_t *client, const char *key, const char *item,
                  redis_command_cb_t callback, void *user_data);
 
 /**
  * BF.EXISTS key item
  */
-CXX_C_API int redis_bf_exists(redis_client_t *client, const char *key, const char *item,
+REDIS_API int redis_bf_exists(redis_client_t *client, const char *key, const char *item,
                     redis_command_cb_t callback, void *user_data);
 
 /**
  * BF.MADD key item [item ...]
  */
-CXX_C_API int redis_bf_madd(redis_client_t *client, const char *key, int item_count, const char **items,
+REDIS_API int redis_bf_madd(redis_client_t *client, const char *key, int item_count, const char **items,
                   redis_command_cb_t callback, void *user_data);
 
 /* =============================================================================
@@ -462,13 +463,13 @@ typedef void (*redis_stream_cb_t)(redis_client_t *client,
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xadd(redis_client_t *client, const char *key, size_t maxlen,
+REDIS_API int redis_xadd(redis_client_t *client, const char *key, size_t maxlen,
                size_t field_count, const char **fields,
                const char **values, const size_t *value_lens,
                redis_command_cb_t callback, void *user_data);
 
 /** Owned-result variant of redis_xadd(); clear `out` after use. */
-CXX_C_API int redis_xadd_result(redis_client_t *client, const char *key, size_t maxlen,
+REDIS_API int redis_xadd_result(redis_client_t *client, const char *key, size_t maxlen,
                                 size_t field_count, const char **fields,
                                 const char **values, const size_t *value_lens,
                                 redis_command_result_t *out);
@@ -487,12 +488,12 @@ CXX_C_API int redis_xadd_result(redis_client_t *client, const char *key, size_t 
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xread(redis_client_t *client, size_t count, int block_ms,
+REDIS_API int redis_xread(redis_client_t *client, size_t count, int block_ms,
                 size_t stream_count, const char **keys, const char **ids,
                 redis_stream_cb_t callback, void *user_data);
 
 /** Owned-result variant of redis_xread(); clear `out` after use. */
-CXX_C_API int redis_xread_result(redis_client_t *client, size_t count, int block_ms,
+REDIS_API int redis_xread_result(redis_client_t *client, size_t count, int block_ms,
                                  size_t stream_count, const char **keys,
                                  const char **ids, redis_stream_read_result_t *out);
 
@@ -509,12 +510,12 @@ CXX_C_API int redis_xread_result(redis_client_t *client, size_t count, int block
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xgroup_create(redis_client_t *client, const char *key,
+REDIS_API int redis_xgroup_create(redis_client_t *client, const char *key,
                         const char *group, const char *id, int mkstream,
                         redis_command_cb_t callback, void *user_data);
 
 /** Owned-result variant of redis_xgroup_create(); clear `out` after use. */
-CXX_C_API int redis_xgroup_create_result(redis_client_t *client, const char *key,
+REDIS_API int redis_xgroup_create_result(redis_client_t *client, const char *key,
                                          const char *group, const char *id,
                                          int mkstream, redis_command_result_t *out);
 
@@ -534,20 +535,20 @@ CXX_C_API int redis_xgroup_create_result(redis_client_t *client, const char *key
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xreadgroup(redis_client_t *client, const char *group, const char *consumer,
+REDIS_API int redis_xreadgroup(redis_client_t *client, const char *group, const char *consumer,
                      size_t count, int block_ms,
                      size_t stream_count, const char **keys, const char **ids,
                      redis_stream_cb_t callback, void *user_data);
 
 /** Owned-result variant of redis_xreadgroup(); clear `out` after use. */
-CXX_C_API int redis_xreadgroup_result(redis_client_t *client, const char *group,
+REDIS_API int redis_xreadgroup_result(redis_client_t *client, const char *group,
                                       const char *consumer, size_t count,
                                       int block_ms, size_t stream_count,
                                       const char **keys, const char **ids,
                                       redis_stream_read_result_t *out);
 
 /** Release all owned stream entries plus the underlying command reply. */
-CXX_C_API void redis_stream_read_result_clear(redis_stream_read_result_t *result);
+REDIS_API void redis_stream_read_result_clear(redis_stream_read_result_t *result);
 
 /**
  * XACK key group id [id ...]
@@ -562,12 +563,12 @@ CXX_C_API void redis_stream_read_result_clear(redis_stream_read_result_t *result
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xack(redis_client_t *client, const char *key, const char *group,
+REDIS_API int redis_xack(redis_client_t *client, const char *key, const char *group,
                size_t id_count, const char **ids,
                redis_command_cb_t callback, void *user_data);
 
 /** Owned-result variant of redis_xack(); clear `out` after use. */
-CXX_C_API int redis_xack_result(redis_client_t *client, const char *key,
+REDIS_API int redis_xack_result(redis_client_t *client, const char *key,
                                 const char *group, size_t id_count,
                                 const char **ids, redis_command_result_t *out);
 
@@ -575,7 +576,7 @@ CXX_C_API int redis_xack_result(redis_client_t *client, const char *key,
  * XDEL key id [id ...]
  * Delete entries from stream
  */
-CXX_C_API int redis_xdel(redis_client_t *client, const char *key,
+REDIS_API int redis_xdel(redis_client_t *client, const char *key,
                size_t id_count, const char **ids,
                redis_command_cb_t callback, void *user_data);
 
@@ -583,20 +584,20 @@ CXX_C_API int redis_xdel(redis_client_t *client, const char *key,
  * XLEN key
  * Get stream length
  */
-CXX_C_API int redis_xlen(redis_client_t *client, const char *key,
+REDIS_API int redis_xlen(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /**
  * XTRIM key MAXLEN [~] count
  * Trim stream to max length
  */
-CXX_C_API int redis_xtrim(redis_client_t *client, const char *key, size_t maxlen,
+REDIS_API int redis_xtrim(redis_client_t *client, const char *key, size_t maxlen,
                 redis_command_cb_t callback, void *user_data);
 
 /**
  * Free stream entry
  */
-CXX_C_API void redis_stream_entry_free(redis_stream_entry_t *entry);
+REDIS_API void redis_stream_entry_free(redis_stream_entry_t *entry);
 
 /**
  * @brief Transfer one owned Stream field value out of an entry.
@@ -623,19 +624,19 @@ CXX_C_API void redis_stream_entry_free(redis_stream_entry_t *entry);
  * }
  * @endcode
  */
-CXX_C_API int redis_stream_entry_take_value(redis_stream_entry_t *entry, size_t index,
+REDIS_API int redis_stream_entry_take_value(redis_stream_entry_t *entry, size_t index,
                                              char **out_value, size_t *out_len);
 
 /**
  * @brief Release a value returned by redis_stream_entry_take_value().
  * @param value Transferred Stream value; NULL is accepted
  */
-CXX_C_API void redis_stream_value_free(void *value);
+REDIS_API void redis_stream_value_free(void *value);
 
 /**
  * Free stream result
  */
-CXX_C_API void redis_stream_result_free(redis_stream_result_t *result, size_t count);
+REDIS_API void redis_stream_result_free(redis_stream_result_t *result, size_t count);
 
 /**
  * Decode an owned RESP XREAD/XREADGROUP reply into typed Stream results.
@@ -648,7 +649,7 @@ CXX_C_API void redis_stream_result_free(redis_stream_result_t *result, size_t co
  * @param out_count Receives the number of stream results
  * @return TURBO_OK on success or a validation/allocation/protocol error
  */
-CXX_C_API int redis_stream_reply_decode(const redis_reply_t *reply,
+REDIS_API int redis_stream_reply_decode(const redis_reply_t *reply,
                                         redis_stream_result_t **out,
                                         size_t *out_count);
 
@@ -665,7 +666,7 @@ CXX_C_API int redis_stream_reply_decode(const redis_reply_t *reply,
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xrange(redis_client_t *client, const char *key,
+REDIS_API int redis_xrange(redis_client_t *client, const char *key,
                const char *start, const char *end, size_t count,
                redis_stream_cb_t callback, void *user_data);
 
@@ -682,7 +683,7 @@ CXX_C_API int redis_xrange(redis_client_t *client, const char *key,
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xrevrange(redis_client_t *client, const char *key,
+REDIS_API int redis_xrevrange(redis_client_t *client, const char *key,
                   const char *end, const char *start, size_t count,
                   redis_stream_cb_t callback, void *user_data);
 
@@ -720,7 +721,7 @@ typedef struct {
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_xpending(redis_client_t *client, const char *key,
+REDIS_API int redis_xpending(redis_client_t *client, const char *key,
                 const char *group,
                 const char *start, const char *end, size_t count,
                 const char *consumer,
@@ -741,7 +742,7 @@ CXX_C_API int redis_xpending(redis_client_t *client, const char *key,
  * @param user_data   User data
  * @return 0 on success
  */
-CXX_C_API int redis_xclaim(redis_client_t *client, const char *key,
+REDIS_API int redis_xclaim(redis_client_t *client, const char *key,
                const char *group, const char *consumer,
                int64_t min_idle_ms,
                size_t id_count, const char **ids,
@@ -762,7 +763,7 @@ CXX_C_API int redis_xclaim(redis_client_t *client, const char *key,
  * @param user_data   User data
  * @return 0 on success
  */
-CXX_C_API int redis_xautoclaim(redis_client_t *client, const char *key,
+REDIS_API int redis_xautoclaim(redis_client_t *client, const char *key,
                    const char *group, const char *consumer,
                    int64_t min_idle_ms, const char *start, size_t count,
                    redis_stream_cb_t callback, void *user_data);
@@ -773,7 +774,7 @@ CXX_C_API int redis_xautoclaim(redis_client_t *client, const char *key,
  *
  * @param id  New last-delivered ID; "$" = latest, "0" = replay all
  */
-CXX_C_API int redis_xgroup_setid(redis_client_t *client, const char *key,
+REDIS_API int redis_xgroup_setid(redis_client_t *client, const char *key,
                      const char *group, const char *id,
                      redis_command_cb_t callback, void *user_data);
 
@@ -781,7 +782,7 @@ CXX_C_API int redis_xgroup_setid(redis_client_t *client, const char *key,
  * XGROUP DESTROY key group
  * Delete a consumer group and its PEL.
  */
-CXX_C_API int redis_xgroup_destroy(redis_client_t *client, const char *key,
+REDIS_API int redis_xgroup_destroy(redis_client_t *client, const char *key,
                        const char *group,
                        redis_command_cb_t callback, void *user_data);
 
@@ -789,7 +790,7 @@ CXX_C_API int redis_xgroup_destroy(redis_client_t *client, const char *key,
  * XGROUP CREATECONSUMER key group consumer  (Redis 6.2+)
  * Explicitly create a consumer without requiring it to read first.
  */
-CXX_C_API int redis_xgroup_createconsumer(redis_client_t *client, const char *key,
+REDIS_API int redis_xgroup_createconsumer(redis_client_t *client, const char *key,
                               const char *group, const char *consumer,
                               redis_command_cb_t callback, void *user_data);
 
@@ -797,7 +798,7 @@ CXX_C_API int redis_xgroup_createconsumer(redis_client_t *client, const char *ke
  * XGROUP DELCONSUMER key group consumer
  * Remove a consumer and release its PEL entries.
  */
-CXX_C_API int redis_xgroup_delconsumer(redis_client_t *client, const char *key,
+REDIS_API int redis_xgroup_delconsumer(redis_client_t *client, const char *key,
                            const char *group, const char *consumer,
                            redis_command_cb_t callback, void *user_data);
 
@@ -818,7 +819,7 @@ CXX_C_API int redis_xgroup_delconsumer(redis_client_t *client, const char *key,
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_publish(redis_client_t *client, const char *channel,
+REDIS_API int redis_publish(redis_client_t *client, const char *channel,
                   const void *message, size_t len,
                   redis_command_cb_t callback, void *user_data);
 
@@ -833,7 +834,7 @@ CXX_C_API int redis_publish(redis_client_t *client, const char *channel,
  * @param user_data User data
  * @return 0 on success
  */
-CXX_C_API int redis_subscribe(redis_client_t *client, size_t channel_count,
+REDIS_API int redis_subscribe(redis_client_t *client, size_t channel_count,
                     const char **channels, redis_pubsub_cb_t on_message,
                     void *user_data);
 
@@ -841,7 +842,7 @@ CXX_C_API int redis_subscribe(redis_client_t *client, size_t channel_count,
  * PSUBSCRIBE pattern [pattern ...]
  * Subscribe to channel patterns
  */
-CXX_C_API int redis_psubscribe(redis_client_t *client, size_t pattern_count,
+REDIS_API int redis_psubscribe(redis_client_t *client, size_t pattern_count,
                      const char **patterns, redis_pubsub_cb_t on_message,
                      void *user_data);
 
@@ -849,14 +850,14 @@ CXX_C_API int redis_psubscribe(redis_client_t *client, size_t pattern_count,
  * UNSUBSCRIBE [channel ...]
  * Unsubscribe from channels
  */
-CXX_C_API int redis_unsubscribe(redis_client_t *client, size_t channel_count,
+REDIS_API int redis_unsubscribe(redis_client_t *client, size_t channel_count,
                       const char **channels);
 
 /**
  * PUNSUBSCRIBE [pattern ...]
  * Unsubscribe from patterns
  */
-CXX_C_API int redis_punsubscribe(redis_client_t *client, size_t pattern_count,
+REDIS_API int redis_punsubscribe(redis_client_t *client, size_t pattern_count,
                        const char **patterns);
 
 /* =============================================================================
@@ -865,68 +866,68 @@ CXX_C_API int redis_punsubscribe(redis_client_t *client, size_t pattern_count,
  */
 
 /** MSET key value [key value ...] */
-CXX_C_API int redis_mset(redis_client_t *client,
+REDIS_API int redis_mset(redis_client_t *client,
                int pair_count, const char **keys, const char **values,
                redis_command_cb_t callback, void *user_data);
 
 /** MGET key [key ...] */
-CXX_C_API int redis_mget(redis_client_t *client,
+REDIS_API int redis_mget(redis_client_t *client,
                int key_count, const char **keys,
                redis_command_cb_t callback, void *user_data);
 
 /** SETNX key value  (SET if Not eXists) */
-CXX_C_API int redis_setnx(redis_client_t *client, const char *key, const char *value,
+REDIS_API int redis_setnx(redis_client_t *client, const char *key, const char *value,
                 redis_command_cb_t callback, void *user_data);
 
 /** SETEX key seconds value */
-CXX_C_API int redis_setex(redis_client_t *client, const char *key, int seconds,
+REDIS_API int redis_setex(redis_client_t *client, const char *key, int seconds,
                 const char *value,
                 redis_command_cb_t callback, void *user_data);
 
 /** PSETEX key milliseconds value */
-CXX_C_API int redis_psetex(redis_client_t *client, const char *key, int64_t ms,
+REDIS_API int redis_psetex(redis_client_t *client, const char *key, int64_t ms,
                  const char *value,
                  redis_command_cb_t callback, void *user_data);
 
 /** GETSET key value  (atomic get-then-set; deprecated in Redis 6.2 but still usable) */
-CXX_C_API int redis_getset(redis_client_t *client, const char *key, const char *value,
+REDIS_API int redis_getset(redis_client_t *client, const char *key, const char *value,
                  redis_command_cb_t callback, void *user_data);
 
 /** GETDEL key  (Redis 6.2+) */
-CXX_C_API int redis_getdel(redis_client_t *client, const char *key,
+REDIS_API int redis_getdel(redis_client_t *client, const char *key,
                  redis_command_cb_t callback, void *user_data);
 
 /** INCRBY key increment */
-CXX_C_API int redis_incrby(redis_client_t *client, const char *key, int64_t increment,
+REDIS_API int redis_incrby(redis_client_t *client, const char *key, int64_t increment,
                  redis_command_cb_t callback, void *user_data);
 
 /** DECRBY key decrement */
-CXX_C_API int redis_decrby(redis_client_t *client, const char *key, int64_t decrement,
+REDIS_API int redis_decrby(redis_client_t *client, const char *key, int64_t decrement,
                  redis_command_cb_t callback, void *user_data);
 
 /** DECR key */
-CXX_C_API int redis_decr(redis_client_t *client, const char *key,
+REDIS_API int redis_decr(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /** INCRBYFLOAT key increment */
-CXX_C_API int redis_incrbyfloat(redis_client_t *client, const char *key, double increment,
+REDIS_API int redis_incrbyfloat(redis_client_t *client, const char *key, double increment,
                      redis_command_cb_t callback, void *user_data);
 
 /** APPEND key value */
-CXX_C_API int redis_append(redis_client_t *client, const char *key, const char *value,
+REDIS_API int redis_append(redis_client_t *client, const char *key, const char *value,
                  redis_command_cb_t callback, void *user_data);
 
 /** STRLEN key */
-CXX_C_API int redis_strlen(redis_client_t *client, const char *key,
+REDIS_API int redis_strlen(redis_client_t *client, const char *key,
                  redis_command_cb_t callback, void *user_data);
 
 /** GETRANGE key start end */
-CXX_C_API int redis_getrange(redis_client_t *client, const char *key,
+REDIS_API int redis_getrange(redis_client_t *client, const char *key,
                    int64_t start, int64_t end,
                    redis_command_cb_t callback, void *user_data);
 
 /** SETRANGE key offset value */
-CXX_C_API int redis_setrange(redis_client_t *client, const char *key,
+REDIS_API int redis_setrange(redis_client_t *client, const char *key,
                    int64_t offset, const char *value,
                    redis_command_cb_t callback, void *user_data);
 
@@ -936,25 +937,25 @@ CXX_C_API int redis_setrange(redis_client_t *client, const char *key,
  */
 
 /** LLEN key */
-CXX_C_API int redis_llen(redis_client_t *client, const char *key,
+REDIS_API int redis_llen(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /** LRANGE key start stop */
-CXX_C_API int redis_lrange(redis_client_t *client, const char *key,
+REDIS_API int redis_lrange(redis_client_t *client, const char *key,
                  int64_t start, int64_t stop,
                  redis_command_cb_t callback, void *user_data);
 
 /** LINDEX key index */
-CXX_C_API int redis_lindex(redis_client_t *client, const char *key, int64_t index,
+REDIS_API int redis_lindex(redis_client_t *client, const char *key, int64_t index,
                  redis_command_cb_t callback, void *user_data);
 
 /** LSET key index value */
-CXX_C_API int redis_lset(redis_client_t *client, const char *key, int64_t index,
+REDIS_API int redis_lset(redis_client_t *client, const char *key, int64_t index,
                const char *value,
                redis_command_cb_t callback, void *user_data);
 
 /** LREM key count value */
-CXX_C_API int redis_lrem(redis_client_t *client, const char *key, int64_t count,
+REDIS_API int redis_lrem(redis_client_t *client, const char *key, int64_t count,
                const char *value,
                redis_command_cb_t callback, void *user_data);
 
@@ -962,12 +963,12 @@ CXX_C_API int redis_lrem(redis_client_t *client, const char *key, int64_t count,
  * LINSERT key BEFORE|AFTER pivot value
  * @param before  1 = BEFORE, 0 = AFTER
  */
-CXX_C_API int redis_linsert(redis_client_t *client, const char *key, int before,
+REDIS_API int redis_linsert(redis_client_t *client, const char *key, int before,
                   const char *pivot, const char *value,
                   redis_command_cb_t callback, void *user_data);
 
 /** LTRIM key start stop */
-CXX_C_API int redis_ltrim(redis_client_t *client, const char *key,
+REDIS_API int redis_ltrim(redis_client_t *client, const char *key,
                 int64_t start, int64_t stop,
                 redis_command_cb_t callback, void *user_data);
 
@@ -975,17 +976,17 @@ CXX_C_API int redis_ltrim(redis_client_t *client, const char *key,
  * BLPOP key [key ...] timeout
  * @param timeout_sec  0 = block forever
  */
-CXX_C_API int redis_blpop(redis_client_t *client,
+REDIS_API int redis_blpop(redis_client_t *client,
                 int key_count, const char **keys, double timeout_sec,
                 redis_command_cb_t callback, void *user_data);
 
 /** BRPOP key [key ...] timeout */
-CXX_C_API int redis_brpop(redis_client_t *client,
+REDIS_API int redis_brpop(redis_client_t *client,
                 int key_count, const char **keys, double timeout_sec,
                 redis_command_cb_t callback, void *user_data);
 
 /** LMOVE source destination LEFT|RIGHT LEFT|RIGHT  (Redis 6.2+) */
-CXX_C_API int redis_lmove(redis_client_t *client,
+REDIS_API int redis_lmove(redis_client_t *client,
                 const char *src, const char *dst,
                 const char *wherefrom, const char *whereto,
                 redis_command_cb_t callback, void *user_data);
@@ -999,7 +1000,7 @@ CXX_C_API int redis_lmove(redis_client_t *client,
  * HMSET key field value [field value ...]
  * @param pair_count  number of field-value pairs
  */
-CXX_C_API int redis_hmset(redis_client_t *client, const char *key,
+REDIS_API int redis_hmset(redis_client_t *client, const char *key,
                 int pair_count, const char **fields, const char **values,
                 redis_command_cb_t callback, void *user_data);
 
@@ -1007,47 +1008,47 @@ CXX_C_API int redis_hmset(redis_client_t *client, const char *key,
  * HMGET key field [field ...]
  * @param field_count  number of fields
  */
-CXX_C_API int redis_hmget(redis_client_t *client, const char *key,
+REDIS_API int redis_hmget(redis_client_t *client, const char *key,
                 int field_count, const char **fields,
                 redis_command_cb_t callback, void *user_data);
 
 /** HGETALL key  — returns alternating field/value bulk strings */
-CXX_C_API int redis_hgetall(redis_client_t *client, const char *key,
+REDIS_API int redis_hgetall(redis_client_t *client, const char *key,
                   redis_command_cb_t callback, void *user_data);
 
 /** HKEYS key */
-CXX_C_API int redis_hkeys(redis_client_t *client, const char *key,
+REDIS_API int redis_hkeys(redis_client_t *client, const char *key,
                 redis_command_cb_t callback, void *user_data);
 
 /** HVALS key */
-CXX_C_API int redis_hvals(redis_client_t *client, const char *key,
+REDIS_API int redis_hvals(redis_client_t *client, const char *key,
                 redis_command_cb_t callback, void *user_data);
 
 /** HLEN key */
-CXX_C_API int redis_hlen(redis_client_t *client, const char *key,
+REDIS_API int redis_hlen(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /** HEXISTS key field */
-CXX_C_API int redis_hexists(redis_client_t *client, const char *key, const char *field,
+REDIS_API int redis_hexists(redis_client_t *client, const char *key, const char *field,
                   redis_command_cb_t callback, void *user_data);
 
 /** HDEL key field [field ...] */
-CXX_C_API int redis_hdel(redis_client_t *client, const char *key,
+REDIS_API int redis_hdel(redis_client_t *client, const char *key,
                int field_count, const char **fields,
                redis_command_cb_t callback, void *user_data);
 
 /** HINCRBY key field increment */
-CXX_C_API int redis_hincrby(redis_client_t *client, const char *key,
+REDIS_API int redis_hincrby(redis_client_t *client, const char *key,
                   const char *field, int64_t increment,
                   redis_command_cb_t callback, void *user_data);
 
 /** HINCRBYFLOAT key field increment */
-CXX_C_API int redis_hincrbyfloat(redis_client_t *client, const char *key,
+REDIS_API int redis_hincrbyfloat(redis_client_t *client, const char *key,
                       const char *field, double increment,
                       redis_command_cb_t callback, void *user_data);
 
 /** HSETNX key field value */
-CXX_C_API int redis_hsetnx(redis_client_t *client, const char *key,
+REDIS_API int redis_hsetnx(redis_client_t *client, const char *key,
                  const char *field, const char *value,
                  redis_command_cb_t callback, void *user_data);
 
@@ -1057,58 +1058,58 @@ CXX_C_API int redis_hsetnx(redis_client_t *client, const char *key,
  */
 
 /** SREM key member [member ...] */
-CXX_C_API int redis_srem(redis_client_t *client, const char *key,
+REDIS_API int redis_srem(redis_client_t *client, const char *key,
                int member_count, const char **members,
                redis_command_cb_t callback, void *user_data);
 
 /** SCARD key */
-CXX_C_API int redis_scard(redis_client_t *client, const char *key,
+REDIS_API int redis_scard(redis_client_t *client, const char *key,
                 redis_command_cb_t callback, void *user_data);
 
 /** SISMEMBER key member */
-CXX_C_API int redis_sismember(redis_client_t *client, const char *key, const char *member,
+REDIS_API int redis_sismember(redis_client_t *client, const char *key, const char *member,
                     redis_command_cb_t callback, void *user_data);
 
 /** SMISMEMBER key member [member ...]  (Redis 6.2+) */
-CXX_C_API int redis_smismember(redis_client_t *client, const char *key,
+REDIS_API int redis_smismember(redis_client_t *client, const char *key,
                     int member_count, const char **members,
                     redis_command_cb_t callback, void *user_data);
 
 /** SPOP key [count] */
-CXX_C_API int redis_spop(redis_client_t *client, const char *key, int count,
+REDIS_API int redis_spop(redis_client_t *client, const char *key, int count,
                redis_command_cb_t callback, void *user_data);
 
 /** SRANDMEMBER key [count] */
-CXX_C_API int redis_srandmember(redis_client_t *client, const char *key, int count,
+REDIS_API int redis_srandmember(redis_client_t *client, const char *key, int count,
                      redis_command_cb_t callback, void *user_data);
 
 /** SUNION key [key ...] */
-CXX_C_API int redis_sunion(redis_client_t *client,
+REDIS_API int redis_sunion(redis_client_t *client,
                  int key_count, const char **keys,
                  redis_command_cb_t callback, void *user_data);
 
 /** SINTER key [key ...] */
-CXX_C_API int redis_sinter(redis_client_t *client,
+REDIS_API int redis_sinter(redis_client_t *client,
                  int key_count, const char **keys,
                  redis_command_cb_t callback, void *user_data);
 
 /** SDIFF key [key ...] */
-CXX_C_API int redis_sdiff(redis_client_t *client,
+REDIS_API int redis_sdiff(redis_client_t *client,
                 int key_count, const char **keys,
                 redis_command_cb_t callback, void *user_data);
 
 /** SUNIONSTORE destination key [key ...] */
-CXX_C_API int redis_sunionstore(redis_client_t *client, const char *dest,
+REDIS_API int redis_sunionstore(redis_client_t *client, const char *dest,
                      int key_count, const char **keys,
                      redis_command_cb_t callback, void *user_data);
 
 /** SINTERSTORE destination key [key ...] */
-CXX_C_API int redis_sinterstore(redis_client_t *client, const char *dest,
+REDIS_API int redis_sinterstore(redis_client_t *client, const char *dest,
                      int key_count, const char **keys,
                      redis_command_cb_t callback, void *user_data);
 
 /** SDIFFSTORE destination key [key ...] */
-CXX_C_API int redis_sdiffstore(redis_client_t *client, const char *dest,
+REDIS_API int redis_sdiffstore(redis_client_t *client, const char *dest,
                     int key_count, const char **keys,
                     redis_command_cb_t callback, void *user_data);
 
@@ -1125,43 +1126,43 @@ CXX_C_API int redis_sdiffstore(redis_client_t *client, const char *dest,
  * @param scores      array of score strings (e.g. "1.5")
  * @param members     array of member strings
  */
-CXX_C_API int redis_zadd(redis_client_t *client, const char *key,
+REDIS_API int redis_zadd(redis_client_t *client, const char *key,
                int pair_count, const char **scores, const char **members,
                redis_command_cb_t callback, void *user_data);
 
 /** ZREM key member [member ...] */
-CXX_C_API int redis_zrem(redis_client_t *client, const char *key,
+REDIS_API int redis_zrem(redis_client_t *client, const char *key,
                int member_count, const char **members,
                redis_command_cb_t callback, void *user_data);
 
 /** ZSCORE key member */
-CXX_C_API int redis_zscore(redis_client_t *client, const char *key, const char *member,
+REDIS_API int redis_zscore(redis_client_t *client, const char *key, const char *member,
                  redis_command_cb_t callback, void *user_data);
 
 /** ZMSCORE key member [member ...]  (Redis 6.2+) */
-CXX_C_API int redis_zmscore(redis_client_t *client, const char *key,
+REDIS_API int redis_zmscore(redis_client_t *client, const char *key,
                   int member_count, const char **members,
                   redis_command_cb_t callback, void *user_data);
 
 /** ZINCRBY key increment member */
-CXX_C_API int redis_zincrby(redis_client_t *client, const char *key,
+REDIS_API int redis_zincrby(redis_client_t *client, const char *key,
                   double increment, const char *member,
                   redis_command_cb_t callback, void *user_data);
 
 /** ZRANK key member */
-CXX_C_API int redis_zrank(redis_client_t *client, const char *key, const char *member,
+REDIS_API int redis_zrank(redis_client_t *client, const char *key, const char *member,
                 redis_command_cb_t callback, void *user_data);
 
 /** ZREVRANK key member */
-CXX_C_API int redis_zrevrank(redis_client_t *client, const char *key, const char *member,
+REDIS_API int redis_zrevrank(redis_client_t *client, const char *key, const char *member,
                    redis_command_cb_t callback, void *user_data);
 
 /** ZCARD key */
-CXX_C_API int redis_zcard(redis_client_t *client, const char *key,
+REDIS_API int redis_zcard(redis_client_t *client, const char *key,
                 redis_command_cb_t callback, void *user_data);
 
 /** ZCOUNT key min max */
-CXX_C_API int redis_zcount(redis_client_t *client, const char *key,
+REDIS_API int redis_zcount(redis_client_t *client, const char *key,
                  const char *min, const char *max,
                  redis_command_cb_t callback, void *user_data);
 
@@ -1169,45 +1170,45 @@ CXX_C_API int redis_zcount(redis_client_t *client, const char *key,
  * ZRANGE key start stop [WITHSCORES]
  * @param withscores  1 = append WITHSCORES
  */
-CXX_C_API int redis_zrange(redis_client_t *client, const char *key,
+REDIS_API int redis_zrange(redis_client_t *client, const char *key,
                  int64_t start, int64_t stop, int withscores,
                  redis_command_cb_t callback, void *user_data);
 
 /** ZREVRANGE key start stop [WITHSCORES] */
-CXX_C_API int redis_zrevrange(redis_client_t *client, const char *key,
+REDIS_API int redis_zrevrange(redis_client_t *client, const char *key,
                    int64_t start, int64_t stop, int withscores,
                    redis_command_cb_t callback, void *user_data);
 
 /** ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count] */
-CXX_C_API int redis_zrangebyscore(redis_client_t *client, const char *key,
+REDIS_API int redis_zrangebyscore(redis_client_t *client, const char *key,
                        const char *min, const char *max,
                        int withscores,
                        int use_limit, int64_t offset, int64_t limit_count,
                        redis_command_cb_t callback, void *user_data);
 
 /** ZREVRANGEBYSCORE key max min [WITHSCORES] [LIMIT offset count] */
-CXX_C_API int redis_zrevrangebyscore(redis_client_t *client, const char *key,
+REDIS_API int redis_zrevrangebyscore(redis_client_t *client, const char *key,
                           const char *max, const char *min,
                           int withscores,
                           int use_limit, int64_t offset, int64_t limit_count,
                           redis_command_cb_t callback, void *user_data);
 
 /** ZPOPMIN key [count] */
-CXX_C_API int redis_zpopmin(redis_client_t *client, const char *key, int count,
+REDIS_API int redis_zpopmin(redis_client_t *client, const char *key, int count,
                   redis_command_cb_t callback, void *user_data);
 
 /** ZPOPMAX key [count] */
-CXX_C_API int redis_zpopmax(redis_client_t *client, const char *key, int count,
+REDIS_API int redis_zpopmax(redis_client_t *client, const char *key, int count,
                   redis_command_cb_t callback, void *user_data);
 
 /** ZRANGEBYLEX key min max [LIMIT offset count] */
-CXX_C_API int redis_zrangebylex(redis_client_t *client, const char *key,
+REDIS_API int redis_zrangebylex(redis_client_t *client, const char *key,
                      const char *min, const char *max,
                      int use_limit, int64_t offset, int64_t limit_count,
                      redis_command_cb_t callback, void *user_data);
 
 /** ZLEXCOUNT key min max */
-CXX_C_API int redis_zlexcount(redis_client_t *client, const char *key,
+REDIS_API int redis_zlexcount(redis_client_t *client, const char *key,
                    const char *min, const char *max,
                    redis_command_cb_t callback, void *user_data);
 
@@ -1217,43 +1218,43 @@ CXX_C_API int redis_zlexcount(redis_client_t *client, const char *key,
  */
 
 /** TYPE key */
-CXX_C_API int redis_type(redis_client_t *client, const char *key,
+REDIS_API int redis_type(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /** TTL key  (seconds; -1 = no expire, -2 = not exist) */
-CXX_C_API int redis_ttl(redis_client_t *client, const char *key,
+REDIS_API int redis_ttl(redis_client_t *client, const char *key,
               redis_command_cb_t callback, void *user_data);
 
 /** PTTL key  (milliseconds) */
-CXX_C_API int redis_pttl(redis_client_t *client, const char *key,
+REDIS_API int redis_pttl(redis_client_t *client, const char *key,
                redis_command_cb_t callback, void *user_data);
 
 /** PERSIST key  (remove TTL) */
-CXX_C_API int redis_persist(redis_client_t *client, const char *key,
+REDIS_API int redis_persist(redis_client_t *client, const char *key,
                   redis_command_cb_t callback, void *user_data);
 
 /** EXPIREAT key unix-timestamp */
-CXX_C_API int redis_expireat(redis_client_t *client, const char *key, int64_t timestamp,
+REDIS_API int redis_expireat(redis_client_t *client, const char *key, int64_t timestamp,
                    redis_command_cb_t callback, void *user_data);
 
 /** PEXPIRE key milliseconds */
-CXX_C_API int redis_pexpire(redis_client_t *client, const char *key, int64_t ms,
+REDIS_API int redis_pexpire(redis_client_t *client, const char *key, int64_t ms,
                   redis_command_cb_t callback, void *user_data);
 
 /** PEXPIREAT key unix-timestamp-ms */
-CXX_C_API int redis_pexpireat(redis_client_t *client, const char *key, int64_t ts_ms,
+REDIS_API int redis_pexpireat(redis_client_t *client, const char *key, int64_t ts_ms,
                    redis_command_cb_t callback, void *user_data);
 
 /** RENAME key newkey */
-CXX_C_API int redis_rename(redis_client_t *client, const char *key, const char *newkey,
+REDIS_API int redis_rename(redis_client_t *client, const char *key, const char *newkey,
                  redis_command_cb_t callback, void *user_data);
 
 /** RENAMENX key newkey */
-CXX_C_API int redis_renamenx(redis_client_t *client, const char *key, const char *newkey,
+REDIS_API int redis_renamenx(redis_client_t *client, const char *key, const char *newkey,
                    redis_command_cb_t callback, void *user_data);
 
 /** UNLINK key [key ...]  (async DEL) */
-CXX_C_API int redis_unlink(redis_client_t *client, int key_count, const char **keys,
+REDIS_API int redis_unlink(redis_client_t *client, int key_count, const char **keys,
                  redis_command_cb_t callback, void *user_data);
 
 /**
@@ -1263,13 +1264,13 @@ CXX_C_API int redis_unlink(redis_client_t *client, int key_count, const char **k
  * @param count    hint (0 = server default)
  * @param type     TYPE filter string (NULL = no filter)
  */
-CXX_C_API int redis_scan(redis_client_t *client,
+REDIS_API int redis_scan(redis_client_t *client,
                const char *cursor, const char *pattern,
                size_t count, const char *type,
                redis_command_cb_t callback, void *user_data);
 
 /** KEYS pattern */
-CXX_C_API int redis_keys(redis_client_t *client, const char *pattern,
+REDIS_API int redis_keys(redis_client_t *client, const char *pattern,
                redis_command_cb_t callback, void *user_data);
 
 /**
@@ -1277,20 +1278,20 @@ CXX_C_API int redis_keys(redis_client_t *client, const char *pattern,
  * @param dest_db  -1 = same DB
  * @param replace  1 = overwrite destination
  */
-CXX_C_API int redis_copy(redis_client_t *client, const char *src, const char *dst,
+REDIS_API int redis_copy(redis_client_t *client, const char *src, const char *dst,
                int dest_db, int replace,
                redis_command_cb_t callback, void *user_data);
 
 /** OBJECT ENCODING key */
-CXX_C_API int redis_object_encoding(redis_client_t *client, const char *key,
+REDIS_API int redis_object_encoding(redis_client_t *client, const char *key,
                          redis_command_cb_t callback, void *user_data);
 
 /** OBJECT REFCOUNT key */
-CXX_C_API int redis_object_refcount(redis_client_t *client, const char *key,
+REDIS_API int redis_object_refcount(redis_client_t *client, const char *key,
                          redis_command_cb_t callback, void *user_data);
 
 /** OBJECT IDLETIME key */
-CXX_C_API int redis_object_idletime(redis_client_t *client, const char *key,
+REDIS_API int redis_object_idletime(redis_client_t *client, const char *key,
                          redis_command_cb_t callback, void *user_data);
 
 /* =============================================================================
@@ -1299,63 +1300,63 @@ CXX_C_API int redis_object_idletime(redis_client_t *client, const char *key,
  */
 
 /** SELECT index */
-CXX_C_API int redis_select(redis_client_t *client, int db,
+REDIS_API int redis_select(redis_client_t *client, int db,
                  redis_command_cb_t callback, void *user_data);
 
 /** DBSIZE */
-CXX_C_API int redis_dbsize(redis_client_t *client,
+REDIS_API int redis_dbsize(redis_client_t *client,
                  redis_command_cb_t callback, void *user_data);
 
 /**
  * FLUSHDB [ASYNC|SYNC]
  * @param async  1 = ASYNC, 0 = SYNC
  */
-CXX_C_API int redis_flushdb(redis_client_t *client, int async,
+REDIS_API int redis_flushdb(redis_client_t *client, int async,
                   redis_command_cb_t callback, void *user_data);
 
 /** FLUSHALL [ASYNC|SYNC] */
-CXX_C_API int redis_flushall(redis_client_t *client, int async,
+REDIS_API int redis_flushall(redis_client_t *client, int async,
                    redis_command_cb_t callback, void *user_data);
 
 /** INFO [section] — section=NULL returns all sections */
-CXX_C_API int redis_info(redis_client_t *client, const char *section,
+REDIS_API int redis_info(redis_client_t *client, const char *section,
                redis_command_cb_t callback, void *user_data);
 
 /** CONFIG GET parameter */
-CXX_C_API int redis_config_get(redis_client_t *client, const char *parameter,
+REDIS_API int redis_config_get(redis_client_t *client, const char *parameter,
                     redis_command_cb_t callback, void *user_data);
 
 /** CONFIG SET parameter value */
-CXX_C_API int redis_config_set(redis_client_t *client, const char *parameter,
+REDIS_API int redis_config_set(redis_client_t *client, const char *parameter,
                     const char *value,
                     redis_command_cb_t callback, void *user_data);
 
 /** CONFIG RESETSTAT */
-CXX_C_API int redis_config_resetstat(redis_client_t *client,
+REDIS_API int redis_config_resetstat(redis_client_t *client,
                           redis_command_cb_t callback, void *user_data);
 
 /** DEBUG SLEEP seconds */
-CXX_C_API int redis_debug_sleep(redis_client_t *client, double seconds,
+REDIS_API int redis_debug_sleep(redis_client_t *client, double seconds,
                      redis_command_cb_t callback, void *user_data);
 
 /** TIME — returns [unix-seconds, microseconds] */
-CXX_C_API int redis_time(redis_client_t *client,
+REDIS_API int redis_time(redis_client_t *client,
                redis_command_cb_t callback, void *user_data);
 
 /** LASTSAVE */
-CXX_C_API int redis_lastsave(redis_client_t *client,
+REDIS_API int redis_lastsave(redis_client_t *client,
                    redis_command_cb_t callback, void *user_data);
 
 /** BGSAVE */
-CXX_C_API int redis_bgsave(redis_client_t *client,
+REDIS_API int redis_bgsave(redis_client_t *client,
                  redis_command_cb_t callback, void *user_data);
 
 /** BGREWRITEAOF */
-CXX_C_API int redis_bgrewriteaof(redis_client_t *client,
+REDIS_API int redis_bgrewriteaof(redis_client_t *client,
                       redis_command_cb_t callback, void *user_data);
 
 /** SAVE */
-CXX_C_API int redis_save(redis_client_t *client,
+REDIS_API int redis_save(redis_client_t *client,
                redis_command_cb_t callback, void *user_data);
 
 /* =============================================================================
@@ -1364,23 +1365,23 @@ CXX_C_API int redis_save(redis_client_t *client,
  */
 
 /** MULTI — begin transaction */
-CXX_C_API int redis_multi(redis_client_t *client,
+REDIS_API int redis_multi(redis_client_t *client,
                 redis_command_cb_t callback, void *user_data);
 
 /** EXEC — execute queued commands */
-CXX_C_API int redis_exec(redis_client_t *client,
+REDIS_API int redis_exec(redis_client_t *client,
                redis_command_cb_t callback, void *user_data);
 
 /** DISCARD — discard queued commands */
-CXX_C_API int redis_discard(redis_client_t *client,
+REDIS_API int redis_discard(redis_client_t *client,
                   redis_command_cb_t callback, void *user_data);
 
 /** WATCH key [key ...] — optimistic locking */
-CXX_C_API int redis_watch(redis_client_t *client, int key_count, const char **keys,
+REDIS_API int redis_watch(redis_client_t *client, int key_count, const char **keys,
                 redis_command_cb_t callback, void *user_data);
 
 /** UNWATCH */
-CXX_C_API int redis_unwatch(redis_client_t *client,
+REDIS_API int redis_unwatch(redis_client_t *client,
                   redis_command_cb_t callback, void *user_data);
 
 /* =============================================================================
@@ -1396,7 +1397,7 @@ CXX_C_API int redis_unwatch(redis_client_t *client,
  * @param arg_count  number of args
  * @param args       arg array (may be NULL when arg_count == 0)
  */
-CXX_C_API int redis_eval(redis_client_t *client,
+REDIS_API int redis_eval(redis_client_t *client,
                const char *script,
                int key_count, const char **keys,
                int arg_count, const char **args,
@@ -1409,7 +1410,7 @@ CXX_C_API int redis_eval(redis_client_t *client,
  * redis_command_result_clear(). Mutating scripts must not be retried when the
  * outcome is SEND_UNCERTAIN or REPLY_UNKNOWN.
  */
-CXX_C_API int redis_eval_result(redis_client_t *client,
+REDIS_API int redis_eval_result(redis_client_t *client,
                       const char *script,
                       int key_count, const char **keys,
                       int arg_count, const char **args,
@@ -1418,35 +1419,35 @@ CXX_C_API int redis_eval_result(redis_client_t *client,
 /**
  * EVALSHA sha1 numkeys key [key ...] arg [arg ...]
  */
-CXX_C_API int redis_evalsha(redis_client_t *client,
+REDIS_API int redis_evalsha(redis_client_t *client,
                   const char *sha1,
                   int key_count, const char **keys,
                   int arg_count, const char **args,
                   redis_command_cb_t callback, void *user_data);
 
 /** Result-preserving EVALSHA variant. */
-CXX_C_API int redis_evalsha_result(redis_client_t *client,
+REDIS_API int redis_evalsha_result(redis_client_t *client,
                          const char *sha1,
                          int key_count, const char **keys,
                          int arg_count, const char **args,
                          redis_command_result_t *out);
 
 /** SCRIPT LOAD script */
-CXX_C_API int redis_script_load(redis_client_t *client, const char *script,
+REDIS_API int redis_script_load(redis_client_t *client, const char *script,
                      redis_command_cb_t callback, void *user_data);
 
 /** Result-preserving SCRIPT LOAD variant. */
-CXX_C_API int redis_script_load_result(redis_client_t *client,
+REDIS_API int redis_script_load_result(redis_client_t *client,
                              const char *script,
                              redis_command_result_t *out);
 
 /** SCRIPT EXISTS sha1 [sha1 ...] */
-CXX_C_API int redis_script_exists(redis_client_t *client,
+REDIS_API int redis_script_exists(redis_client_t *client,
                        int sha_count, const char **sha1s,
                        redis_command_cb_t callback, void *user_data);
 
 /** SCRIPT FLUSH */
-CXX_C_API int redis_script_flush(redis_client_t *client,
+REDIS_API int redis_script_flush(redis_client_t *client,
                       redis_command_cb_t callback, void *user_data);
 
 /* =============================================================================
@@ -1455,16 +1456,16 @@ CXX_C_API int redis_script_flush(redis_client_t *client,
  */
 
 /** PFADD key element [element ...] */
-CXX_C_API int redis_pfadd(redis_client_t *client, const char *key,
+REDIS_API int redis_pfadd(redis_client_t *client, const char *key,
                 int element_count, const char **elements,
                 redis_command_cb_t callback, void *user_data);
 
 /** PFCOUNT key [key ...] */
-CXX_C_API int redis_pfcount(redis_client_t *client, int key_count, const char **keys,
+REDIS_API int redis_pfcount(redis_client_t *client, int key_count, const char **keys,
                   redis_command_cb_t callback, void *user_data);
 
 /** PFMERGE destkey sourcekey [sourcekey ...] */
-CXX_C_API int redis_pfmerge(redis_client_t *client, const char *destkey,
+REDIS_API int redis_pfmerge(redis_client_t *client, const char *destkey,
                   int src_key_count, const char **src_keys,
                   redis_command_cb_t callback, void *user_data);
 
@@ -1474,36 +1475,36 @@ CXX_C_API int redis_pfmerge(redis_client_t *client, const char *destkey,
  */
 
 /** GEOADD key longitude latitude member [longitude latitude member ...] */
-CXX_C_API int redis_geoadd(redis_client_t *client, const char *key,
+REDIS_API int redis_geoadd(redis_client_t *client, const char *key,
                  int item_count, const double *longitudes, const double *latitudes, const char **members,
                  redis_command_cb_t callback, void *user_data);
 
 /** GEODIST key member1 member2 [m|km|ft|mi] */
-CXX_C_API int redis_geodist(redis_client_t *client, const char *key,
+REDIS_API int redis_geodist(redis_client_t *client, const char *key,
                   const char *member1, const char *member2, const char *unit,
                   redis_command_cb_t callback, void *user_data);
 
 /** GEOPOS key member [member ...] */
-CXX_C_API int redis_geopos(redis_client_t *client, const char *key,
+REDIS_API int redis_geopos(redis_client_t *client, const char *key,
                  int member_count, const char **members,
                  redis_command_cb_t callback, void *user_data);
 
 /** GEORADIUS key longitude latitude radius m|km|ft|mi [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count] [ASC|DESC] */
-CXX_C_API int redis_georadius(redis_client_t *client, const char *key,
+REDIS_API int redis_georadius(redis_client_t *client, const char *key,
                     double longitude, double latitude, double radius, const char *unit,
                     int withcoord, int withdist, int withhash,
                     int count, const char *order,
                     redis_command_cb_t callback, void *user_data);
 
 /** GEORADIUSBYMEMBER key member radius m|km|ft|mi [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count] [ASC|DESC] */
-CXX_C_API int redis_georadiusbymember(redis_client_t *client, const char *key,
+REDIS_API int redis_georadiusbymember(redis_client_t *client, const char *key,
                             const char *member, double radius, const char *unit,
                             int withcoord, int withdist, int withhash,
                             int count, const char *order,
                             redis_command_cb_t callback, void *user_data);
 
 /** GEOSEARCH key [FROMMEMBER member | FROMLONLAT longitude latitude] [BYRADIUS radius m|km|ft|mi | BYBOX width height m|km|ft|mi] [ASC|DESC] [COUNT count] (Redis 6.2+) */
-CXX_C_API int redis_geosearch(redis_client_t *client, const char *key,
+REDIS_API int redis_geosearch(redis_client_t *client, const char *key,
                     const char *from_member, const double *from_lonlat,
                     const double *by_radius, const char *radius_unit,
                     const double *by_box, const char *box_unit,
@@ -1516,30 +1517,30 @@ CXX_C_API int redis_geosearch(redis_client_t *client, const char *key,
  */
 
 /** SETBIT key offset value */
-CXX_C_API int redis_setbit(redis_client_t *client, const char *key, int64_t offset, int value,
+REDIS_API int redis_setbit(redis_client_t *client, const char *key, int64_t offset, int value,
                  redis_command_cb_t callback, void *user_data);
 
 /** GETBIT key offset */
-CXX_C_API int redis_getbit(redis_client_t *client, const char *key, int64_t offset,
+REDIS_API int redis_getbit(redis_client_t *client, const char *key, int64_t offset,
                  redis_command_cb_t callback, void *user_data);
 
 /** BITCOUNT key [start end [BYTE|BIT]] */
-CXX_C_API int redis_bitcount(redis_client_t *client, const char *key,
+REDIS_API int redis_bitcount(redis_client_t *client, const char *key,
                    int has_range, int64_t start, int64_t end, const char *unit,
                    redis_command_cb_t callback, void *user_data);
 
 /** BITOP operation destkey key [key ...] */
-CXX_C_API int redis_bitop(redis_client_t *client, const char *operation, const char *destkey,
+REDIS_API int redis_bitop(redis_client_t *client, const char *operation, const char *destkey,
                 int key_count, const char **keys,
                 redis_command_cb_t callback, void *user_data);
 
 /** BITPOS key bit [start [end [BYTE|BIT]]] */
-CXX_C_API int redis_bitpos(redis_client_t *client, const char *key, int bit,
+REDIS_API int redis_bitpos(redis_client_t *client, const char *key, int bit,
                  int has_range, int64_t start, int64_t end, const char *unit,
                  redis_command_cb_t callback, void *user_data);
 
 /** BITFIELD key [GET type offset] [SET type offset value] [INCRBY type offset increment] [OVERFLOW WRAP|SAT|FAIL] */
-CXX_C_API int redis_bitfield(redis_client_t *client, const char *key,
+REDIS_API int redis_bitfield(redis_client_t *client, const char *key,
                    int command_count, const char **commands,
                    redis_command_cb_t callback, void *user_data);
 
@@ -1549,31 +1550,31 @@ CXX_C_API int redis_bitfield(redis_client_t *client, const char *key,
  */
 
 /** AUTH [username] password */
-CXX_C_API int redis_auth(redis_client_t *client, const char *username, const char *password,
+REDIS_API int redis_auth(redis_client_t *client, const char *username, const char *password,
                redis_command_cb_t callback, void *user_data);
 
 /** CLIENT SETNAME connection-name */
-CXX_C_API int redis_client_setname(redis_client_t *client, const char *name,
+REDIS_API int redis_client_setname(redis_client_t *client, const char *name,
                          redis_command_cb_t callback, void *user_data);
 
 /** CLIENT GETNAME */
-CXX_C_API int redis_client_getname(redis_client_t *client,
+REDIS_API int redis_client_getname(redis_client_t *client,
                          redis_command_cb_t callback, void *user_data);
 
 /** CLIENT LIST */
-CXX_C_API int redis_client_list(redis_client_t *client,
+REDIS_API int redis_client_list(redis_client_t *client,
                        redis_command_cb_t callback, void *user_data);
 
 /** CLIENT KILL filter value [filter value ...] */
-CXX_C_API int redis_client_kill(redis_client_t *client, int filter_count, const char **filters, const char **values,
+REDIS_API int redis_client_kill(redis_client_t *client, int filter_count, const char **filters, const char **values,
                        redis_command_cb_t callback, void *user_data);
 
 /** HELLO [protover [AUTH username password] [SETNAME name]] */
-CXX_C_API int redis_hello(redis_client_t *client, const char *protover, const char *username, const char *password, const char *clientname,
+REDIS_API int redis_hello(redis_client_t *client, const char *protover, const char *username, const char *password, const char *clientname,
                  redis_command_cb_t callback, void *user_data);
 
 /** SHUTDOWN [NOSAVE|SAVE] */
-CXX_C_API int redis_shutdown(redis_client_t *client, const char *save_mode,
+REDIS_API int redis_shutdown(redis_client_t *client, const char *save_mode,
                    redis_command_cb_t callback, void *user_data);
 
 #ifdef __cplusplus

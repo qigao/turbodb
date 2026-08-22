@@ -407,12 +407,12 @@ void mongo_append_find_options(bson_t* out,
         
     bson_append_document_end(out, &projection);
 
-    if (plan.ordering) {
+    if (plan.ordering && !plan.ordering->is_expression) {
         bson_t sort;
         bson_append_document_begin(out, "sort", -1, &sort);
-        const std::string key = field_name(plan.ordering->first, settings);
+        const std::string key = field_name(plan.ordering->column, settings);
         bson_append_int32(&sort, key.c_str(), -1,
-                          plan.ordering->second == ORM_ORDER_DESCENDING ? -1 : 1);
+                          plan.ordering->order == ORM_ORDER_DESCENDING ? -1 : 1);
         bson_append_document_end(out, &sort);
     }
     if (plan.offset)
@@ -486,16 +486,16 @@ void mongo_append_pipeline(bson_t* out,
         bson_append_document_end(&having_stage, &match);
         bson_append_document_end(out, &having_stage);
     }
-    if (plan.ordering) {
+    if (plan.ordering && !plan.ordering->is_expression) {
         bson_t sort_stage;
         bson_append_document_begin(out, array_key(stage++).c_str(), -1,
                                    &sort_stage);
         bson_t sort;
         bson_append_document_begin(&sort_stage, "$sort", -1, &sort);
         const std::string key =
-            aggregate_output_path(plan, plan.ordering->first);
+            aggregate_output_path(plan, plan.ordering->column);
         bson_append_int32(&sort, key.c_str(), -1,
-                          plan.ordering->second == ORM_ORDER_DESCENDING ? -1 : 1);
+                          plan.ordering->order == ORM_ORDER_DESCENDING ? -1 : 1);
         bson_append_document_end(&sort_stage, &sort);
         bson_append_document_end(out, &sort_stage);
     }

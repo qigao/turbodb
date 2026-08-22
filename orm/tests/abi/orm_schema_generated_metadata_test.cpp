@@ -1,6 +1,6 @@
 #include "orm.hpp"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -171,36 +171,36 @@ suite("ORM Generated Metadata") {
     orm::repository<app::model::Payment> bases(connection);
     orm::repository<app::model::CardPayment> cards(connection);
     orm::repository<app::model::BankPayment> banks(connection);
-    check_uint_eq(bases.insert(base).affected_rows(), 1u);
-    check_uint_eq(cards.insert(card).affected_rows(), 1u);
-    check_uint_eq(banks.insert(bank).affected_rows(), 1u);
+    check_equal(bases.insert(base).affected_rows(), 1u);
+    check_equal(cards.insert(card).affected_rows(), 1u);
+    check_equal(banks.insert(bank).affected_rows(), 1u);
 
     check_true(bases.find_by_id(1u).has_value());
     check_false(bases.find_by_id(2u).has_value());
     check_false(cards.find_by_id(1u).has_value());
     const auto stored_card = cards.find_by_id(2u);
     check_true(stored_card.has_value());
-    check_str_eq(stored_card->label.c_str(), "card");
-    check_str_eq(stored_card->card_last4.c_str(), "4242");
+    check_equal(stored_card->label.c_str(), "card");
+    check_equal(stored_card->card_last4.c_str(), "4242");
 
     orm::polymorphic_repository<app::model::Payment> payments(connection);
     const auto polymorphic_card = payments.find_by_id(2u);
     check_true(polymorphic_card.has_value());
     check_true(std::holds_alternative<app::model::CardPayment>(
         *polymorphic_card));
-    check_str_eq(
+    check_equal(
         std::get<app::model::CardPayment>(*polymorphic_card).card_last4.c_str(),
         "4242");
     const auto all = payments.find_all();
-    check_uint_eq(all.size(), 3u);
+    check_equal(all.size(), 3u);
 
     auto changed = *polymorphic_card;
     std::get<app::model::CardPayment>(changed).label = "changed";
-    check_uint_eq(payments.update(changed).affected_rows(), 1u);
+    check_equal(payments.update(changed).affected_rows(), 1u);
     const auto updated_card = cards.find_by_id(2u);
     check_true(updated_card.has_value());
-    check_str_eq(updated_card->label.c_str(), "changed");
-    check_uint_eq(payments.remove(changed).affected_rows(), 1u);
+    check_equal(updated_card->label.c_str(), "changed");
+    check_equal(payments.remove(changed).affected_rows(), 1u);
     check_false(cards.find_by_id(2u).has_value());
     check_true(banks.find_by_id(3u).has_value());
 
@@ -246,25 +246,25 @@ suite("ORM Generated Metadata") {
     orm::repository<app::model::Asset> assets(connection);
     orm::repository<app::model::ImageAsset> images(connection);
     orm::repository<app::model::VideoAsset> videos(connection);
-    check_uint_eq(assets.insert(asset).affected_rows(), 1u);
-    check_uint_eq(images.insert(image).affected_rows(), 1u);
-    check_uint_eq(videos.insert(video).affected_rows(), 1u);
+    check_equal(assets.insert(asset).affected_rows(), 1u);
+    check_equal(images.insert(image).affected_rows(), 1u);
+    check_equal(videos.insert(video).affected_rows(), 1u);
     check_false(assets.find_by_id(2u).has_value());
     const auto stored_image = images.find_by_id(2u);
     check_true(stored_image.has_value());
-    check_uint_eq(stored_image->width, 1920u);
+    check_equal(stored_image->width, 1920u);
 
     orm::polymorphic_repository<app::model::Asset> hierarchy(connection);
     const auto found_video = hierarchy.find_by_id(3u);
     check_true(found_video.has_value());
     check_true(std::holds_alternative<app::model::VideoAsset>(*found_video));
-    check_uint_eq(hierarchy.find_all().size(), 3u);
+    check_equal(hierarchy.find_all().size(), 3u);
 
     app::model::ImageAsset duplicate;
     duplicate.id = 1;
     duplicate.label = "duplicate";
     duplicate.width = 640;
-    check_uint_eq(images.insert(duplicate).affected_rows(), 1u);
+    check_equal(images.insert(duplicate).affected_rows(), 1u);
     bool duplicate_rejected = false;
     try {
       (void)hierarchy.find_by_id(1u);
@@ -296,29 +296,29 @@ suite("ORM Generated Metadata") {
 
     orm::repository<app::model::Document> documents(connection);
     orm::repository<app::model::PdfDocument> pdfs(connection);
-    check_uint_eq(documents.insert(document).affected_rows(), 1u);
-    check_uint_eq(pdfs.insert(pdf).affected_rows(), 1u);
+    check_equal(documents.insert(document).affected_rows(), 1u);
+    check_equal(pdfs.insert(pdf).affected_rows(), 1u);
     check_false(documents.find_by_id(2u).has_value());
     auto stored = pdfs.find_by_id(2u);
     check_true(stored.has_value());
-    check_str_eq(stored->title.c_str(), "specification");
-    check_uint_eq(stored->page_count, 12u);
+    check_equal(stored->title.c_str(), "specification");
+    check_equal(stored->page_count, 12u);
 
     stored->title = "updated";
     stored->page_count = 14;
-    check_uint_eq(pdfs.update(*stored).affected_rows(), 1u);
-    check_uint_eq(stored->version, 1u);
+    check_equal(pdfs.update(*stored).affected_rows(), 1u);
+    check_equal(stored->version, 1u);
     const auto updated = pdfs.find_by_id(2u);
     check_true(updated.has_value());
-    check_str_eq(updated->title.c_str(), "updated");
-    check_uint_eq(updated->page_count, 14u);
+    check_equal(updated->title.c_str(), "updated");
+    check_equal(updated->page_count, 14u);
 
     orm::polymorphic_repository<app::model::Document> hierarchy(connection);
     const auto polymorphic = hierarchy.find_by_id(2u);
     check_true(polymorphic.has_value());
     check_true(std::holds_alternative<app::model::PdfDocument>(*polymorphic));
-    check_uint_eq(hierarchy.find_all().size(), 2u);
-    check_uint_eq(pdfs.delete_by_id(2u).affected_rows(), 1u);
+    check_equal(hierarchy.find_all().size(), 2u);
+    check_equal(pdfs.delete_by_id(2u).affected_rows(), 1u);
     check_false(pdfs.find_by_id(2u).has_value());
     check_true(documents.find_by_id(1u).has_value());
   }
@@ -335,40 +335,40 @@ suite("ORM Generated Metadata") {
         orm::model::get_primary_keys<app::model::CompositeOrder>();
     static_assert(primary_keys.size() == 2,
                   "embedded ids must expose every flattened key column");
-    check_str_eq(primary_keys[0].data(), "tenant_id");
-    check_str_eq(primary_keys[1].data(), "order_number");
+    check_equal(primary_keys[0].data(), "tenant_id");
+    check_equal(primary_keys[1].data(), "order_number");
 
     orm::repository<app::model::CompositeOrder> repository(connection);
     app::model::CompositeOrder order{{7, 42}, 0, "created"};
     const auto generated_id = order_model::id(order);
-    check_uint_eq(std::get<0>(generated_id), 7u);
-    check_uint_eq(std::get<1>(generated_id), 42u);
-    check_uint_eq(repository.insert(order).affected_rows(), 1u);
+    check_equal(std::get<0>(generated_id), 7u);
+    check_equal(std::get<1>(generated_id), 42u);
+    check_equal(repository.insert(order).affected_rows(), 1u);
     auto found = repository.find_by_id(app::model::OrderKey{7, 42});
     check_true(found.has_value());
-    check_str_eq(found->label.c_str(), "created");
+    check_equal(found->label.c_str(), "created");
 
     found->label = "updated";
-    check_uint_eq(repository.update(*found).affected_rows(), 1u);
-    check_uint_eq(found->version, 1u);
+    check_equal(repository.update(*found).affected_rows(), 1u);
+    check_equal(found->version, 1u);
     const auto by_tuple = repository.find_by_id(std::make_tuple(7u, 42u));
     check_true(by_tuple.has_value());
-    check_str_eq(by_tuple->label.c_str(), "updated");
-    check_uint_eq(repository.insert({{7, 43}, 0, "second"}).affected_rows(),
+    check_equal(by_tuple->label.c_str(), "updated");
+    check_equal(repository.insert({{7, 43}, 0, "second"}).affected_rows(),
                   1u);
 
     orm::entity_manager manager(connection);
     const std::vector<app::model::OrderKey> ids = {{7, 42}, {7, 43}};
     auto loaded = manager.load_many<app::model::CompositeOrder>(ids);
-    check_uint_eq(loaded.size(), 2u);
+    check_equal(loaded.size(), 2u);
     auto first = loaded.front();
     auto same = manager.find<app::model::CompositeOrder>(
         std::make_tuple(7u, 42u));
     check_not_null(first.get());
     check(first == same);
     first->label = "managed";
-    check_uint_eq(manager.flush(), 1u);
-    check_uint_eq(first->version, 2u);
+    check_equal(manager.flush(), 1u);
+    check_equal(first->version, 2u);
 
     first->key.number = 99;
     bool key_change_rejected = false;
@@ -379,10 +379,10 @@ suite("ORM Generated Metadata") {
     }
     check_true(key_change_rejected);
     manager.discard();
-    check_uint_eq(first->key.number, 42u);
+    check_equal(first->key.number, 42u);
 
     manager.remove(first);
-    check_uint_eq(manager.flush(), 1u);
+    check_equal(manager.flush(), 1u);
     check_false(repository.find_by_id(app::model::OrderKey{7, 42})
                     .has_value());
     check_true(repository.find_by_id(app::model::OrderKey{7, 43})
@@ -402,25 +402,25 @@ suite("ORM Generated Metadata") {
         .execute();
 
     orm::repository<app::model::Customer> customers(connection);
-    check_uint_eq(
+    check_equal(
         customers.insert({1, {"Shanghai", "200000"}, "Alice"})
             .affected_rows(),
         1u);
     auto customer = customers.find_by_id(1u);
     check_true(customer.has_value());
-    check_str_eq(customer->address.city.c_str(), "Shanghai");
+    check_equal(customer->address.city.c_str(), "Shanghai");
     customer->address.postal_code = "200001";
-    check_uint_eq(customers.update(*customer).affected_rows(), 1u);
+    check_equal(customers.update(*customer).affected_rows(), 1u);
     const auto updated = customers.find_by_id(1u);
     check_true(updated.has_value());
-    check_str_eq(updated->address.postal_code.c_str(), "200001");
+    check_equal(updated->address.postal_code.c_str(), "200001");
 
     orm::repository<app::model::DirectCompositeEntity> direct(connection);
-    check_uint_eq(direct.insert({3, 9, "value"}).affected_rows(), 1u);
+    check_equal(direct.insert({3, 9, "value"}).affected_rows(), 1u);
     const auto direct_found = direct.find_by_id(std::make_tuple(3u, 9u));
     check_true(direct_found.has_value());
-    check_str_eq(direct_found->value.c_str(), "value");
-    check_uint_eq(direct.delete_by_id(std::make_tuple(3u, 9u)).affected_rows(),
+    check_equal(direct_found->value.c_str(), "value");
+    check_equal(direct.delete_by_id(std::make_tuple(3u, 9u)).affected_rows(),
                   1u);
   }
 
@@ -436,39 +436,39 @@ suite("ORM Generated Metadata") {
 
     orm::entity_manager manager(connection);
     auto entity = manager.persist(app::model::LifecycleEntity{1, 0, "new"});
-    check_uint_eq(manager.flush(), 1u);
-    check_str_eq(entity->name.c_str(), "new:pre_persist");
-    check_uint_eq(app::model::lifecycle_events.size(), 2u);
-    check_str_eq(app::model::lifecycle_events[0].c_str(), "pre_persist");
-    check_str_eq(app::model::lifecycle_events[1].c_str(), "post_persist");
+    check_equal(manager.flush(), 1u);
+    check_equal(entity->name.c_str(), "new:pre_persist");
+    check_equal(app::model::lifecycle_events.size(), 2u);
+    check_equal(app::model::lifecycle_events[0].c_str(), "pre_persist");
+    check_equal(app::model::lifecycle_events[1].c_str(), "post_persist");
 
     entity->name = "changed";
-    check_uint_eq(manager.flush(), 1u);
-    check_uint_eq(entity->version, 1u);
-    check_str_eq(entity->name.c_str(), "changed:pre_update");
+    check_equal(manager.flush(), 1u);
+    check_equal(entity->version, 1u);
+    check_equal(entity->name.c_str(), "changed:pre_update");
 
     app::model::lifecycle_events.clear();
     orm::entity_manager reader(connection);
     auto loaded = reader.find<app::model::LifecycleEntity>(1u);
     check_not_null(loaded.get());
     check_true(loaded->loaded);
-    check_uint_eq(app::model::lifecycle_events.size(), 1u);
-    check_str_eq(app::model::lifecycle_events.front().c_str(), "post_load");
+    check_equal(app::model::lifecycle_events.size(), 1u);
+    check_equal(app::model::lifecycle_events.front().c_str(), "post_load");
     check(reader.find<app::model::LifecycleEntity>(1u) == loaded);
-    check_uint_eq(app::model::lifecycle_events.size(), 1u);
+    check_equal(app::model::lifecycle_events.size(), 1u);
 
     (void)connection.raw("update lifecycle_entities set name = 'database'").execute();
     reader.refresh(loaded);
-    check_str_eq(loaded->name.c_str(), "database");
-    check_uint_eq(app::model::lifecycle_events.size(), 2u);
-    check_str_eq(app::model::lifecycle_events.back().c_str(), "post_load");
+    check_equal(loaded->name.c_str(), "database");
+    check_equal(app::model::lifecycle_events.size(), 2u);
+    check_equal(app::model::lifecycle_events.back().c_str(), "post_load");
 
     app::model::lifecycle_events.clear();
     reader.remove(loaded);
-    check_uint_eq(reader.flush(), 1u);
-    check_uint_eq(app::model::lifecycle_events.size(), 2u);
-    check_str_eq(app::model::lifecycle_events[0].c_str(), "pre_remove");
-    check_str_eq(app::model::lifecycle_events[1].c_str(), "post_remove");
+    check_equal(reader.flush(), 1u);
+    check_equal(app::model::lifecycle_events.size(), 2u);
+    check_equal(app::model::lifecycle_events[0].c_str(), "pre_remove");
+    check_equal(app::model::lifecycle_events[1].c_str(), "post_remove");
   }
 
   it("rolls back SQL when a post lifecycle callback throws") {
@@ -483,7 +483,7 @@ suite("ORM Generated Metadata") {
 
     orm::entity_manager manager(connection);
     auto entity = manager.persist(app::model::LifecycleEntity{2, 0, "stored"});
-    check_uint_eq(manager.flush(), 1u);
+    check_equal(manager.flush(), 1u);
     entity->name = "rejected";
     app::model::fail_after_update = true;
     bool rejected = false;
@@ -496,15 +496,15 @@ suite("ORM Generated Metadata") {
 
     check_true(rejected);
     check_true(manager.dirty());
-    check_uint_eq(entity->version, 0u);
+    check_equal(entity->version, 0u);
     const orm::repository<app::model::LifecycleEntity> repository(connection);
     const auto stored = repository.find_by_id(2u);
     check_true(stored.has_value());
-    check_str_eq(stored->name.c_str(), "stored:pre_persist");
+    check_equal(stored->name.c_str(), "stored:pre_persist");
 
     manager.discard();
     check_false(manager.dirty());
-    check_str_eq(entity->name.c_str(), "stored:pre_persist");
+    check_equal(entity->name.c_str(), "stored:pre_persist");
   }
 
   it("rolls back batched materialization when post_load throws") {
@@ -516,8 +516,8 @@ suite("ORM Generated Metadata") {
              "not null, name text not null)")
         .execute();
     const orm::repository<app::model::LifecycleEntity> repository(connection);
-    check_uint_eq(repository.insert({3, 0, "first"}).affected_rows(), 1u);
-    check_uint_eq(repository.insert({4, 0, "second"}).affected_rows(), 1u);
+    check_equal(repository.insert({3, 0, "first"}).affected_rows(), 1u);
+    check_equal(repository.insert({4, 0, "second"}).affected_rows(), 1u);
 
     orm::entity_manager manager(connection);
     app::model::fail_after_load_id = 4;
@@ -530,7 +530,7 @@ suite("ORM Generated Metadata") {
     app::model::fail_after_load_id = 0;
 
     check_true(rejected);
-    check_uint_eq(manager.size(), 0u);
+    check_equal(manager.size(), 0u);
     check_false(manager.dirty());
   }
 
@@ -542,10 +542,10 @@ suite("ORM Generated Metadata") {
         .execute();
     const orm::repository<app::model::Profile> repository(connection);
 
-    check_uint_eq(repository.insert({1, app::model::ProfileState::active, std::nullopt})
+    check_equal(repository.insert({1, app::model::ProfileState::active, std::nullopt})
                       .affected_rows(),
                   1u);
-    check_uint_eq(repository
+    check_equal(repository
                       .insert({2, app::model::ProfileState::inactive,
                                std::string("guest")})
                       .affected_rows(),
@@ -560,7 +560,7 @@ suite("ORM Generated Metadata") {
     check_true(named.has_value());
     check(named->state == app::model::ProfileState::inactive);
     check_true(named->nickname.has_value());
-    check_str_eq(named->nickname->c_str(), "guest");
+    check_equal(named->nickname->c_str(), "guest");
   }
 
   it("maps schema columns and custom primary keys onto an existing struct") {
@@ -570,13 +570,13 @@ suite("ORM Generated Metadata") {
     const std::string first_column(orm::model::get_name<app::model::User>(0));
     const std::string second_column(orm::model::get_name<app::model::User>(1));
     const std::string third_column(orm::model::get_name<app::model::User>(2));
-    check_str_eq(table_name.c_str(), "users");
-    check_str_eq(primary_key.c_str(), "user_id");
-    check_str_eq(version.c_str(), "entity_version");
-    check_uint_eq(orm::model::get_array<app::model::User>().size(), 3u);
-    check_str_eq(first_column.c_str(), "user_id");
-    check_str_eq(second_column.c_str(), "entity_version");
-    check_str_eq(third_column.c_str(), "display_name");
+    check_equal(table_name.c_str(), "users");
+    check_equal(primary_key.c_str(), "user_id");
+    check_equal(version.c_str(), "entity_version");
+    check_equal(orm::model::get_array<app::model::User>().size(), 3u);
+    check_equal(first_column.c_str(), "user_id");
+    check_equal(second_column.c_str(), "entity_version");
+    check_equal(third_column.c_str(), "display_name");
 
     orm::connection connection(sqlite_config());
     (void)connection
@@ -585,17 +585,17 @@ suite("ORM Generated Metadata") {
         .execute();
     const orm::repository<app::model::User> repository(connection);
 
-    check_uint_eq(repository.insert({7, 0, {}, "Alice", {}}).affected_rows(), 1u);
+    check_equal(repository.insert({7, 0, {}, "Alice", {}}).affected_rows(), 1u);
     const auto found = repository.find_by_id(7);
     check_true(found.has_value());
-    check_str_eq(found->name.c_str(), "Alice");
+    check_equal(found->name.c_str(), "Alice");
 
     app::model::User updated{7, 0, {}, "Alice Cooper", {}};
-    check_uint_eq(repository.update(updated).affected_rows(), 1u);
-    check_uint_eq(updated.version, 1u);
+    check_equal(repository.update(updated).affected_rows(), 1u);
+    check_equal(updated.version, 1u);
     const auto changed = repository.find_by_id(7);
     check_true(changed.has_value());
-    check_str_eq(changed->name.c_str(), "Alice Cooper");
+    check_equal(changed->name.c_str(), "Alice Cooper");
   }
 
   it("generates a mapped relation descriptor for graph persistence") {
@@ -614,32 +614,32 @@ suite("ORM Generated Metadata") {
     using user_model = orm::model::entity_model<app::model::User>;
     auto user = unit_of_work.persist(
         app::model::User{8, 0, {80, 0, "book"}, "Bob", {}});
-    check_uint_eq(unit_of_work.flush(), 2u);
+    check_equal(unit_of_work.flush(), 2u);
 
     const orm::repository<app::model::Order> orders(connection);
     const auto order = orders.find_by_id(80);
     check_true(order.has_value());
-    check_uint_eq(order->user_id, 8u);
+    check_equal(order->user_id, 8u);
 
     orm::entity_manager reader(connection);
     const auto found_user = reader.find<app::model::User>(8u);
     check_not_null(found_user.get());
-    check_str_eq(found_user->name.c_str(), "Bob");
-    check_uint_eq(found_user->order.id, 0u);
-    check_uint_eq(found_user->orders.size(), 1u);
-    check_uint_eq(found_user->orders.front().id, 80u);
+    check_equal(found_user->name.c_str(), "Bob");
+    check_equal(found_user->order.id, 0u);
+    check_equal(found_user->orders.size(), 1u);
+    check_equal(found_user->orders.front().id, 80u);
     auto fetched = user_model::fetch_order(
         reader, app::model::User{8, 0, {}, "", {}});
     check_false(fetched.loaded());
     const auto fetched_order = fetched.get();
     check_true(fetched.loaded());
     check_not_null(fetched_order.get());
-    check_uint_eq(fetched_order->id, 80u);
+    check_equal(fetched_order->id, 80u);
 
     user_model::initialize_order(reader, found_user);
-    check_uint_eq(found_user->order.id, 80u);
+    check_equal(found_user->order.id, 80u);
     user_model::initialize_order(reader, found_user);
-    check_uint_eq(reader.size(), 2u);
+    check_equal(reader.size(), 2u);
     constexpr auto complete_graph =
         user_model::order_graph() | user_model::orders_graph();
     static_assert(complete_graph.mask() == 3u,
@@ -653,11 +653,11 @@ suite("ORM Generated Metadata") {
     const auto graph_user = graph_reader.find<app::model::User>(
         8u, user_model::order_graph());
     check_not_null(graph_user.get());
-    check_uint_eq(graph_user->order.id, 80u);
-    check_uint_eq(graph_user->orders.size(), 1u);
+    check_equal(graph_user->order.id, 80u);
+    check_equal(graph_user->orders.size(), 1u);
 
     unit_of_work.remove(user);
-    check_uint_eq(unit_of_work.flush(), 2u);
+    check_equal(unit_of_work.flush(), 2u);
     check_false(orders.find_by_id(80).has_value());
   }
 
@@ -681,12 +681,12 @@ suite("ORM Generated Metadata") {
                          {89, 0, "required"},
                          "Cara",
                          {{90, 0, "first"}, {91, 0, "second"}}});
-    check_uint_eq(unit_of_work.flush(), 4u);
+    check_equal(unit_of_work.flush(), 4u);
 
     const orm::repository<app::model::Order> orders(connection);
     const auto first = orders.find_by_id(90);
     check_true(first.has_value());
-    check_uint_eq(first->user_id, 9u);
+    check_equal(first->user_id, 9u);
 
     user->order.label = "required-updated";
     user->orders.front().label = "first-updated";
@@ -698,14 +698,14 @@ suite("ORM Generated Metadata") {
       clear_rejected = error.status() == ORM_STATUS_INVALID_STATE;
     }
     check_true(clear_rejected);
-    check_uint_eq(unit_of_work.flush(), 2u);
+    check_equal(unit_of_work.flush(), 2u);
     check_false(unit_of_work.dirty());
     const auto updated_required = orders.find_by_id(89);
     const auto updated_first = orders.find_by_id(90);
     check_true(updated_required.has_value());
     check_true(updated_first.has_value());
-    check_str_eq(updated_required->label.c_str(), "required-updated");
-    check_str_eq(updated_first->label.c_str(), "first-updated");
+    check_equal(updated_required->label.c_str(), "required-updated");
+    check_equal(updated_first->label.c_str(), "first-updated");
 
     auto canonical_first = unit_of_work.load<app::model::Order>(90u);
     check_not_null(canonical_first.get());
@@ -720,21 +720,21 @@ suite("ORM Generated Metadata") {
     check_true(conflict_rejected);
     unit_of_work.discard();
     check_false(unit_of_work.dirty());
-    check_str_eq(canonical_first->label.c_str(), "first-updated");
-    check_str_eq(user->orders.front().label.c_str(), "first-updated");
+    check_equal(canonical_first->label.c_str(), "first-updated");
+    check_equal(user->orders.front().label.c_str(), "first-updated");
 
     orm::entity_manager reader(connection);
     const auto fetched = user_model::fetch_orders(
         reader, app::model::User{9, 0, {}, "", {}});
-    check_uint_eq(fetched.size(), 3u);
-    check_uint_eq(reader.size(), 3u);
+    check_equal(fetched.size(), 3u);
+    check_equal(reader.size(), 3u);
 
     user->orders.pop_back();
-    check_uint_eq(unit_of_work.flush(), 1u);
+    check_equal(unit_of_work.flush(), 1u);
     check_false(orders.find_by_id(91).has_value());
 
     unit_of_work.remove(user);
-    check_uint_eq(unit_of_work.flush(), 3u);
+    check_equal(unit_of_work.flush(), 3u);
     check_false(orders.find_by_id(89).has_value());
     check_false(orders.find_by_id(90).has_value());
   }
@@ -753,17 +753,17 @@ suite("ORM Generated Metadata") {
 
     orm::repository<app::model::User> users(connection);
     orm::repository<app::model::Order> orders(connection);
-    check_uint_eq(users.insert({10, 0, {}, "stored", {}}).affected_rows(), 1u);
-    check_uint_eq(orders.insert({100, 10, "stored-one"}).affected_rows(), 1u);
-    check_uint_eq(orders.insert({101, 10, "stored-many"}).affected_rows(), 1u);
+    check_equal(users.insert({10, 0, {}, "stored", {}}).affected_rows(), 1u);
+    check_equal(orders.insert({100, 10, "stored-one"}).affected_rows(), 1u);
+    check_equal(orders.insert({101, 10, "stored-many"}).affected_rows(), 1u);
 
     orm::entity_manager manager(connection);
     auto user = manager.merge(app::model::User{
         10, 0, {100, 0, "merged-one"}, "merged", {{101, 0, "merged-many"}}});
-    check_uint_eq(manager.size(), 3u);
-    check_uint_eq(manager.flush(), 3u);
-    check_uint_eq(user->order.user_id, 10u);
-    check_uint_eq(user->orders.front().user_id, 10u);
+    check_equal(manager.size(), 3u);
+    check_equal(manager.flush(), 3u);
+    check_equal(user->order.user_id, 10u);
+    check_equal(user->orders.front().user_id, 10u);
 
     auto stored_user = users.find_by_id(10u);
     auto stored_one = orders.find_by_id(100u);
@@ -771,29 +771,29 @@ suite("ORM Generated Metadata") {
     check_true(stored_user.has_value());
     check_true(stored_one.has_value());
     check_true(stored_many.has_value());
-    check_str_eq(stored_user->name.c_str(), "merged");
-    check_str_eq(stored_one->label.c_str(), "merged-one");
-    check_str_eq(stored_many->label.c_str(), "merged-many");
+    check_equal(stored_user->name.c_str(), "merged");
+    check_equal(stored_one->label.c_str(), "merged-one");
+    check_equal(stored_many->label.c_str(), "merged-many");
 
     stored_user->name = "database";
     stored_one->label = "database-one";
     stored_many->label = "database-many";
-    check_uint_eq(users.update(*stored_user).affected_rows(), 1u);
-    check_uint_eq(orders.update(*stored_one).affected_rows(), 1u);
-    check_uint_eq(orders.update(*stored_many).affected_rows(), 1u);
+    check_equal(users.update(*stored_user).affected_rows(), 1u);
+    check_equal(orders.update(*stored_one).affected_rows(), 1u);
+    check_equal(orders.update(*stored_many).affected_rows(), 1u);
 
     user->name = "local";
     user->order.label = "local-one";
     user->orders.front().label = "local-many";
     manager.refresh(user);
-    check_str_eq(user->name.c_str(), "database");
-    check_str_eq(user->order.label.c_str(), "database-one");
-    check_str_eq(user->orders.front().label.c_str(), "database-many");
+    check_equal(user->name.c_str(), "database");
+    check_equal(user->order.label.c_str(), "database-one");
+    check_equal(user->orders.front().label.c_str(), "database-many");
     check_false(manager.dirty());
 
     manager.detach(user);
     check_false(manager.contains(user));
-    check_uint_eq(manager.size(), 0u);
+    check_equal(manager.size(), 0u);
   }
 
   it("removes only materialized relations after eager find") {
@@ -810,23 +810,23 @@ suite("ORM Generated Metadata") {
 
     orm::repository<app::model::User> users(connection);
     orm::repository<app::model::Order> orders(connection);
-    check_uint_eq(users.insert({11, 0, {}, "eager", {}}).affected_rows(), 1u);
-    check_uint_eq(orders.insert({110, 11, "first"}).affected_rows(), 1u);
-    check_uint_eq(orders.insert({111, 11, "second"}).affected_rows(), 1u);
+    check_equal(users.insert({11, 0, {}, "eager", {}}).affected_rows(), 1u);
+    check_equal(orders.insert({110, 11, "first"}).affected_rows(), 1u);
+    check_equal(orders.insert({111, 11, "second"}).affected_rows(), 1u);
 
     orm::entity_manager manager(connection);
     auto user = manager.find<app::model::User>(11u);
     check_not_null(user.get());
-    check_uint_eq(user->order.id, 0u);
-    check_uint_eq(user->orders.size(), 2u);
-    check_uint_eq(manager.size(), 3u);
+    check_equal(user->order.id, 0u);
+    check_equal(user->orders.size(), 2u);
+    check_equal(manager.size(), 3u);
 
     user->orders.pop_back();
-    check_uint_eq(manager.flush(), 1u);
+    check_equal(manager.flush(), 1u);
     check_false(orders.find_by_id(111u).has_value());
 
     manager.remove(user);
-    check_uint_eq(manager.flush(), 2u);
+    check_equal(manager.flush(), 2u);
     check_false(users.find_by_id(11u).has_value());
     check_false(orders.find_by_id(110u).has_value());
   }
@@ -844,8 +844,8 @@ suite("ORM Generated Metadata") {
 
     orm::repository<app::model::User> users(connection);
     orm::repository<app::model::Order> orders(connection);
-    check_uint_eq(users.insert({12, 0, {}, "bounded", {}}).affected_rows(), 1u);
-    check_uint_eq(orders.insert({120, 12, "child"}).affected_rows(), 1u);
+    check_equal(users.insert({12, 0, {}, "bounded", {}}).affected_rows(), 1u);
+    check_equal(orders.insert({120, 12, "child"}).affected_rows(), 1u);
 
     orm::entity_manager manager(connection, 1u);
     orm_status_t status = ORM_STATUS_OK;
@@ -854,8 +854,8 @@ suite("ORM Generated Metadata") {
     } catch (const orm::status_error& error) {
       status = error.status();
     }
-    check_int_eq(status, ORM_STATUS_LIMIT_EXCEEDED);
-    check_uint_eq(manager.size(), 0u);
+    check_equal(status, ORM_STATUS_LIMIT_EXCEEDED);
+    check_equal(manager.size(), 0u);
     check_false(manager.dirty());
   }
 }

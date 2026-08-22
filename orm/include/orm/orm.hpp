@@ -43,6 +43,11 @@ namespace orm {
     not_like = ORM_COMPARE_NOT_LIKE
   };
 
+  enum class subquery_quantifier : orm_subquery_quantifier_t {
+    any = ORM_SUBQUERY_ANY,
+    all = ORM_SUBQUERY_ALL
+  };
+
   enum class sort_order : orm_order_t {
     ascending = ORM_ORDER_ASCENDING,
     descending = ORM_ORDER_DESCENDING
@@ -91,6 +96,8 @@ namespace orm {
 
   namespace detail {
 
+    struct aggregate_expression_factory;
+
     inline orm_string_view_t to_view(std::string_view value) noexcept {
       return {value.data(), value.size()};
     }
@@ -118,6 +125,16 @@ namespace orm {
   class value final {
   public:
     value(std::nullptr_t) noexcept : storage_(std::monostate{}) {}
+
+    value(std::nullopt_t) noexcept : value(nullptr) {}
+
+    template <typename T> value(const std::optional<T> &input) : value(nullptr) {
+      if (input.has_value()) *this = value(*input);
+    }
+
+    template <typename T> value(std::optional<T> &&input) : value(nullptr) {
+      if (input.has_value()) *this = value(std::move(*input));
+    }
 
     value(bool input) noexcept : storage_(input) {}
 
@@ -198,35 +215,56 @@ namespace orm {
   template <typename Entity> class table;
   template <typename T> class column;
   template <typename T> class aggregate_expression;
+  template <typename T> class expression;
 
   namespace detail {
 
+    struct scalar_token_spec {
+      orm_scalar_token_kind_t kind;
+      std::string column;
+      value operand;
+    };
+    template <typename T>
+    struct scalar_expression_factory {
+      static expression<T> from_tokens(std::vector<scalar_token_spec> tokens,
+                                       std::string alias = {});
+      template <typename Input>
+      static expression<T> from_value(Input input);
+    };
+
+    template <typename T> struct scalar_type { using type = std::decay_t<T>; };
+    template <typename T> struct scalar_type<std::optional<T>> { using type = std::decay_t<T>; };
+    template <typename T> using scalar_type_t = typename scalar_type<std::decay_t<T>>::type;
+
     template <typename T>
     inline constexpr bool is_text_v =
-        std::is_same_v<std::decay_t<T>, std::string> ||
-        std::is_same_v<std::decay_t<T>, std::string_view> ||
-        (std::is_pointer_v<std::decay_t<T>> &&
-         std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::decay_t<T>>>, char>);
+        std::is_same_v<scalar_type_t<T>, std::string> ||
+        std::is_same_v<scalar_type_t<T>, std::string_view> ||
+        (std::is_pointer_v<scalar_type_t<T>> &&
+         std::is_same_v<std::remove_cv_t<std::remove_pointer_t<scalar_type_t<T>>>, char>);
 
     template <typename T>
     inline constexpr bool is_number_v =
-        (std::is_arithmetic_v<std::decay_t<T>> && !std::is_same_v<std::decay_t<T>, bool>) ||
-        std::is_enum_v<std::decay_t<T>>;
+        (std::is_arithmetic_v<scalar_type_t<T>> && !std::is_same_v<scalar_type_t<T>, bool>) ||
+        std::is_enum_v<scalar_type_t<T>>;
 
     template <typename T>
     inline constexpr bool is_blob_v =
-        std::is_same_v<std::decay_t<T>, std::vector<std::uint8_t>>;
+        std::is_same_v<scalar_type_t<T>, std::vector<std::uint8_t>>;
 
     template <typename Field, typename Input>
     inline constexpr bool is_compatible_value_v =
         std::is_same_v<std::decay_t<Input>, std::nullptr_t> ||
-        (std::is_same_v<std::decay_t<Field>, bool> && std::is_same_v<std::decay_t<Input>, bool>) ||
+        std::is_same_v<std::decay_t<Input>, std::nullopt_t> ||
+        (std::is_same_v<scalar_type_t<Field>, bool> &&
+         std::is_same_v<scalar_type_t<Input>, bool>) ||
         (is_number_v<Field> && is_number_v<Input>) || (is_text_v<Field> && is_text_v<Input>) ||
         (is_blob_v<Field> && is_blob_v<Input>);
 
     template <typename Left, typename Right>
     inline constexpr bool is_compatible_column_v =
-        (std::is_same_v<std::decay_t<Left>, bool> && std::is_same_v<std::decay_t<Right>, bool>) ||
+        (std::is_same_v<scalar_type_t<Left>, bool> &&
+         std::is_same_v<scalar_type_t<Right>, bool>) ||
         (is_number_v<Left> && is_number_v<Right>) || (is_text_v<Left> && is_text_v<Right>);
 
     struct condition_leaf {
@@ -234,6 +272,14 @@ namespace orm {
       std::string column;
       comparison operation;
       value operand;
+    };
+
+    struct column_condition_leaf {
+      std::string left_table;
+      std::string left_column;
+      comparison operation;
+      std::string right_table;
+      std::string right_column;
     };
 
     struct aggregate_leaf {
@@ -251,9 +297,11 @@ namespace orm {
     };
 
     struct predicate_node {
-      using storage = std::variant<condition_leaf, aggregate_leaf, condition_group>;
+      using storage =
+          std::variant<condition_leaf, column_condition_leaf, aggregate_leaf, condition_group>;
 
       explicit predicate_node(condition_leaf leaf) : data(std::move(leaf)) {}
+      explicit predicate_node(column_condition_leaf leaf) : data(std::move(leaf)) {}
       explicit predicate_node(aggregate_leaf leaf) : data(std::move(leaf)) {}
       explicit predicate_node(condition_group group) : data(std::move(group)) {}
 
@@ -291,6 +339,14 @@ namespace orm {
                                comparison operation, value operand) {
       return predicate(std::make_shared<const detail::predicate_node>(
           detail::aggregate_leaf{function, std::move(column_name), operation, std::move(operand)}));
+    }
+
+    static predicate columns(std::string left_table, std::string left_column,
+                             comparison operation, std::string right_table,
+                             std::string right_column) {
+      return predicate(std::make_shared<const detail::predicate_node>(
+          detail::column_condition_leaf{std::move(left_table), std::move(left_column), operation,
+                                        std::move(right_table), std::move(right_column)}));
     }
 
     static predicate combine(logic operation, predicate left, predicate right) {
@@ -428,6 +484,76 @@ namespace orm {
       return compare(comparison::not_like, std::forward<Input>(input));
     }
 
+    [[nodiscard]] predicate is_null() const { return eq(nullptr); }
+
+    [[nodiscard]] predicate is_not_null() const { return ne(nullptr); }
+
+    template <typename Lower, typename Upper,
+              std::enable_if_t<detail::is_compatible_value_v<T, Lower> &&
+                                   detail::is_compatible_value_v<T, Upper>,
+                               int> = 0>
+    [[nodiscard]] predicate between(Lower &&lower, Upper &&upper) const {
+      return ge(std::forward<Lower>(lower)) && le(std::forward<Upper>(upper));
+    }
+
+    template <typename Lower, typename Upper,
+              std::enable_if_t<detail::is_compatible_value_v<T, Lower> &&
+                                   detail::is_compatible_value_v<T, Upper>,
+                               int> = 0>
+    [[nodiscard]] predicate not_between(Lower &&lower, Upper &&upper) const {
+      return lt(std::forward<Lower>(lower)) || gt(std::forward<Upper>(upper));
+    }
+
+    template <typename First, typename... Rest,
+              std::enable_if_t<detail::is_compatible_value_v<T, First> &&
+                                   (detail::is_compatible_value_v<T, Rest> && ...),
+                               int> = 0>
+    [[nodiscard]] predicate in(First &&first, Rest &&...rest) const {
+      predicate output = eq(std::forward<First>(first));
+      ((output = std::move(output) || eq(std::forward<Rest>(rest))), ...);
+      return output;
+    }
+
+    template <typename First, typename... Rest,
+              std::enable_if_t<detail::is_compatible_value_v<T, First> &&
+                                   (detail::is_compatible_value_v<T, Rest> && ...),
+                               int> = 0>
+    [[nodiscard]] predicate not_in(First &&first, Rest &&...rest) const {
+      predicate output = ne(std::forward<First>(first));
+      ((output = std::move(output) && ne(std::forward<Rest>(rest))), ...);
+      return output;
+    }
+
+    template <typename Other, std::enable_if_t<detail::is_compatible_column_v<T, Other>, int> = 0>
+    [[nodiscard]] predicate eq_column(const column<Other> &other) const {
+      return compare_column(comparison::equal, other);
+    }
+
+    template <typename Other, std::enable_if_t<detail::is_compatible_column_v<T, Other>, int> = 0>
+    [[nodiscard]] predicate ne_column(const column<Other> &other) const {
+      return compare_column(comparison::not_equal, other);
+    }
+
+    template <typename Other, std::enable_if_t<detail::is_compatible_column_v<T, Other>, int> = 0>
+    [[nodiscard]] predicate lt_column(const column<Other> &other) const {
+      return compare_column(comparison::less, other);
+    }
+
+    template <typename Other, std::enable_if_t<detail::is_compatible_column_v<T, Other>, int> = 0>
+    [[nodiscard]] predicate le_column(const column<Other> &other) const {
+      return compare_column(comparison::less_equal, other);
+    }
+
+    template <typename Other, std::enable_if_t<detail::is_compatible_column_v<T, Other>, int> = 0>
+    [[nodiscard]] predicate gt_column(const column<Other> &other) const {
+      return compare_column(comparison::greater, other);
+    }
+
+    template <typename Other, std::enable_if_t<detail::is_compatible_column_v<T, Other>, int> = 0>
+    [[nodiscard]] predicate ge_column(const column<Other> &other) const {
+      return compare_column(comparison::greater_equal, other);
+    }
+
     template <typename Input, std::enable_if_t<detail::is_compatible_value_v<T, Input>, int> = 0>
     [[nodiscard]] predicate operator==(Input &&input) const {
       return eq(std::forward<Input>(input));
@@ -503,6 +629,13 @@ namespace orm {
     }
 
     template <typename Other>
+    [[nodiscard]] predicate compare_column(comparison operation,
+                                           const column<Other> &other) const {
+      return predicate::columns(table_, qualified_, operation, std::string(other.table_name()),
+                                std::string(other.qualified_name()));
+    }
+
+    template <typename Other>
     [[nodiscard]] join_condition join(comparison operation, const column<Other> &other) const {
       return join_condition(table_, qualified_, operation, std::string(other.table_name()),
                             std::string(other.qualified_name()));
@@ -559,11 +692,12 @@ namespace orm {
     }
 
   private:
+    friend struct detail::aggregate_expression_factory;
     template <typename U> friend aggregate_expression<std::uint64_t> count(const column<U> &);
     friend aggregate_expression<std::uint64_t> count_all();
-    template <typename U, std::enable_if_t<detail::is_number_v<U>, int>>
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> Enable>
     friend aggregate_expression<U> sum(const column<U> &);
-    template <typename U, std::enable_if_t<detail::is_number_v<U>, int>>
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> Enable>
     friend aggregate_expression<double> avg(const column<U> &);
     template <typename U> friend aggregate_expression<U> min(const column<U> &);
     template <typename U> friend aggregate_expression<U> max(const column<U> &);
@@ -581,49 +715,288 @@ namespace orm {
     std::string alias_;
   };
 
+  namespace detail {
+    struct aggregate_expression_factory {
+      template <typename T>
+      static aggregate_expression<T> make(aggregate_function function,
+                                          std::string column_name) {
+        return aggregate_expression<T>(function, std::move(column_name));
+      }
+    };
+
+    template <typename T>
+    template <typename Input>
+    expression<T> scalar_expression_factory<T>::from_value(Input input) {
+      return expression<T>(std::vector<scalar_token_spec>{
+          {ORM_SCALAR_VALUE, {}, value(std::move(input))}},
+                           {});
+    }
+
+    template <typename T>
+    expression<T> scalar_expression_factory<T>::from_tokens(
+        std::vector<scalar_token_spec> tokens, std::string alias) {
+      return expression<T>(std::move(tokens), std::move(alias));
+    }
+  } // namespace detail
+
+  template <typename T> class expression final {
+  public:
+    using value_type = T;
+
+    explicit expression(const column<T> &input)
+        : tokens_{{ORM_SCALAR_COLUMN, std::string(input.qualified_name()), value(nullptr)}} {}
+
+    expression as(std::string alias) const {
+      expression copy = *this;
+      copy.alias_ = std::move(alias);
+      return copy;
+    }
+
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator+(U input) const { return append<U>(ORM_SCALAR_ADD, input); }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator-(U input) const { return append<U>(ORM_SCALAR_SUBTRACT, input); }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator*(U input) const { return append<U>(ORM_SCALAR_MULTIPLY, input); }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator/(U input) const { return append<U>(ORM_SCALAR_DIVIDE, input); }
+
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator+(const column<U> &input) const {
+      return combine<U>(ORM_SCALAR_ADD, expression<U>(input));
+    }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator-(const column<U> &input) const {
+      return combine<U>(ORM_SCALAR_SUBTRACT, expression<U>(input));
+    }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator*(const column<U> &input) const {
+      return combine<U>(ORM_SCALAR_MULTIPLY, expression<U>(input));
+    }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator/(const column<U> &input) const {
+      return combine<U>(ORM_SCALAR_DIVIDE, expression<U>(input));
+    }
+
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator+(const expression<U> &input) const {
+      return combine<U>(ORM_SCALAR_ADD, input);
+    }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator-(const expression<U> &input) const {
+      return combine<U>(ORM_SCALAR_SUBTRACT, input);
+    }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator*(const expression<U> &input) const {
+      return combine<U>(ORM_SCALAR_MULTIPLY, input);
+    }
+    template <typename U, std::enable_if_t<detail::is_number_v<U>, int> = 0>
+    auto operator/(const expression<U> &input) const {
+      return combine<U>(ORM_SCALAR_DIVIDE, input);
+    }
+
+    [[nodiscard]] const std::vector<detail::scalar_token_spec> &tokens() const noexcept {
+      return tokens_;
+    }
+
+    [[nodiscard]] std::string_view alias() const noexcept { return alias_; }
+
+  private:
+    template <typename> friend class expression;
+    template <typename> friend struct detail::scalar_expression_factory;
+
+    template <typename U> using result_t = std::common_type_t<detail::scalar_type_t<T>,
+                                                               detail::scalar_type_t<U>>;
+    template <typename U>
+    expression<result_t<U>> combine(orm_scalar_token_kind_t kind,
+                                    const expression<U> &input) const {
+      std::vector<detail::scalar_token_spec> tokens = tokens_;
+      tokens.reserve(tokens_.size() + input.tokens_.size() + 1);
+      tokens.insert(tokens.end(), input.tokens_.begin(), input.tokens_.end());
+      tokens.push_back({kind, {}, value(nullptr)});
+      return detail::scalar_expression_factory<result_t<U>>::from_tokens(
+          std::move(tokens), alias_);
+    }
+
+    template <typename U> expression<result_t<U>> append(orm_scalar_token_kind_t kind,
+                                                        U input) const {
+      std::vector<detail::scalar_token_spec> tokens = tokens_;
+      tokens.reserve(tokens_.size() + 2);
+      tokens.push_back({ORM_SCALAR_VALUE, {}, value(std::move(input))});
+      tokens.push_back({kind, {}, value(nullptr)});
+      return detail::scalar_expression_factory<result_t<U>>::from_tokens(std::move(tokens),
+                                                                       alias_);
+    }
+
+    expression(std::vector<detail::scalar_token_spec> tokens, std::string alias)
+        : tokens_(std::move(tokens)), alias_(std::move(alias)) {}
+    std::vector<detail::scalar_token_spec> tokens_;
+    std::string alias_;
+  };
+
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator+(const column<T> &left, U right) { return expression<T>(left) + right; }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator-(const column<T> &left, U right) { return expression<T>(left) - right; }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator*(const column<T> &left, U right) { return expression<T>(left) * right; }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator/(const column<T> &left, U right) { return expression<T>(left) / right; }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator+(const column<T> &left, const column<U> &right) {
+    return expression<T>(left) + expression<U>(right);
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator-(const column<T> &left, const column<U> &right) {
+    return expression<T>(left) - expression<U>(right);
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator*(const column<T> &left, const column<U> &right) {
+    return expression<T>(left) * expression<U>(right);
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator/(const column<T> &left, const column<U> &right) {
+    return expression<T>(left) / expression<U>(right);
+  }
+
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator+(T left, const expression<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) + right;
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator-(T left, const expression<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) - right;
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator*(T left, const expression<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) * right;
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator/(T left, const expression<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) / right;
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator+(T left, const column<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) + expression<U>(right);
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator-(T left, const column<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) - expression<U>(right);
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator*(T left, const column<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) * expression<U>(right);
+  }
+  template <typename T, typename U,
+            std::enable_if_t<detail::is_number_v<T> && detail::is_number_v<U>, int> = 0>
+  auto operator/(T left, const column<U> &right) {
+    using result_t = std::common_type_t<detail::scalar_type_t<T>, detail::scalar_type_t<U>>;
+    return detail::scalar_expression_factory<result_t>::from_value(left) / expression<U>(right);
+  }
+
   template <typename T>
   [[nodiscard]] aggregate_expression<std::uint64_t> count(const column<T> &input) {
-    return aggregate_expression<std::uint64_t>(aggregate_function::count,
-                                               std::string(input.qualified_name()));
+    return detail::aggregate_expression_factory::make<std::uint64_t>(
+        aggregate_function::count, std::string(input.qualified_name()));
   }
 
   [[nodiscard]] inline aggregate_expression<std::uint64_t> count_all() {
-    return aggregate_expression<std::uint64_t>(aggregate_function::count_all, {});
+    return detail::aggregate_expression_factory::make<std::uint64_t>(
+        aggregate_function::count_all, {});
   }
 
   template <typename T, std::enable_if_t<detail::is_number_v<T>, int> = 0>
   [[nodiscard]] aggregate_expression<T> sum(const column<T> &input) {
-    return aggregate_expression<T>(aggregate_function::sum, std::string(input.qualified_name()));
+    return detail::aggregate_expression_factory::make<T>(
+        aggregate_function::sum, std::string(input.qualified_name()));
   }
 
   template <typename T, std::enable_if_t<detail::is_number_v<T>, int> = 0>
   [[nodiscard]] aggregate_expression<double> avg(const column<T> &input) {
-    return aggregate_expression<double>(aggregate_function::average,
-                                        std::string(input.qualified_name()));
+    return detail::aggregate_expression_factory::make<double>(
+        aggregate_function::average, std::string(input.qualified_name()));
   }
 
   template <typename T> [[nodiscard]] aggregate_expression<T> min(const column<T> &input) {
-    return aggregate_expression<T>(aggregate_function::minimum,
-                                   std::string(input.qualified_name()));
+    return detail::aggregate_expression_factory::make<T>(
+        aggregate_function::minimum, std::string(input.qualified_name()));
   }
 
   template <typename T> [[nodiscard]] aggregate_expression<T> max(const column<T> &input) {
-    return aggregate_expression<T>(aggregate_function::maximum,
-                                   std::string(input.qualified_name()));
+    return detail::aggregate_expression_factory::make<T>(
+        aggregate_function::maximum, std::string(input.qualified_name()));
   }
 
   namespace detail {
-
     struct projection_spec {
-      enum class kind { column, aggregate } type;
+      enum class kind { column, aggregate, expression } type;
       std::string column;
       aggregate_function function = aggregate_function::count_all;
       std::string alias;
+      std::vector<scalar_token_spec> tokens;
     };
 
     template <typename T> struct is_projection : std::false_type {};
     template <typename T> struct is_projection<column<T>> : std::true_type {};
     template <typename T> struct is_projection<aggregate_expression<T>> : std::true_type {};
+    template <typename T> struct is_projection<expression<T>> : std::true_type {};
+
+    template <typename T> struct projection_value;
+    template <typename T> struct projection_value<column<T>> { using type = T; };
+    template <typename T> struct projection_value<aggregate_expression<T>> { using type = T; };
+    template <typename T> struct projection_value<expression<T>> { using type = T; };
+
+    template <typename... Projections>
+    using projection_row_t =
+        std::tuple<typename projection_value<std::decay_t<Projections>>::type...>;
+
+    template <typename Row> struct single_projection_value;
+    template <typename T> struct single_projection_value<std::tuple<T>> { using type = T; };
+
+    template <typename Row> struct subquery_projection {
+      static constexpr bool valid = false;
+    };
+    template <typename T> struct subquery_projection<std::tuple<T>> {
+      using type = T;
+      static constexpr bool valid = true;
+    };
+
+    template <typename Row, typename Mapper, typename = void>
+    struct projection_mapper {
+      static constexpr bool valid = false;
+    };
+
+    template <typename... Fields, typename Mapper>
+    struct projection_mapper<
+        std::tuple<Fields...>, Mapper,
+        std::void_t<std::invoke_result_t<std::decay_t<Mapper> &, Fields...>>> {
+      using invocation_type = std::invoke_result_t<std::decay_t<Mapper> &, Fields...>;
+      using result_type = std::decay_t<invocation_type>;
+      static constexpr bool valid =
+          !std::is_void_v<result_type> && std::is_move_constructible_v<result_type>;
+    };
 
     template <typename T>
     inline constexpr bool is_projection_v = is_projection<std::decay_t<T>>::value;
@@ -638,6 +1011,14 @@ namespace orm {
     template <typename T> projection_spec projection_of(const aggregate_expression<T> &input) {
       return {projection_spec::kind::aggregate, std::string(input.column_name()), input.function(),
               std::string(input.alias())};
+    }
+
+    template <typename T> projection_spec projection_of(const expression<T> &input) {
+      projection_spec output{};
+      output.type = projection_spec::kind::expression;
+      output.alias = std::string(input.alias());
+      output.tokens = input.tokens();
+      return output;
     }
 
   } // namespace detail
@@ -744,6 +1125,13 @@ namespace orm {
       return *this;
     }
 
+    query &distinct(bool enabled = true) {
+      checked("set DISTINCT", [&](orm_error_t *error) {
+        return orm_query_set_distinct(handle_, enabled ? 1 : 0, error);
+      });
+      return *this;
+    }
+
     query &column(std::string_view name) {
       checked("add selected column", [&](orm_error_t *error) {
         return orm_query_add_column(handle_, detail::to_view(name), error);
@@ -760,6 +1148,22 @@ namespace orm {
       return *this;
     }
 
+    query &scalar_expression(const std::vector<detail::scalar_token_spec> &tokens,
+                             std::string_view alias = {}) {
+      if (tokens.size() > std::numeric_limits<std::uint32_t>::max())
+        throw std::length_error("ORM scalar expression token count exceeds uint32_t");
+      std::vector<orm_scalar_token_t> native;
+      native.reserve(tokens.size());
+      for (const auto &token : tokens)
+        native.push_back({token.kind, detail::to_view(token.column), token.operand.native()});
+      const orm_scalar_expression_t expression{native.data(),
+                                               static_cast<std::uint32_t>(native.size())};
+      checked("add scalar expression", [&](orm_error_t *error) {
+        return orm_query_add_expression(handle_, expression, detail::to_view(alias), error);
+      });
+      return *this;
+    }
+
     query &set(std::string_view column_name, value input) {
       checked("set assignment", [&](orm_error_t *error) {
         return orm_query_set(handle_, detail::to_view(column_name), input.native(), error);
@@ -771,6 +1175,56 @@ namespace orm {
       checked("append WHERE predicate", [&](orm_error_t *error) {
         return orm_query_where(handle_, detail::to_view(column_name),
                                static_cast<orm_compare_t>(operation), input.native(), error);
+      });
+      return *this;
+    }
+
+    query &where_columns(std::string_view left_column, comparison operation,
+                         std::string_view right_column) {
+      checked("append column WHERE predicate", [&](orm_error_t *error) {
+        return orm_query_where_columns(handle_, detail::to_view(left_column),
+                                       static_cast<orm_compare_t>(operation),
+                                       detail::to_view(right_column), error);
+      });
+      return *this;
+    }
+
+    query &where_exists(const query &subquery, bool negated = false) {
+      checked(negated ? "append NOT EXISTS subquery" : "append EXISTS subquery",
+              [&](orm_error_t *error) {
+                return orm_query_where_exists(handle_, subquery.handle_, negated ? 1 : 0, error);
+              });
+      return *this;
+    }
+
+    query &where_in_subquery(std::string_view column_name, const query &subquery,
+                             bool negated = false) {
+      checked(negated ? "append NOT IN subquery" : "append IN subquery",
+              [&](orm_error_t *error) {
+                return orm_query_where_in_subquery(handle_, detail::to_view(column_name),
+                                                   subquery.handle_, negated ? 1 : 0, error);
+              });
+      return *this;
+    }
+
+    query &where_scalar_subquery(std::string_view column_name, comparison operation,
+                                 const query &subquery) {
+      checked("append scalar subquery comparison", [&](orm_error_t *error) {
+        return orm_query_where_scalar_subquery(
+            handle_, detail::to_view(column_name), static_cast<orm_compare_t>(operation),
+            subquery.handle_, error);
+      });
+      return *this;
+    }
+
+    query &where_quantified_subquery(std::string_view column_name,
+                                     comparison operation,
+                                     subquery_quantifier quantifier,
+                                     const query &subquery) {
+      checked("append quantified subquery comparison", [&](orm_error_t *error) {
+        return orm_query_where_quantified_subquery(
+            handle_, detail::to_view(column_name), static_cast<orm_compare_t>(operation),
+            static_cast<orm_subquery_quantifier_t>(quantifier), subquery.handle_, error);
       });
       return *this;
     }
@@ -850,6 +1304,23 @@ namespace orm {
       return *this;
     }
 
+    template <typename T>
+    query &order_by(const expression<T> &input, sort_order order) {
+      std::vector<orm_scalar_token_t> tokens;
+      tokens.reserve(input.tokens().size());
+      for (const auto &token : input.tokens()) {
+        tokens.push_back(
+            {token.kind, detail::to_view(token.column), token.operand.native()});
+      }
+      const orm_scalar_expression_t expression{tokens.data(),
+                                              static_cast<std::uint32_t>(tokens.size())};
+      checked("append ORDER BY scalar expression", [&](orm_error_t *error) {
+        return orm_query_order_by_expression(handle_, expression,
+                                            static_cast<orm_order_t>(order), error);
+      });
+      return *this;
+    }
+
     query &limit(std::uint64_t count) {
       checked("set LIMIT",
               [&](orm_error_t *error) { return orm_query_set_limit(handle_, count, error); });
@@ -880,6 +1351,26 @@ namespace orm {
     }
 
     orm_query_t *handle_ = nullptr;
+  };
+
+  class exists_predicate final {
+  public:
+    exists_predicate(const exists_predicate &) = delete;
+    exists_predicate &operator=(const exists_predicate &) = delete;
+    exists_predicate(exists_predicate &&) noexcept = default;
+    exists_predicate &operator=(exists_predicate &&) noexcept = default;
+
+    void apply(query &outer) const { outer.where_exists(subquery_, negated_); }
+
+  private:
+    friend class select_query;
+    template <typename> friend class typed_select_query;
+
+    exists_predicate(query subquery, bool negated)
+        : subquery_(std::move(subquery)), negated_(negated) {}
+
+    query subquery_;
+    bool negated_;
   };
 
   namespace detail {
@@ -1309,6 +1800,14 @@ namespace orm {
         return;
       }
 
+      if (const auto *condition = std::get_if<column_condition_leaf>(&node.data)) {
+        if (having)
+          throw std::invalid_argument("ORM column comparison is not supported in HAVING");
+        target.where_columns(condition->left_column, condition->operation,
+                             condition->right_column);
+        return;
+      }
+
       if (const auto *aggregate = std::get_if<aggregate_leaf>(&node.data)) {
         if (!having) throw std::invalid_argument("ORM aggregate predicate is only valid in HAVING");
         target.having(aggregate->function, aggregate->column, aggregate->operation,
@@ -1336,6 +1835,8 @@ namespace orm {
     inline bool references_only_table(const predicate_node &node, std::string_view table_name) {
       if (const auto *condition = std::get_if<condition_leaf>(&node.data))
         return condition->table == table_name;
+      if (const auto *condition = std::get_if<column_condition_leaf>(&node.data))
+        return condition->left_table == table_name && condition->right_table == table_name;
       if (std::holds_alternative<aggregate_leaf>(node.data)) return false;
       const auto &group = std::get<condition_group>(node.data);
       return std::all_of(group.children.begin(), group.children.end(), [&](const auto &child) {
@@ -1760,6 +2261,9 @@ namespace orm {
   class select_builder;
   class select_query;
   class join_builder;
+  template <typename Row> class typed_select_builder;
+  template <typename Row> class typed_select_query;
+  template <typename Row> class typed_join_builder;
   class insert_query;
   class update_query;
   class delete_query;
@@ -2053,7 +2557,8 @@ namespace orm {
 
     template <typename... Projections,
               std::enable_if_t<(detail::is_projection_v<Projections> && ...), int> = 0>
-    [[nodiscard]] select_builder select(Projections &&...projections) const;
+    [[nodiscard]] typed_select_builder<detail::projection_row_t<Projections...>>
+    select(Projections &&...projections) const;
 
     template <typename Entity,
               std::enable_if_t<detail::has_model_v<Entity>, int> = 0>
@@ -2118,6 +2623,109 @@ namespace orm {
       return *this;
     }
 
+    select_query &where(const exists_predicate &condition) {
+      condition.apply(query_);
+      return *this;
+    }
+
+    template <typename T>
+    select_query &where_in(const column<T> &column, const select_query &subquery) {
+      query_.where_in_subquery(column.qualified_name(), subquery.query_);
+      return *this;
+    }
+
+    template <typename T>
+    select_query &where_not_in(const column<T> &column, const select_query &subquery) {
+      query_.where_in_subquery(column.qualified_name(), subquery.query_, true);
+      return *this;
+    }
+
+    template <typename T, typename Row,
+              typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    select_query &where_in(const column<T> &column,
+                           const typed_select_query<Row> &subquery) {
+      subquery.apply_in_subquery(query_, column, false);
+      return *this;
+    }
+
+    template <typename T, typename Row,
+              typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    select_query &where_not_in(const column<T> &column,
+                               const typed_select_query<Row> &subquery) {
+      subquery.apply_in_subquery(query_, column, true);
+      return *this;
+    }
+
+    template <typename T, typename Row,
+              typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    select_query &where(const column<T> &column, comparison operation,
+                        const typed_select_query<Row> &subquery) {
+      subquery.apply_scalar_subquery(query_, column, operation);
+      return *this;
+    }
+
+    template <typename T, typename Row,
+              typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    select_query &where_any(const column<T> &column, comparison operation,
+                            const typed_select_query<Row> &subquery) {
+      subquery.apply_quantified_subquery(query_, column, operation,
+                                         subquery_quantifier::any);
+      return *this;
+    }
+
+    template <typename T, typename Row,
+              typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    select_query &where_all(const column<T> &column, comparison operation,
+                            const typed_select_query<Row> &subquery) {
+      subquery.apply_quantified_subquery(query_, column, operation,
+                                         subquery_quantifier::all);
+      return *this;
+    }
+
+    void apply_in_subquery(query &outer, std::string_view column_name,
+                           bool negated) const {
+      outer.where_in_subquery(column_name, query_, negated);
+    }
+
+    void apply_scalar_subquery(query &outer, std::string_view column_name,
+                               comparison operation) const {
+      outer.where_scalar_subquery(column_name, operation, query_);
+    }
+
+    void apply_quantified_subquery(query &outer, std::string_view column_name,
+                                   comparison operation,
+                                   subquery_quantifier quantifier) const {
+      outer.where_quantified_subquery(column_name, operation, quantifier, query_);
+    }
+
+    [[nodiscard]] exists_predicate exists() {
+      return exists_predicate(std::move(query_), false);
+    }
+
+    [[nodiscard]] exists_predicate not_exists() {
+      return exists_predicate(std::move(query_), true);
+    }
+
+    select_query &distinct(bool enabled = true) {
+      query_.distinct(enabled);
+      return *this;
+    }
+
     select_query &where(std::string_view column_name, comparison operation, value input) {
       query_.where(column_name, operation, std::move(input));
       return *this;
@@ -2143,6 +2751,12 @@ namespace orm {
 
     select_query &order_by(const order_specifier &order) {
       query_.order_by(order.column_name(), order.order());
+      return *this;
+    }
+
+    template <typename T> select_query &order_by(const expression<T> &input,
+                                                sort_order order) {
+      query_.order_by(input, order);
       return *this;
     }
 
@@ -2252,8 +2866,10 @@ namespace orm {
         for (const auto &projection : projections_) {
           if (projection.type == detail::projection_spec::kind::column) {
             target.column(projection.column);
-          } else {
+          } else if (projection.type == detail::projection_spec::kind::aggregate) {
             target.aggregate(projection.function, projection.column, projection.alias);
+          } else {
+            target.scalar_expression(projection.tokens, projection.alias);
           }
         }
       }
@@ -2262,12 +2878,496 @@ namespace orm {
 
   private:
     friend class connection;
+    template <typename> friend class typed_select_builder;
 
     select_builder(const connection &owner, std::vector<detail::projection_spec> projections)
         : connection_(&owner), projections_(std::move(projections)) {}
 
     const connection *connection_;
     std::vector<detail::projection_spec> projections_;
+  };
+
+  template <typename Row> class typed_join_builder final {
+  public:
+    [[nodiscard]] typed_select_query<Row> &on(const join_condition &condition) & {
+      (void)builder_.on(condition);
+      owner_->allow_table(table_);
+      return *owner_;
+    }
+
+    [[nodiscard]] typed_select_query<Row> &&on(const join_condition &condition) && {
+      (void)builder_.on(condition);
+      owner_->allow_table(table_);
+      return std::move(*owner_);
+    }
+
+  private:
+    friend class typed_select_query<Row>;
+
+    typed_join_builder(typed_select_query<Row> &owner, join_builder builder,
+                       std::string table_name)
+        : owner_(&owner), builder_(std::move(builder)), table_(std::move(table_name)) {}
+
+    typed_select_query<Row> *owner_;
+    join_builder builder_;
+    std::string table_;
+  };
+
+  template <typename Row> class typed_select_query final {
+  public:
+    using row_type = Row;
+
+    typed_select_query(const typed_select_query &) = delete;
+    typed_select_query &operator=(const typed_select_query &) = delete;
+    typed_select_query(typed_select_query &&) noexcept = default;
+    typed_select_query &operator=(typed_select_query &&) noexcept = default;
+
+    typed_select_query &where(const predicate &condition) & {
+      query_.where(condition);
+      return *this;
+    }
+
+    typed_select_query &&where(const predicate &condition) && {
+      query_.where(condition);
+      return std::move(*this);
+    }
+
+    typed_select_query &where(const exists_predicate &condition) & {
+      query_.where(condition);
+      return *this;
+    }
+
+    typed_select_query &&where(const exists_predicate &condition) && {
+      query_.where(condition);
+      return std::move(*this);
+    }
+
+    template <typename T, typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    void apply_in_subquery(query &outer, const column<T> &column, bool negated) const {
+      query_.apply_in_subquery(outer, column.qualified_name(), negated);
+    }
+
+    template <typename T, typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    void apply_scalar_subquery(query &outer, const column<T> &column,
+                               comparison operation) const {
+      query_.apply_scalar_subquery(outer, column.qualified_name(), operation);
+    }
+
+    template <typename T, typename Projection = detail::subquery_projection<Row>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    void apply_quantified_subquery(query &outer, const column<T> &column,
+                                   comparison operation,
+                                   subquery_quantifier quantifier) const {
+      query_.apply_quantified_subquery(outer, column.qualified_name(), operation,
+                                       quantifier);
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &where(const column<T> &column, comparison operation,
+                              const typed_select_query<InnerRow> &subquery) & {
+      query_.where(column, operation, subquery);
+      return *this;
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &&where(const column<T> &column, comparison operation,
+                               const typed_select_query<InnerRow> &subquery) && {
+      query_.where(column, operation, subquery);
+      return std::move(*this);
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &where_any(const column<T> &column, comparison operation,
+                                  const typed_select_query<InnerRow> &subquery) & {
+      query_.where_any(column, operation, subquery);
+      return *this;
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &&where_any(const column<T> &column, comparison operation,
+                                   const typed_select_query<InnerRow> &subquery) && {
+      query_.where_any(column, operation, subquery);
+      return std::move(*this);
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &where_all(const column<T> &column, comparison operation,
+                                  const typed_select_query<InnerRow> &subquery) & {
+      query_.where_all(column, operation, subquery);
+      return *this;
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &&where_all(const column<T> &column, comparison operation,
+                                   const typed_select_query<InnerRow> &subquery) && {
+      query_.where_all(column, operation, subquery);
+      return std::move(*this);
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &where_in(const column<T> &column,
+                                 const typed_select_query<InnerRow> &subquery) & {
+      query_.where_in(column, subquery);
+      return *this;
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &&where_in(const column<T> &column,
+                                  const typed_select_query<InnerRow> &subquery) && {
+      query_.where_in(column, subquery);
+      return std::move(*this);
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &where_not_in(const column<T> &column,
+                                     const typed_select_query<InnerRow> &subquery) & {
+      query_.where_not_in(column, subquery);
+      return *this;
+    }
+
+    template <typename T, typename InnerRow,
+              typename Projection = detail::subquery_projection<InnerRow>,
+              std::enable_if_t<Projection::valid &&
+                                   detail::is_compatible_column_v<T, typename Projection::type>,
+                               int> = 0>
+    typed_select_query &&where_not_in(const column<T> &column,
+                                      const typed_select_query<InnerRow> &subquery) && {
+      query_.where_not_in(column, subquery);
+      return std::move(*this);
+    }
+
+    [[nodiscard]] exists_predicate exists() {
+      return query_.exists();
+    }
+
+    [[nodiscard]] exists_predicate not_exists() {
+      return query_.not_exists();
+    }
+
+    typed_select_query &distinct(bool enabled = true) & {
+      query_.distinct(enabled);
+      return *this;
+    }
+
+    typed_select_query &&distinct(bool enabled = true) && {
+      query_.distinct(enabled);
+      return std::move(*this);
+    }
+
+    typed_select_query &where(std::string_view column_name, comparison operation,
+                              value input) & {
+      query_.where(column_name, operation, std::move(input));
+      return *this;
+    }
+
+    typed_select_query &&where(std::string_view column_name, comparison operation,
+                               value input) && {
+      query_.where(column_name, operation, std::move(input));
+      return std::move(*this);
+    }
+
+    template <typename Entity>
+    [[nodiscard]] typed_join_builder<Row> inner_join(const table<Entity> &target) {
+      return typed_join_builder<Row>(*this, query_.inner_join(target), std::string(target.name()));
+    }
+
+    template <typename Entity>
+    [[nodiscard]] typed_join_builder<Row> left_join(const table<Entity> &target) {
+      return typed_join_builder<Row>(*this, query_.left_join(target), std::string(target.name()));
+    }
+
+    template <typename T> typed_select_query &group_by(const column<T> &input) & {
+      query_.group_by(input);
+      return *this;
+    }
+
+    template <typename T> typed_select_query &&group_by(const column<T> &input) && {
+      query_.group_by(input);
+      return std::move(*this);
+    }
+
+    typed_select_query &having(const predicate &condition) & {
+      query_.having(condition);
+      return *this;
+    }
+
+    typed_select_query &&having(const predicate &condition) && {
+      query_.having(condition);
+      return std::move(*this);
+    }
+
+    typed_select_query &order_by(const order_specifier &order) & {
+      query_.order_by(order);
+      return *this;
+    }
+
+    typed_select_query &&order_by(const order_specifier &order) && {
+      query_.order_by(order);
+      return std::move(*this);
+    }
+
+    template <typename T> typed_select_query &order_by(const expression<T> &input,
+                                                      sort_order order) & {
+      query_.order_by(input, order);
+      return *this;
+    }
+
+    template <typename T> typed_select_query &&order_by(const expression<T> &input,
+                                                       sort_order order) && {
+      query_.order_by(input, order);
+      return std::move(*this);
+    }
+
+    typed_select_query &limit(std::uint64_t count) & {
+      query_.limit(count);
+      return *this;
+    }
+
+    typed_select_query &&limit(std::uint64_t count) && {
+      query_.limit(count);
+      return std::move(*this);
+    }
+
+    typed_select_query &offset(std::uint64_t count) & {
+      query_.offset(count);
+      return *this;
+    }
+
+    typed_select_query &&offset(std::uint64_t count) && {
+      query_.offset(count);
+      return std::move(*this);
+    }
+
+    [[nodiscard]] result fetch() {
+      validate_projection_tables();
+      return query_.fetch();
+    }
+
+    [[nodiscard]] result fetch(transaction &owner) {
+      validate_projection_tables();
+      return query_.fetch(owner);
+    }
+
+    [[nodiscard]] std::vector<Row> fetch_typed() {
+      require_explicit_projection();
+      validate_projection_tables();
+      return query_.template fetch<Row>();
+    }
+
+    [[nodiscard]] std::vector<Row> fetch_typed(transaction &owner) {
+      require_explicit_projection();
+      validate_projection_tables();
+      return query_.template fetch<Row>(owner);
+    }
+
+    [[nodiscard]] std::optional<Row> fetch_one_typed() {
+      require_explicit_projection();
+      validate_projection_tables();
+      return materialize_one(query_.fetch());
+    }
+
+    [[nodiscard]] std::optional<Row> fetch_one_typed(transaction &owner) {
+      require_explicit_projection();
+      validate_projection_tables();
+      return materialize_one(query_.fetch(owner));
+    }
+
+    template <typename R = Row,
+              typename Scalar = typename detail::single_projection_value<R>::type>
+    [[nodiscard]] std::vector<Scalar> fetch_scalars() {
+      auto rows = fetch_typed();
+      std::vector<Scalar> output;
+      output.reserve(rows.size());
+      for (auto &row : rows) output.push_back(std::move(std::get<0>(row)));
+      return output;
+    }
+
+    template <typename R = Row,
+              typename Scalar = typename detail::single_projection_value<R>::type>
+    [[nodiscard]] std::vector<Scalar> fetch_scalars(transaction &owner) {
+      auto rows = fetch_typed(owner);
+      std::vector<Scalar> output;
+      output.reserve(rows.size());
+      for (auto &row : rows) output.push_back(std::move(std::get<0>(row)));
+      return output;
+    }
+
+    template <typename R = Row,
+              typename Scalar = typename detail::single_projection_value<R>::type>
+    [[nodiscard]] std::optional<Scalar> fetch_one_scalar() {
+      auto row = fetch_one_typed();
+      if (!row.has_value()) return std::nullopt;
+      return std::move(std::get<0>(*row));
+    }
+
+    template <typename R = Row,
+              typename Scalar = typename detail::single_projection_value<R>::type>
+    [[nodiscard]] std::optional<Scalar> fetch_one_scalar(transaction &owner) {
+      auto row = fetch_one_typed(owner);
+      if (!row.has_value()) return std::nullopt;
+      return std::move(std::get<0>(*row));
+    }
+
+    template <typename Mapper, typename Traits = detail::projection_mapper<Row, Mapper>,
+              std::enable_if_t<Traits::valid, int> = 0>
+    [[nodiscard]] std::vector<typename Traits::result_type> fetch_mapped(Mapper &&mapper) {
+      auto rows = fetch_typed();
+      std::vector<typename Traits::result_type> output;
+      output.reserve(rows.size());
+      for (auto &row : rows)
+        output.push_back(std::apply(mapper, std::move(row)));
+      return output;
+    }
+
+    template <typename Mapper, typename Traits = detail::projection_mapper<Row, Mapper>,
+              std::enable_if_t<Traits::valid, int> = 0>
+    [[nodiscard]] std::vector<typename Traits::result_type>
+    fetch_mapped(Mapper &&mapper, transaction &owner) {
+      auto rows = fetch_typed(owner);
+      std::vector<typename Traits::result_type> output;
+      output.reserve(rows.size());
+      for (auto &row : rows)
+        output.push_back(std::apply(mapper, std::move(row)));
+      return output;
+    }
+
+    template <typename Mapper, typename Traits = detail::projection_mapper<Row, Mapper>,
+              std::enable_if_t<Traits::valid, int> = 0>
+    [[nodiscard]] std::optional<typename Traits::result_type>
+    fetch_one_mapped(Mapper &&mapper) {
+      auto row = fetch_one_typed();
+      if (!row.has_value()) return std::nullopt;
+      return std::apply(mapper, std::move(*row));
+    }
+
+    template <typename Mapper, typename Traits = detail::projection_mapper<Row, Mapper>,
+              std::enable_if_t<Traits::valid, int> = 0>
+    [[nodiscard]] std::optional<typename Traits::result_type>
+    fetch_one_mapped(Mapper &&mapper, transaction &owner) {
+      auto row = fetch_one_typed(owner);
+      if (!row.has_value()) return std::nullopt;
+      return std::apply(mapper, std::move(*row));
+    }
+
+    template <typename T> [[nodiscard]] std::vector<T> fetch() {
+      validate_projection_tables();
+      return query_.template fetch<T>();
+    }
+
+    template <typename T> [[nodiscard]] std::vector<T> fetch(transaction &owner) {
+      validate_projection_tables();
+      return query_.template fetch<T>(owner);
+    }
+
+  private:
+    friend class typed_select_builder<Row>;
+    friend class typed_join_builder<Row>;
+
+    typed_select_query(select_query target, std::string source_table,
+                       std::vector<std::string> projection_columns)
+        : query_(std::move(target)), projection_columns_(std::move(projection_columns)) {
+      allowed_tables_.insert(std::move(source_table));
+    }
+
+    void allow_table(const std::string &table_name) { allowed_tables_.insert(table_name); }
+
+    void validate_projection_tables() const {
+      for (const auto &column_name : projection_columns_) {
+        const bool allowed = std::any_of(
+            allowed_tables_.begin(), allowed_tables_.end(), [&](const auto &table_name) {
+              return column_name.size() > table_name.size() &&
+                     column_name.compare(0, table_name.size(), table_name) == 0 &&
+                     column_name[table_name.size()] == '.';
+            });
+        if (!allowed)
+          throw std::invalid_argument(
+              "ORM projection column belongs to neither the FROM table nor a joined table");
+      }
+    }
+
+    static constexpr void require_explicit_projection() {
+      static_assert(std::tuple_size<Row>::value != 0,
+                    "ORM typed fetch requires at least one explicit projection");
+    }
+
+    static std::optional<Row> materialize_one(result output) {
+      const std::uint64_t count = output.rows();
+      if (count == 0) return std::nullopt;
+      if (count != 1)
+        throw status_error(ORM_STATUS_INVALID_STATE,
+                           "typed single-result query returned more than one row");
+      return output.template row<Row>(0);
+    }
+
+    select_query query_;
+    std::vector<std::string> projection_columns_;
+    std::unordered_set<std::string> allowed_tables_;
+  };
+
+  template <typename Row> class typed_select_builder final {
+  public:
+    using row_type = Row;
+
+    template <typename Entity>
+    [[nodiscard]] typed_select_query<Row> from(const table<Entity> &source) const {
+      std::vector<std::string> projection_columns;
+      projection_columns.reserve(builder_.projections_.size());
+      for (const auto &projection : builder_.projections_)
+        if (!projection.column.empty()) projection_columns.push_back(projection.column);
+      return typed_select_query<Row>(builder_.from(source), std::string(source.name()),
+                                     std::move(projection_columns));
+    }
+
+  private:
+    friend class connection;
+
+    explicit typed_select_builder(select_builder builder) : builder_(std::move(builder)) {}
+
+    select_builder builder_;
   };
 
   class insert_query final {
@@ -2364,11 +3464,13 @@ namespace orm {
 
   template <typename... Projections,
             std::enable_if_t<(detail::is_projection_v<Projections> && ...), int>>
-  select_builder connection::select(Projections &&...projections) const {
+  typed_select_builder<detail::projection_row_t<Projections...>>
+  connection::select(Projections &&...projections) const {
     std::vector<detail::projection_spec> specifications;
     specifications.reserve(sizeof...(Projections));
     (specifications.push_back(detail::projection_of(std::forward<Projections>(projections))), ...);
-    return select_builder(*this, std::move(specifications));
+    return typed_select_builder<detail::projection_row_t<Projections...>>(
+        select_builder(*this, std::move(specifications)));
   }
 
   template <typename Entity> insert_query connection::insert(const table<Entity> &target) const {

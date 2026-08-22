@@ -1,7 +1,7 @@
 #include "orm.hpp"
 
 #include <mongoc/mongoc.h>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstdint>
 #include <cstdlib>

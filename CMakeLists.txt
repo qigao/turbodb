@@ -42,8 +42,7 @@ include(GNUInstallDirs)
 include(CMakeOptions.cmake)
 include(Sanitizers)
 include(CmakeUtils)
-
-find_package(ZLIB REQUIRED)
+ 
 find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
 find_package(TurboUtils REQUIRED PATHS "${TURBO_UTILS_ROOT}")
 find_package(TurboNet REQUIRED CONFIG PATHS "${TURBO_NET_ROOT}" NO_DEFAULT_PATH)

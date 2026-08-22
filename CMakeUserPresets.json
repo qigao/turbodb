@@ -14,16 +14,7 @@
                 "USER_ROOT": "C:/Users/lockg",
                 "PROGRAM_FILES_X86_ROOT": "C:/Program Files (x86)",
                 "WINDOWS_ROOT": "C:/Windows",
-                "NINJA_ROOT": "$env{USER_ROOT}/scoop/shims",
-                "VS_ROOT": "$env{PROGRAM_FILES_X86_ROOT}/Microsoft Visual Studio/2022/BuildTools",
-                "MSVC_VERSION": "14.44.35207",
-                "MSVC_ROOT": "$env{VS_ROOT}/VC/Tools/MSVC/$env{MSVC_VERSION}",
-                "MSVC_AUXILIARY_ROOT": "$env{VS_ROOT}/VC/Auxiliary/VS",
-                "WINDOWS_SDK_ROOT": "$env{PROGRAM_FILES_X86_ROOT}/Windows Kits/10",
-                "WINDOWS_SDK_VERSION": "10.0.26100.0",
-                "INCLUDE": "$env{MSVC_ROOT}/include;$env{MSVC_AUXILIARY_ROOT}/include;$env{WINDOWS_SDK_ROOT}/Include/$env{WINDOWS_SDK_VERSION}/ucrt;$env{WINDOWS_SDK_ROOT}/Include/$env{WINDOWS_SDK_VERSION}/um;$env{WINDOWS_SDK_ROOT}/Include/$env{WINDOWS_SDK_VERSION}/shared;$env{WINDOWS_SDK_ROOT}/Include/$env{WINDOWS_SDK_VERSION}/winrt;$env{WINDOWS_SDK_ROOT}/Include/$env{WINDOWS_SDK_VERSION}/cppwinrt",
-                "LIB": "$env{MSVC_ROOT}/lib/x64;$env{WINDOWS_SDK_ROOT}/Lib/$env{WINDOWS_SDK_VERSION}/ucrt/x64;$env{WINDOWS_SDK_ROOT}/Lib/$env{WINDOWS_SDK_VERSION}/um/x64",
-                "LIBPATH": "$env{MSVC_ROOT}/lib/x64;$env{MSVC_ROOT}/lib/x86/store/references;$env{WINDOWS_SDK_ROOT}/UnionMetadata/$env{WINDOWS_SDK_VERSION};$env{WINDOWS_SDK_ROOT}/References/$env{WINDOWS_SDK_VERSION};$env{WINDOWS_ROOT}/Microsoft.NET/Framework64/v4.0.30319"
+                "NINJA_ROOT": "$env{USER_ROOT}/scoop/shims"
             }
         },
         {

@@ -151,8 +151,8 @@ static cluster_node_t *create_node(redis_cluster_t *cluster,
     node->info.port = port;
     node->info.node_id = node_id ? tstr_dup(node_id) : NULL;
     if (!node->info.host || (node_id && !node->info.node_id)) {
-        tstr_free((tstr_t)node->info.host);
-        tstr_free((tstr_t)node->info.node_id);
+        tstr_free((tstr)node->info.host);
+        tstr_free((tstr)node->info.node_id);
         free(node);
         return NULL;
     }
@@ -178,8 +178,8 @@ static cluster_node_t *create_node(redis_cluster_t *cluster,
 
     node->pool = redis_pool_create(&pool_config);
     if (!node->pool) {
-        tstr_free((tstr_t)node->info.host);
-        tstr_free((tstr_t)node->info.node_id);
+        tstr_free((tstr)node->info.host);
+        tstr_free((tstr)node->info.node_id);
         free(node);
         return NULL;
     }
@@ -202,8 +202,8 @@ static void destroy_node(cluster_node_t *node) {
     if (node->pool) {
         redis_pool_destroy(node->pool);
     }
-    tstr_free((tstr_t)node->info.host);
-    tstr_free((tstr_t)node->info.node_id);
+    tstr_free((tstr)node->info.host);
+    tstr_free((tstr)node->info.node_id);
     free(node);
 }
 
@@ -766,12 +766,12 @@ void redis_cluster_destroy(redis_cluster_t *cluster) {
 
     /* Free configuration */
     for (size_t i = 0; i < cluster->config.seed_count; i++) {
-        tstr_free((tstr_t)cluster->config.seed_hosts[i]);
+        tstr_free((tstr)cluster->config.seed_hosts[i]);
     }
     free(cluster->config.seed_hosts);
     free(cluster->config.seed_ports);
-    tstr_free((tstr_t)cluster->config.username);
-    tstr_free((tstr_t)cluster->config.password);
+    tstr_free((tstr)cluster->config.username);
+    tstr_free((tstr)cluster->config.password);
 
     free(cluster);
 }
@@ -802,7 +802,7 @@ typedef enum {
 typedef struct {
     cluster_redirect_kind_t kind;
     uint16_t slot;
-    tstr_t host;
+    tstr host;
     uint16_t port;
 } cluster_redirect_t;
 

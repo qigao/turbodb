@@ -227,7 +227,7 @@
 #### 避免重复造轮子（强制规则）
 
 - ❌ **禁止手写**：动态数组 → 用 `turbo_vec_t` / `TURBO_VEC_DEFINE`；统一生命周期的临时数组按协议选 `MemoryPool` 或 `mem_pool_t`
-- ❌ **禁止手写**：字符串拼接 → 用 `tstr_t`（TurboUtils）或 `sds`（vendor）
+- ❌ **禁止手写**：字符串拼接 → 用 `tstr`（TurboUtils）或 `sds`（vendor）
 - ❌ **禁止手写**：哈希表/集合 → 用 `turbo_hash_map_t` / `TURBO_HASH_MAP_DEFINE` 或 `turbo_set_t` / `TURBO_SET_DEFINE`
 - ❌ **禁止手写**：双端队列 → 用 `turbo_deque_t` / `TURBO_DEQUE_DEFINE`
 - ❌ **禁止手写**：文件读写 → 用 `turbo_fs`（TurboUtils）
