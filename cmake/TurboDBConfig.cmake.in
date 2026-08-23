@@ -9,4 +9,14 @@ find_dependency(TurboNet CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/TurboDBTargets.cmake")
 
+# Import TurboDB targets before ORM.  A Redis-enabled ORM package asks for
+# TurboDB only when TurboDB::Redis is not available; reversing this order
+# creates TurboDBConfig -> OrmConfig -> TurboDBConfig recursion downstream.
+find_dependency(Orm CONFIG)
+
+if(NOT TARGET TurboDB::ORM)
+  add_library(TurboDB::ORM INTERFACE IMPORTED)
+  set_target_properties(TurboDB::ORM PROPERTIES INTERFACE_LINK_LIBRARIES Orm::C)
+endif()
+
 check_required_components(TurboDB)

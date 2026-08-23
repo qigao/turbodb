@@ -24,22 +24,13 @@ option(ORM_BUILD_SCHEMA_TOOLS "Build ORM schema validation tools"
 set(TIDESDB_WITH_SNAPPY OFF CACHE BOOL "build with Snappy compression support")
 set(TIDESDB_WITH_LZ4 OFF CACHE BOOL "build with LZ4 compression support")
 
-# ORM backend database options
-# For dev preset: all enabled by default for comprehensive testing
-# For release preset: only SQLite enabled by default for minimal dependencies
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(ORM_WITH_SQLITE_DEFAULT ON)
-    set(ORM_WITH_PGSQL_DEFAULT ON)
-    set(ORM_WITH_REDIS_DEFAULT ON)
-    set(ORM_WITH_MONGODB_DEFAULT ON)
-    set(ORM_WITH_TIDESDB_DEFAULT ON)
-else()
-    set(ORM_WITH_SQLITE_DEFAULT ON)
-    set(ORM_WITH_PGSQL_DEFAULT OFF)
-    set(ORM_WITH_REDIS_DEFAULT OFF)
-    set(ORM_WITH_MONGODB_DEFAULT OFF)
-    set(ORM_WITH_TIDESDB_DEFAULT OFF)
-endif()
+# ORM ships its SQL backends by default. Optional datastore adapters are
+# enabled explicitly so static consumers do not inherit unrelated libraries.
+set(ORM_WITH_SQLITE_DEFAULT ON)
+set(ORM_WITH_PGSQL_DEFAULT ON)
+set(ORM_WITH_REDIS_DEFAULT OFF)
+set(ORM_WITH_MONGODB_DEFAULT OFF)
+set(ORM_WITH_TIDESDB_DEFAULT OFF)
 
 option(ORM_WITH_SQLITE "Enable SQLite backend for ORM" ${ORM_WITH_SQLITE_DEFAULT})
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend for ORM" ${ORM_WITH_PGSQL_DEFAULT})

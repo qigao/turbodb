@@ -23,31 +23,22 @@ option(ORM_INSTALL_EXAMPLES "Install Orm example source code" OFF)
 option(ORM_BUILD_SCHEMA_TOOLS "Build ORM schema validation tools"
        ${ORM_BUILD_TESTS_DEFAULT})
 
-# Backend options. When built as part of the TurboDB project the parent does
-# not define ORM_WITH_*_DEFAULT yet, so default every backend to ON to match
-# the historically always-linked ORM library; a standalone Orm build keeps
-# SQLite and PostgreSQL on and the optional backends off.
-if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  if(NOT DEFINED ORM_WITH_SQLITE_DEFAULT)
-    set(ORM_WITH_SQLITE_DEFAULT ON)
-  endif()
-  if(NOT DEFINED ORM_WITH_PGSQL_DEFAULT)
-    set(ORM_WITH_PGSQL_DEFAULT ON)
-  endif()
-  if(NOT DEFINED ORM_WITH_REDIS_DEFAULT)
-    set(ORM_WITH_REDIS_DEFAULT ON)
-  endif()
-  if(NOT DEFINED ORM_WITH_MONGODB_DEFAULT)
-    set(ORM_WITH_MONGODB_DEFAULT ON)
-  endif()
-  if(NOT DEFINED ORM_WITH_TIDESDB_DEFAULT)
-    set(ORM_WITH_TIDESDB_DEFAULT ON)
-  endif()
-else()
+# Keep the installed TurboDB::ORM contract identical whether ORM is built on
+# its own or as a TurboDB subdirectory. Optional backends remain opt-in so a
+# static ORM consumer does not inherit unrelated backend libraries.
+if(NOT DEFINED ORM_WITH_SQLITE_DEFAULT)
   set(ORM_WITH_SQLITE_DEFAULT ON)
+endif()
+if(NOT DEFINED ORM_WITH_PGSQL_DEFAULT)
   set(ORM_WITH_PGSQL_DEFAULT ON)
+endif()
+if(NOT DEFINED ORM_WITH_REDIS_DEFAULT)
   set(ORM_WITH_REDIS_DEFAULT OFF)
+endif()
+if(NOT DEFINED ORM_WITH_MONGODB_DEFAULT)
   set(ORM_WITH_MONGODB_DEFAULT OFF)
+endif()
+if(NOT DEFINED ORM_WITH_TIDESDB_DEFAULT)
   set(ORM_WITH_TIDESDB_DEFAULT OFF)
 endif()
 
@@ -116,6 +107,7 @@ endif()
 
 add_library(orm_c ${ORM_C_SOURCES})
 add_library(orm_cpp INTERFACE)
+add_library(TurboDB::ORM ALIAS orm_c)
 target_compile_features(orm_c PRIVATE cxx_std_17)
 target_compile_definitions(orm_c PRIVATE ORM_C_BUILD)
 

@@ -29,7 +29,7 @@ the optional schema workflow generates typed C and C++ model facades.
 
 | Language | Header | CMake target | Query style |
 | --- | --- | --- | --- |
-| C11 | `orm.h` or generated `*.orm.h` | `Orm::C` | Fluent query DSL or generated typed CRUD |
+| C11 | `orm.h` or generated `*.orm.h` | `TurboDB::ORM` | Fluent query DSL or generated typed CRUD |
 | C++17 | `orm.hpp` or generated `*.orm.hpp` | `Orm::Cpp` | Typed query DSL and generated entity manager |
 
 Both interfaces use the same C ABI implementation and backend adapters.
@@ -58,9 +58,9 @@ TidesDB retain separate install prefixes and package lifecycles.
 Run these commands from `shared/orm`. Consume the installed package with:
 
 ```cmake
-find_package(Orm CONFIG REQUIRED)
+find_package(TurboDB CONFIG REQUIRED)
 
-target_link_libraries(c_application PRIVATE Orm::C)
+target_link_libraries(c_application PRIVATE TurboDB::ORM)
 target_link_libraries(cpp_application PRIVATE Orm::Cpp)
 ```
 
