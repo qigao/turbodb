@@ -65,6 +65,7 @@ find_package(TurboNet CONFIG REQUIRED
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(zstd CONFIG REQUIRED)
 
 # Additional components
 if(CMAKE_CROSSCOMPILING)

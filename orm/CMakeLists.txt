@@ -22,6 +22,8 @@ option(ORM_BUILD_EXAMPLES "Build the Orm usage examples"
 option(ORM_INSTALL_EXAMPLES "Install Orm example source code" OFF)
 option(ORM_BUILD_SCHEMA_TOOLS "Build ORM schema validation tools"
        ${ORM_BUILD_TESTS_DEFAULT})
+option(ORM_WARNINGS_AS_ERRORS "Treat ORM compiler warnings as errors"
+       ${ORM_BUILD_TESTS_DEFAULT})
 
 # Keep the installed TurboDB::ORM contract identical whether ORM is built on
 # its own or as a TurboDB subdirectory. Optional backends remain opt-in so a
@@ -181,7 +183,10 @@ cmake_config_target(
   NO_VERSION)
 
 if(MSVC)
-  set(ORM_MSVC_WARNING_OPTIONS /W4 /WX /permissive-)
+  set(ORM_MSVC_WARNING_OPTIONS /W4 /permissive-)
+  if(ORM_WARNINGS_AS_ERRORS)
+    list(APPEND ORM_MSVC_WARNING_OPTIONS /WX)
+  endif()
   if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     list(APPEND ORM_MSVC_WARNING_OPTIONS /Zc:preprocessor)
   endif()
@@ -191,7 +196,10 @@ function(orm_enable_strict_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE ${ORM_MSVC_WARNING_OPTIONS})
   else()
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    if(ORM_WARNINGS_AS_ERRORS)
+      target_compile_options(${target} PRIVATE -Werror)
+    endif()
   endif()
 endfunction()
 
