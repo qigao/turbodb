@@ -43,9 +43,25 @@ include(CMakeOptions.cmake)
 include(Sanitizers)
 include(CmakeUtils)
  
-find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
-find_package(TurboUtils REQUIRED PATHS "${TURBO_UTILS_ROOT}")
-find_package(TurboNet REQUIRED CONFIG PATHS "${TURBO_NET_ROOT}" NO_DEFAULT_PATH)
+foreach(_turbodb_dependency_root IN ITEMS
+        TURBOUTILS_ROOT TURBOPARSER_ROOT TURBONET_ROOT)
+  if(NOT DEFINED ENV{${_turbodb_dependency_root}} OR
+     "$ENV{${_turbodb_dependency_root}}" STREQUAL "")
+    message(FATAL_ERROR
+            "Required dependency root is not defined: ${_turbodb_dependency_root}")
+  endif()
+  if(NOT IS_DIRECTORY "$ENV{${_turbodb_dependency_root}}")
+    message(FATAL_ERROR
+            "${_turbodb_dependency_root} is not a directory: $ENV{${_turbodb_dependency_root}}")
+  endif()
+endforeach()
+
+find_package(TurboParser CONFIG REQUIRED
+             PATHS "$ENV{TURBOPARSER_ROOT}" NO_DEFAULT_PATH)
+find_package(TurboUtils CONFIG REQUIRED
+             PATHS "$ENV{TURBOUTILS_ROOT}" NO_DEFAULT_PATH)
+find_package(TurboNet CONFIG REQUIRED
+             PATHS "$ENV{TURBONET_ROOT}" NO_DEFAULT_PATH)
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
