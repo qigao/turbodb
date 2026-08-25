@@ -4,6 +4,16 @@ if(POLICY CMP0144)
   cmake_policy(SET CMP0144 NEW)
 endif()
 
+option(ORM_WITH_MONGODB "Enable MongoDB backend" OFF)
+if(ORM_WITH_MONGODB)
+  list(APPEND VCPKG_MANIFEST_FEATURES mongodb)
+endif()
+
+option(ORM_WITH_PGSQL "Enable PostgreSQL backend" OFF)
+if(ORM_WITH_PGSQL)
+  list(APPEND VCPKG_MANIFEST_FEATURES postgresql)
+endif()
+
 project(
   TurboDB
   VERSION 1.0.0

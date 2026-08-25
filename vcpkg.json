@@ -10,16 +10,28 @@
       "name": "sqlite3",
       "version>=": "3.49.0"
     },
-    {
-      "name": "libpq",
-      "version>=": "16.9",
-      "default-features": false,
-      "features": [
-        "zstd"
+    "zstd"
+  ],
+  "features": {
+    "mongodb": {
+      "description": "Build the optional MongoDB ORM backend",
+      "dependencies": [
+        "mongo-c-driver"
       ]
     },
-    "zstd",
-    "mongo-c-driver"
-  ],
+    "postgresql": {
+      "description": "Build the optional PostgreSQL ORM backend",
+      "dependencies": [
+        {
+          "name": "libpq",
+          "version>=": "16.9",
+          "default-features": false,
+          "features": [
+            "zstd"
+          ]
+        }
+      ]
+    }
+  },
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
 }

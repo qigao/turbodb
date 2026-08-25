@@ -27,7 +27,7 @@ set(TIDESDB_WITH_LZ4 OFF CACHE BOOL "build with LZ4 compression support")
 # ORM ships its SQL backends by default. Optional datastore adapters are
 # enabled explicitly so static consumers do not inherit unrelated libraries.
 set(ORM_WITH_SQLITE_DEFAULT ON)
-set(ORM_WITH_PGSQL_DEFAULT ON)
+set(ORM_WITH_PGSQL_DEFAULT OFF)
 set(ORM_WITH_REDIS_DEFAULT OFF)
 set(ORM_WITH_MONGODB_DEFAULT OFF)
 set(ORM_WITH_TIDESDB_DEFAULT OFF)

@@ -32,7 +32,7 @@ if(NOT DEFINED ORM_WITH_SQLITE_DEFAULT)
   set(ORM_WITH_SQLITE_DEFAULT ON)
 endif()
 if(NOT DEFINED ORM_WITH_PGSQL_DEFAULT)
-  set(ORM_WITH_PGSQL_DEFAULT ON)
+  set(ORM_WITH_PGSQL_DEFAULT OFF)
 endif()
 if(NOT DEFINED ORM_WITH_REDIS_DEFAULT)
   set(ORM_WITH_REDIS_DEFAULT OFF)
@@ -425,15 +425,14 @@ endif()
 
 if(ORM_WITH_SQLITE)
 add_executable(
-  orm_sqlite_c_api_test tests/abi/sqlite_api_test.c
-                        tests/abi/c_api_fake_libpq.cpp ${ORM_C_SOURCES})
+  orm_sqlite_c_api_test tests/abi/sqlite_api_test.c ${ORM_C_SOURCES})
 target_compile_features(orm_sqlite_c_api_test PRIVATE c_std_11 cxx_std_17)
 target_compile_definitions(orm_sqlite_c_api_test
                            PRIVATE ${ORM_TEST_DEFINITIONS})
 target_include_directories(
   orm_sqlite_c_api_test
   PRIVATE ${ORM_INCLUDE_DIR} ${ORM_DB_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
-          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR} ${PostgreSQL_INCLUDE_DIRS})
+          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR})
 target_link_libraries(orm_sqlite_c_api_test PRIVATE ${ORM_TEST_PRIVATE_LIBS})
 set_target_properties(orm_sqlite_c_api_test PROPERTIES CXX_STANDARD_REQUIRED ON
                                                        C_STANDARD_REQUIRED ON
@@ -476,13 +475,13 @@ orm_enable_strict_warnings(orm_jpa_api_test)
 add_test(NAME orm_jpa_api COMMAND orm_jpa_api_test)
 
 add_executable(orm_typed_fetch_test tests/abi/typed_fetch_test.cpp
-                                    tests/abi/c_api_fake_libpq.cpp ${ORM_C_SOURCES})
+                                    ${ORM_C_SOURCES})
 target_compile_features(orm_typed_fetch_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_typed_fetch_test PRIVATE ${ORM_TEST_DEFINITIONS})
 target_include_directories(
   orm_typed_fetch_test
   PRIVATE ${ORM_INCLUDE_DIR} ${ORM_DB_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
-          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR} ${PostgreSQL_INCLUDE_DIRS})
+          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR})
 target_link_libraries(orm_typed_fetch_test PRIVATE ${ORM_TEST_PRIVATE_LIBS}
                                                    TurboUtils::TinyTest)
 set_target_properties(orm_typed_fetch_test PROPERTIES CXX_STANDARD_REQUIRED ON
@@ -593,9 +592,7 @@ add_executable(
   orm_redis_transaction_test
   tests/abi/redis_transaction_test.cpp
   tests/abi/redis_transaction_fake.cpp
-  tests/abi/c_api_fake_libpq.cpp
   src/abi/orm_c.cpp
-  src/dbs/postgres/backend.cpp
   src/dbs/sqlite/backend.cpp
   src/dbs/redis/backend.cpp
   src/dbs/redis/query.cpp)
@@ -605,7 +602,7 @@ target_compile_definitions(orm_redis_transaction_test PRIVATE ORM_C_STATIC
 target_include_directories(
   orm_redis_transaction_test
   PRIVATE ${ORM_INCLUDE_DIR} ${ORM_DB_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
-          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR} ${PostgreSQL_INCLUDE_DIRS})
+          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR})
 target_include_directories(
   orm_redis_transaction_test SYSTEM
   PRIVATE $<TARGET_PROPERTY:TurboDB::Redis,INTERFACE_INCLUDE_DIRECTORIES>)
@@ -621,9 +618,7 @@ add_executable(
   orm_driver_error_mapping_test
   tests/abi/driver_error_mapping_test.cpp
   tests/abi/redis_transaction_fake.cpp
-  tests/abi/c_api_fake_libpq.cpp
   src/abi/orm_c.cpp
-  src/dbs/postgres/backend.cpp
   src/dbs/sqlite/backend.cpp
   src/dbs/redis/backend.cpp
   src/dbs/redis/query.cpp)
@@ -633,7 +628,7 @@ target_compile_definitions(orm_driver_error_mapping_test PRIVATE ORM_C_STATIC
 target_include_directories(
   orm_driver_error_mapping_test
   PRIVATE ${ORM_INCLUDE_DIR} ${ORM_DB_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
-          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR} ${PostgreSQL_INCLUDE_DIRS})
+          ${ORM_ABI_TEST_DIR} ${ORM_TEST_SUPPORT_DIR})
 target_include_directories(
   orm_driver_error_mapping_test SYSTEM
   PRIVATE $<TARGET_PROPERTY:TurboDB::Redis,INTERFACE_INCLUDE_DIRECTORIES>)
