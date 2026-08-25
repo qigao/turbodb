@@ -121,8 +121,9 @@ schema Store [orm(1), cpp_namespace("app::model")];
 }
 ```
 
-Every message in an ORM profile is an entity and must declare one table and
-exactly one `[id(1)]` or `[primary_key(1)]` field. Field and resolved column
+Every message in an ORM profile is an entity and must declare one table plus
+one or more direct `[id(1)]` / `[primary_key(1)]` fields, or one
+`[embedded_id(1)]`. Field and resolved column
 names must be unique. Relation targets and optional `mapped_by`/`foreign_key`
 fields must exist; mapping types must match the owner primary key. Supported
 cascade values are `none`, `persist`, `remove`, `merge`, `refresh`, `detach`,
@@ -196,9 +197,9 @@ auto managed = entity_manager.find<Order>(OrderKey{7, 42});
 
 Composite identity components remain distinct in the identity map, participate
 in every UPDATE/DELETE predicate, and cannot change while managed. Generated C
-facades currently require one direct primary key and reject embedded/composite
-identity schemas before emitting code. Generated relation descriptors currently
-require a single-component owner key.
+facades accept direct composite keys and emit one ordered parameter/predicate
+per key field; embedded identifiers remain unsupported by the C facade.
+Generated relation descriptors currently require a single-component owner key.
 
 Single-table inheritance uses one root-owned table and discriminator contract:
 
@@ -326,6 +327,18 @@ if (status != ORM_STATUS_OK) {
   /* use user */
 }
 User_clear(&user);
+```
+
+Direct composite keys remain separate typed parameters in schema declaration
+order, and every key is applied to find, update, and remove:
+
+```c
+Membership_t membership;
+uint8_t found = 0;
+Membership_init(&membership);
+status = Store_Membership_orm_find(connection, domain_id, user_id, group_id,
+                                   &membership, &found, &error);
+Membership_clear(&membership);
 ```
 
 The C facade is deliberately repository-shaped: it provides typed CRUD and

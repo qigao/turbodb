@@ -874,7 +874,7 @@ suite("ORM Schema Validator") {
       node_free(root);
     }
 
-    given("a composite C++ identity contract") {
+    given("a direct composite identity contract") {
       const char* schema =
           "schema CStore [orm(1)]; [table(users)] message User { "
           "[id(1)] uint64 tenant; [id(1)] uint64 user; string name; }";
@@ -884,11 +884,20 @@ suite("ORM Schema Validator") {
       check_not_null(root);
       check_equal(parse_schema(schema, std::strlen(schema), root, nullptr), 0);
 
-      then("the C facade rejects it instead of emitting a partial CRUD API") {
-        check(!orm::schema::generate_c(root, "c_store.tbe.h", generated,
-                                       diagnostics));
-        check(has_message(diagnostics,
-                          "requires exactly one direct primary-key field"));
+      then("the C facade emits every key parameter and predicate") {
+        check(orm::schema::generate_c(root, "c_store.tbe.h", generated,
+                                      diagnostics));
+        check(diagnostics.empty());
+        check(generated.find("uint64_t primary_tenant, uint64_t primary_user") !=
+              std::string::npos);
+        check(generated.find("orm_u64((uint64_t)(primary_tenant))") !=
+              std::string::npos);
+        check(generated.find("orm_u64((uint64_t)(primary_user))") !=
+              std::string::npos);
+        check(generated.find("orm_u64((uint64_t)(entity->tenant))") !=
+              std::string::npos);
+        check(generated.find("orm_u64((uint64_t)(entity->user))") !=
+              std::string::npos);
       }
       node_free(root);
     }

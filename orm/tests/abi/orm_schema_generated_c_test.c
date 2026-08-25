@@ -143,4 +143,74 @@ suite("ORM generated C facade") {
     User_clear(&inserted);
     orm_disconnect(connection);
   }
+
+  it("uses every direct composite key field for typed CRUD") {
+    orm_error_t error;
+    orm_connection_t *connection;
+    Membership_t inserted;
+    Membership_t current;
+    Membership_t missing;
+    uint64_t affected = 0u;
+    uint8_t found = 0u;
+
+    orm_error_init(&error);
+    connection = create_connection(&error);
+    execute_sql(connection,
+                "create table memberships("
+                "domain_id text not null,"
+                "user_id text not null,"
+                "group_id text not null,"
+                "revision integer not null,"
+                "primary key(domain_id,user_id,group_id))",
+                &error);
+
+    Membership_init(&inserted);
+    Membership_init(&current);
+    Membership_init(&missing);
+    inserted.domain_id = tstr_cpy(inserted.domain_id, "domain-a");
+    inserted.user_id = tstr_cpy(inserted.user_id, "user-a");
+    inserted.group_id = tstr_cpy(inserted.group_id, "group-a");
+    inserted.revision = 1u;
+    check_not_null(inserted.domain_id);
+    check_not_null(inserted.user_id);
+    check_not_null(inserted.group_id);
+
+    check(CStore_Membership_orm_insert(connection, &inserted, &affected,
+                                       &error) == ORM_STATUS_OK,
+          error.message);
+    check_equal(affected, 1u);
+    check(CStore_Membership_orm_find(
+              connection, orm_view("domain-a"), orm_view("user-a"),
+              orm_view("group-a"), &current, &found, &error) == ORM_STATUS_OK,
+          error.message);
+    check_equal(found, 1);
+    check_equal(current.revision, 1u);
+
+    current.revision = 2u;
+    check(CStore_Membership_orm_update(connection, &current, &affected,
+                                       &error) == ORM_STATUS_OK,
+          error.message);
+    check_equal(affected, 1u);
+    check(CStore_Membership_orm_find(
+              connection, orm_view("domain-a"), orm_view("user-a"),
+              orm_view("group-a"), &missing, &found, &error) == ORM_STATUS_OK,
+          error.message);
+    check_equal(found, 1);
+    check_equal(missing.revision, 2u);
+
+    check(CStore_Membership_orm_remove(connection, &current, &affected,
+                                       &error) == ORM_STATUS_OK,
+          error.message);
+    check_equal(affected, 1u);
+    check(CStore_Membership_orm_find(
+              connection, orm_view("domain-a"), orm_view("user-a"),
+              orm_view("group-a"), &missing, &found, &error) == ORM_STATUS_OK,
+          error.message);
+    check_equal(found, 0);
+
+    Membership_clear(&missing);
+    Membership_clear(&current);
+    Membership_clear(&inserted);
+    orm_disconnect(connection);
+  }
 }

@@ -63,9 +63,7 @@ static inline orm_status_t {{{symbol}}}_find(
   status = orm_query_create(connection, orm_view({{{table_literal}}}), &query, error);
   if (status != ORM_STATUS_OK) goto cleanup;
 {{{select_columns_code}}}
-  status = orm_query_where(query, orm_view({{{primary_column_literal}}}),
-                           ORM_COMPARE_EQUAL, {{{primary_value_expression}}}, error);
-  if (status != ORM_STATUS_OK) goto cleanup;
+{{{primary_where_code}}}
   status = orm_query_set_limit(query, 2u, error);
   if (status != ORM_STATUS_OK) goto cleanup;
   status = orm_query_execute(query, &result, error);
@@ -138,9 +136,7 @@ static inline orm_status_t {{{symbol}}}_update(
   status = orm_update(connection, orm_view({{{table_literal}}}), &query, error);
   if (status != ORM_STATUS_OK) goto cleanup;
 {{{update_fields_code}}}
-  status = orm_query_where(query, orm_view({{{primary_column_literal}}}),
-                           ORM_COMPARE_EQUAL, {{{entity_primary_value_expression}}}, error);
-  if (status != ORM_STATUS_OK) goto cleanup;
+{{{entity_primary_where_code}}}
 {{{version_where_code}}}
   status = orm_query_execute(query, &result, error);
   if (status != ORM_STATUS_OK) goto cleanup;
@@ -179,9 +175,7 @@ static inline orm_status_t {{{symbol}}}_remove(
 
   status = orm_delete(connection, orm_view({{{table_literal}}}), &query, error);
   if (status != ORM_STATUS_OK) goto cleanup;
-  status = orm_query_where(query, orm_view({{{primary_column_literal}}}),
-                           ORM_COMPARE_EQUAL, {{{entity_primary_value_expression}}}, error);
-  if (status != ORM_STATUS_OK) goto cleanup;
+{{{entity_primary_where_code}}}
 {{{version_remove_where_code}}}
   status = orm_query_execute(query, &result, error);
   if (status != ORM_STATUS_OK) goto cleanup;

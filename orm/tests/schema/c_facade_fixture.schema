@@ -12,3 +12,10 @@ enum UserState <uint8> {
   [column(display_name), c(display_name)] string name;
   optional string nickname;
 }
+
+[table(memberships)] message Membership {
+  [primary_key(1), column(domain_id)] string domain_id;
+  [primary_key(1), column(user_id)] string user_id;
+  [primary_key(1), column(group_id)] string group_id;
+  uint64 revision;
+}

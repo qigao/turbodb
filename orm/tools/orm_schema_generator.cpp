@@ -120,9 +120,8 @@ struct generated_c_entity {
   std::string symbol;
   std::string table_literal;
   std::string primary_parameter;
-  std::string primary_column_literal;
-  std::string primary_value_expression;
-  std::string entity_primary_value_expression;
+  std::string primary_where_code;
+  std::string entity_primary_where_code;
   std::string select_columns_code;
   std::string read_fields_code;
   std::string insert_fields_code;
@@ -267,11 +266,13 @@ std::string c_parameter_type(const c_type_info& type) {
   return type.c_type;
 }
 
-std::string c_parameter_value_expression(const c_type_info& type) {
-  if (type.kind == c_field_kind::string) return "orm_text_v(primary_key)";
+std::string c_parameter_value_expression(const c_type_info& type,
+                                         const std::string& expression) {
+  if (type.kind == c_field_kind::string)
+    return "orm_text_v(" + expression + ")";
   if (type.kind == c_field_kind::bytes)
-    return "orm_blob(primary_key.data, primary_key.size)";
-  return c_entity_value_expression(type, "primary_key");
+    return "orm_blob(" + expression + ".data, " + expression + ".size)";
+  return c_entity_value_expression(type, expression);
 }
 
 std::string c_presence_expression(const std::string& owner,
@@ -444,6 +445,15 @@ std::string c_where_statement(const field_model& field,
          "  if (status != ORM_STATUS_OK) goto cleanup;\n";
 }
 
+std::string c_parameter_where_statement(const field_model& field,
+                                        const c_type_info& type,
+                                        const std::string& parameter) {
+  return "  status = orm_query_where(query, orm_view(" +
+         cpp_string_literal(field.column) + "), ORM_COMPARE_EQUAL, " +
+         c_parameter_value_expression(type, parameter) + ", error);\n"
+         "  if (status != ORM_STATUS_OK) goto cleanup;\n";
+}
+
 bool make_generated_c_entity(const entity_model& entity,
                              const schema_model& schema,
                              generated_c_entity& output,
@@ -452,10 +462,9 @@ bool make_generated_c_entity(const entity_model& entity,
   output.type_name = entity.name;
   output.symbol = schema.name + "_" + entity.name + "_orm";
   output.table_literal = cpp_string_literal(entity.table);
-  const field_model* primary = nullptr;
   const field_model* version = nullptr;
-  std::size_t primary_count = 0;
   std::vector<std::pair<const field_model*, c_type_info>> fields;
+  std::vector<std::pair<const field_model*, const c_type_info*>> primaries;
   for (const field_model& field : entity.fields) {
     if (field.relation) continue;
     if (field.embedded) {
@@ -482,28 +491,30 @@ bool make_generated_c_entity(const entity_model& entity,
       return false;
     }
     fields.emplace_back(&field, std::move(*type));
-    if (field.primary_key) {
-      primary = &field;
-      ++primary_count;
-    }
     if (field.version) version = &field;
   }
-  if (primary == nullptr || primary_count != 1) {
+  for (const auto& item : fields) {
+    if (item.first->primary_key)
+      primaries.emplace_back(item.first, &item.second);
+  }
+  if (primaries.empty()) {
     diagnostics.push_back(
         {entity.name, "",
-         "ORM C facade requires exactly one direct primary-key field"});
+         "ORM C facade requires at least one direct primary-key field"});
     return false;
   }
 
-  const auto primary_it = std::find_if(
-      fields.begin(), fields.end(),
-      [&](const auto& item) { return item.first == primary; });
-  if (primary_it == fields.end()) return false;
-  output.primary_parameter = c_parameter_type(primary_it->second) + " primary_key";
-  output.primary_column_literal = cpp_string_literal(primary->column);
-  output.primary_value_expression = c_parameter_value_expression(primary_it->second);
-  output.entity_primary_value_expression = c_entity_value_expression(
-      primary_it->second, "entity->" + primary->c_member);
+  for (const auto& primary : primaries) {
+    const field_model& field = *primary.first;
+    const c_type_info& type = *primary.second;
+    const std::string parameter = "primary_" + field.c_member;
+    if (!output.primary_parameter.empty()) output.primary_parameter += ", ";
+    output.primary_parameter += c_parameter_type(type) + " " + parameter;
+    output.primary_where_code +=
+        c_parameter_where_statement(field, type, parameter);
+    output.entity_primary_where_code += c_where_statement(
+        field, type, "entity->" + field.c_member);
+  }
 
   for (std::size_t index = 0; index < fields.size(); ++index) {
     const field_model& field = *fields[index].first;
@@ -1053,11 +1064,9 @@ node_owner build_c_render_context(
     add_string(item, "symbol", entity.symbol);
     add_string(item, "table_literal", entity.table_literal);
     add_string(item, "primary_parameter", entity.primary_parameter);
-    add_string(item, "primary_column_literal", entity.primary_column_literal);
-    add_string(item, "primary_value_expression",
-               entity.primary_value_expression);
-    add_string(item, "entity_primary_value_expression",
-               entity.entity_primary_value_expression);
+    add_string(item, "primary_where_code", entity.primary_where_code);
+    add_string(item, "entity_primary_where_code",
+               entity.entity_primary_where_code);
     add_string(item, "select_columns_code", entity.select_columns_code);
     add_string(item, "read_fields_code", entity.read_fields_code);
     add_string(item, "insert_fields_code", entity.insert_fields_code);
