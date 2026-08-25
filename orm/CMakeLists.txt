@@ -87,9 +87,6 @@ set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
 set(ORM_C_SOURCES src/abi/orm_c.cpp)
-if(ORM_WITH_PGSQL)
-  list(APPEND ORM_C_SOURCES src/dbs/postgres/backend.cpp)
-endif()
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_C_SOURCES src/dbs/sqlite/backend.cpp)
 endif()
@@ -125,11 +122,6 @@ target_link_libraries(orm_c PUBLIC TurboUtils::Core PRIVATE TurboParser::Mustach
 if(ORM_WITH_SQLITE)
   target_compile_definitions(orm_c PRIVATE ORM_WITH_SQLITE)
   target_link_libraries(orm_c PRIVATE SQLite::SQLite3)
-endif()
-
-if(ORM_WITH_PGSQL)
-  target_compile_definitions(orm_c PRIVATE ORM_WITH_PGSQL)
-  target_link_libraries(orm_c PRIVATE PostgreSQL::PostgreSQL)
 endif()
 
 if(ORM_WITH_REDIS)
@@ -182,6 +174,38 @@ cmake_config_target(
   "orm"
   NO_VERSION)
 
+if(ORM_WITH_PGSQL)
+  add_library(orm_postgresql_driver src/dbs/postgres/backend.cpp
+                                    src/dbs/postgres/driver.cpp)
+  target_compile_features(orm_postgresql_driver PRIVATE cxx_std_17)
+  target_compile_definitions(orm_postgresql_driver
+                             PRIVATE ORM_POSTGRESQL_BUILD
+                             PUBLIC ORM_POSTGRESQL_STATIC)
+  target_include_directories(
+    orm_postgresql_driver
+    PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
+           $<INSTALL_INTERFACE:include/shared/orm>
+    PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_DB_INCLUDE_DIR})
+  target_link_libraries(orm_postgresql_driver PUBLIC orm_c
+                                               PRIVATE PostgreSQL::PostgreSQL)
+  set_target_properties(
+    orm_postgresql_driver
+    PROPERTIES CXX_STANDARD_REQUIRED ON
+               CXX_VISIBILITY_PRESET hidden
+               VISIBILITY_INLINES_HIDDEN ON)
+  cmake_config_target(
+    orm_postgresql_driver
+    ALIAS
+    OrmPostgreSQL::Driver
+    EXPORT_NAME
+    Driver
+    EXPORT_SET
+    OrmPostgreSQLTargets
+    FOLDER
+    "orm"
+    NO_VERSION)
+endif()
+
 if(MSVC)
   set(ORM_MSVC_WARNING_OPTIONS /W4 /permissive-)
   if(ORM_WARNINGS_AS_ERRORS)
@@ -204,6 +228,9 @@ function(orm_enable_strict_warnings target)
 endfunction()
 
 orm_enable_strict_warnings(orm_c)
+if(ORM_WITH_PGSQL)
+  orm_enable_strict_warnings(orm_postgresql_driver)
+endif()
 
 if(ORM_BUILD_TESTS)
   enable_testing()
@@ -386,9 +413,6 @@ set(ORM_TEST_DEFINITIONS ORM_C_STATIC)
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_SQLITE)
 endif()
-if(ORM_WITH_PGSQL)
-  list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_PGSQL)
-endif()
 if(ORM_WITH_REDIS)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_REDIS)
 endif()
@@ -399,13 +423,44 @@ if(ORM_WITH_MONGODB)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_MONGO)
 endif()
 
+add_executable(orm_core_package_consumer_test
+               tests/package_consumer/core/main.c)
+target_compile_features(orm_core_package_consumer_test PRIVATE c_std_11)
+target_link_libraries(orm_core_package_consumer_test PRIVATE orm_c)
+set_target_properties(orm_core_package_consumer_test
+                      PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_core_package_consumer_test)
+if(MSVC)
+  target_compile_options(orm_core_package_consumer_test PRIVATE /std:c11)
+endif()
+add_test(NAME orm_package_core COMMAND orm_core_package_consumer_test)
+
+if(ORM_WITH_PGSQL)
+  add_executable(orm_postgresql_package_consumer_test
+                 tests/package_consumer/postgresql/main.c)
+  target_compile_features(orm_postgresql_package_consumer_test PRIVATE c_std_11)
+  target_link_libraries(orm_postgresql_package_consumer_test
+                        PRIVATE orm_postgresql_driver)
+  set_target_properties(orm_postgresql_package_consumer_test
+                        PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_postgresql_package_consumer_test)
+  if(MSVC)
+    target_compile_options(orm_postgresql_package_consumer_test PRIVATE /std:c11)
+  endif()
+  add_test(NAME orm_package_postgresql
+           COMMAND orm_postgresql_package_consumer_test)
+endif()
+
 if(ORM_WITH_PGSQL)
 add_executable(
   orm_postgres_c_api_test tests/abi/c_api_test.c tests/abi/c_api_fake_libpq.cpp
+                          src/dbs/postgres/backend.cpp
+                          src/dbs/postgres/driver.cpp
                           ${ORM_C_SOURCES})
 target_compile_features(orm_postgres_c_api_test PRIVATE c_std_11 cxx_std_17)
 target_compile_definitions(orm_postgres_c_api_test
-                           PRIVATE ${ORM_TEST_DEFINITIONS})
+                           PRIVATE ${ORM_TEST_DEFINITIONS}
+                                   ORM_POSTGRESQL_STATIC)
 target_include_directories(
   orm_postgres_c_api_test
   PRIVATE ${ORM_INCLUDE_DIR} ${ORM_DB_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
@@ -684,7 +739,7 @@ endif()
 if(WIN32)
   set(ORM_TEST_RUNTIME_PATH
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboUtils::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboParser::Mustache>")
-  set(ORM_RUNTIME_TESTS orm_redis_query orm_tidesdb_row
+  set(ORM_RUNTIME_TESTS orm_package_core orm_redis_query orm_tidesdb_row
                         orm_mustache_render orm_mock_orm_backend orm_typed_fetch)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
@@ -692,7 +747,7 @@ if(WIN32)
     list(APPEND ORM_RUNTIME_TESTS orm_sqlite_c_api orm_cpp_api orm_jpa_api)
   endif()
   if(ORM_WITH_PGSQL)
-    list(APPEND ORM_RUNTIME_TESTS orm_postgres_c_api orm_cpp17)
+    list(APPEND ORM_RUNTIME_TESTS orm_package_postgresql orm_postgres_c_api orm_cpp17)
   endif()
   if(ORM_WITH_REDIS)
     string(
@@ -759,3 +814,8 @@ cmake_install_headers(FILES include/orm/dbs/postgres/model_detail.hpp DESTINATIO
                       ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm/dbs/postgres)
 
 cmake_config_package(PACKAGE Orm VERSION "${ORM_VERSION}")
+if(ORM_WITH_PGSQL)
+  cmake_install_headers(FILES include/orm/orm_postgresql.h DESTINATION
+                        ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+  cmake_config_package(PACKAGE OrmPostgreSQL VERSION "${ORM_VERSION}")
+endif()

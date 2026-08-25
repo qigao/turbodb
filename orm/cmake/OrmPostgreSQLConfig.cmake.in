@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(PostgreSQL)
+find_dependency(Orm CONFIG
+                PATHS "${CMAKE_CURRENT_LIST_DIR}/../Orm"
+                NO_DEFAULT_PATH)
+
+include("${CMAKE_CURRENT_LIST_DIR}/OrmPostgreSQLTargets.cmake")
+check_required_components(OrmPostgreSQL)

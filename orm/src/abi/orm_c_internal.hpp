@@ -132,20 +132,25 @@ struct query_plan {
 
 class status_error final : public std::runtime_error {
 public:
-    status_error(orm_status_t status, std::string message)
-        : std::runtime_error(std::move(message)), status_(status)
+    status_error(orm_status_t status, std::string message,
+                 std::string backend_code = {})
+        : std::runtime_error(std::move(message)), status_(status),
+          backend_code_(std::move(backend_code))
     {
     }
 
     orm_status_t status() const noexcept { return status_; }
+    const std::string& backend_code() const noexcept { return backend_code_; }
 
 private:
     orm_status_t status_;
+    std::string backend_code_;
 };
 
-[[noreturn]] inline void fail(orm_status_t status, std::string message)
+[[noreturn]] inline void fail(orm_status_t status, std::string message,
+                              std::string backend_code = {})
 {
-    throw status_error(status, std::move(message));
+    throw status_error(status, std::move(message), std::move(backend_code));
 }
 
 inline void require(bool condition, orm_status_t status, const char* message)
@@ -246,11 +251,19 @@ enum class sqlite_open_mode {
     read_write_create
 };
 
-#if defined(ORM_WITH_PGSQL)
+using database_backend_factory = std::unique_ptr<database_backend> (*)(
+    const std::vector<std::string>& keywords,
+    const std::vector<std::string>& values,
+    const connection_limits& limits);
+
+ORM_C_API orm_status_t register_database_driver(
+    std::string_view name, database_backend_factory factory,
+    orm_error_t* error) noexcept;
+
 std::unique_ptr<database_backend>
 make_postgres_backend(const std::vector<std::string>& keywords,
-                      const std::vector<std::string>& values);
-#endif
+                      const std::vector<std::string>& values,
+                      const connection_limits& limits);
 
 #if defined(ORM_WITH_SQLITE)
 std::unique_ptr<database_backend>

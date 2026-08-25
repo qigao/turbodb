@@ -52,6 +52,13 @@ void fake_pg_set_result_types(size_t columns, const uint32_t* types)
 void fake_pg_fail_next_query(void)
 {
     pg_fake::fail_next_query = true;
+    pg_fake::failure_sqlstate.clear();
+}
+
+void fake_pg_fail_next_query_with_sqlstate(const char* sqlstate)
+{
+    pg_fake::fail_next_query = true;
+    pg_fake::failure_sqlstate = sqlstate != nullptr ? sqlstate : "";
 }
 
 const char* fake_pg_last_sql(void)
@@ -128,6 +135,8 @@ PGresult* PQexecParams(PGconn*,
         pg_fake::next_call = scripted_pg_call{};
         auto* result = pg_fake::make_result(PGRES_FATAL_ERROR);
         result->error = "forced SQL failure";
+        result->sqlstate = std::move(pg_fake::failure_sqlstate);
+        pg_fake::failure_sqlstate.clear();
         return result;
     }
 
@@ -177,6 +186,13 @@ ExecStatusType PQresultStatus(const PGresult* result)
 char* PQresultErrorMessage(const PGresult* result)
 {
     return const_cast<char*>(result->error.c_str());
+}
+
+char* PQresultErrorField(const PGresult* result, int field_code)
+{
+    if (field_code != PG_DIAG_SQLSTATE || result->sqlstate.empty())
+        return nullptr;
+    return const_cast<char*>(result->sqlstate.c_str());
 }
 
 int PQntuples(const PGresult* result)

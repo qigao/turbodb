@@ -12,6 +12,17 @@
 namespace orm_c_detail {
 namespace {
 
+orm_status_t map_postgres_error(std::string_view sqlstate) noexcept
+{
+    if (sqlstate == "23505" || sqlstate == "23503" ||
+        sqlstate == "40001" || sqlstate == "40P01" ||
+        sqlstate == "55P03")
+        return ORM_STATUS_BUSY;
+    if (sqlstate.size() >= 2 && sqlstate[0] == '0' && sqlstate[1] == '8')
+        return ORM_STATUS_CONNECTION_ERROR;
+    return ORM_STATUS_SQL_ERROR;
+}
+
 constexpr unsigned int pg_bytea_oid = 17;
 
 int hex_digit(char value) noexcept
@@ -240,7 +251,8 @@ class postgres_backend final : public database_backend {
             try {
                 owner_.execute_control(sql);
             } catch (const status_error& error) {
-                fail(error.status(), std::string(operation) + ": " + error.what());
+                fail(error.status(), std::string(operation) + ": " + error.what(),
+                     error.backend_code());
             }
             active_ = false;
             owner_.transaction_active_ = false;
@@ -349,9 +361,13 @@ private:
         const ExecStatusType status =
             result != nullptr ? PQresultStatus(result.get()) : PGRES_FATAL_ERROR;
         if (result == nullptr ||
-            (status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK))
-            fail(ORM_STATUS_SQL_ERROR,
-                 pg_ormlite_detail::result_error(connection_.get(), result.get()));
+            (status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK)) {
+            const std::string sqlstate =
+                pg_ormlite_detail::result_sqlstate(result.get());
+            fail(map_postgres_error(sqlstate),
+                 pg_ormlite_detail::result_error(connection_.get(), result.get()),
+                 sqlstate);
+        }
 
         const int rows = PQntuples(result.get());
         const int columns = PQnfields(result.get());
@@ -431,7 +447,8 @@ private:
 
 std::unique_ptr<database_backend>
 make_postgres_backend(const std::vector<std::string>& keywords,
-                      const std::vector<std::string>& values)
+                      const std::vector<std::string>& values,
+                      const connection_limits&)
 {
     return std::make_unique<postgres_backend>(keywords, values);
 }

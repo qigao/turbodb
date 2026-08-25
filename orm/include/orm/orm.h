@@ -44,6 +44,7 @@ extern "C" {
 
 #define ORM_C_ABI_VERSION UINT32_C(2)
 #define ORM_C_ERROR_MESSAGE_CAPACITY UINT32_C(512)
+#define ORM_C_BACKEND_CODE_CAPACITY UINT32_C(16)
 #define ORM_C_DEFAULT_MAX_PARAMETERS UINT32_C(256)
 #define ORM_C_DEFAULT_MAX_COLUMNS UINT32_C(256)
 #define ORM_C_DEFAULT_MAX_PREDICATES UINT32_C(256)
@@ -186,6 +187,8 @@ typedef struct orm_error {
   uint32_t struct_size;
   orm_status_t status;
   char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+  /* Optional driver-native code, for example PostgreSQL SQLSTATE. */
+  char backend_code[ORM_C_BACKEND_CODE_CAPACITY];
 } orm_error_t;
 
 typedef union orm_value_data {
@@ -228,6 +231,15 @@ ORM_C_API uint32_t ORM_C_CALL orm_c_abi_version(void);
 ORM_C_API const char *ORM_C_CALL orm_status_message(orm_status_t status);
 
 ORM_C_API void ORM_C_CALL orm_error_init(orm_error_t *error);
+
+/*
+ * Initializes exactly error_size bytes. New code should pass sizeof(*error)
+ * to opt in to fields appended after the original v2 error prefix.
+ */
+ORM_C_API void ORM_C_CALL orm_error_init_s(orm_error_t *error, uint32_t error_size);
+
+/* Returns an empty string when the initialized error prefix has no code field. */
+ORM_C_API const char *ORM_C_CALL orm_error_backend_code(const orm_error_t *error);
 
 ORM_C_API void ORM_C_CALL orm_config(orm_config_t *config);
 
@@ -860,13 +872,18 @@ static inline orm_chain_t *orm_chain_detail_fail(orm_chain_t *self, orm_status_t
   size_t index = 0;
   if (self == NULL) return NULL;
   self->status = status;
-  if (self->error == NULL || self->error->struct_size != (uint32_t)sizeof(orm_error_t)) return self;
+  if (self->error == NULL ||
+      self->error->struct_size <
+          (uint32_t)(offsetof(orm_error_t, message) + ORM_C_ERROR_MESSAGE_CAPACITY))
+    return self;
   self->error->status = status;
   while (message[index] != '\0' && index + 1 < ORM_C_ERROR_MESSAGE_CAPACITY) {
     self->error->message[index] = message[index];
     ++index;
   }
   self->error->message[index] = '\0';
+  if (self->error->struct_size > (uint32_t)offsetof(orm_error_t, backend_code))
+    self->error->backend_code[0] = '\0';
   TURBO_LOG_DEBUGF(tlog_peek_default(), "orm", "chain failure ({}): {}", status,
                    vstr_from_cstr(message));
   return self;

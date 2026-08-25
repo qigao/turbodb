@@ -1,5 +1,6 @@
 #include "c_api_test_support.h"
 #include "orm.h"
+#include "orm_postgresql.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,6 +65,25 @@ static void test_turboutils_string_interop(void) {
   tstr_free(owned);
 }
 
+static void test_legacy_error_boundary(void) {
+  orm_error_t error;
+  orm_connection_t *connection = NULL;
+  unsigned char expected_tail[ORM_C_BACKEND_CODE_CAPACITY];
+
+  memset(&error, 0xA5, sizeof(error));
+  orm_error_init(&error);
+  memcpy(expected_tail, error.backend_code, sizeof(expected_tail));
+  require_true(error.struct_size == (uint32_t)offsetof(orm_error_t, backend_code),
+               "legacy error initializer reported the extended size");
+  require_status(orm_connect(NULL, &connection, &error), ORM_STATUS_INVALID_ARGUMENT, &error,
+                 "write legacy error prefix");
+  require_true(connection == NULL, "invalid connect returned a connection");
+  require_true(memcmp(error.backend_code, expected_tail, sizeof(expected_tail)) == 0,
+               "legacy error write changed bytes beyond the reported prefix");
+  require_true(strcmp(orm_error_backend_code(&error), "") == 0,
+               "legacy error unexpectedly exposed a backend code");
+}
+
 static orm_connection_t *create_postgres_connection(orm_config_t *config, uint64_t max_result_bytes,
                                                     orm_error_t *error) {
   static const orm_option_t options[] = {{{"host", 4}, {"localhost", 9}},
@@ -77,6 +97,27 @@ static orm_connection_t *create_postgres_connection(orm_config_t *config, uint64
   require_status(orm_connect(config, &connection, error), ORM_STATUS_OK, error, "orm_connect");
   require_true(connection != NULL, "connection create returned a null handle");
   return connection;
+}
+
+static void test_postgres_driver_registration(void) {
+  static const orm_option_t options[] = {{{"host", 4}, {"localhost", 9}},
+                                         {{"dbname", 6}, {"orm_test", 8}}};
+  orm_config_t config;
+  orm_connection_t *connection = NULL;
+  orm_error_t error;
+
+  orm_error_init(&error);
+  orm_config(&config);
+  config.driver = string_view("postgresql");
+  config.options = options;
+  config.option_count = (uint32_t)(sizeof(options) / sizeof(options[0]));
+  require_status(orm_connect(&config, &connection, &error), ORM_STATUS_UNSUPPORTED, &error,
+                 "reject unregistered PostgreSQL driver");
+  require_true(connection == NULL, "unregistered PostgreSQL driver returned a connection");
+  require_status(orm_postgresql_register(&error), ORM_STATUS_OK, &error,
+                 "register PostgreSQL driver");
+  require_status(orm_postgresql_register(&error), ORM_STATUS_OK, &error,
+                 "register PostgreSQL driver idempotently");
 }
 
 static void test_explicit_transactions(void) {
@@ -306,12 +347,15 @@ static void test_limits_and_errors(void) {
   require_true(result == NULL, "oversized result returned a handle");
   require_true(fake_pg_cleared_results() == 1, "oversized PostgreSQL result was not released");
 
-  fake_pg_fail_next_query();
-  require_status(orm_query_execute(query, &result, &error), ORM_STATUS_SQL_ERROR, &error,
-                 "map PostgreSQL failure");
+  orm_error_init_s(&error, (uint32_t)sizeof(error));
+  fake_pg_fail_next_query_with_sqlstate("23505");
+  require_status(orm_query_execute(query, &result, &error), ORM_STATUS_BUSY, &error,
+                 "map PostgreSQL unique violation");
   require_true(result == NULL, "failed SQL execution returned a result handle");
   require_true(strstr(error.message, "forced SQL failure") != NULL,
                "SQL error context was not propagated");
+  require_true(strcmp(orm_error_backend_code(&error), "23505") == 0,
+               "PostgreSQL SQLSTATE was not preserved");
 
   orm_query_destroy(query);
   orm_disconnect(connection);
@@ -776,6 +820,8 @@ int main(void) {
   require_true(orm_c_abi_version() == ORM_C_ABI_VERSION,
                "runtime ABI version does not match the header");
   test_turboutils_string_interop();
+  test_legacy_error_boundary();
+  test_postgres_driver_registration();
   test_explicit_transactions();
   test_query_and_result_lifetimes();
   test_limits_and_errors();

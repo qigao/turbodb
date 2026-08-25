@@ -2,9 +2,9 @@
 
 Orm is a database-neutral query library for C11 and C++17. It provides a
 stable C ABI, a fluent C DSL, and a typed C++ DSL over the same bounded query
-model. PostgreSQL and SQLite are always supported; optional Redis Query Engine
-and embedded TidesDB adapters cover indexed remote documents and durable local
-key/value storage respectively.
+model. SQLite is available in the core build. PostgreSQL is an explicitly
+linked driver component; optional Redis Query Engine and embedded TidesDB
+adapters cover indexed remote documents and durable local key/value storage.
 
 The DSL is inspired by [QueryDSL](https://querydsl.com/): schemas, columns,
 predicates, joins, and aggregates are represented explicitly instead of being
@@ -23,7 +23,7 @@ the optional schema workflow generates typed C and C++ model facades.
 - Explicit limits for query size, parameters, predicates, nesting, and result retention
 - Opaque C handles and no backend names in exported function symbols
 - TurboUtils `vstr` views, `tstr` helpers, typed formatting, and optional `tlog` diagnostics
-- PostgreSQL, SQLite, optional Redis Query Engine, and optional TidesDB selected through runtime configuration
+- SQLite plus explicitly built PostgreSQL, Redis Query Engine, and TidesDB drivers selected through runtime configuration
 
 ## Choose an interface
 
@@ -37,7 +37,9 @@ Both interfaces use the same C ABI implementation and backend adapters.
 
 ## Build and install
 
-TurboUtils, PostgreSQL, and SQLite development packages are required.
+TurboUtils and SQLite development packages are required by the default build.
+PostgreSQL/libpq is required only when `ORM_WITH_PGSQL=ON` builds the separate
+`OrmPostgreSQL::Driver` component.
 
 ```sh
 cmake -S . -B build -DORM_BUILD_TESTS=ON
@@ -63,6 +65,20 @@ find_package(TurboDB CONFIG REQUIRED)
 target_link_libraries(c_application PRIVATE TurboDB::ORM)
 target_link_libraries(cpp_application PRIVATE Orm::Cpp)
 ```
+
+The core `Orm` package never discovers or links PostgreSQL. A product that
+needs PostgreSQL opts in explicitly:
+
+```cmake
+find_package(OrmPostgreSQL CONFIG REQUIRED)
+target_link_libraries(control_service PRIVATE OrmPostgreSQL::Driver)
+```
+
+Before its first PostgreSQL connection, call
+`orm_postgresql_register(&error)`. Registration is thread-safe and
+idempotent. Without that component and registration,
+`orm_connect(driver="postgresql")` returns `ORM_STATUS_UNSUPPORTED`; other ORM
+consumers do not compile or link libpq.
 
 `Orm::C` propagates `TurboUtils::Core`. C callers can pass `vstr` directly as
 `orm_string_view_t`, or use `orm_view_tstr()` / `orm_text_tstr()` for owned

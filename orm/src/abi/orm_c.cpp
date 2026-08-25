@@ -16,6 +16,7 @@
 #include <limits>
 #include <locale>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <sstream>
@@ -23,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -62,7 +64,46 @@ struct connection_state {
     connection_limits limits;
 };
 
-void write_error(orm_error_t* error, orm_status_t status, const char* message) noexcept
+constexpr std::size_t legacy_error_size = offsetof(orm_error_t, backend_code);
+constexpr std::size_t max_registered_drivers = 16;
+
+struct driver_registry {
+    std::mutex mutex;
+    std::unordered_map<std::string, orm_c_detail::database_backend_factory> factories;
+};
+
+driver_registry& database_drivers()
+{
+    static driver_registry registry;
+    return registry;
+}
+
+bool register_database_driver_impl(
+    std::string_view name, orm_c_detail::database_backend_factory factory)
+{
+    if (name.empty() || factory == nullptr)
+        return false;
+    auto& registry = database_drivers();
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    const auto found = registry.factories.find(std::string(name));
+    if (found != registry.factories.end())
+        return found->second == factory;
+    if (registry.factories.size() >= max_registered_drivers)
+        return false;
+    registry.factories.emplace(name, factory);
+    return true;
+}
+
+orm_c_detail::database_backend_factory find_database_driver(std::string_view name)
+{
+    auto& registry = database_drivers();
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    const auto found = registry.factories.find(std::string(name));
+    return found != registry.factories.end() ? found->second : nullptr;
+}
+
+void write_error(orm_error_t* error, orm_status_t status, const char* message,
+                 const char* backend_code = nullptr) noexcept
 {
     if (error == nullptr)
         return;
@@ -86,6 +127,19 @@ void write_error(orm_error_t* error, orm_status_t status, const char* message) n
     const std::size_t copy_size = std::min(source_size, available - 1);
     std::memcpy(error->message, source, copy_size);
     error->message[copy_size] = '\0';
+
+    const std::size_t code_offset = offsetof(orm_error_t, backend_code);
+    if (reported_size <= code_offset)
+        return;
+    const std::size_t code_available = std::min<std::size_t>(
+        reported_size - code_offset, ORM_C_BACKEND_CODE_CAPACITY);
+    if (code_available == 0)
+        return;
+    const char* code_source = backend_code != nullptr ? backend_code : "";
+    const std::size_t code_size = std::strlen(code_source);
+    const std::size_t code_copy_size = std::min(code_size, code_available - 1);
+    std::memcpy(error->backend_code, code_source, code_copy_size);
+    error->backend_code[code_copy_size] = '\0';
 }
 
 template<typename Function>
@@ -96,7 +150,8 @@ orm_status_t api_call(orm_error_t* error, Function&& function) noexcept
         function();
         return ORM_STATUS_OK;
     } catch (const status_error& exception) {
-        write_error(error, exception.status(), exception.what());
+        write_error(error, exception.status(), exception.what(),
+                    exception.backend_code().c_str());
         return exception.status();
     } catch (const std::bad_alloc&) {
         write_error(error, ORM_STATUS_OUT_OF_MEMORY, "memory allocation failed");
@@ -1478,6 +1533,21 @@ Integer parse_integer(vstr cell)
 
 } // namespace
 
+namespace orm_c_detail {
+
+orm_status_t register_database_driver(std::string_view name,
+                                      database_backend_factory factory,
+                                      orm_error_t* error) noexcept
+{
+    return api_call(error, [&] {
+        require(register_database_driver_impl(name, factory),
+                ORM_STATUS_INVALID_STATE,
+                "database driver registration failed");
+    });
+}
+
+} // namespace orm_c_detail
+
 extern "C" {
 
 uint32_t ORM_C_CALL orm_c_abi_version(void)
@@ -1527,9 +1597,24 @@ void ORM_C_CALL orm_error_init(orm_error_t* error)
 {
     if (error == nullptr)
         return;
-    error->struct_size = sizeof(*error);
-    error->status = ORM_STATUS_OK;
-    error->message[0] = '\0';
+    error->struct_size = static_cast<uint32_t>(legacy_error_size);
+    write_error(error, ORM_STATUS_OK, "");
+}
+
+void ORM_C_CALL orm_error_init_s(orm_error_t* error, uint32_t error_size)
+{
+    if (error == nullptr || error_size < sizeof(error->struct_size))
+        return;
+    error->struct_size = error_size;
+    write_error(error, ORM_STATUS_OK, "");
+}
+
+const char* ORM_C_CALL orm_error_backend_code(const orm_error_t* error)
+{
+    if (error == nullptr ||
+        error->struct_size <= offsetof(orm_error_t, backend_code))
+        return "";
+    return error->backend_code;
 }
 
 void ORM_C_CALL orm_config(orm_config_t* config)
@@ -1595,14 +1680,12 @@ orm_connect(const orm_config_t* config,
 
         auto state = std::make_shared<connection_state>();
         if (driver == "postgresql") {
-#if defined(ORM_WITH_PGSQL)
             require(!keywords.empty(), ORM_STATUS_INVALID_ARGUMENT,
                     "the selected driver requires at least one option");
-            state->backend = orm_c_detail::make_postgres_backend(keywords, values);
-#else
-            fail(ORM_STATUS_UNSUPPORTED,
-                 "postgresql ORM backend was not enabled at build time");
-#endif
+            const auto factory = find_database_driver(driver);
+            require(factory != nullptr, ORM_STATUS_UNSUPPORTED,
+                    "postgresql ORM driver is not registered");
+            state->backend = factory(keywords, values, limits);
         } else if (driver == "sqlite") {
 #if defined(ORM_WITH_SQLITE)
             sqlite_settings settings = parse_sqlite_settings(keywords, values);

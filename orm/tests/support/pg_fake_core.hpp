@@ -24,6 +24,7 @@ struct pg_conn {
 struct pg_result {
     ExecStatusType status = PGRES_TUPLES_OK;
     std::string error;
+    std::string sqlstate;
     int columns = 0;
     std::vector<std::vector<std::optional<std::string>>> rows;
     std::vector<Oid> column_types;
@@ -62,6 +63,7 @@ inline std::vector<std::vector<std::optional<std::string>>> next_rows;
 inline std::vector<Oid> next_column_types;
 inline int next_columns = 0;
 inline bool fail_next_query = false;
+inline std::string failure_sqlstate;
 inline std::string last_sql;
 inline std::vector<std::optional<std::string>> last_parameters;
 inline int finished_connections = 0;
@@ -130,6 +132,7 @@ inline void reset_script_state()
     next_column_types.clear();
     next_columns = 0;
     fail_next_query = false;
+    failure_sqlstate.clear();
     last_sql.clear();
     last_parameters.clear();
     prepared_calls = 0;

@@ -63,6 +63,14 @@ inline std::string result_error(PGconn* connection, PGresult* result)
     return connection_error(connection);
 }
 
+inline std::string result_sqlstate(PGresult* result)
+{
+    if (result == nullptr)
+        return {};
+    const char* code = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+    return code != nullptr ? std::string(code) : std::string{};
+}
+
 inline std::vector<const char*> parameter_pointers(const std::vector<std::string>& parameters)
 {
     std::vector<const char*> pointers;

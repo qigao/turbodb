@@ -101,6 +101,32 @@
             "inherits": ["base-win-release-user", "win-paths"]
         },
         {
+            "name": "win-dev-pg-user",
+            "inherits": "win-dev-user",
+            "binaryDir": "${sourceDir}/build/Msvc-PG",
+            "cacheVariables": {
+                "ORM_WITH_PGSQL": "ON",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-pg/debug"
+            },
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "PATH": "${sourceDir}/build/Msvc-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
+            "name": "win-release-pg-user",
+            "inherits": "win-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Release-PG",
+            "cacheVariables": {
+                "ORM_WITH_PGSQL": "ON",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-pg/release"
+            },
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "PATH": "${sourceDir}/build/Msvc-Release-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$env{TURBOPARSER_ROOT}/bin${pathListSep}$env{TURBONET_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
@@ -130,6 +156,32 @@
                 "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$env{TURBOPARSER_ROOT}/lib${pathListSep}$env{TURBONET_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": ["release-linux-ninja", "linux-paths"]
+        },
+        {
+            "name": "linux-dev-pg-user",
+            "inherits": "linux-dev-user",
+            "binaryDir": "${sourceDir}/build/linux-gcc-debug-pg",
+            "cacheVariables": {
+                "ORM_WITH_PGSQL": "ON",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-pg/debug"
+            },
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$env{TURBOPARSER_ROOT}/lib${pathListSep}$env{TURBONET_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            }
+        },
+        {
+            "name": "linux-release-pg-user",
+            "inherits": "linux-release-user",
+            "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
+            "cacheVariables": {
+                "ORM_WITH_PGSQL": "ON",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-pg/release"
+            },
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$env{TURBOPARSER_ROOT}/lib${pathListSep}$env{TURBONET_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            }
         },
         {
             "name": "android-dependencies-debug",
@@ -167,12 +219,20 @@
     "buildPresets": [
         { "name": "win-dev-user", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "configurePreset": "win-release-user" },
+        { "name": "win-dev-pg-user", "configurePreset": "win-dev-pg-user" },
+        { "name": "win-release-pg-user", "configurePreset": "win-release-pg-user" },
         { "name": "linux-dev-user", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "configurePreset": "linux-release-user" },
+        { "name": "linux-dev-pg-user", "configurePreset": "linux-dev-pg-user" },
+        { "name": "linux-release-pg-user", "configurePreset": "linux-release-pg-user" },
         { "name": "install-win-dev-user", "configurePreset": "win-dev-user", "targets": ["install"] },
         { "name": "install-win-release-user", "configurePreset": "win-release-user", "targets": ["install"] },
+        { "name": "install-win-dev-pg-user", "configurePreset": "win-dev-pg-user", "targets": ["install"] },
+        { "name": "install-win-release-pg-user", "configurePreset": "win-release-pg-user", "targets": ["install"] },
         { "name": "install-linux-dev-user", "configurePreset": "linux-dev-user", "targets": ["install"] },
         { "name": "install-linux-release-user", "configurePreset": "linux-release-user", "targets": ["install"] },
+        { "name": "install-linux-dev-pg-user", "configurePreset": "linux-dev-pg-user", "targets": ["install"] },
+        { "name": "install-linux-release-pg-user", "configurePreset": "linux-release-pg-user", "targets": ["install"] },
         { "name": "android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win" },
         { "name": "android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win" },
         { "name": "android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win" },
@@ -189,7 +249,11 @@
     "testPresets": [
         { "name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user" },
+        { "name": "win-dev-pg-user", "inherits": "base-test", "configurePreset": "win-dev-pg-user" },
+        { "name": "win-release-pg-user", "inherits": "base-test", "configurePreset": "win-release-pg-user" },
         { "name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user" },
-        { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" }
+        { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" },
+        { "name": "linux-dev-pg-user", "inherits": "base-test", "configurePreset": "linux-dev-pg-user" },
+        { "name": "linux-release-pg-user", "inherits": "base-test", "configurePreset": "linux-release-pg-user" }
     ]
 }
