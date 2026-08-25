@@ -120,6 +120,47 @@ static void test_postgres_driver_registration(void) {
                  "register PostgreSQL driver idempotently");
 }
 
+static void test_postgres_conninfo_options(void) {
+  static const orm_option_t conninfo_options[] = {
+      {{"conninfo", 8},
+       {"host=127.0.0.1 port=15432 dbname=flowie",
+        sizeof("host=127.0.0.1 port=15432 dbname=flowie") - 1}},
+      {{"password", 8}, {"test-secret", 11}}};
+  static const orm_option_t ambiguous_options[] = {
+      {{"conninfo", 8}, {"dbname=flowie", sizeof("dbname=flowie") - 1}},
+      {{"host", 4}, {"127.0.0.1", 9}}};
+  orm_config_t config;
+  orm_connection_t *connection = NULL;
+  orm_error_t error;
+
+  fake_pg_reset();
+  orm_error_init(&error);
+  orm_config(&config);
+  config.driver = string_view("postgresql");
+  config.options = conninfo_options;
+  config.option_count = (uint32_t)(sizeof(conninfo_options) / sizeof(conninfo_options[0]));
+  require_status(orm_connect(&config, &connection, &error), ORM_STATUS_OK, &error,
+                 "connect PostgreSQL with conninfo");
+  require_true(fake_pg_connect_expand_dbname() == 1,
+               "PostgreSQL conninfo did not enable expand_dbname");
+  require_true(fake_pg_connect_option_count() == 2 &&
+                   strcmp(fake_pg_connect_keyword_at(0), "dbname") == 0 &&
+                   strcmp(fake_pg_connect_value_at(0),
+                          "host=127.0.0.1 port=15432 dbname=flowie") == 0 &&
+                   strcmp(fake_pg_connect_keyword_at(1), "password") == 0,
+               "PostgreSQL conninfo was not normalized for libpq");
+  orm_disconnect(connection);
+
+  connection = NULL;
+  orm_config(&config);
+  config.driver = string_view("postgresql");
+  config.options = ambiguous_options;
+  config.option_count = (uint32_t)(sizeof(ambiguous_options) / sizeof(ambiguous_options[0]));
+  require_status(orm_connect(&config, &connection, &error), ORM_STATUS_INVALID_ARGUMENT, &error,
+                 "reject ambiguous PostgreSQL conninfo");
+  require_true(connection == NULL, "ambiguous PostgreSQL conninfo returned a connection");
+}
+
 static void test_explicit_transactions(void) {
   orm_error_t error;
   orm_config_t config;
@@ -822,6 +863,7 @@ int main(void) {
   test_turboutils_string_interop();
   test_legacy_error_boundary();
   test_postgres_driver_registration();
+  test_postgres_conninfo_options();
   test_explicit_transactions();
   test_query_and_result_lifetimes();
   test_limits_and_errors();

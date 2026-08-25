@@ -88,8 +88,43 @@ int fake_pg_cleared_results(void)
     return pg_fake::cleared_results;
 }
 
-PGconn* PQconnectdbParams(const char* const*, const char* const*, int)
+int fake_pg_connect_expand_dbname(void)
 {
+    return pg_fake::connect_expand_dbname;
+}
+
+size_t fake_pg_connect_option_count(void)
+{
+    return pg_fake::connect_keywords.size();
+}
+
+const char* fake_pg_connect_keyword_at(size_t index)
+{
+    return index < pg_fake::connect_keywords.size()
+        ? pg_fake::connect_keywords[index].c_str()
+        : nullptr;
+}
+
+const char* fake_pg_connect_value_at(size_t index)
+{
+    return index < pg_fake::connect_values.size()
+        ? pg_fake::connect_values[index].c_str()
+        : nullptr;
+}
+
+PGconn* PQconnectdbParams(const char* const* keywords,
+                          const char* const* values,
+                          int expand_dbname)
+{
+    pg_fake::connect_expand_dbname = expand_dbname;
+    pg_fake::connect_keywords.clear();
+    pg_fake::connect_values.clear();
+    if (keywords != nullptr && values != nullptr) {
+        for (size_t index = 0; keywords[index] != nullptr; ++index) {
+            pg_fake::connect_keywords.emplace_back(keywords[index]);
+            pg_fake::connect_values.emplace_back(values[index] != nullptr ? values[index] : "");
+        }
+    }
     return new pg_conn;
 }
 

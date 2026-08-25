@@ -1153,6 +1153,30 @@ Common PostgreSQL options use libpq connection keywords such as `host`, `port`,
 `user`, `password`, and `dbname`. Configuration strings are borrowed only by
 `orm_connect` and are never retained by the connection.
 
+For a preassembled libpq connection string, pass the ORM option `conninfo`.
+The driver forwards it as libpq's expandable `dbname`; keep `password` as a
+separate option. `conninfo` cannot be combined with `host`, `hostaddr`, `port`,
+`dbname`, `user`, or `service`, because mixed coordinate precedence would be
+ambiguous.
+
+The real PostgreSQL gate is opt-in and therefore does not affect the normal
+core-only build:
+
+```powershell
+cmake --preset win-dev-pg-user -DORM_POSTGRES_LIVE_TESTS=ON
+cmake --build --preset win-dev-pg-user --target orm_postgres_live_test
+$env:TURBODB_ORM_PGSQL_TEST_CONNINFO =
+  'host=127.0.0.1 port=15432 dbname=test user=test sslmode=disable connect_timeout=5'
+$env:PGPASSWORD = '<resolved outside logs>'
+ctest --preset win-dev-pg-user -R '^orm_postgres_live$' --output-on-failure
+```
+
+With `ORM_POSTGRES_LIVE_TESTS=OFF` (the default), CTest lists this gate as
+`Disabled`. The test creates a process-scoped `orm_pg_live_*` schema, exercises
+parameters, BYTEA, SQLSTATE mapping, statement timeout, and result bounds, and
+drops the schema in teardown. Neither the test nor the ORM logs credentials,
+connection strings, or bound values.
+
 **Large result sets**: libpq's `PQexecParams` buffers the complete result
 before the ORM checks `max_result_rows`/`max_result_bytes`, so those limits are
 safety upper bounds, not streaming thresholds. For unbounded or very large

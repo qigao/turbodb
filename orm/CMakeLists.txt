@@ -24,6 +24,7 @@ option(ORM_BUILD_SCHEMA_TOOLS "Build ORM schema validation tools"
        ${ORM_BUILD_TESTS_DEFAULT})
 option(ORM_WARNINGS_AS_ERRORS "Treat ORM compiler warnings as errors"
        ${ORM_BUILD_TESTS_DEFAULT})
+option(ORM_POSTGRES_LIVE_TESTS "Enable live PostgreSQL ORM integration test" OFF)
 
 # Keep the installed TurboDB::ORM contract identical whether ORM is built on
 # its own or as a TurboDB subdirectory. Optional backends remain opt-in so a
@@ -554,6 +555,25 @@ target_include_directories(orm_cpp17_test PRIVATE ${ORM_DB_INCLUDE_DIR}
 set_target_properties(orm_cpp17_test PROPERTIES CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_cpp17_test)
 add_test(NAME orm_cpp17 COMMAND orm_cpp17_test)
+
+add_executable(orm_postgres_live_test tests/integration/postgres_live_test.c)
+target_compile_features(orm_postgres_live_test PRIVATE c_std_11)
+target_link_libraries(orm_postgres_live_test
+                      PRIVATE orm_postgresql_driver TurboUtils::TinyTest)
+set_target_properties(orm_postgres_live_test
+                      PROPERTIES C_STANDARD_REQUIRED ON
+                                 LINKER_LANGUAGE CXX
+                                 FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_postgres_live_test)
+if(MSVC)
+  target_compile_options(orm_postgres_live_test PRIVATE /std:c11)
+endif()
+add_test(NAME orm_postgres_live COMMAND orm_postgres_live_test)
+set_tests_properties(orm_postgres_live PROPERTIES LABELS "integration;postgres")
+if(NOT ORM_POSTGRES_LIVE_TESTS)
+  set_tests_properties(orm_postgres_live PROPERTIES DISABLED TRUE)
+  message(STATUS "PostgreSQL ORM live gate is disabled (ORM_POSTGRES_LIVE_TESTS=OFF)")
+endif()
 endif()
 
 add_executable(orm_redis_query_test tests/abi/redis_query_test.cpp
@@ -747,7 +767,8 @@ if(WIN32)
     list(APPEND ORM_RUNTIME_TESTS orm_sqlite_c_api orm_cpp_api orm_jpa_api)
   endif()
   if(ORM_WITH_PGSQL)
-    list(APPEND ORM_RUNTIME_TESTS orm_package_postgresql orm_postgres_c_api orm_cpp17)
+    list(APPEND ORM_RUNTIME_TESTS orm_package_postgresql orm_postgres_c_api
+         orm_cpp17 orm_postgres_live)
   endif()
   if(ORM_WITH_REDIS)
     string(

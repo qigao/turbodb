@@ -2,6 +2,7 @@
 
 #include "pg_detail.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <memory>
@@ -21,6 +22,13 @@ orm_status_t map_postgres_error(std::string_view sqlstate) noexcept
     if (sqlstate.size() >= 2 && sqlstate[0] == '0' && sqlstate[1] == '8')
         return ORM_STATUS_CONNECTION_ERROR;
     return ORM_STATUS_SQL_ERROR;
+}
+
+bool is_postgres_coordinate(std::string_view keyword) noexcept
+{
+    return keyword == "host" || keyword == "hostaddr" ||
+           keyword == "port" || keyword == "dbname" ||
+           keyword == "user" || keyword == "service";
 }
 
 constexpr unsigned int pg_bytea_oid = 17;
@@ -278,19 +286,36 @@ public:
     postgres_backend(const std::vector<std::string>& keywords,
                      const std::vector<std::string>& values)
     {
+        const auto conninfo =
+            std::find(keywords.begin(), keywords.end(), "conninfo");
+        const bool expand_dbname = conninfo != keywords.end();
+        if (expand_dbname) {
+            const std::size_t conninfo_index =
+                static_cast<std::size_t>(conninfo - keywords.begin());
+            require(!values[conninfo_index].empty(), ORM_STATUS_INVALID_ARGUMENT,
+                    "PostgreSQL conninfo must not be empty");
+            for (const std::string& keyword : keywords) {
+                require(keyword == "conninfo" || !is_postgres_coordinate(keyword),
+                        ORM_STATUS_INVALID_ARGUMENT,
+                        "PostgreSQL conninfo cannot be combined with connection coordinates");
+            }
+        }
+
         std::vector<const char*> keyword_pointers;
         std::vector<const char*> value_pointers;
         keyword_pointers.reserve(keywords.size() + 1);
         value_pointers.reserve(values.size() + 1);
         for (std::size_t index = 0; index < keywords.size(); ++index) {
-            keyword_pointers.push_back(keywords[index].c_str());
+            keyword_pointers.push_back(
+                keywords[index] == "conninfo" ? "dbname" : keywords[index].c_str());
             value_pointers.push_back(values[index].c_str());
         }
         keyword_pointers.push_back(nullptr);
         value_pointers.push_back(nullptr);
 
         connection_ = pg_ormlite_detail::adopt_connection(
-            PQconnectdbParams(keyword_pointers.data(), value_pointers.data(), 0));
+            PQconnectdbParams(keyword_pointers.data(), value_pointers.data(),
+                              expand_dbname ? 1 : 0));
         if (connection_ == nullptr)
             fail(ORM_STATUS_CONNECTION_ERROR,
                  "libpq failed to allocate a PostgreSQL connection");

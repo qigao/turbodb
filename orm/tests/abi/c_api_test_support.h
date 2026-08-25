@@ -16,6 +16,10 @@ void fake_pg_set_result(size_t rows,
 void fake_pg_set_result_types(size_t columns, const uint32_t* types);
 void fake_pg_fail_next_query(void);
 void fake_pg_fail_next_query_with_sqlstate(const char *sqlstate);
+int fake_pg_connect_expand_dbname(void);
+size_t fake_pg_connect_option_count(void);
+const char *fake_pg_connect_keyword_at(size_t index);
+const char *fake_pg_connect_value_at(size_t index);
 const char* fake_pg_last_sql(void);
 size_t fake_pg_parameter_count(void);
 const char* fake_pg_parameter_at(size_t index);
