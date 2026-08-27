@@ -323,6 +323,9 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_WAIT,
                                          TURBO_OK, connected.waitable);
       if (connected.kind == REDIS_CFLOW_CONNECT_ERROR) {
+        if (connected.status == TURBO_EBUSY)
+          return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
+                                           TURBO_EBUSY, empty_waitable);
         redis_pool_mark_connect_failure(impl, slot);
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
                                          connected.status, empty_waitable);

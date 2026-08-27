@@ -1,4 +1,5 @@
 #include "orm_redis_cursor.h"
+#include "orm_text_token.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@ typedef struct orm_redis_reader_state {
 struct orm_redis_cursor_state {
   orm_redis_row_driver driver;
   orm_redis_field_view *fields;
+  const cmeta_data_desc **field_shapes;
   unsigned char *field_names;
   size_t field_count;
   size_t max_rows;
@@ -113,7 +115,9 @@ static cserde_status orm_redis_reader_next(void *context, cserde_token *out) {
   orm_redis_reader_state *reader = (orm_redis_reader_state *)context;
   orm_redis_cursor_state *state;
   const orm_redis_reply_ops *ops;
+  const cmeta_data_desc *shape;
   const void *value;
+  int64_t integer;
   cserde_status status;
   orm_redis_reply_kind kind;
   if (reader == NULL || out == NULL || reader->cursor == NULL)
@@ -141,16 +145,52 @@ static cserde_status orm_redis_reader_next(void *context, cserde_token *out) {
         out->kind = CSERDE_NULL;
       } else {
         kind = ops->kind(state->driver.context, value);
+        shape = state->field_shapes[reader->column];
         if (kind == ORM_REDIS_REPLY_INTEGER) {
-          out->kind = CSERDE_SINT;
-          out->value.sint = ops->integer(state->driver.context, value);
+          integer = ops->integer(state->driver.context, value);
+          if (shape != NULL && shape->kind == CMETA_DATA_BOOL) {
+            if (integer != 0 && integer != 1) return CSERDE_SOURCE_ERROR;
+            out->kind = CSERDE_BOOL;
+            out->value.boolean = integer != 0;
+          } else if (shape != NULL && shape->kind == CMETA_DATA_UINT) {
+            if (integer < 0) return CSERDE_SOURCE_ERROR;
+            out->kind = CSERDE_UINT;
+            out->value.uint = (uint64_t)integer;
+          } else {
+            out->kind = CSERDE_SINT;
+            out->value.sint = integer;
+          }
         } else if (kind == ORM_REDIS_REPLY_STRING) {
-          out->kind = CSERDE_STRING;
-          out->value.slice.data = ops->bytes(state->driver.context, value,
-                                             &out->value.slice.size);
-          if (out->value.slice.size != 0u && out->value.slice.data == NULL)
+          const unsigned char *data =
+              ops->bytes(state->driver.context, value, &out->value.slice.size);
+          if (out->value.slice.size != 0u && data == NULL)
             return CSERDE_SOURCE_ERROR;
-          out->value.slice.lifetime = CSERDE_VIEW_TRANSIENT;
+          if (shape != NULL && shape->kind == CMETA_DATA_SINT) {
+            if (orm_text_token_sint(data, out->value.slice.size, out) !=
+                CSERDE_OK)
+              return CSERDE_SOURCE_ERROR;
+          } else if (shape != NULL && shape->kind == CMETA_DATA_UINT) {
+            if (orm_text_token_uint(data, out->value.slice.size, out) !=
+                CSERDE_OK)
+              return CSERDE_SOURCE_ERROR;
+          } else if (shape != NULL && shape->kind == CMETA_DATA_FLOAT) {
+            if (orm_text_token_float(data, out->value.slice.size, 1, out) !=
+                CSERDE_OK)
+              return CSERDE_SOURCE_ERROR;
+          } else if (shape != NULL && shape->kind == CMETA_DATA_BOOL) {
+            if (out->value.slice.size != 1u ||
+                (data[0] != (unsigned char)'0' &&
+                 data[0] != (unsigned char)'1'))
+              return CSERDE_SOURCE_ERROR;
+            out->kind = CSERDE_BOOL;
+            out->value.boolean = data[0] == (unsigned char)'1';
+          } else {
+            out->kind = shape != NULL && shape->kind == CMETA_DATA_BYTES
+                            ? CSERDE_BYTES
+                            : CSERDE_STRING;
+            out->value.slice.data = data;
+            out->value.slice.lifetime = CSERDE_VIEW_TRANSIENT;
+          }
         } else {
           return CSERDE_SOURCE_ERROR;
         }
@@ -257,14 +297,76 @@ static void orm_redis_cursor_destroy(void *context) {
   orm_redis_release_row(state);
   state->driver.ops->destroy(state->driver.context);
   free(state->field_names);
+  free(state->field_shapes);
   free(state->fields);
   free(state);
+}
+
+static const cmeta_data_field_desc *orm_redis_find_shape_field(
+    const cmeta_data_struct_shape *shape, const orm_redis_field_view *field) {
+  size_t index;
+  for (index = 0u; index < shape->field_count; ++index) {
+    const cmeta_data_field_desc *candidate =
+        cmeta_data_struct_field(shape, index);
+    const size_t name_size = candidate != NULL && candidate->name != NULL
+                                 ? strlen(candidate->name)
+                                 : 0u;
+    if (candidate != NULL && candidate->name != NULL &&
+        name_size == field->size &&
+        (name_size == 0u ||
+         memcmp(candidate->name, field->data, name_size) == 0))
+      return candidate;
+  }
+  return NULL;
+}
+
+static orm_status_t orm_redis_cursor_configure_shape(
+    void *context, const cmeta_data_desc *row_shape, orm_error_t *error) {
+  orm_redis_cursor_state *state = (orm_redis_cursor_state *)context;
+  const cmeta_data_struct_shape *shape;
+  size_t index;
+  if (state == NULL || row_shape == NULL ||
+      !cmeta_data_desc_valid(row_shape) ||
+      row_shape->kind != CMETA_DATA_STRUCT || row_shape->shape == NULL) {
+    orm_redis_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
+                        "Redis row shape must be a valid struct descriptor");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  shape = (const cmeta_data_struct_shape *)row_shape->shape;
+  for (index = 0u; index < state->field_count; ++index) {
+    const cmeta_data_field_desc *field =
+        orm_redis_find_shape_field(shape, &state->fields[index]);
+    if (field == NULL || field->value == NULL ||
+        !cmeta_data_desc_valid(field->value)) {
+      orm_redis_set_error(error, ORM_STATUS_TYPE_ERROR,
+                          "Redis projection is missing from the row shape");
+      return ORM_STATUS_TYPE_ERROR;
+    }
+    switch (field->value->kind) {
+      case CMETA_DATA_BOOL:
+      case CMETA_DATA_SINT:
+      case CMETA_DATA_UINT:
+      case CMETA_DATA_FLOAT:
+      case CMETA_DATA_STRING:
+      case CMETA_DATA_BYTES:
+      case CMETA_DATA_ENUM:
+        break;
+      default:
+        orm_redis_set_error(
+            error, ORM_STATUS_UNSUPPORTED,
+            "Redis bulk-string projection requires a scalar row field");
+        return ORM_STATUS_UNSUPPORTED;
+    }
+    state->field_shapes[index] = field->value;
+  }
+  orm_redis_set_error(error, ORM_STATUS_OK, NULL);
+  return ORM_STATUS_OK;
 }
 
 static const orm_row_cursor_ops orm_redis_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "redis-resp-stream", orm_redis_cursor_next, orm_redis_cursor_cancel,
-    orm_redis_cursor_destroy};
+    orm_redis_cursor_destroy, orm_redis_cursor_configure_shape};
 
 orm_status_t orm_redis_cursor_start(
     orm_row_cursor *out_cursor, orm_redis_row_driver *driver,
@@ -306,9 +408,13 @@ orm_status_t orm_redis_cursor_start(
   }
   state->fields = (orm_redis_field_view *)calloc(
       field_count == 0u ? 1u : field_count, sizeof(*state->fields));
+  state->field_shapes = (const cmeta_data_desc **)calloc(
+      field_count == 0u ? 1u : field_count, sizeof(*state->field_shapes));
   state->field_names = (unsigned char *)malloc(field_bytes == 0u ? 1u : field_bytes);
-  if (state->fields == NULL || state->field_names == NULL) {
+  if (state->fields == NULL || state->field_shapes == NULL ||
+      state->field_names == NULL) {
     free(state->field_names);
+    free(state->field_shapes);
     free(state->fields);
     free(state);
     orm_redis_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);

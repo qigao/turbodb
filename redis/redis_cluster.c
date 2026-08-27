@@ -381,7 +381,8 @@ redis_cluster_connect_step redis_cluster_connect_next(
       return redis_cluster_result(impl, REDIS_CLUSTER_CONNECT_WAIT, TURBO_OK,
                                   seed.waitable);
     if (seed.kind == REDIS_POOL_CONNECT_ERROR) {
-      impl->phase = REDIS_CLUSTER_PHASE_FAILED;
+      if (seed.status != TURBO_EBUSY)
+        impl->phase = REDIS_CLUSTER_PHASE_FAILED;
       return redis_cluster_result(impl, REDIS_CLUSTER_CONNECT_ERROR,
                                   seed.status, empty_waitable);
     }
@@ -452,7 +453,8 @@ redis_cluster_connect_step redis_cluster_connect_next(
         return redis_cluster_result(impl, REDIS_CLUSTER_CONNECT_WAIT, TURBO_OK,
                                     connected.waitable);
       if (connected.kind == REDIS_POOL_CONNECT_ERROR) {
-        impl->phase = REDIS_CLUSTER_PHASE_FAILED;
+        if (connected.status != TURBO_EBUSY)
+          impl->phase = REDIS_CLUSTER_PHASE_FAILED;
         return redis_cluster_result(impl, REDIS_CLUSTER_CONNECT_ERROR,
                                     connected.status, empty_waitable);
       }

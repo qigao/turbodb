@@ -132,6 +132,16 @@ static cflow_io_native_backend_kind redis_cflow_test_backend(void) {
 #endif
 }
 
+typedef struct redis_cflow_connect_waker {
+  redis_cflow_connection *connection;
+  redis_cflow_connect_step step;
+} redis_cflow_connect_waker;
+
+static void redis_cflow_test_connect_next(void *user) {
+  redis_cflow_connect_waker *state = (redis_cflow_connect_waker *)user;
+  state->step = redis_cflow_connection_connect_next(state->connection);
+}
+
 suite("redis CFlow RESP stream") {
   it("connects a resolved endpoint through the CFlow native backend") {
     redis_io_runtime runtime = {0};
@@ -169,6 +179,49 @@ suite("redis CFlow RESP stream") {
     check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
   }
 
+  it("fails fast when connect cleanup reenters from its wake callback") {
+    redis_io_runtime runtime = {0};
+    redis_io_runtime_config runtime_config = {
+        redis_cflow_test_backend(), 1u, 2u, 1u};
+    redis_cflow_test_socket listener = REDIS_CFLOW_TEST_INVALID;
+    uint16_t port = 0u;
+    redis_cflow_connection connection = {0};
+    redis_cflow_open_config config;
+    redis_cflow_connect_step initial;
+    redis_cflow_connect_step retry;
+    redis_cflow_connect_waker state = {0};
+
+    check_equal(redis_io_runtime_init(&runtime, &runtime_config), TURBO_OK);
+    check_equal(redis_cflow_test_listener(&listener, &port), TURBO_OK);
+    redis_cflow_test_close(listener);
+    listener = REDIS_CFLOW_TEST_INVALID;
+    config = (redis_cflow_open_config){
+        &runtime, "127.0.0.1", port, 8u, 1u, 1024u, 8u, 128u, 16u,
+        UINT64_C(10000000)};
+    check_equal(redis_cflow_connection_open(&connection, &config), TURBO_OK);
+    initial = redis_cflow_connection_connect_next(&connection);
+    check_equal(initial.kind, REDIS_CFLOW_CONNECT_WAIT);
+    state.connection = &connection;
+    state.step.kind = REDIS_CFLOW_CONNECT_WAIT;
+    check_true(cflow_waitable_arm(
+        &initial.waitable,
+        (cflow_waker){redis_cflow_test_connect_next, &state}));
+    check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)),
+                TURBO_OK);
+    check_equal(state.step.kind, REDIS_CFLOW_CONNECT_ERROR);
+#if defined(__linux__)
+    check_equal(state.step.status, TURBO_EBUSY);
+#else
+    check_not_equal(state.step.status, TURBO_ETIMEDOUT);
+#endif
+    retry = redis_cflow_connection_connect_next(&connection);
+    check_equal(retry.kind, REDIS_CFLOW_CONNECT_ERROR);
+    check_not_equal(retry.status, TURBO_EBUSY);
+    check_equal(redis_cflow_connection_destroy(&connection), TURBO_OK);
+    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+  }
+
   it("turns partial network RESP into demand-driven WAIT and ITEM steps") {
     static const char *arguments[] = {"PING"};
     static const char expected_command[] = "*1\r\n$4\r\nPING\r\n";
@@ -176,7 +229,7 @@ suite("redis CFlow RESP stream") {
     static const char second_reply[] = "oo\r\n";
     redis_io_runtime runtime = {0};
     redis_io_runtime_config runtime_config = {
-        redis_cflow_test_backend(), 2u, 4u, 2u};
+        redis_cflow_test_backend(), 1u, 4u, 1u};
     redis_cflow_test_socket sockets[2];
     redis_cflow_connection connection = {0};
     redis_cflow_connection_config connection_config;

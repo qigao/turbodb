@@ -30,6 +30,12 @@ ORM. PostgreSQL uses libpq single-row mode, MongoDB uses its native cursor,
 Redis parses the network RESP array one owned row at a time, SQLite advances
 the prepared statement, and TidesDB advances its iterator.
 
+Each backend selects CSerde token kinds from its own native metadata. CBind
+does not guess numeric or boolean values from arbitrary strings. PostgreSQL
+uses field OIDs; Redis uses the declared CMeta field kind for typeless RESP bulk
+strings. A malformed declared scalar fails the Source instead of being returned
+as text.
+
 ## C API
 
 Load the installed TurboDB package, include `orm.h`, and link `TurboDB::ORM`.
@@ -177,7 +183,9 @@ must outlive that Source.
 
 - SQLite: row and command Sources; explicit transactions and savepoints.
 - PostgreSQL: libpq single-row row Source, direct command completion and
-  affected-row parsing; explicit transactions and savepoints.
+  affected-row parsing; explicit transactions and savepoints. Field OIDs select
+  supported scalar token kinds; arbitrary-precision and unknown types remain
+  strings instead of being narrowed.
 - MongoDB: native row cursor and direct insert/update/delete commands;
   transactions require a deployment that supports MongoDB sessions.
 - TidesDB: iterator-backed row Source and direct commands. Stateful ordering,
@@ -190,6 +198,8 @@ must outlive that Source.
   `MULTI/EXEC` is currently unsupported because affected rows are unavailable
   until commit; it requires a future commit-aware Source protocol. SELECT is
   lazy at first demand and does not materialize the complete RESP reply.
+  Projected CMeta scalar kinds drive strict conversion of RESP bulk strings;
+  non-canonical numeric or boolean representations fail at the cursor boundary.
   Destroying a Source before completion disconnects that client so unread
   response bytes cannot corrupt the next command.
 

@@ -12,6 +12,11 @@
 typedef struct redis_io_runtime_impl redis_io_runtime_impl;
 typedef struct redis_io_slot redis_io_slot;
 
+typedef struct redis_io_retiring_socket {
+  uintptr_t identity;
+  bool active;
+} redis_io_retiring_socket;
+
 typedef struct redis_io_wait_token {
   redis_io_runtime *runtime;
   redis_io_slot *slot;
@@ -39,6 +44,7 @@ struct redis_io_runtime_impl {
   cflow_executor executor;
   cflow_io_actor actor;
   redis_io_slot *slots;
+  redis_io_retiring_socket *retiring_sockets;
   size_t slot_capacity;
   size_t drive_batch_capacity;
   turbo_mutex_t gate;
@@ -50,6 +56,7 @@ struct redis_io_runtime_impl {
 };
 
 static TURBO_THREAD_LOCAL redis_io_slot *redis_io_current_wake_slot;
+static TURBO_THREAD_LOCAL unsigned redis_io_driver_depth;
 
 cflow_io_native_backend_kind redis_io_default_backend_kind(void) {
 #if defined(_WIN32)
@@ -253,6 +260,7 @@ int redis_io_runtime_run_ready(redis_io_runtime *runtime, size_t max_steps,
   impl->driver_active = true;
   impl->drive_pending = false;
   turbo_mutex_unlock(&impl->gate);
+  ++redis_io_driver_depth;
 
   while (repeat && count < max_steps) {
     cflow_io_request_id abandoned = redis_io_abandoned_delivered(impl);
@@ -286,7 +294,9 @@ int redis_io_runtime_run_ready(redis_io_runtime *runtime, size_t max_steps,
   turbo_mutex_lock(&impl->gate);
   impl->driver_active = false;
   repeat = impl->drive_pending;
+  turbo_cond_broadcast(&impl->changed);
   turbo_mutex_unlock(&impl->gate);
+  --redis_io_driver_depth;
   *progressed = count;
   if (repeat && count < max_steps) {
     size_t additional = 0u;
@@ -329,6 +339,7 @@ static void redis_io_cleanup_init(redis_io_runtime *runtime,
   turbo_cond_destroy(&impl->changed);
   turbo_mutex_destroy(&impl->gate);
   free(impl->slots);
+  free(impl->retiring_sockets);
   free(impl);
   if (runtime != NULL) runtime->impl = NULL;
 }
@@ -346,19 +357,26 @@ int redis_io_runtime_init(redis_io_runtime *runtime,
   if (runtime == NULL || runtime->impl != NULL || config == NULL ||
       config->request_capacity == 0u || config->command_capacity == 0u ||
       config->completion_batch_capacity == 0u ||
-      config->request_capacity > SIZE_MAX / sizeof(redis_io_slot))
+      config->request_capacity > SIZE_MAX / sizeof(redis_io_slot) ||
+      config->request_capacity >
+          SIZE_MAX / sizeof(redis_io_retiring_socket))
     return TURBO_EINVAL;
   impl = (redis_io_runtime_impl *)calloc(1u, sizeof(*impl));
   if (impl == NULL) return TURBO_ENOMEM;
   impl->slots = (redis_io_slot *)calloc(config->request_capacity,
                                         sizeof(*impl->slots));
-  if (impl->slots == NULL) {
+  impl->retiring_sockets = (redis_io_retiring_socket *)calloc(
+      config->request_capacity, sizeof(*impl->retiring_sockets));
+  if (impl->slots == NULL || impl->retiring_sockets == NULL) {
+    free(impl->retiring_sockets);
+    free(impl->slots);
     free(impl);
     return TURBO_ENOMEM;
   }
   impl->slot_capacity = config->request_capacity;
   if (config->request_capacity >
       (SIZE_MAX - config->command_capacity) / 3u) {
+    free(impl->retiring_sockets);
     free(impl->slots);
     free(impl);
     return TURBO_EINVAL;
@@ -429,6 +447,13 @@ redis_io_submit_status redis_io_runtime_try_submit(
   if (impl->closing) {
     turbo_mutex_unlock(&impl->gate);
     return REDIS_IO_SUBMIT_CLOSED;
+  }
+  for (index = 0u; index < impl->slot_capacity; ++index) {
+    if (impl->retiring_sockets[index].active &&
+        impl->retiring_sockets[index].identity == operation->socket) {
+      turbo_mutex_unlock(&impl->gate);
+      return REDIS_IO_SUBMIT_LEASE_IN_USE;
+    }
   }
   for (index = 0u; index < impl->slot_capacity; ++index) {
     if (impl->slots[index].in_use && impl->slots[index].release_pending &&
@@ -628,9 +653,10 @@ int redis_io_runtime_wait_idle(redis_io_runtime *runtime,
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   uint64_t started;
   if (impl == NULL || timeout_ns == 0u) return TURBO_EINVAL;
+  if (redis_io_driver_depth != 0u) return TURBO_EBUSY;
   started = turbo_hrtime();
   for (;;) {
-    bool pending = false;
+    bool pending;
     size_t index;
     uint64_t now;
     uint64_t remaining;
@@ -638,6 +664,7 @@ int redis_io_runtime_wait_idle(redis_io_runtime *runtime,
     (void)redis_io_runtime_run_ready(runtime, impl->drive_batch_capacity,
                                      &progressed);
     turbo_mutex_lock(&impl->gate);
+    pending = impl->driver_active || impl->drive_pending;
     for (index = 0u; index < impl->slot_capacity; ++index) {
       if (impl->slots[index].in_use &&
           (!impl->slots[index].delivered ||
@@ -666,10 +693,68 @@ int redis_io_runtime_forget_socket(redis_io_runtime *runtime,
                                    uintptr_t closed_socket) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   int status;
+  size_t index;
   if (impl == NULL) return TURBO_EINVAL;
   status = cflow_io_native_backend_forget_socket(&impl->backend,
                                                   closed_socket);
-  return status == TURBO_ENOENT ? TURBO_OK : status;
+  if (status != TURBO_OK && status != TURBO_ENOENT) return status;
+  turbo_mutex_lock(&impl->gate);
+  for (index = 0u; index < impl->slot_capacity; ++index) {
+    if (impl->retiring_sockets[index].active &&
+        impl->retiring_sockets[index].identity == closed_socket) {
+      impl->retiring_sockets[index].active = false;
+      break;
+    }
+  }
+  turbo_mutex_unlock(&impl->gate);
+  return TURBO_OK;
+}
+
+int redis_io_runtime_retire_socket(redis_io_runtime *runtime,
+                                   uintptr_t socket_identity) {
+  redis_io_runtime_impl *impl = redis_io_impl(runtime);
+  size_t available = SIZE_MAX;
+  size_t index;
+  if (impl == NULL) return TURBO_EINVAL;
+  turbo_mutex_lock(&impl->gate);
+  for (index = 0u; index < impl->slot_capacity; ++index) {
+    if (impl->retiring_sockets[index].active) {
+      if (impl->retiring_sockets[index].identity == socket_identity) {
+        turbo_mutex_unlock(&impl->gate);
+        return TURBO_EBUSY;
+      }
+    } else if (available == SIZE_MAX) {
+      available = index;
+    }
+    if (impl->slots[index].in_use &&
+        impl->slots[index].operation.socket == socket_identity) {
+      turbo_mutex_unlock(&impl->gate);
+      return TURBO_EBUSY;
+    }
+  }
+  if (available == SIZE_MAX) {
+    turbo_mutex_unlock(&impl->gate);
+    return TURBO_ENOBUFS;
+  }
+  impl->retiring_sockets[available].identity = socket_identity;
+  impl->retiring_sockets[available].active = true;
+  turbo_mutex_unlock(&impl->gate);
+  return TURBO_OK;
+}
+
+int redis_io_runtime_forget_socket_wait(redis_io_runtime *runtime,
+                                        uintptr_t closed_socket,
+                                        uint64_t timeout_ns) {
+  uint64_t started;
+  if (redis_io_impl(runtime) == NULL || timeout_ns == 0u) return TURBO_EINVAL;
+  started = turbo_hrtime();
+  for (;;) {
+    int status = redis_io_runtime_forget_socket(runtime, closed_socket);
+    if (status != TURBO_EBUSY) return status;
+    if (redis_io_driver_depth != 0u) return TURBO_EBUSY;
+    if (turbo_hrtime() - started >= timeout_ns) return TURBO_ETIMEDOUT;
+    turbo_thread_yield();
+  }
 }
 
 int redis_io_runtime_close(redis_io_runtime *runtime) {
@@ -720,6 +805,7 @@ int redis_io_runtime_destroy(redis_io_runtime *runtime) {
   cflow_executor_destroy(&impl->executor);
   turbo_cond_destroy(&impl->changed);
   turbo_mutex_destroy(&impl->gate);
+  free(impl->retiring_sockets);
   free(impl->slots);
   free(impl);
   runtime->impl = NULL;

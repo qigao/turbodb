@@ -61,6 +61,14 @@ typedef struct redis_io_destroy_waker {
   int destroy_status;
 } redis_io_destroy_waker;
 
+typedef struct redis_io_wait_idle_waker {
+  redis_io_runtime *runtime;
+  redis_io_request *request;
+  redis_io_request_poll_status poll_status;
+  int acknowledge_status;
+  int wait_idle_status;
+} redis_io_wait_idle_waker;
+
 typedef struct redis_io_reuse_race {
   turbo_mutex_t gate;
   turbo_cond_t changed;
@@ -142,6 +150,15 @@ static void redis_test_close_and_destroy_from_waker(void *user) {
   state->destroy_status = redis_io_runtime_destroy(state->runtime);
 }
 
+static void redis_test_wait_idle_from_waker(void *user) {
+  redis_io_wait_idle_waker *state = (redis_io_wait_idle_waker *)user;
+  cflow_io_completion completion = {0};
+  state->poll_status = redis_io_request_poll(state->request, &completion);
+  state->acknowledge_status = redis_io_request_acknowledge(state->request);
+  state->wait_idle_status = redis_io_runtime_wait_idle(
+      state->runtime, UINT64_C(10000000));
+}
+
 static void redis_test_block_then_resubmit(void *user) {
   redis_io_reuse_race *state = (redis_io_reuse_race *)user;
   cflow_io_completion completion = {0};
@@ -191,6 +208,12 @@ static void redis_test_close_socket(redis_test_socket socket_value) {
 #else
   (void)close(socket_value);
 #endif
+}
+
+static int redis_test_forget_socket(redis_io_runtime *runtime,
+                                    uintptr_t socket_value) {
+  return redis_io_runtime_forget_socket_wait(runtime, socket_value,
+                                             UINT64_C(5000000000));
 }
 
 static int redis_test_socket_error(void) {
@@ -284,6 +307,31 @@ suite("redis cflow io runtime") {
     check_false(redis_io_runtime_valid(&runtime));
   }
 
+  it("rejects admission while a socket identity is retiring") {
+    static const uintptr_t socket_identity = (uintptr_t)1234u;
+    unsigned char received = 0u;
+    redis_io_runtime runtime = {0};
+    redis_io_runtime_config config = {
+        redis_test_backend_kind(), 1u, 2u, 1u};
+    redis_io_request request = {0};
+    cflow_io_native_operation operation = {
+        .kind = CFLOW_IO_NATIVE_TCP_RECV,
+        .socket = socket_identity,
+        .buffer = &received,
+        .length = 1u};
+
+    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
+    check_equal(redis_io_runtime_retire_socket(&runtime, socket_identity),
+                TURBO_OK);
+    check_equal(redis_io_runtime_retire_socket(&runtime, socket_identity),
+                TURBO_EBUSY);
+    check_equal(redis_io_runtime_try_submit(&runtime, 1u, &operation, &request),
+                REDIS_IO_SUBMIT_LEASE_IN_USE);
+    check_equal(redis_test_forget_socket(&runtime, socket_identity), TURBO_OK);
+    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+  }
+
   it("wakes and publishes one completion for each accepted operation") {
     static const unsigned char payload[] = {0x52u, 0x45u, 0x53u, 0x50u};
     redis_io_runtime runtime = {0};
@@ -320,6 +368,12 @@ suite("redis cflow io runtime") {
     check_equal(redis_io_runtime_try_submit(&runtime, 2u, &send_operation,
                                             &send_request),
                 REDIS_IO_SUBMIT_ACCEPTED);
+    check_equal(redis_io_runtime_retire_socket(&runtime,
+                                               (uintptr_t)sockets[0]),
+                TURBO_EBUSY);
+    check_equal(redis_io_runtime_retire_socket(&runtime,
+                                               (uintptr_t)sockets[1]),
+                TURBO_EBUSY);
 
     receive_waitable = redis_io_request_waitable(&receive);
     send_waitable = redis_io_request_waitable(&send_request);
@@ -346,10 +400,10 @@ suite("redis cflow io runtime") {
 
     redis_test_close_socket(sockets[0]);
     redis_test_close_socket(sockets[1]);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[0]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[1]),
                 TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
@@ -420,10 +474,10 @@ suite("redis cflow io runtime") {
 
     redis_test_close_socket(sockets[0]);
     redis_test_close_socket(sockets[1]);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[0]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[1]),
                 TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
@@ -488,10 +542,10 @@ suite("redis cflow io runtime") {
 
     redis_test_close_socket(sockets[0]);
     redis_test_close_socket(sockets[1]);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[0]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[1]),
                 TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
@@ -576,16 +630,16 @@ suite("redis cflow io runtime") {
     redis_test_close_socket(blocker_sockets[1]);
     redis_test_close_socket(callback_sockets[0]);
     redis_test_close_socket(callback_sockets[1]);
-    check_equal(redis_io_runtime_forget_socket(
+    check_equal(redis_test_forget_socket(
                     &runtime, (uintptr_t)blocker_sockets[0]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(
+    check_equal(redis_test_forget_socket(
                     &runtime, (uintptr_t)blocker_sockets[1]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(
+    check_equal(redis_test_forget_socket(
                     &runtime, (uintptr_t)callback_sockets[0]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(
+    check_equal(redis_test_forget_socket(
                     &runtime, (uintptr_t)callback_sockets[1]),
                 TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
@@ -634,12 +688,61 @@ suite("redis cflow io runtime") {
     check_equal(state.destroy_status, TURBO_EBUSY);
     redis_test_close_socket(sockets[0]);
     redis_test_close_socket(sockets[1]);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[0]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[1]),
                 TURBO_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+  }
+
+  it("rejects wait_idle reentry from a wake callback without waiting") {
+    static const unsigned char payload = 0x53u;
+    redis_io_runtime runtime = {0};
+    redis_io_runtime_config config = {
+        redis_test_backend_kind(), 1u, 2u, 1u};
+    redis_test_socket sockets[2];
+    unsigned char received = 0u;
+    redis_io_request request = {0};
+    redis_io_wait_idle_waker state = {0};
+    cflow_waitable waitable;
+    cflow_io_native_operation receive_operation = {
+        .kind = CFLOW_IO_NATIVE_TCP_RECV,
+        .socket = (uintptr_t)REDIS_TEST_INVALID_SOCKET,
+        .buffer = &received,
+        .length = 1u};
+
+    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
+    check_equal(redis_test_socket_pair(sockets), TURBO_OK);
+    receive_operation.socket = (uintptr_t)sockets[0];
+    state.runtime = &runtime;
+    state.request = &request;
+    state.poll_status = REDIS_IO_REQUEST_INVALID;
+    state.acknowledge_status = TURBO_EINVAL;
+    state.wait_idle_status = TURBO_OK;
+    check_equal(redis_io_runtime_try_submit(&runtime, 32u,
+                                            &receive_operation, &request),
+                REDIS_IO_SUBMIT_ACCEPTED);
+    waitable = redis_io_request_waitable(&request);
+    check_true(cflow_waitable_arm(
+        &waitable, (cflow_waker){redis_test_wait_idle_from_waker, &state}));
+    check_equal(send(sockets[1], (const char *)&payload, 1, 0), 1);
+    check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)),
+                TURBO_OK);
+
+    check_equal(state.poll_status, REDIS_IO_REQUEST_COMPLETED);
+    check_equal(state.acknowledge_status, TURBO_OK);
+    check_equal(state.wait_idle_status, TURBO_EBUSY);
+    redis_test_close_socket(sockets[0]);
+    redis_test_close_socket(sockets[1]);
+    check_equal(redis_test_forget_socket(&runtime,
+                                               (uintptr_t)sockets[0]),
+                TURBO_OK);
+    check_equal(redis_test_forget_socket(&runtime,
+                                               (uintptr_t)sockets[1]),
+                TURBO_OK);
+    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
     check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
   }
 
@@ -748,10 +851,10 @@ suite("redis cflow io runtime") {
 
     redis_test_close_socket(sockets[0]);
     redis_test_close_socket(sockets[1]);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[0]),
                 TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(&runtime,
+    check_equal(redis_test_forget_socket(&runtime,
                                                (uintptr_t)sockets[1]),
                 TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);

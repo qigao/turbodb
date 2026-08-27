@@ -141,12 +141,12 @@ static void orm_flow_test_cursor_destroy(void *context) {
 static const orm_row_cursor_ops orm_flow_test_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "flow-test", orm_flow_test_cursor_next,
-    orm_flow_test_cursor_cancel, orm_flow_test_cursor_destroy};
+    orm_flow_test_cursor_cancel, orm_flow_test_cursor_destroy, NULL};
 
 static const orm_row_cursor_ops orm_flow_test_partial_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "partial-flow-test", NULL, orm_flow_test_cursor_cancel,
-    orm_flow_test_cursor_destroy};
+    orm_flow_test_cursor_destroy, NULL};
 
 typedef struct orm_flow_test_sink_state {
   orm_flow_test_row row;
@@ -179,7 +179,9 @@ static void orm_flow_test_sink_done(void *context) {
 spec("ORM CBind CFlow source") {
   it("disposes a partially initialized cursor from a failed backend contract") {
     orm_flow_test_cursor_state state = {0};
-    orm_row_cursor cursor = {&orm_flow_test_partial_cursor_ops, &state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_partial_cursor_ops,
+                             .context = &state,
+                             .wait_timeout_ns = 0u};
 
     check_false(orm_row_cursor_valid(&cursor));
     orm_row_cursor_dispose(&cursor);
@@ -206,7 +208,9 @@ spec("ORM CBind CFlow source") {
         .next_kind = ORM_ROW_CURSOR_ROW_AND_DONE,
         .cancel_count = 0u,
         .destroy_count = 0u};
-    orm_row_cursor cursor = {&orm_flow_test_cursor_ops, &state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
+                             .context = &state,
+                             .wait_timeout_ns = 0u};
     orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
@@ -238,7 +242,9 @@ spec("ORM CBind CFlow source") {
         .next_kind = ORM_ROW_CURSOR_WAIT,
         .cancel_count = 0u,
         .destroy_count = 0u};
-    orm_row_cursor cursor = {&orm_flow_test_cursor_ops, &state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
+                             .context = &state,
+                             .wait_timeout_ns = 0u};
     orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
@@ -267,7 +273,9 @@ spec("ORM CBind CFlow source") {
         .waitable = orm_flow_test_waitable_as_cflow_waitable(&wait_state),
         .cancel_count = 0u,
         .destroy_count = 0u};
-    orm_row_cursor cursor = {&orm_flow_test_cursor_ops, &state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
+                             .context = &state,
+                             .wait_timeout_ns = 0u};
     orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
@@ -297,7 +305,9 @@ spec("ORM CBind CFlow source") {
         .next_kind = ORM_ROW_CURSOR_DONE,
         .cancel_count = 0u,
         .destroy_count = 0u};
-    orm_row_cursor cursor = {&orm_flow_test_cursor_ops, &state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
+                             .context = &state,
+                             .wait_timeout_ns = 0u};
     orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 0u, 64u, 1u);
     orm_error_t error;
@@ -329,7 +339,9 @@ spec("ORM CBind CFlow source") {
         .next_kind = ORM_ROW_CURSOR_ROW,
         .cancel_count = 0u,
         .destroy_count = 0u};
-    orm_row_cursor cursor = {&orm_flow_test_cursor_ops, &state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
+                             .context = &state,
+                             .wait_timeout_ns = 0u};
     orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
@@ -358,7 +370,9 @@ spec("ORM CBind CFlow source") {
         .next_kind = ORM_ROW_CURSOR_DONE,
         .cancel_count = 0u,
         .destroy_count = 0u};
-    orm_row_cursor cursor = {&orm_flow_test_cursor_ops, &state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
+                             .context = &state,
+                             .wait_timeout_ns = 0u};
     orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
@@ -401,7 +415,9 @@ spec("ORM CBind CFlow source") {
     orm_flow_test_cursor_state cursor_state = {
         .reader_state = {tokens, sizeof(tokens) / sizeof(tokens[0]), 0u},
         .next_kind = ORM_ROW_CURSOR_ROW_AND_DONE};
-    orm_row_cursor cursor = {&orm_flow_test_cursor_ops, &cursor_state};
+    orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
+                             .context = &cursor_state,
+                             .wait_timeout_ns = 0u};
     orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_flow_test_sink_state sink_state = {0};

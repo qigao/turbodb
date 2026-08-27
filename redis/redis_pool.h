@@ -91,7 +91,9 @@ REDIS_API int redis_pool_init(redis_pool *pool,
  * runtime, then call again. During startup, DONE means every fixed slot is
  * IDLE. After a command invalidates a slot, destroy that command stream and
  * call this function again to reconnect invalid slots in place. Recovery is
- * explicit and never allocates beyond the configured capacity.
+ * explicit and never allocates beyond the configured capacity. EBUSY keeps
+ * the current slot CONNECTING; schedule a retry after the current wake/driver
+ * callback returns.
  */
 REDIS_API redis_pool_connect_step redis_pool_connect_next(redis_pool *pool);
 

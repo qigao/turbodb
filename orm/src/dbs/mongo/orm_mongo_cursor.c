@@ -265,7 +265,7 @@ static void orm_mongo_cursor_destroy(void *context) {
 static const orm_row_cursor_ops orm_mongo_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "mongodb-document", orm_mongo_cursor_next, orm_mongo_cursor_cancel,
-    orm_mongo_cursor_destroy};
+    orm_mongo_cursor_destroy, NULL};
 
 orm_status_t orm_mongo_cursor_start(
     orm_row_cursor *out_cursor, orm_mongo_driver *driver,

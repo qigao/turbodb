@@ -77,6 +77,12 @@ cleanup_connection:
 }
 ```
 
+The blocking example advances only after `redis_io_runtime_wait_idle()`. In a
+reactive driver, a wake callback schedules the next step instead of calling it
+inline. If a connection, pool, Cluster, or Sentinel connect step reports
+`ERROR` with `TURBO_EBUSY`, its phase is preserved: retry after the current
+wake/driver callback returns. Other `ERROR` statuses are terminal.
+
 ## Pool, Cluster, and Sentinel ownership
 
 The pool owns a fixed array of connections. A successful
