@@ -5,6 +5,7 @@
 
 #include "../redis_client.h"
 #include "../redis_internal.h"
+#include "CoroNet.h"
 #include "turbo_str.h"
 #include "tinytest.h"
 #include "turbo_error.h"
@@ -20,6 +21,7 @@
 #define TEST_ASSERT_GREATER_THAN(threshold, actual) check((long long)(actual) > (long long)(threshold))
 #define TEST_ASSERT_LESS_THAN(limit, actual) check((long long)(actual) < (long long)(limit))
 #define REDIS_RUN_TEST(fn, label) it(label) { fn(); }
+#define REDIS_STREAM_PROTOCOL_TEST_PORT 19936
 
 void setUp(void) {
 }
@@ -354,6 +356,197 @@ void test_command_stream_reserves_transport_until_destroyed(void) {
     client->socket = NULL;
     client->is_connected = 0;
     redis_client_destroy(client);
+}
+
+typedef struct redis_stream_protocol_case {
+    coro_context_t *ctx;
+    coro_socket_t *listener;
+    const char *stage;
+    int status;
+    int allocation_mode;
+    size_t commands;
+    size_t fragments;
+} redis_stream_protocol_case;
+
+static void fake_stream_connection(coro_socket_t *client, void *arg) {
+    static const char first_fragment[] = "*3\r\n:7\r\n$5\r\nhe";
+    static const char second_fragment[] = "llo\r\n*2\r\n:11\r\n:29\r\n";
+    static const char partial_reply[] = "*2\r\n:1\r\n";
+    static const char cancelled_tail[] = ":2\r\n";
+    redis_stream_protocol_case *test_case =
+        (redis_stream_protocol_case *)arg;
+    size_t command_index;
+
+    if (test_case->allocation_mode) {
+        static const char allocation_reply[] = "*1\r\n:1\r\n";
+        char *data = NULL;
+        size_t length = 0u;
+        if (coro_socket_recv(client, &data, &length) != TURBO_OK ||
+            data == NULL || length == 0u) {
+            coro_socket_free_recv(data);
+            return;
+        }
+        ++test_case->commands;
+        coro_socket_free_recv(data);
+        if (coro_socket_send(client, allocation_reply,
+                             sizeof(allocation_reply) - 1u) == TURBO_OK)
+            ++test_case->fragments;
+        return;
+    }
+
+    for (command_index = 0u; command_index < 2u; ++command_index) {
+        char *data = NULL;
+        size_t length = 0u;
+        int status = coro_socket_recv(client, &data, &length);
+        if (status != TURBO_OK || data == NULL || length == 0u) {
+            coro_socket_free_recv(data);
+            return;
+        }
+        ++test_case->commands;
+        coro_socket_free_recv(data);
+
+        if (command_index == 0u) {
+            if (coro_socket_send(client, first_fragment,
+                                 sizeof(first_fragment) - 1u) != TURBO_OK)
+                return;
+            ++test_case->fragments;
+            coro_sleep(test_case->ctx, 1u);
+            if (coro_socket_send(client, second_fragment,
+                                 sizeof(second_fragment) - 1u) != TURBO_OK)
+                return;
+            ++test_case->fragments;
+        } else {
+            if (coro_socket_send(client, partial_reply,
+                                 sizeof(partial_reply) - 1u) != TURBO_OK)
+                return;
+            ++test_case->fragments;
+            coro_sleep(test_case->ctx, 10u);
+            (void)coro_socket_send(client, cancelled_tail,
+                                   sizeof(cancelled_tail) - 1u);
+        }
+    }
+}
+
+static void run_stream_protocol_contract(coro_t *co, void *arg) {
+    redis_stream_protocol_case *test_case =
+        (redis_stream_protocol_case *)arg;
+    redis_config_t config = {
+        .host = "127.0.0.1",
+        .port = REDIS_STREAM_PROTOCOL_TEST_PORT,
+        .timeout_ms = 1000,
+        .command_timeout_ms = 1000,
+        .max_pipeline = 1};
+    const char *arguments[] = {"PING"};
+    redis_client_t *client = NULL;
+    redis_command_stream_t *stream = NULL;
+    redis_command_stream_step_t step = REDIS_COMMAND_STREAM_STEP_INIT;
+
+    (void)co;
+    test_case->status = TURBO_EIO;
+    test_case->stage = "listen";
+    test_case->listener = coro_socket_create(test_case->ctx,
+                                             CORO_SOCKET_TCP_V4);
+    if (test_case->listener == NULL ||
+        coro_socket_listen_on(test_case->listener, "127.0.0.1",
+                              REDIS_STREAM_PROTOCOL_TEST_PORT,
+                              fake_stream_connection, test_case) != TURBO_OK)
+        goto cleanup;
+    coro_yield();
+
+    test_case->stage = "connect";
+    client = redis_client_create_with_config(&config);
+    if (client == NULL || redis_client_connect(client, NULL, NULL) != TURBO_OK)
+        goto cleanup;
+
+    test_case->stage = "consume fragmented response";
+    if (redis_commandv_stream_open(client, 1, arguments, NULL, 512u, 3u,
+                                   &stream) != TURBO_OK)
+        goto cleanup;
+    step = redis_command_stream_next(stream);
+    if (step.kind != REDIS_COMMAND_STREAM_ITEM || step.item == NULL ||
+        step.item->type != REDIS_REPLY_INTEGER || step.item->integer != 7)
+        goto cleanup;
+    redis_reply_free(step.item);
+    step.item = NULL;
+    step = redis_command_stream_next(stream);
+    if (step.kind != REDIS_COMMAND_STREAM_ITEM || step.item == NULL ||
+        step.item->type != REDIS_REPLY_BULK_STRING || step.item->len != 5u ||
+        memcmp(step.item->str, "hello", 5u) != 0)
+        goto cleanup;
+    redis_reply_free(step.item);
+    step.item = NULL;
+    step = redis_command_stream_next(stream);
+    if (step.kind != REDIS_COMMAND_STREAM_ITEM || step.item == NULL ||
+        step.item->type != REDIS_REPLY_ARRAY ||
+        step.item->element_count != 2u ||
+        step.item->elements[0]->integer != 11 ||
+        step.item->elements[1]->integer != 29)
+        goto cleanup;
+    redis_reply_free(step.item);
+    step.item = NULL;
+    step = redis_command_stream_next(stream);
+    if (step.kind != REDIS_COMMAND_STREAM_DONE || !client->is_connected)
+        goto cleanup;
+    redis_command_stream_destroy(stream);
+    stream = NULL;
+
+    test_case->stage = "cancel partial response";
+    if (redis_commandv_stream_open(client, 1, arguments, NULL, 512u, 2u,
+                                   &stream) != TURBO_OK)
+        goto cleanup;
+    step = redis_command_stream_next(stream);
+    if (step.kind != REDIS_COMMAND_STREAM_ITEM || step.item == NULL ||
+        step.item->type != REDIS_REPLY_INTEGER || step.item->integer != 1)
+        goto cleanup;
+    redis_reply_free(step.item);
+    step.item = NULL;
+    redis_command_stream_destroy(stream);
+    stream = NULL;
+    if (client->is_connected || client->socket != NULL)
+        goto cleanup;
+
+    test_case->stage = "map decoded allocation limit";
+    test_case->allocation_mode = 1;
+    if (redis_client_connect(client, NULL, NULL) != TURBO_OK ||
+        redis_commandv_stream_open(client, 1, arguments, NULL, 32u, 1u,
+                                   &stream) != TURBO_OK)
+        goto cleanup;
+    step = redis_command_stream_next(stream);
+    if (step.kind != REDIS_COMMAND_STREAM_ERROR ||
+        step.status != TURBO_ENOBUFS || step.item != NULL ||
+        client->is_connected || client->socket != NULL)
+        goto cleanup;
+    redis_command_stream_destroy(stream);
+    stream = NULL;
+
+    test_case->stage = "complete";
+    test_case->status = TURBO_OK;
+
+cleanup:
+    redis_reply_free(step.item);
+    redis_command_stream_destroy(stream);
+    redis_client_destroy(client);
+    coro_socket_destroy(test_case->listener);
+    test_case->listener = NULL;
+}
+
+void test_command_stream_protocol_contract(void) {
+    redis_stream_protocol_case test_case = {0};
+    test_case.stage = "create context";
+    test_case.ctx = coro_context_create(NULL);
+    TEST_ASSERT_NOT_NULL(test_case.ctx);
+    TEST_ASSERT_EQUAL(TURBO_OK,
+                      coro_context_spawn(test_case.ctx,
+                                         run_stream_protocol_contract,
+                                         &test_case));
+    coro_context_run(test_case.ctx, TURBO_RUN_DEFAULT);
+    coro_context_destroy(test_case.ctx);
+    if (test_case.status != TURBO_OK)
+        fprintf(stderr, "Redis stream protocol contract failed at stage: %s\n",
+                test_case.stage);
+    TEST_ASSERT_EQUAL(TURBO_OK, test_case.status);
+    TEST_ASSERT_EQUAL(3, test_case.commands);
+    TEST_ASSERT_EQUAL(4, test_case.fragments);
 }
 
 // =============================================================================
@@ -952,6 +1145,7 @@ suite("redis_client") {
         REDIS_RUN_TEST(test_script_results_preserve_not_sent, "should preserve scripting commands rejected before send");
         REDIS_RUN_TEST(test_server_error_classification, "should classify stable Redis server errors");
         REDIS_RUN_TEST(test_command_stream_reserves_transport_until_destroyed, "should reject a second stream and release an unsent stream cleanly");
+        REDIS_RUN_TEST(test_command_stream_protocol_contract, "should stream fragmented replies and disconnect on partial cancellation");
     }
 
     group("Stream API") {

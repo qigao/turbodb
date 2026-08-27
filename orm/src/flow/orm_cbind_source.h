@@ -54,6 +54,13 @@ typedef struct orm_row_cursor {
   void *context;
 } orm_row_cursor;
 
+/*
+ * Backend open_cursor contract: the caller supplies a zero cursor. Success
+ * returns a complete ABI-compatible cursor; failure leaves it zero and the
+ * backend releases every partial resource. A backend must never publish an
+ * opaque context without a valid destroy operation because no upper layer can
+ * recover that ownership information.
+ */
 int orm_row_cursor_valid(const orm_row_cursor *cursor);
 void orm_row_cursor_dispose(orm_row_cursor *cursor);
 
