@@ -261,6 +261,58 @@ void test_resp_parser_rejects_malformed_headers(void) {
     }
 }
 
+void test_resp_array_reader_yields_fragmented_top_level_items(void) {
+    static const char first[] = "*3\r\n:2\r\n$3\r\na";
+    static const char second[] = "bc\r\n*2\r\n:7\r\n:9\r\n";
+    redis_client_t *client = redis_client_create("127.0.0.1", 6379);
+    redis_resp_array_reader reader;
+    redis_reply_t *item = NULL;
+
+    TEST_ASSERT_NOT_NULL(client);
+    redis_resp_array_reader_init(&reader, 3u);
+    TEST_ASSERT_EQUAL(0, redis_recv_buffer_append_bounded(
+                             client, first, sizeof(first) - 1u, 64u));
+    TEST_ASSERT_EQUAL(REDIS_RESP_ARRAY_ITEM,
+                      redis_resp_array_reader_next(client, &reader, &item));
+    TEST_ASSERT_EQUAL(REDIS_REPLY_INTEGER, item->type);
+    TEST_ASSERT_EQUAL(2, item->integer);
+    redis_reply_free(item);
+    item = NULL;
+
+    TEST_ASSERT_EQUAL(REDIS_RESP_ARRAY_NEED_MORE,
+                      redis_resp_array_reader_next(client, &reader, &item));
+    TEST_ASSERT_NULL(item);
+    TEST_ASSERT_EQUAL(0, redis_recv_buffer_append_bounded(
+                             client, second, sizeof(second) - 1u, 64u));
+    TEST_ASSERT_EQUAL(REDIS_RESP_ARRAY_ITEM,
+                      redis_resp_array_reader_next(client, &reader, &item));
+    TEST_ASSERT_EQUAL(REDIS_REPLY_BULK_STRING, item->type);
+    TEST_ASSERT_EQUAL(3, item->len);
+    check_equal(item->str, "abc", 3u);
+    redis_reply_free(item);
+    item = NULL;
+    TEST_ASSERT_EQUAL(REDIS_RESP_ARRAY_ITEM,
+                      redis_resp_array_reader_next(client, &reader, &item));
+    TEST_ASSERT_EQUAL(REDIS_REPLY_ARRAY, item->type);
+    TEST_ASSERT_EQUAL(2, item->element_count);
+    TEST_ASSERT_EQUAL(7, item->elements[0]->integer);
+    TEST_ASSERT_EQUAL(9, item->elements[1]->integer);
+    redis_reply_free(item);
+    item = NULL;
+    TEST_ASSERT_EQUAL(REDIS_RESP_ARRAY_DONE,
+                      redis_resp_array_reader_next(client, &reader, &item));
+    redis_client_destroy(client);
+}
+
+void test_resp_bounded_append_rejects_oversized_fragment(void) {
+    redis_client_t *client = redis_client_create("127.0.0.1", 6379);
+    TEST_ASSERT_NOT_NULL(client);
+    TEST_ASSERT_EQUAL(0, redis_recv_buffer_append_bounded(client, "1234", 4u, 4u));
+    TEST_ASSERT_EQUAL(-2, redis_recv_buffer_append_bounded(client, "5", 1u, 4u));
+    TEST_ASSERT_EQUAL(4, client->recv_buffer_used);
+    redis_client_destroy(client);
+}
+
 // =============================================================================
 // Stream Structure Tests
 // =============================================================================
@@ -836,6 +888,8 @@ suite("redis_client") {
         REDIS_RUN_TEST(test_resp_parser_parses_nested_binary_reply, "should parse nested binary replies with pooled nodes and tstr values");
         REDIS_RUN_TEST(test_resp_parser_retries_incomplete_reply, "should retry an incomplete RESP reply");
         REDIS_RUN_TEST(test_resp_parser_rejects_malformed_headers, "should reject malformed RESP headers and framing");
+        REDIS_RUN_TEST(test_resp_array_reader_yields_fragmented_top_level_items, "should yield top-level RESP items across arbitrary fragments");
+        REDIS_RUN_TEST(test_resp_bounded_append_rejects_oversized_fragment, "should reject a fragment beyond the configured buffer bound");
     }
 
     group("Stream Structure") {

@@ -16,6 +16,7 @@ typedef struct redis_client_s redis_client_t;
 typedef struct redis_command_s redis_command_t;
 typedef struct redis_reply_s redis_reply_t;
 typedef struct redis_subscription_s redis_subscription_t;
+typedef struct redis_command_stream_s redis_command_stream_t;
 typedef struct coro_context_s coro_context_t;
 typedef struct coro_socket_s coro_socket_t;
 
@@ -86,6 +87,24 @@ typedef struct {
     redis_reply_t *reply;
 } redis_command_result_t;
 
+typedef enum {
+    REDIS_COMMAND_STREAM_ITEM,
+    REDIS_COMMAND_STREAM_DONE,
+    REDIS_COMMAND_STREAM_ERROR
+} redis_command_stream_step_kind_t;
+
+typedef struct {
+    redis_command_stream_step_kind_t kind;
+    int status;
+    redis_command_outcome_t outcome;
+    redis_server_error_t server_error;
+    redis_reply_t *item;
+} redis_command_stream_step_t;
+
+#define REDIS_COMMAND_STREAM_STEP_INIT \
+    { REDIS_COMMAND_STREAM_DONE, 0, REDIS_COMMAND_NOT_SENT, \
+      REDIS_SERVER_ERROR_NONE, NULL }
+
 #define REDIS_COMMAND_RESULT_INIT \
     { 0, REDIS_COMMAND_NOT_SENT, REDIS_SERVER_ERROR_NONE, NULL }
 
@@ -146,6 +165,9 @@ struct redis_client_s {
 
     /* Serializes cross-thread wait interruption with socket publish/take. */
     turbo_mutex_t socket_mutex;
+
+    /* At most one demand-driven reply stream may own the socket protocol. */
+    redis_command_stream_t *active_stream;
 };
 
 /* API Functions */
@@ -245,6 +267,33 @@ REDIS_API int redis_commandv(redis_client_t *client, int argc, const char **argv
 REDIS_API int redis_commandv_result(redis_client_t *client, int argc,
                                     const char **argv, const size_t *argvlen,
                                     redis_command_result_t *out);
+
+/**
+ * Prepare a demand-driven stream over the direct children of one RESP array.
+ * No bytes are sent until the first redis_command_stream_next() call.
+ * `max_buffer_bytes` bounds retained, unparsed network payload and
+ * `max_items` bounds the top-level array cardinality.
+ */
+REDIS_API int redis_commandv_stream_open(redis_client_t *client, int argc,
+                                         const char **argv,
+                                         const size_t *argvlen,
+                                         size_t max_buffer_bytes,
+                                         size_t max_items,
+                                         redis_command_stream_t **out_stream);
+
+/**
+ * Return one owned top-level item, completion, or an error. The caller frees
+ * an ITEM/ERROR `item` with redis_reply_free(). This call suspends the active
+ * CoroNet coroutine only when another network fragment is required.
+ */
+REDIS_API redis_command_stream_step_t redis_command_stream_next(
+    redis_command_stream_t *stream);
+
+/**
+ * Destroy a command stream. If the reply is not fully consumed, the client is
+ * disconnected because unread RESP bytes cannot be safely reused.
+ */
+REDIS_API void redis_command_stream_destroy(redis_command_stream_t *stream);
 
 /** Release an owned command reply and reset the result to NOT_SENT. */
 REDIS_API void redis_command_result_clear(redis_command_result_t *result);

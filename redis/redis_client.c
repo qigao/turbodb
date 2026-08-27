@@ -25,6 +25,15 @@ static redis_config_t default_config = {.host = "127.0.0.1",
                                         .max_pipeline = 100,
                                         .cluster_readonly = 0};
 
+struct redis_command_stream_s {
+  redis_client_t *client;
+  tstr command;
+  redis_resp_array_reader reader;
+  size_t max_buffer_bytes;
+  int sent;
+  int terminal;
+};
+
 /* Forward declarations */
 static char *build_resp_command(int argc, const char **argv, const size_t *argvlen,
                                 size_t *out_len);
@@ -337,6 +346,10 @@ int redis_commandv_result(redis_client_t *client, int argc, const char **argv,
   if (!out) return TURBO_EINVAL;
   *out = (redis_command_result_t)REDIS_COMMAND_RESULT_INIT;
 
+  if (client && client->active_stream != NULL) {
+    out->status = TURBO_EBUSY;
+    return out->status;
+  }
   if (!client || argc <= 0 || !argv) {
     out->status = TURBO_EINVAL;
     return out->status;
@@ -413,6 +426,153 @@ int redis_commandv_result(redis_client_t *client, int argc, const char **argv,
     }
     coro_socket_free_recv(data);
   }
+}
+
+int redis_commandv_stream_open(redis_client_t *client, int argc,
+                               const char **argv, const size_t *argvlen,
+                               size_t max_buffer_bytes, size_t max_items,
+                               redis_command_stream_t **out_stream) {
+  redis_command_stream_t *stream;
+  size_t command_size = 0u;
+  int index;
+  if (!out_stream) return TURBO_EINVAL;
+  *out_stream = NULL;
+  if (!client || !client->is_connected || !client->socket || argc <= 0 ||
+      !argv || max_buffer_bytes == 0u || max_items == 0u ||
+      client->active_stream != NULL)
+    return client && client->active_stream ? TURBO_EBUSY : TURBO_EINVAL;
+  if (client->recv_buffer_used > max_buffer_bytes)
+    return TURBO_ENOBUFS;
+  for (index = 0; index < argc; ++index)
+    if (!argv[index]) return TURBO_EINVAL;
+  stream = (redis_command_stream_t *)calloc(1u, sizeof(*stream));
+  if (!stream) return TURBO_ENOMEM;
+  stream->command = build_resp_command(argc, argv, argvlen, &command_size);
+  if (!stream->command) {
+    free(stream);
+    return TURBO_ENOMEM;
+  }
+  stream->client = client;
+  stream->max_buffer_bytes = max_buffer_bytes;
+  redis_resp_array_reader_init(&stream->reader, max_items);
+  client->active_stream = stream;
+  *out_stream = stream;
+  return TURBO_OK;
+}
+
+static redis_command_stream_step_t redis_command_stream_error(
+    redis_command_stream_t *stream, int status,
+    redis_command_outcome_t outcome, redis_reply_t *item) {
+  redis_command_stream_step_t step = REDIS_COMMAND_STREAM_STEP_INIT;
+  step.kind = REDIS_COMMAND_STREAM_ERROR;
+  step.status = status;
+  step.outcome = outcome;
+  step.item = item;
+  step.server_error = redis_server_error_classify(item);
+  stream->terminal = 1;
+  if (stream->client->active_stream == stream)
+    stream->client->active_stream = NULL;
+  return step;
+}
+
+redis_command_stream_step_t redis_command_stream_next(
+    redis_command_stream_t *stream) {
+  redis_command_stream_step_t step = REDIS_COMMAND_STREAM_STEP_INIT;
+  redis_client_t *client;
+  if (!stream || !stream->client) {
+    step.kind = REDIS_COMMAND_STREAM_ERROR;
+    step.status = TURBO_EINVAL;
+    return step;
+  }
+  client = stream->client;
+  if (stream->terminal)
+    return step;
+  if (!client->is_connected || client->socket == NULL)
+    return redis_command_stream_error(
+        stream, TURBO_ENOTCONN,
+        stream->sent ? REDIS_COMMAND_REPLY_UNKNOWN : REDIS_COMMAND_NOT_SENT,
+        NULL);
+  if (!stream->sent) {
+    int send_status = coro_socket_send(client->socket, stream->command,
+                                       tstr_len(stream->command));
+    if (send_status != TURBO_OK) {
+      client->is_connected = 0;
+      redis_client_disconnect(client);
+      client->recv_buffer_used = 0u;
+      return redis_command_stream_error(
+          stream, send_status, REDIS_COMMAND_SEND_UNCERTAIN, NULL);
+    }
+    stream->sent = 1;
+    tstr_freep(&stream->command);
+  }
+  for (;;) {
+    redis_reply_t *item = NULL;
+    redis_resp_array_step parsed =
+        redis_resp_array_reader_next(client, &stream->reader, &item);
+    if (parsed == REDIS_RESP_ARRAY_ITEM) {
+      step.kind = REDIS_COMMAND_STREAM_ITEM;
+      step.status = TURBO_OK;
+      step.outcome = REDIS_COMMAND_REPLIED;
+      step.item = item;
+      return step;
+    }
+    if (parsed == REDIS_RESP_ARRAY_DONE) {
+      stream->terminal = 1;
+      if (client->active_stream == stream)
+        client->active_stream = NULL;
+      step.outcome = REDIS_COMMAND_REPLIED;
+      return step;
+    }
+    if (parsed == REDIS_RESP_ARRAY_SERVER_ERROR)
+      return redis_command_stream_error(stream, TURBO_EIO,
+                                        REDIS_COMMAND_REPLIED, item);
+    if (parsed == REDIS_RESP_ARRAY_ERROR) {
+      client->is_connected = 0;
+      redis_client_disconnect(client);
+      client->recv_buffer_used = 0u;
+      return redis_command_stream_error(stream, TURBO_EPROTO,
+                                        REDIS_COMMAND_REPLY_UNKNOWN, NULL);
+    }
+    {
+      char *data = NULL;
+      size_t length = 0u;
+      int receive_status = coro_socket_recv(client->socket, &data, &length);
+      if (data != NULL && length != 0u)
+        receive_status = TURBO_OK;
+      if (receive_status != TURBO_OK) {
+        coro_socket_free_recv(data);
+        client->is_connected = 0;
+        redis_client_disconnect(client);
+        client->recv_buffer_used = 0u;
+        return redis_command_stream_error(
+            stream, receive_status, REDIS_COMMAND_REPLY_UNKNOWN, NULL);
+      }
+      receive_status = redis_recv_buffer_append_bounded(
+          client, data, length, stream->max_buffer_bytes);
+      coro_socket_free_recv(data);
+      if (receive_status != 0) {
+        client->is_connected = 0;
+        redis_client_disconnect(client);
+        client->recv_buffer_used = 0u;
+        return redis_command_stream_error(
+            stream, receive_status == -2 ? TURBO_ENOBUFS : TURBO_ENOMEM,
+            REDIS_COMMAND_REPLY_UNKNOWN, NULL);
+      }
+    }
+  }
+}
+
+void redis_command_stream_destroy(redis_command_stream_t *stream) {
+  if (!stream) return;
+  if (stream->client && stream->client->active_stream == stream) {
+    if (stream->sent && !stream->terminal) {
+      redis_client_disconnect(stream->client);
+      stream->client->recv_buffer_used = 0u;
+    }
+    stream->client->active_stream = NULL;
+  }
+  tstr_free(stream->command);
+  free(stream);
 }
 
 int redis_commandv(redis_client_t *client, int argc, const char **argv, const size_t *argvlen,
@@ -497,6 +657,10 @@ void redis_client_destroy(redis_client_t *client) {
     return;
 
   TLOG_DEBUGF("Destroying Redis client for {:s}:{:d}", client->config.host, client->config.port);
+  if (client->active_stream != NULL) {
+    client->active_stream->client = NULL;
+    client->active_stream = NULL;
+  }
   redis_client_disconnect(client);
   reset_command_queue_state(client);
 

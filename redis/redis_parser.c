@@ -193,6 +193,79 @@ int redis_recv_buffer_append(redis_client_t *client, const char *data, size_t le
   return 0;
 }
 
+int redis_recv_buffer_append_bounded(redis_client_t *client,
+                                     const char *data, size_t len,
+                                     size_t max_buffer_bytes) {
+  if (!client || max_buffer_bytes == 0u || (!data && len != 0u)) return -1;
+  if (client->recv_buffer_used > max_buffer_bytes ||
+      len > max_buffer_bytes - client->recv_buffer_used)
+    return -2;
+  return redis_recv_buffer_append(client, data, len);
+}
+
+static void redis_recv_buffer_consume(redis_client_t *client,
+                                      size_t consumed) {
+  if (!client || consumed == 0u || consumed > client->recv_buffer_used) return;
+  memmove(client->recv_buffer, client->recv_buffer + consumed,
+          client->recv_buffer_used - consumed);
+  client->recv_buffer_used -= consumed;
+}
+
+void redis_resp_array_reader_init(redis_resp_array_reader *reader,
+                                  size_t max_items) {
+  if (!reader) return;
+  memset(reader, 0, sizeof(*reader));
+  reader->max_items = max_items;
+}
+
+redis_resp_array_step redis_resp_array_reader_next(
+    redis_client_t *client, redis_resp_array_reader *reader,
+    redis_reply_t **item) {
+  redis_resp_token_t token;
+  int parsed;
+
+  if (item) *item = NULL;
+  if (!client || !reader || !item || reader->max_items == 0u)
+    return REDIS_RESP_ARRAY_ERROR;
+  if (reader->terminal)
+    return REDIS_RESP_ARRAY_DONE;
+
+  if (!reader->header_read) {
+    parsed = redis_resp_scan_token(client->recv_buffer,
+                                   client->recv_buffer_used, &token);
+    if (parsed <= 0)
+      return parsed == 0 ? REDIS_RESP_ARRAY_NEED_MORE
+                         : REDIS_RESP_ARRAY_ERROR;
+    if (token.type == '-') {
+      parsed = redis_parse_resp_reply(client, item);
+      if (parsed <= 0)
+        return parsed == 0 ? REDIS_RESP_ARRAY_NEED_MORE
+                           : REDIS_RESP_ARRAY_ERROR;
+      redis_recv_buffer_consume(client, (size_t)parsed);
+      reader->terminal = 1;
+      return REDIS_RESP_ARRAY_SERVER_ERROR;
+    }
+    if (token.type != '*' || token.int_value < 0 ||
+        (uint64_t)token.int_value > reader->max_items)
+      return REDIS_RESP_ARRAY_ERROR;
+    reader->remaining = (size_t)token.int_value;
+    reader->header_read = 1;
+    redis_recv_buffer_consume(client, token.header_len);
+  }
+
+  if (reader->remaining == 0u) {
+    reader->terminal = 1;
+    return REDIS_RESP_ARRAY_DONE;
+  }
+  parsed = redis_parse_resp_reply(client, item);
+  if (parsed <= 0)
+    return parsed == 0 ? REDIS_RESP_ARRAY_NEED_MORE
+                       : REDIS_RESP_ARRAY_ERROR;
+  redis_recv_buffer_consume(client, (size_t)parsed);
+  --reader->remaining;
+  return REDIS_RESP_ARRAY_ITEM;
+}
+
 int redis_parse_resp_reply(redis_client_t *client, redis_reply_t **reply) {
   redis_reply_owner_t *owner;
   int consumed;

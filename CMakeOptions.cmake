@@ -13,10 +13,7 @@ cmake_dependent_option(ENABLE_ASAN "Enable Address Sanitizer" ON
 
 option(BUILD_EXAMPLES "Build example programs" ON)
 option(BUILD_TESTS "Build test suite" ${ENABLE_TESTS})
-option(ORM_BUILD_EXAMPLES "Build ORM example programs" ${BUILD_EXAMPLES})
 option(ORM_BUILD_TESTS "Build ORM test suite" ${BUILD_TESTS})
-option(ORM_BUILD_SCHEMA_TOOLS "Build ORM schema validation tools"
-       ${ORM_BUILD_TESTS})
 
 # tidesdb compression backends -- only Zstd by default; Snappy and LZ4 are
 # opt-in. Override per build with -DTIDESDB_WITH_SNAPPY=ON /
