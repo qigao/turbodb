@@ -546,6 +546,9 @@ add_executable(orm_redis_backend_contract_test
                tests/abi/redis_backend_contract_test.c)
 target_compile_features(orm_redis_backend_contract_test PRIVATE c_std_11)
 target_link_libraries(orm_redis_backend_contract_test PRIVATE orm_c)
+if(WIN32)
+  target_link_libraries(orm_redis_backend_contract_test PRIVATE ws2_32)
+endif()
 if(MSVC)
   target_compile_options(orm_redis_backend_contract_test PRIVATE /W4 /WX
                                                                  /std:c11

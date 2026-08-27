@@ -938,7 +938,10 @@ static orm_status_t orm_redis_verify_query_engine(
                    ? ORM_STATUS_UNSUPPORTED : ORM_STATUS_CONNECTION_ERROR,
         "Redis Query Engine is required but FT.SEARCH is unavailable");
   }
-  if (result.reply == NULL || result.reply->type != REDIS_REPLY_ARRAY) {
+  if (result.reply == NULL || result.reply->type != REDIS_REPLY_ARRAY ||
+      result.reply->element_count != 1u || result.reply->elements == NULL ||
+      result.reply->elements[0] == NULL ||
+      result.reply->elements[0]->type != REDIS_REPLY_ARRAY) {
     redis_reply_free(result.reply);
     return orm_redis_fail(
         error, ORM_STATUS_UNSUPPORTED,
