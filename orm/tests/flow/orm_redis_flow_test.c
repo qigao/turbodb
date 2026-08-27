@@ -11,7 +11,10 @@
 
 Struct(orm_redis_test_row,
     (int, id),
-    (long, score)
+    (long, score),
+    (bool, enabled),
+    (size_t, count),
+    (double, ratio)
 );
 
 static const cmeta_type_identity orm_redis_test_row_identity =
@@ -29,11 +32,17 @@ static const cmeta_data_field_desc orm_redis_test_row_fields[] = {
     {"orm.test.RedisRow.id", "id", offsetof(orm_redis_test_row, id),
      &cmeta_data_int},
     {"orm.test.RedisRow.score", "score", offsetof(orm_redis_test_row, score),
-     &cmeta_data_long}};
+     &cmeta_data_long},
+    {"orm.test.RedisRow.enabled", "enabled",
+     offsetof(orm_redis_test_row, enabled), &cmeta_data_bool},
+    {"orm.test.RedisRow.count", "count", offsetof(orm_redis_test_row, count),
+     &cmeta_data_size},
+    {"orm.test.RedisRow.ratio", "ratio", offsetof(orm_redis_test_row, ratio),
+     &cmeta_data_double}};
 static const cmeta_data_struct_shape orm_redis_test_row_shape = {
     .layout = StructMeta(orm_redis_test_row),
     .fields = orm_redis_test_row_fields,
-    .field_count = 2u};
+    .field_count = 5u};
 static const cmeta_data_desc orm_redis_test_row_data = {
     .struct_size = ORM_REDIS_TEST_DATA_PREFIX_SIZE,
     .abi_version = CMETA_DATA_DESC_ABI_VERSION,
@@ -155,42 +164,159 @@ static const orm_redis_row_driver_ops orm_redis_test_driver_ops = {
     orm_redis_test_next, orm_redis_test_cancel, orm_redis_test_release_call,
     orm_redis_test_destroy_call};
 
+static void orm_redis_test_reject_integer_for_shape(
+    const unsigned char *field_name, size_t field_name_size, int64_t value) {
+  const orm_redis_test_reply field = {
+      ORM_REDIS_REPLY_STRING, 0, field_name, field_name_size, NULL, 0u};
+  const orm_redis_test_reply integer = {
+      ORM_REDIS_REPLY_INTEGER, value, NULL, 0u, NULL, 0u};
+  const orm_redis_test_reply *children[] = {&field, &integer};
+  const orm_redis_test_reply row = {
+      ORM_REDIS_REPLY_ARRAY, 0, NULL, 0u, children, 2u};
+  const orm_redis_field_view projection = {field_name, field_name_size};
+  orm_redis_test_driver driver_context = {.rows = {&row, NULL}, .next = 0u};
+  orm_redis_row_driver driver = {
+      &orm_redis_test_driver_ops, &orm_redis_test_reply_ops, &driver_context};
+  orm_redis_cursor_config cursor_config =
+      ORM_REDIS_CURSOR_CONFIG_INIT(1u, field_name_size, UINT64_C(1024));
+  orm_row_cursor cursor = {0};
+  orm_error_t error;
+  cserde_reader reader = {0};
+  cserde_token token = {0};
+
+  orm_error_init(&error);
+  mock_orm_redis_test_release_reset();
+  mock_orm_redis_test_destroy_reset();
+  mock_orm_redis_test_release_expect(
+      TINYMOCk_ARG((void *)&driver_context), TINYMOCk_ARG((void *)&row));
+  mock_orm_redis_test_destroy_expect(
+      TINYMOCk_ARG((void *)&driver_context));
+  check_equal(orm_redis_cursor_start(&cursor, &driver, &projection, 1u,
+                                     &cursor_config, &error),
+              ORM_STATUS_OK);
+  check_equal(cursor.ops->configure_shape(cursor.context,
+                                           &orm_redis_test_row_data, &error),
+              ORM_STATUS_OK);
+  check_equal(cursor.ops->next(cursor.context, &reader).kind,
+              ORM_ROW_CURSOR_ROW);
+  check_equal(cserde_reader_next(&reader, &token), CSERDE_OK);
+  check_equal(token.kind, CSERDE_MAP_BEGIN);
+  check_equal(cserde_reader_next(&reader, &token), CSERDE_OK);
+  check_equal(token.kind, CSERDE_STRING);
+  check_equal(cserde_reader_next(&reader, &token), CSERDE_SOURCE_ERROR);
+  cursor.ops->destroy(cursor.context);
+  mock_orm_redis_test_release_verify();
+  mock_orm_redis_test_destroy_verify();
+}
+
 spec("ORM Redis CFlow cursor") {
+  it("rejects RESP integers outside declared boolean and unsigned domains") {
+    static const unsigned char enabled_name[] = "enabled";
+    static const unsigned char count_name[] = "count";
+    orm_redis_test_reject_integer_for_shape(enabled_name,
+                                             sizeof(enabled_name) - 1u, 2);
+    orm_redis_test_reject_integer_for_shape(count_name,
+                                             sizeof(count_name) - 1u, -1);
+  }
+
+  it("rejects a projection missing from the configured row shape") {
+    static const unsigned char missing_name[] = "missing";
+    const orm_redis_field_view projection = {
+        missing_name, sizeof(missing_name) - 1u};
+    orm_redis_test_driver driver_context = {0};
+    orm_redis_row_driver driver = {
+        &orm_redis_test_driver_ops, &orm_redis_test_reply_ops, &driver_context};
+    orm_redis_cursor_config cursor_config =
+        ORM_REDIS_CURSOR_CONFIG_INIT(1u, sizeof(missing_name) - 1u,
+                                     UINT64_C(1024));
+    orm_row_cursor cursor = {0};
+    orm_error_t error;
+
+    orm_error_init(&error);
+    mock_orm_redis_test_destroy_reset();
+    mock_orm_redis_test_destroy_expect(
+        TINYMOCk_ARG((void *)&driver_context));
+    check_equal(orm_redis_cursor_start(&cursor, &driver, &projection, 1u,
+                                       &cursor_config, &error),
+                ORM_STATUS_OK);
+    check_equal(cursor.ops->configure_shape(cursor.context,
+                                             &orm_redis_test_row_data,
+                                             &error),
+                ORM_STATUS_TYPE_ERROR);
+    cursor.ops->destroy(cursor.context);
+    mock_orm_redis_test_destroy_verify();
+  }
+
   it("requests and releases exactly one owned reply row per resume") {
     static const unsigned char id_name[] = "id";
     static const unsigned char score_name[] = "score";
+    static const unsigned char enabled_name[] = "enabled";
+    static const unsigned char count_name[] = "count";
+    static const unsigned char ratio_name[] = "ratio";
+    static const unsigned char value_7_text[] = "7";
+    static const unsigned char value_19_text[] = "19";
+    static const unsigned char value_11_text[] = "11";
+    static const unsigned char value_29_text[] = "29";
+    static const unsigned char enabled_1_text[] = "1";
+    static const unsigned char count_42_text[] = "42";
+    static const unsigned char count_84_text[] = "84";
+    static const unsigned char ratio_125_text[] = "1.25";
+    static const unsigned char ratio_25_text[] = "2.5";
     const orm_redis_test_reply field_id = {
         ORM_REDIS_REPLY_STRING, 0, id_name, 2u, NULL, 0u};
     const orm_redis_test_reply field_score = {
         ORM_REDIS_REPLY_STRING, 0, score_name, 5u, NULL, 0u};
+    const orm_redis_test_reply field_enabled = {
+        ORM_REDIS_REPLY_STRING, 0, enabled_name, 7u, NULL, 0u};
+    const orm_redis_test_reply field_count = {
+        ORM_REDIS_REPLY_STRING, 0, count_name, 5u, NULL, 0u};
+    const orm_redis_test_reply field_ratio = {
+        ORM_REDIS_REPLY_STRING, 0, ratio_name, 5u, NULL, 0u};
     const orm_redis_test_reply value_7 = {
-        ORM_REDIS_REPLY_INTEGER, 7, NULL, 0u, NULL, 0u};
+        ORM_REDIS_REPLY_STRING, 0, value_7_text, 1u, NULL, 0u};
     const orm_redis_test_reply value_19 = {
-        ORM_REDIS_REPLY_INTEGER, 19, NULL, 0u, NULL, 0u};
+        ORM_REDIS_REPLY_STRING, 0, value_19_text, 2u, NULL, 0u};
     const orm_redis_test_reply value_11 = {
-        ORM_REDIS_REPLY_INTEGER, 11, NULL, 0u, NULL, 0u};
+        ORM_REDIS_REPLY_STRING, 0, value_11_text, 2u, NULL, 0u};
     const orm_redis_test_reply value_29 = {
-        ORM_REDIS_REPLY_INTEGER, 29, NULL, 0u, NULL, 0u};
+        ORM_REDIS_REPLY_STRING, 0, value_29_text, 2u, NULL, 0u};
+    const orm_redis_test_reply enabled_1 = {
+        ORM_REDIS_REPLY_STRING, 0, enabled_1_text, 1u, NULL, 0u};
+    const orm_redis_test_reply enabled_0 = {
+        ORM_REDIS_REPLY_INTEGER, 0, NULL, 0u, NULL, 0u};
+    const orm_redis_test_reply count_42 = {
+        ORM_REDIS_REPLY_STRING, 0, count_42_text, 2u, NULL, 0u};
+    const orm_redis_test_reply count_84 = {
+        ORM_REDIS_REPLY_STRING, 0, count_84_text, 2u, NULL, 0u};
+    const orm_redis_test_reply ratio_125 = {
+        ORM_REDIS_REPLY_STRING, 0, ratio_125_text, 4u, NULL, 0u};
+    const orm_redis_test_reply ratio_25 = {
+        ORM_REDIS_REPLY_STRING, 0, ratio_25_text, 3u, NULL, 0u};
     const orm_redis_test_reply *row_1_children[] = {
-        &field_id, &value_7, &field_score, &value_19};
+        &field_id, &value_7, &field_score, &value_19,
+        &field_enabled, &enabled_1, &field_count, &count_42,
+        &field_ratio, &ratio_125};
     const orm_redis_test_reply *row_2_children[] = {
-        &field_id, &value_11, &field_score, &value_29};
+        &field_id, &value_11, &field_score, &value_29,
+        &field_enabled, &enabled_0, &field_count, &count_84,
+        &field_ratio, &ratio_25};
     const orm_redis_test_reply row_1 = {
-        ORM_REDIS_REPLY_ARRAY, 0, NULL, 0u, row_1_children, 4u};
+        ORM_REDIS_REPLY_ARRAY, 0, NULL, 0u, row_1_children, 10u};
     const orm_redis_test_reply row_2 = {
-        ORM_REDIS_REPLY_ARRAY, 0, NULL, 0u, row_2_children, 4u};
+        ORM_REDIS_REPLY_ARRAY, 0, NULL, 0u, row_2_children, 10u};
     const orm_redis_field_view fields[] = {
-        {id_name, 2u}, {score_name, 5u}};
+        {id_name, 2u}, {score_name, 5u}, {enabled_name, 7u},
+        {count_name, 5u}, {ratio_name, 5u}};
     orm_redis_test_driver driver_context = {
         .rows = {&row_1, &row_2}, .next = 0u};
     orm_redis_row_driver driver = {
         &orm_redis_test_driver_ops, &orm_redis_test_reply_ops, &driver_context};
     orm_redis_cursor_config cursor_config =
-        ORM_REDIS_CURSOR_CONFIG_INIT(4u, 16u, UINT64_C(5000000000));
+        ORM_REDIS_CURSOR_CONFIG_INIT(4u, 32u, UINT64_C(5000000000));
     orm_row_cursor cursor = {0};
     orm_error_t error;
     orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
-        &orm_redis_test_row_data, 1u, 1u, 2u, 1u);
+        &orm_redis_test_row_data, 1u, 1u, 5u, 1u);
     cflow_source source = {0};
     orm_redis_test_row first = {0};
     orm_redis_test_row second = {0};
@@ -205,7 +331,7 @@ spec("ORM Redis CFlow cursor") {
         TINYMOCk_ARG((void *)&driver_context), TINYMOCk_ARG((void *)&row_2));
     mock_orm_redis_test_destroy_expect(
         TINYMOCk_ARG((void *)&driver_context));
-    check_equal(orm_redis_cursor_start(&cursor, &driver, fields, 2u,
+    check_equal(orm_redis_cursor_start(&cursor, &driver, fields, 5u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
     check_null(driver.context);
@@ -218,14 +344,69 @@ spec("ORM Redis CFlow cursor") {
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(first.id, 7);
     check_equal(first.score, 19L);
+    check_true(first.enabled);
+    check_equal(first.count, (size_t)42u);
+    check_equal(first.ratio, 1.25);
     step = cflow_source_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(second.id, 11);
     check_equal(second.score, 29L);
+    check_false(second.enabled);
+    check_equal(second.count, (size_t)84u);
+    check_equal(second.ratio, 2.5);
     step = cflow_source_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_DONE);
 
     cflow_source_destroy(&source);
+    mock_orm_redis_test_release_verify();
+    mock_orm_redis_test_destroy_verify();
+  }
+
+  it("rejects non-canonical numeric bulk strings at the Redis boundary") {
+    static const unsigned char ratio_name[] = "ratio";
+    static const unsigned char padded_ratio_text[] = " 1.25";
+    const orm_redis_test_reply field_ratio = {
+        ORM_REDIS_REPLY_STRING, 0, ratio_name, 5u, NULL, 0u};
+    const orm_redis_test_reply padded_ratio = {
+        ORM_REDIS_REPLY_STRING, 0, padded_ratio_text, 5u, NULL, 0u};
+    const orm_redis_test_reply *children[] = {&field_ratio, &padded_ratio};
+    const orm_redis_test_reply row = {
+        ORM_REDIS_REPLY_ARRAY, 0, NULL, 0u, children, 2u};
+    const orm_redis_field_view field = {ratio_name, 5u};
+    orm_redis_test_driver driver_context = {
+        .rows = {&row, NULL}, .next = 0u};
+    orm_redis_row_driver driver = {
+        &orm_redis_test_driver_ops, &orm_redis_test_reply_ops, &driver_context};
+    orm_redis_cursor_config cursor_config =
+        ORM_REDIS_CURSOR_CONFIG_INIT(1u, 5u, UINT64_C(5000000000));
+    orm_row_cursor cursor = {0};
+    orm_error_t error;
+    cserde_reader reader = {0};
+    cserde_token token = {0};
+
+    orm_error_init(&error);
+    mock_orm_redis_test_release_reset();
+    mock_orm_redis_test_destroy_reset();
+    mock_orm_redis_test_release_expect(
+        TINYMOCk_ARG((void *)&driver_context), TINYMOCk_ARG((void *)&row));
+    mock_orm_redis_test_destroy_expect(
+        TINYMOCk_ARG((void *)&driver_context));
+    check_equal(orm_redis_cursor_start(&cursor, &driver, &field, 1u,
+                                       &cursor_config, &error),
+                ORM_STATUS_OK);
+    check_equal(cursor.ops->configure_shape(cursor.context,
+                                             &orm_redis_test_row_data,
+                                             &error),
+                ORM_STATUS_OK);
+    check_equal(cursor.ops->next(cursor.context, &reader).kind,
+                ORM_ROW_CURSOR_ROW);
+    check_equal(cserde_reader_next(&reader, &token), CSERDE_OK);
+    check_equal(token.kind, CSERDE_MAP_BEGIN);
+    check_equal(cserde_reader_next(&reader, &token), CSERDE_OK);
+    check_equal(token.kind, CSERDE_STRING);
+    check_equal(cserde_reader_next(&reader, &token), CSERDE_SOURCE_ERROR);
+
+    cursor.ops->destroy(cursor.context);
     mock_orm_redis_test_release_verify();
     mock_orm_redis_test_destroy_verify();
   }

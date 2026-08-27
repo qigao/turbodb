@@ -85,6 +85,7 @@ set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_plan.c
                   src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_cbind_source.c
                      src/flow/orm_command_source.c
+                     src/flow/orm_text_token.c
                      src/dbs/redis/orm_redis_cursor.c
                      src/dbs/mongo/orm_mongo_cursor.c
                      src/dbs/tidesdb/orm_tidesdb_cursor.c)

@@ -53,6 +53,18 @@ protocol. `CBind` is required by every row-producing execution because an
 explicit CMeta row shape is the only supported public result contract. There is
 no schema-less index-based result and no universal dynamic row fallback.
 
+Token semantics are normalized by the backend adapter, not by CBind. CBind
+therefore remains strict: a `CSERDE_STRING` is never guessed to be a number or
+boolean. Backends with native value kinds map those kinds directly. PostgreSQL
+uses the libpq field OID to distinguish boolean, signed integer, OID, floating
+point, `bytea`, and text tokens. Redis RESP bulk strings have no scalar type, so
+the internal cursor borrows the configured CMeta row shape and parses only the
+projected field's declared scalar kind; RESP integers are similarly checked for
+boolean and unsigned targets. Invalid or non-canonical representations fail at
+the backend reader boundary instead of falling back to text. Decimal parsing
+uses an immutable process-lifetime C numeric locale, so application locale
+changes cannot alter database token semantics.
+
 ## Data-path protocol
 
 - Data unit: one owning `cmeta_data_desc::storage_type` object.
@@ -78,6 +90,10 @@ no schema-less index-based result and no universal dynamic row fallback.
   the driver's waitable; there is no unbounded queue and no silent buffering.
 - Failure: malformed rows and binding failures terminate the Source, cancel the
   cursor, restore the output to semantic zero, and surface one stable error.
+- Type ownership: the backend owns native-to-CSerde token selection. The row
+  descriptor remains borrowed and immutable; an optional internal cursor
+  configuration hook receives it before cursor ownership moves. The common
+  Source and CBind layers do not coerce backend strings.
 - Shutdown: stop new demand, cancel the Run, close the Run, then destroy the
   scheduler/driver executor and borrowed graph state.
 
@@ -93,13 +109,18 @@ PostgreSQL uses a pure C Adapter around libpq's async command API. Each
 downstream demand advances by at most one `PGRES_SINGLE_TUPLE`. Cancellation
 and every failure drain `PQgetResult` to NULL before the connection can be
 reused. `bytea` text is decoded into bounded transient `CSERDE_BYTES` before
-the row is published.
+the row is published. Scalar text returned by libpq is converted only when its
+field OID selects a supported exact CSerde kind. Arbitrary-precision `numeric`
+and unknown OIDs remain strings rather than being narrowed silently.
 
 MongoDB maps its native cursor to demand directly. Redis owns one bounded reply
 tree returned by its client and exposes rows incrementally without copying a
-second result matrix. TidesDB streams plans that preserve scan order; ordering,
-grouping, and aggregate plans are rejected until they can be represented by
-bounded CFlow stateful operators without restoring an eager result object.
+second result matrix. Redis bulk-string scalar conversion is driven by the
+projected CMeta field; its accepted boolean and numeric grammars are strict and
+malformed data terminates the Source. TidesDB streams plans that preserve scan
+order; ordering, grouping, and aggregate plans are rejected until they can be
+represented by bounded CFlow stateful operators without restoring an eager
+result object.
 
 Commands are also Sources. The first demand invokes the backend exactly once
 and emits one `orm_command_result_t` with `VALUE_AND_DONE`; cancellation before
@@ -110,7 +131,11 @@ transaction boundary because its command results do not exist until commit; a
 commit-aware CFlow protocol is required before that feature can return.
 
 Rollback is source-only because persisted database formats remain unchanged;
-there is deliberately no runtime compatibility fallback.
+there is deliberately no runtime compatibility fallback. The row-shape hook is
+an internal cursor ABI revision and does not change the public ORM ABI, query
+syntax, database schema, or stored data. Rolling back the revision removes the
+hook and backend token mappings together; typed PostgreSQL and Redis scalar
+rows then return the former binding error rather than changing stored values.
 
 ## Verification
 
@@ -124,3 +149,7 @@ one-result-per-demand, cancellation drain, exact result release, `bytea`,
 cumulative encoded-byte limits, terminal affected rows, malformed command
 counts, and a fatal error following an already-delivered row. MongoDB and Redis
 cursor tests cover native error propagation and strict reply validation.
+PostgreSQL flow tests additionally verify OID-selected boolean, signed,
+unsigned, floating, text, and byte tokens. Redis flow tests verify schema-driven
+bulk strings, shape-aware RESP integers, and rejection of non-canonical numeric
+text.

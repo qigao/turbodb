@@ -35,6 +35,7 @@ int redis_socket_resolve(const char *host, uint16_t port,
                          size_t *count);
 int redis_socket_open(const redis_socket_address *address,
                       uintptr_t *out_socket);
+int redis_socket_close_once(uintptr_t socket_value, int *consumed);
 int redis_socket_close(uintptr_t socket_value);
 
 #ifdef __cplusplus

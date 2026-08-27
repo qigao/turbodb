@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-enum { ORM_ROW_CURSOR_OPS_ABI_VERSION = 1u };
+enum { ORM_ROW_CURSOR_OPS_ABI_VERSION = 2u };
 enum { ORM_CBIND_SOURCE_CONFIG_ABI_VERSION = 1u };
 
 typedef enum orm_row_cursor_step_kind {
@@ -39,6 +39,8 @@ typedef orm_row_cursor_step (*orm_row_cursor_next_fn)(void *context,
                                                        cserde_reader *out_row);
 typedef void (*orm_row_cursor_cancel_fn)(void *context);
 typedef void (*orm_row_cursor_destroy_fn)(void *context);
+typedef orm_status_t (*orm_row_cursor_configure_shape_fn)(
+    void *context, const cmeta_data_desc *row_shape, orm_error_t *error);
 
 typedef struct orm_row_cursor_ops {
   size_t struct_size;
@@ -47,6 +49,8 @@ typedef struct orm_row_cursor_ops {
   orm_row_cursor_next_fn next;
   orm_row_cursor_cancel_fn cancel;
   orm_row_cursor_destroy_fn destroy;
+  /* Optional backend-specific normalization of native scalar tokens. */
+  orm_row_cursor_configure_shape_fn configure_shape;
 } orm_row_cursor_ops;
 
 typedef struct orm_row_cursor {

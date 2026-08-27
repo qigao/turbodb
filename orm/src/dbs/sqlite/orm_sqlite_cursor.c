@@ -265,7 +265,7 @@ static void orm_sqlite_cursor_destroy(void *context) {
 static const orm_row_cursor_ops orm_sqlite_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "sqlite", orm_sqlite_cursor_next, orm_sqlite_cursor_cancel,
-    orm_sqlite_cursor_destroy};
+    orm_sqlite_cursor_destroy, NULL};
 
 static orm_status_t orm_sqlite_cursor_from_statement_impl(
     orm_row_cursor *out_cursor, sqlite3_stmt **statement,

@@ -28,6 +28,10 @@ typedef struct redis_cflow_connection_impl {
   size_t next_address;
   redis_io_request connect_request;
   int connect_status;
+  int socket_cleanup_pending;
+  int socket_retired;
+  uintptr_t closed_socket_to_forget;
+  int socket_close_status;
   unsigned char *receive_chunk;
   size_t max_command_bytes;
   size_t max_buffer_bytes;
@@ -77,6 +81,7 @@ static int redis_cflow_connection_allocate(
   }
   impl->runtime = runtime;
   impl->socket = socket_value;
+  impl->closed_socket_to_forget = REDIS_SOCKET_INVALID;
   impl->lease_id = lease_id;
   impl->max_command_bytes = max_command_bytes;
   impl->max_buffer_bytes = max_buffer_bytes;
@@ -96,6 +101,46 @@ static redis_cflow_connection_impl *redis_cflow_connection_get(
 static redis_cflow_stream_impl *redis_cflow_stream_get(
     const redis_cflow_stream *stream) {
   return stream ? (redis_cflow_stream_impl *)stream->impl : NULL;
+}
+
+static int redis_cflow_cleanup_socket(
+    redis_cflow_connection_impl *connection) {
+  uintptr_t closed_socket;
+  int close_status;
+  int consumed = 0;
+  int status;
+  if (connection->closed_socket_to_forget != REDIS_SOCKET_INVALID) {
+    status = redis_io_runtime_forget_socket_wait(
+        connection->runtime, connection->closed_socket_to_forget,
+        connection->cancel_timeout_ns);
+    if (status != TURBO_OK) return status;
+    connection->closed_socket_to_forget = REDIS_SOCKET_INVALID;
+    status = connection->socket_close_status;
+    connection->socket_close_status = TURBO_OK;
+    return status;
+  }
+  if (!connection->socket_cleanup_pending) return TURBO_OK;
+  if (connection->socket == REDIS_SOCKET_INVALID) return TURBO_EINVAL;
+  if (!connection->socket_retired) {
+    status = redis_io_runtime_retire_socket(connection->runtime,
+                                            connection->socket);
+    if (status != TURBO_OK) return status;
+    connection->socket_retired = 1;
+  }
+  closed_socket = connection->socket;
+  close_status = redis_socket_close_once(closed_socket, &consumed);
+  if (!consumed) return TURBO_EBUSY;
+  connection->socket = REDIS_SOCKET_INVALID;
+  connection->socket_cleanup_pending = 0;
+  connection->socket_retired = 0;
+  connection->closed_socket_to_forget = closed_socket;
+  connection->socket_close_status = close_status;
+  status = redis_io_runtime_forget_socket_wait(
+      connection->runtime, closed_socket, connection->cancel_timeout_ns);
+  if (status != TURBO_OK) return status;
+  connection->closed_socket_to_forget = REDIS_SOCKET_INVALID;
+  connection->socket_close_status = TURBO_OK;
+  return close_status;
 }
 
 static int redis_cflow_submit_status(redis_io_submit_status status) {
@@ -240,6 +285,8 @@ redis_cflow_connect_step redis_cflow_connection_connect_next(
   redis_cflow_connect_step step = {
       REDIS_CFLOW_CONNECT_ERROR, {0}, TURBO_EINVAL};
   if (!impl || impl->active_stream) return step;
+  step.status = redis_cflow_cleanup_socket(impl);
+  if (step.status != TURBO_OK) return step;
   if (impl->usable) {
     step.kind = REDIS_CFLOW_CONNECT_DONE;
     step.status = TURBO_OK;
@@ -267,10 +314,13 @@ redis_cflow_connect_step redis_cflow_connection_connect_next(
       impl->connect_status = completion.error != 0
                                  ? completion.error : TURBO_ENOTCONN;
       if (impl->socket != REDIS_SOCKET_INVALID) {
-        uintptr_t closed_socket = impl->socket;
-        (void)redis_socket_close(closed_socket);
-        (void)redis_io_runtime_forget_socket(impl->runtime, closed_socket);
-        impl->socket = REDIS_SOCKET_INVALID;
+        int cleanup_status;
+        impl->socket_cleanup_pending = 1;
+        cleanup_status = redis_cflow_cleanup_socket(impl);
+        if (cleanup_status != TURBO_OK) {
+          step.status = cleanup_status;
+          return step;
+        }
       }
     }
     if (impl->next_address == impl->address_count) {
@@ -296,10 +346,13 @@ redis_cflow_connect_step redis_cflow_connection_connect_next(
       submitted = redis_io_runtime_try_submit(
           impl->runtime, impl->lease_id, &operation, &impl->connect_request);
       if (submitted != REDIS_IO_SUBMIT_ACCEPTED) {
-        uintptr_t closed_socket = impl->socket;
-        impl->socket = REDIS_SOCKET_INVALID;
-        (void)redis_socket_close(closed_socket);
-        (void)redis_io_runtime_forget_socket(impl->runtime, closed_socket);
+        int cleanup_status;
+        impl->socket_cleanup_pending = 1;
+        cleanup_status = redis_cflow_cleanup_socket(impl);
+        if (cleanup_status != TURBO_OK) {
+          step.status = cleanup_status;
+          return step;
+        }
         step.status = redis_cflow_submit_status(submitted);
         return step;
       }
@@ -339,14 +392,16 @@ int redis_cflow_connection_close(redis_cflow_connection *connection) {
     status = redis_io_request_acknowledge(&impl->connect_request);
     if (status != TURBO_OK) return status;
   }
+  status = redis_cflow_cleanup_socket(impl);
+  if (status != TURBO_OK) return status;
   if (impl->socket == REDIS_SOCKET_INVALID) return TURBO_OK;
   if (impl->owns_socket) {
-    uintptr_t closed_socket = impl->socket;
-    status = redis_socket_close(closed_socket);
-    if (status == TURBO_OK)
-      status = redis_io_runtime_forget_socket(impl->runtime, closed_socket);
+    impl->socket_cleanup_pending = 1;
+    status = redis_cflow_cleanup_socket(impl);
+    if (status != TURBO_OK) return status;
+  } else {
+    impl->socket = REDIS_SOCKET_INVALID;
   }
-  impl->socket = REDIS_SOCKET_INVALID;
   return status;
 }
 

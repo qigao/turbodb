@@ -226,6 +226,7 @@ orm_status_t orm_cbind_source_init(cflow_source *out_source,
                                    orm_error_t *error) {
   orm_cbind_source_state *state;
   cflow_source source;
+  orm_status_t status;
 
   if (out_source == NULL || out_source->self != NULL ||
       !orm_row_cursor_valid(cursor) ||
@@ -233,6 +234,13 @@ orm_status_t orm_cbind_source_init(cflow_source *out_source,
     orm_cbind_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
                         "invalid CBind source configuration");
     return ORM_STATUS_INVALID_ARGUMENT;
+  }
+
+  if (cursor->ops->configure_shape != NULL) {
+    status = cursor->ops->configure_shape(cursor->context, config->row_shape,
+                                          error);
+    if (status != ORM_STATUS_OK)
+      return status;
   }
 
   state = (orm_cbind_source_state *)calloc(1u, sizeof(*state));

@@ -145,16 +145,27 @@ int redis_socket_open(const redis_socket_address *address,
   return TURBO_OK;
 }
 
-int redis_socket_close(uintptr_t socket_value) {
-  if (socket_value == REDIS_SOCKET_INVALID) return TURBO_EINVAL;
+int redis_socket_close_once(uintptr_t socket_value, int *consumed) {
+  if (socket_value == REDIS_SOCKET_INVALID || consumed == NULL)
+    return TURBO_EINVAL;
 #if defined(_WIN32)
-  return closesocket((SOCKET)socket_value) == 0
-             ? TURBO_OK
-             : redis_socket_last_error();
-#else
-  while (close((int)socket_value) != 0) {
-    if (errno != EINTR) return -errno;
+  if (closesocket((SOCKET)socket_value) == 0) {
+    *consumed = 1;
+    return TURBO_OK;
   }
-  return TURBO_OK;
+  {
+    int error = WSAGetLastError();
+    *consumed = error == WSAENOTSOCK;
+    return -error;
+  }
+#else
+  int status = close((int)socket_value) == 0 ? TURBO_OK : -errno;
+  *consumed = 1;
+  return status;
 #endif
+}
+
+int redis_socket_close(uintptr_t socket_value) {
+  int consumed = 0;
+  return redis_socket_close_once(socket_value, &consumed);
 }

@@ -1,4 +1,5 @@
 #include "orm_postgres_cursor.h"
+#include "orm_text_token.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,8 +43,43 @@ struct orm_postgres_cursor_state {
 
 enum {
   ORM_POSTGRES_DECIMAL_BASE = 10u,
-  ORM_POSTGRES_BYTEA_OID = 17u
+  ORM_POSTGRES_BOOL_OID = 16u,
+  ORM_POSTGRES_BYTEA_OID = 17u,
+  ORM_POSTGRES_INT8_OID = 20u,
+  ORM_POSTGRES_INT2_OID = 21u,
+  ORM_POSTGRES_INT4_OID = 23u,
+  ORM_POSTGRES_OID_OID = 26u,
+  ORM_POSTGRES_FLOAT4_OID = 700u,
+  ORM_POSTGRES_FLOAT8_OID = 701u
 };
+
+static cserde_status orm_postgres_emit_text_value(
+    uint32_t oid, const unsigned char *data, size_t size, cserde_token *out) {
+  switch (oid) {
+    case ORM_POSTGRES_BOOL_OID:
+      if (size != 1u ||
+          (data[0] != (unsigned char)'t' && data[0] != (unsigned char)'f'))
+        return CSERDE_SOURCE_ERROR;
+      out->kind = CSERDE_BOOL;
+      out->value.boolean = data[0] == (unsigned char)'t';
+      return CSERDE_OK;
+    case ORM_POSTGRES_INT8_OID:
+    case ORM_POSTGRES_INT2_OID:
+    case ORM_POSTGRES_INT4_OID:
+      return orm_text_token_sint(data, size, out);
+    case ORM_POSTGRES_OID_OID:
+      return orm_text_token_uint(data, size, out);
+    case ORM_POSTGRES_FLOAT4_OID:
+    case ORM_POSTGRES_FLOAT8_OID:
+      return orm_text_token_float(data, size, 0, out);
+    default:
+      out->kind = CSERDE_STRING;
+      out->value.slice.data = data;
+      out->value.slice.size = size;
+      out->value.slice.lifetime = CSERDE_VIEW_TRANSIENT;
+      return CSERDE_OK;
+  }
+}
 
 static void orm_postgres_set_error(orm_error_t *error, orm_status_t status,
                                    const char *message) {
@@ -157,11 +193,13 @@ static cserde_status orm_postgres_reader_next(void *context,
               ops->length(state->current_result, 0u, reader->column);
           if (value == NULL)
             return CSERDE_SOURCE_ERROR;
-          out->kind = CSERDE_STRING;
-          out->value.slice.data = (const unsigned char *)value;
-          out->value.slice.size = length;
+          if (orm_postgres_emit_text_value(
+                  ops->column_type(state->current_result, reader->column),
+                  (const unsigned char *)value, length, out) != CSERDE_OK)
+            return CSERDE_SOURCE_ERROR;
         }
-        out->value.slice.lifetime = CSERDE_VIEW_TRANSIENT;
+        if (out->kind == CSERDE_BYTES)
+          out->value.slice.lifetime = CSERDE_VIEW_TRANSIENT;
       }
       ++reader->column;
       reader->phase = reader->column == columns
@@ -483,7 +521,7 @@ static void orm_postgres_cursor_destroy(void *context) {
 static const orm_row_cursor_ops orm_postgres_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "postgresql-single-row", orm_postgres_cursor_next,
-    orm_postgres_cursor_cancel, orm_postgres_cursor_destroy};
+    orm_postgres_cursor_cancel, orm_postgres_cursor_destroy, NULL};
 
 orm_status_t orm_postgres_cursor_start(
     orm_row_cursor *out_cursor, const orm_postgres_driver *driver,

@@ -238,7 +238,8 @@ redis_sentinel_connect_step redis_sentinel_connect_next(
       return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK,
                                    connected.waitable);
     if (connected.kind == REDIS_POOL_CONNECT_ERROR) {
-      impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+      if (connected.status != TURBO_EBUSY)
+        impl->phase = REDIS_SENTINEL_PHASE_FAILED;
       return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
                                    connected.status, empty_waitable);
     }
@@ -311,7 +312,8 @@ redis_sentinel_connect_step redis_sentinel_connect_next(
       return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK,
                                    connected.waitable);
     if (connected.kind == REDIS_POOL_CONNECT_ERROR) {
-      impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+      if (connected.status != TURBO_EBUSY)
+        impl->phase = REDIS_SENTINEL_PHASE_FAILED;
       return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
                                    connected.status, empty_waitable);
     }
