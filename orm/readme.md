@@ -36,7 +36,7 @@ Load the installed TurboDB package, include `orm.h`, and link `TurboDB::ORM`.
 Backend dependencies enabled by the package are resolved transitively.
 
 ```cmake
-find_package(TurboDB CONFIG REQUIRED)
+find_package(TurboDB CONFIG REQUIRED COMPONENTS ORM)
 target_link_libraries(app PRIVATE TurboDB::ORM)
 ```
 

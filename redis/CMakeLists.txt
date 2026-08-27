@@ -1,7 +1,7 @@
 # Redis Client (RESP Protocol) Async Redis client implementing RESP protocol
 
-set(REDIS_HEADERS redis_export.h redis_client.h redis_pool.h redis_cluster.h
-                  redis_sentinel.h)
+set(REDIS_HEADERS redis_export.h redis_reply.h redis_io.h redis_cflow.h
+                  redis_pool.h redis_cluster.h redis_sentinel.h)
 
 if(NOT RE2C_EXECUTABLE)
   message(FATAL_ERROR "Redis RESP parser requires re2c")
@@ -12,8 +12,10 @@ cmake_add_grammar(
   LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/parser/redis_resp_parser.re
   FOLDER "redis")
 
-add_library(tedis SHARED redis_client.c redis_ext.c redis_pool.c redis_cluster.c
-                         redis_sentinel.c redis_parser.c ${REDIS_RESP_LEXER_GEN}
+add_library(tedis SHARED redis_io.c redis_socket.c redis_protocol.c redis_cflow.c
+                         redis_pool.c redis_cluster.c redis_sentinel.c
+                         redis_parser.c
+                         ${REDIS_RESP_LEXER_GEN}
                          ${REDIS_HEADERS})
 add_dependencies(tedis REDIS_RESP_lexer_codegen)
 
@@ -38,12 +40,13 @@ target_include_directories(
                $<INSTALL_INTERFACE:include> $<INSTALL_INTERFACE:include/redis>
         PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
-target_link_libraries(tedis PUBLIC TurboNet::CoroNet TurboUtils::Core)
+target_link_libraries(tedis PUBLIC TurboUtils::Core TurboUtils::CFlow)
 
 # Platform-specific settings
 if(WIN32)
   target_compile_definitions(tedis PRIVATE _CRT_SECURE_NO_WARNINGS
                                            WIN32_LEAN_AND_MEAN)
+  target_link_libraries(tedis PRIVATE ws2_32)
 endif()
 
 # Tests

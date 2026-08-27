@@ -3,7 +3,8 @@
 #include "orm_redis_lib.h"
 #include "query.h"
 
-#include <redis_client.h>
+#include <redis_cflow.h>
+#include <turbo/clock.h>
 #include <turbo_error.h>
 
 #include <inttypes.h>
@@ -15,7 +16,13 @@
 enum {
   ORM_REDIS_DEFAULT_PORT = 6379u,
   ORM_REDIS_DEFAULT_TIMEOUT_MS = 5000u,
-  ORM_REDIS_COMMAND_PIPELINE_CAPACITY = 1u,
+  ORM_REDIS_IO_REQUEST_CAPACITY = 1u,
+  ORM_REDIS_IO_COMMAND_CAPACITY = 4u,
+  ORM_REDIS_IO_COMPLETION_BATCH_CAPACITY = 1u,
+  ORM_REDIS_ADDRESS_CAPACITY = 8u,
+  ORM_REDIS_INITIAL_BUFFER_BYTES = 4096u,
+  ORM_REDIS_RECEIVE_CHUNK_BYTES = 16384u,
+  ORM_REDIS_CONTROL_BUFFER_BYTES = 65536u,
   ORM_REDIS_DATABASE_MAX = 15u,
   ORM_REDIS_OPTION_VALUE_MAX = 4096u,
   ORM_REDIS_REPLY_MAX_DEPTH = 128u
@@ -54,19 +61,36 @@ typedef struct orm_redis_settings {
 } orm_redis_settings;
 
 typedef struct orm_redis_backend_state {
-  redis_client_t *client;
+  redis_io_runtime runtime;
+  redis_cflow_connection connection;
   orm_redis_settings settings;
   int cursor_active;
 } orm_redis_backend_state;
 
+typedef enum orm_redis_stream_phase {
+  ORM_REDIS_STREAM_TOTAL = 0,
+  ORM_REDIS_STREAM_ID,
+  ORM_REDIS_STREAM_ROW
+} orm_redis_stream_phase;
+
 typedef struct orm_redis_stream_driver {
   orm_redis_backend_state *owner;
-  redis_command_stream_t *stream;
+  redis_cflow_stream stream;
   size_t max_result_bytes;
   size_t result_bytes;
-  int total_read;
+  orm_redis_stream_phase phase;
   char error_message[ORM_C_ERROR_MESSAGE_CAPACITY];
 } orm_redis_stream_driver;
+
+typedef struct orm_redis_command_result {
+  int status;
+  redis_command_outcome_t outcome;
+  redis_server_error_t server_error;
+  redis_reply_t *reply;
+} orm_redis_command_result;
+
+#define ORM_REDIS_COMMAND_RESULT_INIT \
+  { TURBO_OK, REDIS_COMMAND_NOT_SENT, REDIS_SERVER_ERROR_NONE, NULL }
 
 typedef struct orm_redis_arguments {
   vec_t values;
@@ -217,7 +241,7 @@ static orm_status_t orm_redis_settings_parse(
 }
 
 static orm_status_t orm_redis_result_error(
-    redis_command_result_t *result, int mutation, orm_error_t *error,
+    orm_redis_command_result *result, int mutation, orm_error_t *error,
     const char *operation) {
   char message[ORM_C_ERROR_MESSAGE_CAPACITY];
   orm_status_t status;
@@ -237,13 +261,83 @@ static orm_status_t orm_redis_result_error(
                    result->reply != NULL && result->reply->str != NULL
                        ? result->reply->str : "");
   }
-  redis_command_result_clear(result);
+  redis_reply_free(result->reply);
+  *result = (orm_redis_command_result)ORM_REDIS_COMMAND_RESULT_INIT;
   return orm_redis_fail(error, status, message);
+}
+
+static uint64_t orm_redis_timeout_ns(uint32_t timeout_ms) {
+  return (uint64_t)timeout_ms * UINT64_C(1000000);
+}
+
+static int orm_redis_command_run(
+    orm_redis_backend_state *state, int count, const char **argv,
+    const size_t *lengths, size_t max_reply_bytes,
+    orm_redis_command_result *out) {
+  redis_cflow_stream stream = {0};
+  redis_cflow_stream_step step;
+  uint64_t timeout_ns =
+      orm_redis_timeout_ns(state->settings.command_timeout_ms);
+  uint64_t started = turbo_hrtime();
+  uint64_t deadline = timeout_ns > UINT64_MAX - started
+                          ? UINT64_MAX : started + timeout_ns;
+  int status;
+  *out = (orm_redis_command_result)ORM_REDIS_COMMAND_RESULT_INIT;
+  status = redis_cflow_command_open(&state->connection, count, argv, lengths,
+                                    max_reply_bytes, &stream);
+  if (status != TURBO_OK) {
+    out->status = status;
+    return status;
+  }
+  for (;;) {
+    step = redis_cflow_stream_next(&stream);
+    if (step.kind == REDIS_CFLOW_STREAM_WAIT) {
+      uint64_t now = turbo_hrtime();
+      status = now >= deadline
+                   ? TURBO_ETIMEDOUT
+                   : redis_io_runtime_wait_idle(&state->runtime,
+                                                deadline - now);
+      if (status == TURBO_OK) continue;
+      out->status = status;
+      out->outcome = step.outcome;
+      (void)redis_cflow_stream_cancel(&stream);
+      (void)redis_cflow_stream_destroy(&stream);
+      return status;
+    }
+    if (step.kind == REDIS_CFLOW_STREAM_ERROR) {
+      out->status = step.status;
+      out->outcome = step.outcome;
+      out->server_error = step.server_error;
+      out->reply = step.item;
+      (void)redis_cflow_stream_destroy(&stream);
+      return out->status;
+    }
+    if (step.kind == REDIS_CFLOW_STREAM_ITEM) {
+      if (out->reply != NULL) {
+        redis_reply_free(step.item);
+        out->status = TURBO_EPROTO;
+        out->outcome = REDIS_COMMAND_REPLY_UNKNOWN;
+        (void)redis_cflow_stream_destroy(&stream);
+        return out->status;
+      }
+      out->reply = step.item;
+      out->outcome = step.outcome;
+      out->server_error = redis_server_error_classify(step.item);
+      continue;
+    }
+    out->status = out->reply != NULL ? TURBO_OK : TURBO_EPROTO;
+    out->outcome = out->reply != NULL ? REDIS_COMMAND_REPLIED
+                                     : REDIS_COMMAND_REPLY_UNKNOWN;
+    status = redis_cflow_stream_destroy(&stream);
+    if (status != TURBO_OK && out->status == TURBO_OK)
+      out->status = status;
+    return out->status;
+  }
 }
 
 static orm_status_t orm_redis_command(
     orm_redis_backend_state *state, size_t count, const tstr *arguments,
-    int mutation, redis_command_result_t *out, orm_error_t *error,
+    int mutation, orm_redis_command_result *out, orm_error_t *error,
     const char *operation) {
   const char **argv;
   size_t *lengths;
@@ -264,9 +358,9 @@ static orm_status_t orm_redis_command(
     argv[index] = arguments[index];
     lengths[index] = tstr_len(arguments[index]);
   }
-  *out = (redis_command_result_t)REDIS_COMMAND_RESULT_INIT;
-  native_status = redis_commandv_result(state->client, (int)count, argv,
-                                        lengths, out);
+  native_status = orm_redis_command_run(
+      state, (int)count, argv, lengths,
+      ORM_REDIS_CONTROL_BUFFER_BYTES, out);
   free(lengths);
   free(argv);
   (void)native_status;
@@ -362,15 +456,17 @@ static const orm_predicate *orm_redis_require_id(
 }
 
 static orm_status_t orm_redis_integer_reply(
-    redis_command_result_t *result, uint64_t *affected,
+    orm_redis_command_result *result, uint64_t *affected,
     orm_error_t *error, const char *operation) {
   if (result->reply == NULL || result->reply->type != REDIS_REPLY_INTEGER ||
       result->reply->integer < 0) {
-    redis_command_result_clear(result);
+    redis_reply_free(result->reply);
+    *result = (orm_redis_command_result)ORM_REDIS_COMMAND_RESULT_INIT;
     return orm_redis_fail(error, ORM_STATUS_DATASTORE_ERROR, operation);
   }
   *affected = (uint64_t)result->reply->integer;
-  redis_command_result_clear(result);
+  redis_reply_free(result->reply);
+  *result = (orm_redis_command_result)ORM_REDIS_COMMAND_RESULT_INIT;
   return ORM_STATUS_OK;
 }
 
@@ -379,7 +475,7 @@ static orm_status_t orm_redis_execute_insert(
     uint64_t *affected, orm_error_t *error) {
   orm_redis_arguments args;
   const orm_assignment *id = NULL;
-  redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
+  orm_redis_command_result result = ORM_REDIS_COMMAND_RESULT_INIT;
   size_t index;
   char ttl[32];
   orm_status_t status;
@@ -441,7 +537,7 @@ static orm_status_t orm_redis_execute_update(
     uint64_t *affected, orm_error_t *error) {
   orm_redis_arguments args;
   const orm_predicate *id = orm_redis_require_id(state, plan, error);
-  redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
+  orm_redis_command_result result = ORM_REDIS_COMMAND_RESULT_INIT;
   size_t index;
   char ttl[32];
   orm_status_t status;
@@ -501,7 +597,7 @@ static orm_status_t orm_redis_execute_delete(
     uint64_t *affected, orm_error_t *error) {
   const orm_predicate *id = orm_redis_require_id(state, plan, error);
   tstr arguments[2] = {NULL, NULL};
-  redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
+  orm_redis_command_result result = ORM_REDIS_COMMAND_RESULT_INIT;
   orm_status_t status;
   if (id == NULL) return error->status;
   arguments[0] = tstr_dup("DEL");
@@ -522,7 +618,7 @@ static orm_status_t orm_redis_execute_delete(
 }
 
 static orm_redis_driver_step orm_redis_stream_failure(
-    orm_redis_stream_driver *driver, redis_command_stream_step_t native) {
+    orm_redis_stream_driver *driver, redis_cflow_stream_step native) {
   orm_redis_driver_step step = ORM_REDIS_DRIVER_STEP_INIT;
   step.kind = ORM_REDIS_DRIVER_ERROR;
   step.status = native.status == TURBO_ENOBUFS
@@ -591,65 +687,78 @@ static int orm_redis_stream_account(orm_redis_stream_driver *driver,
 static orm_redis_driver_step orm_redis_stream_next(void *context, void **row) {
   orm_redis_stream_driver *driver = (orm_redis_stream_driver *)context;
   orm_redis_driver_step step = ORM_REDIS_DRIVER_STEP_INIT;
-  redis_command_stream_step_t native;
+  redis_cflow_stream_step native;
   *row = NULL;
-  if (!driver->total_read) {
-    native = redis_command_stream_next(driver->stream);
-    if (native.kind == REDIS_COMMAND_STREAM_ERROR)
+  for (;;) {
+    native = redis_cflow_stream_next(&driver->stream);
+    if (native.kind == REDIS_CFLOW_STREAM_WAIT) {
+      step.kind = ORM_REDIS_DRIVER_WAIT;
+      step.waitable = native.waitable;
+      return step;
+    }
+    if (native.kind == REDIS_CFLOW_STREAM_ERROR)
       return orm_redis_stream_failure(driver, native);
-    if (native.kind != REDIS_COMMAND_STREAM_ITEM || native.item == NULL ||
-        native.item->type != REDIS_REPLY_INTEGER ||
-        native.item->integer < 0) {
+    if (native.kind == REDIS_CFLOW_STREAM_DONE) {
+      if (driver->phase == ORM_REDIS_STREAM_ID) return step;
+      step.kind = ORM_REDIS_DRIVER_ERROR;
+      step.status = ORM_STATUS_DATASTORE_ERROR;
+      step.message = driver->phase == ORM_REDIS_STREAM_TOTAL
+                         ? "Redis Query Engine reply omitted the total"
+                         : "Redis Query Engine reply ended before a row";
+      return step;
+    }
+    if (native.kind != REDIS_CFLOW_STREAM_ITEM || native.item == NULL) {
       redis_reply_free(native.item);
       step.kind = ORM_REDIS_DRIVER_ERROR;
       step.status = ORM_STATUS_DATASTORE_ERROR;
-      step.message = "Redis Query Engine returned an invalid total";
+      step.message = "Redis Query Engine returned an invalid stream step";
       return step;
     }
-    redis_reply_free(native.item);
-    driver->total_read = 1;
-  }
-  native = redis_command_stream_next(driver->stream);
-  if (native.kind == REDIS_COMMAND_STREAM_DONE) return step;
-  if (native.kind == REDIS_COMMAND_STREAM_ERROR)
-    return orm_redis_stream_failure(driver, native);
-  if (native.kind != REDIS_COMMAND_STREAM_ITEM || native.item == NULL ||
-      (native.item->type != REDIS_REPLY_STRING &&
-       native.item->type != REDIS_REPLY_BULK_STRING)) {
-    redis_reply_free(native.item);
-    step.kind = ORM_REDIS_DRIVER_ERROR;
-    step.status = ORM_STATUS_DATASTORE_ERROR;
-    step.message = "Redis Query Engine returned an invalid document id";
+    if (driver->phase == ORM_REDIS_STREAM_TOTAL) {
+      if (native.item->type != REDIS_REPLY_INTEGER ||
+          native.item->integer < 0) {
+        redis_reply_free(native.item);
+        step.kind = ORM_REDIS_DRIVER_ERROR;
+        step.status = ORM_STATUS_DATASTORE_ERROR;
+        step.message = "Redis Query Engine returned an invalid total";
+        return step;
+      }
+      redis_reply_free(native.item);
+      driver->phase = ORM_REDIS_STREAM_ID;
+      continue;
+    }
+    if (driver->phase == ORM_REDIS_STREAM_ID) {
+      if (native.item->type != REDIS_REPLY_STRING &&
+          native.item->type != REDIS_REPLY_BULK_STRING) {
+        redis_reply_free(native.item);
+        step.kind = ORM_REDIS_DRIVER_ERROR;
+        step.status = ORM_STATUS_DATASTORE_ERROR;
+        step.message = "Redis Query Engine returned an invalid document id";
+        return step;
+      }
+      if (!orm_redis_stream_account(driver, native.item)) {
+        redis_reply_free(native.item);
+        step.kind = ORM_REDIS_DRIVER_ERROR;
+        step.status = ORM_STATUS_LIMIT_EXCEEDED;
+        step.message = "Redis result exceeds max_result_bytes";
+        return step;
+      }
+      redis_reply_free(native.item);
+      driver->phase = ORM_REDIS_STREAM_ROW;
+      continue;
+    }
+    if (!orm_redis_stream_account(driver, native.item)) {
+      redis_reply_free(native.item);
+      step.kind = ORM_REDIS_DRIVER_ERROR;
+      step.status = ORM_STATUS_LIMIT_EXCEEDED;
+      step.message = "Redis result exceeds max_result_bytes";
+      return step;
+    }
+    driver->phase = ORM_REDIS_STREAM_ID;
+    *row = native.item;
+    step.kind = ORM_REDIS_DRIVER_ROW;
     return step;
   }
-  if (!orm_redis_stream_account(driver, native.item)) {
-    redis_reply_free(native.item);
-    step.kind = ORM_REDIS_DRIVER_ERROR;
-    step.status = ORM_STATUS_LIMIT_EXCEEDED;
-    step.message = "Redis result exceeds max_result_bytes";
-    return step;
-  }
-  redis_reply_free(native.item);
-  native = redis_command_stream_next(driver->stream);
-  if (native.kind == REDIS_COMMAND_STREAM_ERROR)
-    return orm_redis_stream_failure(driver, native);
-  if (native.kind != REDIS_COMMAND_STREAM_ITEM || native.item == NULL) {
-    redis_reply_free(native.item);
-    step.kind = ORM_REDIS_DRIVER_ERROR;
-    step.status = ORM_STATUS_DATASTORE_ERROR;
-    step.message = "Redis Query Engine reply ended before a row";
-    return step;
-  }
-  if (!orm_redis_stream_account(driver, native.item)) {
-    redis_reply_free(native.item);
-    step.kind = ORM_REDIS_DRIVER_ERROR;
-    step.status = ORM_STATUS_LIMIT_EXCEEDED;
-    step.message = "Redis result exceeds max_result_bytes";
-    return step;
-  }
-  *row = native.item;
-  step.kind = ORM_REDIS_DRIVER_ROW;
-  return step;
 }
 
 static void orm_redis_stream_release(void *context, void *row) {
@@ -657,17 +766,22 @@ static void orm_redis_stream_release(void *context, void *row) {
   redis_reply_free((redis_reply_t *)row);
 }
 
+static void orm_redis_stream_cancel(void *context) {
+  orm_redis_stream_driver *driver = (orm_redis_stream_driver *)context;
+  if (driver != NULL) (void)redis_cflow_stream_cancel(&driver->stream);
+}
+
 static void orm_redis_stream_destroy(void *context) {
   orm_redis_stream_driver *driver = (orm_redis_stream_driver *)context;
   if (driver == NULL) return;
-  redis_command_stream_destroy(driver->stream);
+  (void)redis_cflow_stream_destroy(&driver->stream);
   if (driver->owner != NULL) driver->owner->cursor_active = 0;
   free(driver);
 }
 
 static const orm_redis_row_driver_ops orm_redis_stream_ops = {
     sizeof(orm_redis_row_driver_ops), ORM_REDIS_ROW_DRIVER_OPS_ABI_VERSION,
-    orm_redis_stream_next, orm_redis_stream_release,
+    orm_redis_stream_next, orm_redis_stream_cancel, orm_redis_stream_release,
     orm_redis_stream_destroy};
 
 static orm_status_t orm_redis_backend_open(
@@ -720,8 +834,8 @@ static orm_status_t orm_redis_backend_open(
     lengths[index] = tstr_len(*argument);
   }
   max_items = 1u + (size_t)limits->max_result_rows * 2u;
-  native_status = redis_commandv_stream_open(
-      state->client, (int)vec_size(&query.arguments), argv, lengths,
+  native_status = redis_cflow_stream_open(
+      &state->connection, (int)vec_size(&query.arguments), argv, lengths,
       (size_t)limits->max_result_bytes, max_items, &stream_driver->stream);
   if (native_status != TURBO_OK) {
     status = orm_redis_fail(
@@ -736,7 +850,8 @@ static orm_status_t orm_redis_backend_open(
   driver.reply_ops = orm_redis_lib_reply_ops();
   driver.context = stream_driver;
   cursor_config = (orm_redis_cursor_config)ORM_REDIS_CURSOR_CONFIG_INIT(
-      (size_t)limits->max_result_rows, (size_t)limits->max_result_bytes);
+      (size_t)limits->max_result_rows, (size_t)limits->max_result_bytes,
+      orm_redis_timeout_ns(state->settings.command_timeout_ms));
   status = orm_redis_cursor_start(out_cursor, &driver, fields, field_count,
                                   &cursor_config, error);
   if (status != ORM_STATUS_OK) goto cleanup;
@@ -794,7 +909,12 @@ static orm_status_t orm_redis_backend_begin(
 static void orm_redis_backend_destroy(void *context) {
   orm_redis_backend_state *state = (orm_redis_backend_state *)context;
   if (state == NULL) return;
-  redis_client_destroy(state->client);
+  if (redis_cflow_connection_valid(&state->connection))
+    (void)redis_cflow_connection_destroy(&state->connection);
+  if (redis_io_runtime_valid(&state->runtime)) {
+    (void)redis_io_runtime_close(&state->runtime);
+    (void)redis_io_runtime_destroy(&state->runtime);
+  }
   orm_redis_settings_destroy(&state->settings);
   free(state);
 }
@@ -803,42 +923,28 @@ static orm_status_t orm_redis_verify_query_engine(
     orm_redis_backend_state *state, const orm_limits *limits,
     orm_error_t *error) {
   static const char *arguments[] = {"COMMAND", "INFO", "FT.SEARCH"};
-  redis_command_stream_t *stream = NULL;
-  redis_command_stream_step_t step;
+  orm_redis_command_result result = ORM_REDIS_COMMAND_RESULT_INIT;
   int native_status;
   if (limits->max_result_bytes > (uint64_t)SIZE_MAX)
     return orm_redis_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "Redis max_result_bytes exceeds size_t");
-  native_status = redis_commandv_stream_open(
-      state->client, 3, arguments, NULL,
-      (size_t)limits->max_result_bytes, 1u, &stream);
-  if (native_status != TURBO_OK)
-    return orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR,
-                          "open Redis Query Engine capability probe failed");
-  step = redis_command_stream_next(stream);
-  if (step.kind == REDIS_COMMAND_STREAM_ERROR) {
-    redis_reply_free(step.item);
-    redis_command_stream_destroy(stream);
+  native_status = orm_redis_command_run(
+      state, 3, arguments, NULL, (size_t)limits->max_result_bytes, &result);
+  if (native_status != TURBO_OK ||
+      result.server_error != REDIS_SERVER_ERROR_NONE) {
+    redis_reply_free(result.reply);
     return orm_redis_fail(
-        error, step.outcome == REDIS_COMMAND_REPLIED
+        error, result.outcome == REDIS_COMMAND_REPLIED
                    ? ORM_STATUS_UNSUPPORTED : ORM_STATUS_CONNECTION_ERROR,
         "Redis Query Engine is required but FT.SEARCH is unavailable");
   }
-  if (step.kind != REDIS_COMMAND_STREAM_ITEM || step.item == NULL ||
-      step.item->type != REDIS_REPLY_ARRAY) {
-    redis_reply_free(step.item);
-    redis_command_stream_destroy(stream);
+  if (result.reply == NULL || result.reply->type != REDIS_REPLY_ARRAY) {
+    redis_reply_free(result.reply);
     return orm_redis_fail(
         error, ORM_STATUS_UNSUPPORTED,
         "Redis Query Engine is required but FT.SEARCH is unavailable");
   }
-  redis_reply_free(step.item);
-  step = redis_command_stream_next(stream);
-  redis_reply_free(step.item);
-  redis_command_stream_destroy(stream);
-  if (step.kind != REDIS_COMMAND_STREAM_DONE)
-    return orm_redis_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                          "Redis capability probe returned an invalid reply");
+  redis_reply_free(result.reply);
   return ORM_STATUS_OK;
 }
 
@@ -847,12 +953,67 @@ static const orm_backend_ops orm_redis_backend_ops = {
     orm_redis_backend_destroy, orm_redis_backend_open,
     orm_redis_backend_execute, orm_redis_backend_begin};
 
+static orm_status_t orm_redis_expect_ok(
+    orm_redis_backend_state *state, int count, const char **arguments,
+    orm_error_t *error, const char *operation) {
+  orm_redis_command_result result = ORM_REDIS_COMMAND_RESULT_INIT;
+  int status = orm_redis_command_run(
+      state, count, arguments, NULL, ORM_REDIS_CONTROL_BUFFER_BYTES, &result);
+  if (status != TURBO_OK || result.server_error != REDIS_SERVER_ERROR_NONE) {
+    redis_reply_free(result.reply);
+    return orm_redis_fail(error,
+                          result.outcome == REDIS_COMMAND_REPLIED
+                              ? ORM_STATUS_DATASTORE_ERROR
+                              : ORM_STATUS_CONNECTION_ERROR,
+                          operation);
+  }
+  if (result.reply == NULL || result.reply->type != REDIS_REPLY_STRING ||
+      result.reply->len != 2u || memcmp(result.reply->str, "OK", 2u) != 0) {
+    redis_reply_free(result.reply);
+    return orm_redis_fail(error, ORM_STATUS_DATASTORE_ERROR, operation);
+  }
+  redis_reply_free(result.reply);
+  return ORM_STATUS_OK;
+}
+
+static orm_status_t orm_redis_prepare_connection(
+    orm_redis_backend_state *state, orm_error_t *error) {
+  orm_status_t status;
+  if (state->settings.password != NULL &&
+      tstr_len(state->settings.password) != 0u) {
+    const char *auth[3] = {"AUTH", state->settings.username,
+                           state->settings.password};
+    int count = state->settings.username != NULL &&
+                        tstr_len(state->settings.username) != 0u
+                    ? 3 : 2;
+    if (count == 2) auth[1] = state->settings.password;
+    status = orm_redis_expect_ok(state, count, auth, error,
+                                 "Redis AUTH failed");
+    if (status != ORM_STATUS_OK) return status;
+  }
+  if (state->settings.database != 0) {
+    char database[16];
+    const char *select_arguments[2] = {"SELECT", database};
+    (void)snprintf(database, sizeof(database), "%d", state->settings.database);
+    status = orm_redis_expect_ok(state, 2, select_arguments, error,
+                                 "Redis SELECT failed");
+    if (status != ORM_STATUS_OK) return status;
+  }
+  return ORM_STATUS_OK;
+}
+
 orm_status_t orm_redis_backend_create(const orm_config_t *config,
                                       const orm_limits *limits,
                                       orm_backend *out_backend,
                                       orm_error_t *error) {
   orm_redis_backend_state *state;
-  redis_config_t native;
+  redis_io_runtime_config runtime_config;
+  redis_cflow_open_config open_config;
+  redis_cflow_connect_step connect_step;
+  size_t max_command_bytes;
+  size_t max_buffer_bytes;
+  size_t initial_buffer_bytes;
+  size_t receive_chunk_bytes;
   int native_status;
   orm_status_t status;
   if (config == NULL || limits == NULL || out_backend == NULL)
@@ -865,34 +1026,68 @@ orm_status_t orm_redis_backend_create(const orm_config_t *config,
                           "allocate Redis backend");
   status = orm_redis_settings_parse(config, &state->settings, error);
   if (status != ORM_STATUS_OK) goto fail;
-  memset(&native, 0, sizeof(native));
-  native.host = state->settings.host;
-  native.port = state->settings.port;
-  native.username = state->settings.username != NULL &&
-                            tstr_len(state->settings.username) != 0u
-                        ? state->settings.username : NULL;
-  native.password = state->settings.password != NULL &&
-                            tstr_len(state->settings.password) != 0u
-                        ? state->settings.password : NULL;
-  native.database = state->settings.database;
-  native.timeout_ms = state->settings.timeout_ms;
-  native.command_timeout_ms = state->settings.command_timeout_ms;
-  native.max_pipeline = ORM_REDIS_COMMAND_PIPELINE_CAPACITY;
-  state->client = redis_client_create_with_config(&native);
-  if (state->client == NULL) {
-    status = orm_redis_fail(error, ORM_STATUS_OUT_OF_MEMORY,
-                            "create Redis client failed");
+  if (limits->max_result_bytes > (uint64_t)SIZE_MAX) {
+    status = orm_redis_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
+                            "Redis max_result_bytes exceeds size_t");
     goto fail;
   }
-  native_status = redis_client_connect(state->client, NULL, NULL);
+  if (limits->max_query_bytes > SIZE_MAX - limits->max_parameter_bytes ||
+      limits->max_query_bytes + limits->max_parameter_bytes >
+          SIZE_MAX - ORM_REDIS_CONTROL_BUFFER_BYTES) {
+    status = orm_redis_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
+                            "Redis command byte limit overflows size_t");
+    goto fail;
+  }
+  max_command_bytes = limits->max_query_bytes + limits->max_parameter_bytes +
+                      ORM_REDIS_CONTROL_BUFFER_BYTES;
+  max_buffer_bytes = (size_t)limits->max_result_bytes;
+  if (max_buffer_bytes < ORM_REDIS_CONTROL_BUFFER_BYTES)
+    max_buffer_bytes = ORM_REDIS_CONTROL_BUFFER_BYTES;
+  initial_buffer_bytes = max_buffer_bytes < ORM_REDIS_INITIAL_BUFFER_BYTES
+                             ? max_buffer_bytes
+                             : ORM_REDIS_INITIAL_BUFFER_BYTES;
+  receive_chunk_bytes = max_buffer_bytes < ORM_REDIS_RECEIVE_CHUNK_BYTES
+                            ? max_buffer_bytes
+                            : ORM_REDIS_RECEIVE_CHUNK_BYTES;
+  runtime_config = (redis_io_runtime_config){
+      redis_io_default_backend_kind(), ORM_REDIS_IO_REQUEST_CAPACITY,
+      ORM_REDIS_IO_COMMAND_CAPACITY,
+      ORM_REDIS_IO_COMPLETION_BATCH_CAPACITY};
+  native_status = redis_io_runtime_init(&state->runtime, &runtime_config);
   if (native_status != TURBO_OK) {
-    status = orm_redis_fail(
-        error, ORM_STATUS_CONNECTION_ERROR,
-        native_status == TURBO_EINVAL
-            ? "Redis ORM connections must be created inside an active CoroNet coroutine"
-            : "connect Redis failed");
+    status = orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR,
+                            "initialize Redis CFlow I/O runtime failed");
     goto fail;
   }
+  open_config = (redis_cflow_open_config){
+      &state->runtime, state->settings.host, state->settings.port, 1u,
+      ORM_REDIS_ADDRESS_CAPACITY, max_command_bytes, initial_buffer_bytes,
+      max_buffer_bytes, receive_chunk_bytes,
+      orm_redis_timeout_ns(state->settings.command_timeout_ms)};
+  native_status = redis_cflow_connection_open(&state->connection, &open_config);
+  if (native_status != TURBO_OK) {
+    status = orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR,
+                            "resolve Redis endpoint failed");
+    goto fail;
+  }
+  for (;;) {
+    connect_step = redis_cflow_connection_connect_next(&state->connection);
+    if (connect_step.kind == REDIS_CFLOW_CONNECT_DONE) break;
+    if (connect_step.kind == REDIS_CFLOW_CONNECT_ERROR) {
+      status = orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR,
+                              "connect Redis through CFlow failed");
+      goto fail;
+    }
+    native_status = redis_io_runtime_wait_idle(
+        &state->runtime, orm_redis_timeout_ns(state->settings.timeout_ms));
+    if (native_status != TURBO_OK) {
+      status = orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR,
+                              "connect Redis timed out");
+      goto fail;
+    }
+  }
+  status = orm_redis_prepare_connection(state, error);
+  if (status != ORM_STATUS_OK) goto fail;
   status = orm_redis_verify_query_engine(state, limits, error);
   if (status != ORM_STATUS_OK) goto fail;
   out_backend->ops = &orm_redis_backend_ops;

@@ -45,6 +45,7 @@ void orm_row_cursor_dispose(orm_row_cursor *cursor) {
     cursor->ops->destroy(cursor->context);
   cursor->ops = NULL;
   cursor->context = NULL;
+  cursor->wait_timeout_ns = 0u;
 }
 
 static int orm_cbind_source_config_valid(
@@ -258,6 +259,7 @@ orm_status_t orm_cbind_source_init(cflow_source *out_source,
   *out_source = source;
   cursor->ops = NULL;
   cursor->context = NULL;
+  cursor->wait_timeout_ns = 0u;
   orm_cbind_set_error(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }

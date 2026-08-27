@@ -52,6 +52,8 @@ typedef struct orm_row_cursor_ops {
 typedef struct orm_row_cursor {
   const orm_row_cursor_ops *ops;
   void *context;
+  /* Zero disables CFlow WAIT timeout wrapping for this backend cursor. */
+  uint64_t wait_timeout_ns;
 } orm_row_cursor;
 
 /*

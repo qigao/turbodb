@@ -1,682 +1,389 @@
-/**
- * @file redis_sentinel.c
- * @brief Redis Sentinel service discovery and failover implementation
- */
-
 #include "redis_sentinel.h"
-#include "redis_pool.h"
+
 #include "turbo_error.h"
 #include "turbo_str.h"
+
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define REDIS_SENTINEL_ENDPOINT_MAX 255u
-#define REDIS_SENTINEL_NS_PER_MS UINT64_C(1000000)
+typedef enum redis_sentinel_phase {
+  REDIS_SENTINEL_PHASE_DISCOVERY_CONNECT = 0,
+  REDIS_SENTINEL_PHASE_DISCOVERY_COMMAND,
+  REDIS_SENTINEL_PHASE_MASTER_CONNECT,
+  REDIS_SENTINEL_PHASE_READY,
+  REDIS_SENTINEL_PHASE_FAILED,
+  REDIS_SENTINEL_PHASE_CLOSING,
+  REDIS_SENTINEL_PHASE_CLOSED
+} redis_sentinel_phase;
 
-typedef struct redis_sentinel_generation_s {
-  redis_pool_t *pool;
-  tstr host;
-  uint16_t port;
-  size_t active_leases;
-  int retired;
-  struct redis_sentinel_generation_s *next;
-} redis_sentinel_generation_t;
+typedef struct redis_sentinel_impl {
+  redis_io_runtime *runtime;
+  tstr *sentinel_hosts;
+  uint16_t *sentinel_ports;
+  size_t sentinel_count;
+  tstr service_name;
+  tstr sentinel_username;
+  tstr sentinel_password;
+  tstr username;
+  tstr password;
+  int database;
+  size_t connection_capacity;
+  cflow_io_lease_id base_lease_id;
+  size_t address_capacity;
+  size_t max_command_bytes;
+  size_t initial_buffer_bytes;
+  size_t max_buffer_bytes;
+  size_t receive_chunk_bytes;
+  size_t discovery_reply_bytes;
+  uint64_t cancel_timeout_ns;
+  tstr master_host;
+  uint16_t master_port;
+  redis_pool discovery_pool;
+  redis_pool_stream discovery_stream;
+  redis_pool master_pool;
+  int discovery_item_seen;
+  redis_sentinel_phase phase;
+} redis_sentinel_impl;
 
-typedef struct {
-  redis_sentinel_generation_t *generation;
-  redis_pool_conn_t *connection;
-  redis_client_t *client;
-} redis_sentinel_attempt_t;
-
-struct redis_sentinel_s {
-  redis_sentinel_config_t config;
-  redis_sentinel_generation_t *current;
-  redis_sentinel_generation_t *retired;
-  size_t preferred_sentinel;
-  uint64_t last_topology_refresh_ns;
-  uint64_t control_epoch;
-  size_t active_calls;
-  int connected;
-  int refreshing;
-  int closing;
-  int destroy_pending;
-  redis_sentinel_stats_t stats;
-};
-
-static void redis_sentinel_config_clear(redis_sentinel_config_t *config) {
-  if (!config) return;
-  if (config->sentinel_hosts) {
-    for (size_t i = 0; i < config->sentinel_count; ++i)
-      tstr_free((tstr)config->sentinel_hosts[i]);
-    free((char **)config->sentinel_hosts);
-  }
-  free(config->sentinel_ports);
-  tstr_free((tstr)config->service_name);
-  tstr_free((tstr)config->sentinel_username);
-  tstr_free((tstr)config->sentinel_password);
-  tstr_free((tstr)config->username);
-  tstr_free((tstr)config->password);
-  memset(config, 0, sizeof(*config));
+static redis_sentinel_impl *redis_sentinel_get(redis_sentinel *sentinel) {
+  return sentinel ? (redis_sentinel_impl *)sentinel->impl : NULL;
 }
 
-static int redis_sentinel_copy_optional(const char *source, const char **target) {
-  if (!target) return TURBO_EINVAL;
-  *target = source ? tstr_dup(source) : NULL;
-  return source && !*target ? TURBO_ENOMEM : TURBO_OK;
+static const redis_sentinel_impl *redis_sentinel_get_const(
+    const redis_sentinel *sentinel) {
+  return sentinel ? (const redis_sentinel_impl *)sentinel->impl : NULL;
 }
 
-static int redis_sentinel_config_copy(redis_sentinel_config_t *target,
-                                      const redis_sentinel_config_t *source) {
-  char **hosts;
-  uint16_t *ports;
-  int rc = TURBO_ENOMEM;
-
-  if (!target || !source) return TURBO_EINVAL;
-  memset(target, 0, sizeof(*target));
-  *target = *source;
-  target->sentinel_hosts = NULL;
-  target->sentinel_ports = NULL;
-  target->service_name = NULL;
-  target->sentinel_username = NULL;
-  target->sentinel_password = NULL;
-  target->username = NULL;
-  target->password = NULL;
-
-  hosts = calloc(source->sentinel_count, sizeof(*hosts));
-  ports = calloc(source->sentinel_count, sizeof(*ports));
-  if (!hosts || !ports) {
-    free(hosts);
-    free(ports);
-    goto fail;
-  }
-  target->sentinel_hosts = (const char **)hosts;
-  target->sentinel_ports = ports;
-
-  for (size_t i = 0; i < source->sentinel_count; ++i) {
-    hosts[i] = tstr_dup(source->sentinel_hosts[i]);
-    if (!hosts[i]) goto fail;
-    ports[i] = source->sentinel_ports[i];
-  }
-
-  target->service_name = tstr_dup(source->service_name);
-  if (!target->service_name) goto fail;
-  if (redis_sentinel_copy_optional(source->sentinel_username, &target->sentinel_username) !=
-          TURBO_OK ||
-      redis_sentinel_copy_optional(source->sentinel_password, &target->sentinel_password) !=
-          TURBO_OK ||
-      redis_sentinel_copy_optional(source->username, &target->username) != TURBO_OK ||
-      redis_sentinel_copy_optional(source->password, &target->password) != TURBO_OK)
-    goto fail;
-
-  if (target->min_connections == 0) target->min_connections = 2;
-  if (target->max_connections == 0) target->max_connections = 10;
-  if (target->min_connections > target->max_connections)
-    target->min_connections = target->max_connections;
-  if (target->sentinel_connect_timeout_ms == 0) target->sentinel_connect_timeout_ms = 1000;
-  if (target->sentinel_command_timeout_ms == 0) target->sentinel_command_timeout_ms = 2000;
-  if (target->connect_timeout_ms == 0) target->connect_timeout_ms = 5000;
-  if (target->command_timeout_ms == 0) target->command_timeout_ms = target->connect_timeout_ms;
-  if (target->idle_timeout_ms == 0) target->idle_timeout_ms = 60000;
-  return TURBO_OK;
-
-fail:
-  redis_sentinel_config_clear(target);
-  return rc;
+static tstr redis_sentinel_copy(const char *value) {
+  return value ? tstr_new_len(value, strlen(value)) : NULL;
 }
 
-static int redis_sentinel_config_valid(const redis_sentinel_config_t *config) {
-  if (!config || !config->sentinel_hosts || !config->sentinel_ports ||
-      config->sentinel_count == 0 || config->sentinel_count > REDIS_SENTINEL_MAX_ENDPOINTS ||
-      !config->service_name || !config->service_name[0] || config->database < 0 ||
-      config->database > 15 || (config->sentinel_username && !config->sentinel_password) ||
-      (config->username && !config->password))
-    return 0;
-  for (size_t i = 0; i < config->sentinel_count; ++i)
-    if (!config->sentinel_hosts[i] || !config->sentinel_hosts[i][0] ||
-        config->sentinel_ports[i] == 0)
-      return 0;
-  return 1;
+static redis_sentinel_connect_step redis_sentinel_result(
+    redis_sentinel_connect_step_kind kind, int status,
+    cflow_waitable waitable) {
+  redis_sentinel_connect_step step;
+  memset(&step, 0, sizeof(step));
+  step.kind = kind;
+  step.status = status;
+  step.waitable = waitable;
+  return step;
 }
 
-static int redis_sentinel_reply_text_is(const redis_reply_t *reply, const char *expected) {
-  size_t expected_len;
-  if (!reply || !expected || !reply->str ||
-      (reply->type != REDIS_REPLY_STRING && reply->type != REDIS_REPLY_BULK_STRING))
-    return 0;
-  expected_len = strlen(expected);
-  return reply->len == expected_len && memcmp(reply->str, expected, expected_len) == 0;
-}
-
-static int redis_sentinel_parse_port(const redis_reply_t *reply, uint16_t *port) {
-  uint32_t value = 0;
-  if (!port || !reply || !reply->str || reply->len == 0 || reply->len > 5 ||
-      (reply->type != REDIS_REPLY_STRING && reply->type != REDIS_REPLY_BULK_STRING))
-    return TURBO_EPROTO;
-  for (size_t i = 0; i < reply->len; ++i) {
-    unsigned char digit = (unsigned char)reply->str[i];
-    if (digit < '0' || digit > '9') return TURBO_EPROTO;
-    value = value * 10u + (uint32_t)(digit - '0');
-    if (value > UINT16_MAX) return TURBO_EPROTO;
-  }
-  if (value == 0) return TURBO_EPROTO;
-  *port = (uint16_t)value;
-  return TURBO_OK;
-}
-
-static int redis_sentinel_query_master(redis_sentinel_t *sentinel, size_t sentinel_index,
-                                       tstr *host, uint16_t *port) {
-  redis_config_t config = {0};
-  redis_client_t *client = NULL;
-  redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
-  const redis_reply_t *host_reply;
-  const redis_reply_t *port_reply;
-  const char *argv[] = {"SENTINEL", "get-master-addr-by-name", NULL};
-  int rc = TURBO_ENOTCONN;
-
-  if (!sentinel || !host || !port || sentinel_index >= sentinel->config.sentinel_count)
-    return TURBO_EINVAL;
-  *host = NULL;
-  *port = 0;
-  argv[2] = sentinel->config.service_name;
-
-  config.host = sentinel->config.sentinel_hosts[sentinel_index];
-  config.port = sentinel->config.sentinel_ports[sentinel_index];
-  config.username = sentinel->config.sentinel_username;
-  config.password = sentinel->config.sentinel_password;
-  config.database = 0;
-  config.timeout_ms = sentinel->config.sentinel_connect_timeout_ms;
-  config.command_timeout_ms = sentinel->config.sentinel_command_timeout_ms;
-  config.max_pipeline = 1;
-
-  client = redis_client_create_with_config(&config);
-  if (!client) {
-    rc = TURBO_ENOMEM;
-    goto cleanup;
-  }
-  rc = redis_client_connect(client, NULL, NULL);
-  if (rc != TURBO_OK) goto cleanup;
-  rc = redis_commandv_result(client, 3, argv, NULL, &result);
-  if (rc != TURBO_OK || !result.reply || result.reply->type != REDIS_REPLY_ARRAY ||
-      result.reply->element_count != 2) {
-    rc = rc == TURBO_OK ? TURBO_EPROTO : rc;
-    goto cleanup;
-  }
-
-  host_reply = result.reply->elements[0];
-  port_reply = result.reply->elements[1];
-  if (!host_reply || !host_reply->str || host_reply->len == 0 ||
-      host_reply->len > REDIS_SENTINEL_ENDPOINT_MAX ||
-      (host_reply->type != REDIS_REPLY_STRING && host_reply->type != REDIS_REPLY_BULK_STRING)) {
-    rc = TURBO_EPROTO;
-    goto cleanup;
-  }
-  rc = redis_sentinel_parse_port(port_reply, port);
-  if (rc != TURBO_OK) goto cleanup;
-  *host = tstr_dup_len(host_reply->str, host_reply->len);
-  if (!*host) rc = TURBO_ENOMEM;
-
-cleanup:
-  redis_command_result_clear(&result);
-  redis_client_destroy(client);
-  if (rc != TURBO_OK) {
-    tstr_free(*host);
-    *host = NULL;
-    *port = 0;
-  }
-  return rc;
-}
-
-static int redis_sentinel_pool_is_master(redis_pool_t *pool) {
-  redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
-  const char *argv[] = {"ROLE"};
-  int rc;
-  if (!pool) return TURBO_EINVAL;
-  rc = redis_pool_commandv_result(pool, 0, 1, argv, NULL, &result);
-  if (rc == TURBO_OK && result.reply && result.reply->type == REDIS_REPLY_ARRAY &&
-      result.reply->element_count > 0 &&
-      redis_sentinel_reply_text_is(result.reply->elements[0], "master")) {
-    redis_command_result_clear(&result);
-    return TURBO_OK;
-  }
-  redis_command_result_clear(&result);
-  return rc == TURBO_OK ? TURBO_EPROTO : rc;
-}
-
-static int redis_sentinel_endpoint_is_master(redis_sentinel_t *sentinel, const char *host,
-                                             uint16_t port) {
-  redis_config_t config = {0};
-  redis_client_t *client = NULL;
-  redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
-  const char *argv[] = {"ROLE"};
-  int rc;
-
+static redis_pool_config redis_sentinel_pool_config(
+    const redis_sentinel_impl *impl, const char *host, uint16_t port,
+    const char *username, const char *password, int database,
+    size_t capacity, cflow_io_lease_id lease_id) {
+  redis_pool_config config = REDIS_POOL_CONFIG_INIT;
+  config.runtime = impl->runtime;
   config.host = host;
   config.port = port;
-  config.username = sentinel->config.username;
-  config.password = sentinel->config.password;
-  config.database = sentinel->config.database;
-  config.timeout_ms = sentinel->config.connect_timeout_ms;
-  config.command_timeout_ms = sentinel->config.command_timeout_ms;
-  config.max_pipeline = 1;
-  client = redis_client_create_with_config(&config);
-  if (!client) return TURBO_ENOMEM;
-  rc = redis_client_connect(client, NULL, NULL);
-  if (rc == TURBO_OK) rc = redis_commandv_result(client, 1, argv, NULL, &result);
-  if (rc == TURBO_OK && (!result.reply || result.reply->type != REDIS_REPLY_ARRAY ||
-                         result.reply->element_count == 0 ||
-                         !redis_sentinel_reply_text_is(result.reply->elements[0], "master")))
-    rc = TURBO_EPROTO;
-  redis_command_result_clear(&result);
-  redis_client_destroy(client);
-  return rc;
+  config.username = username;
+  config.password = password;
+  config.database = database;
+  config.connection_capacity = capacity;
+  config.base_lease_id = lease_id;
+  config.address_capacity = impl->address_capacity;
+  config.max_command_bytes = impl->max_command_bytes;
+  config.initial_buffer_bytes = impl->initial_buffer_bytes;
+  config.max_buffer_bytes = impl->max_buffer_bytes;
+  config.receive_chunk_bytes = impl->receive_chunk_bytes;
+  config.prepare_reply_bytes = impl->discovery_reply_bytes;
+  config.cancel_timeout_ns = impl->cancel_timeout_ns;
+  return config;
 }
 
-static void redis_sentinel_generation_destroy(redis_sentinel_generation_t *generation) {
-  if (!generation) return;
-  redis_pool_destroy(generation->pool);
-  tstr_free(generation->host);
-  free(generation);
+static int redis_sentinel_parse_master(redis_sentinel_impl *impl,
+                                       const redis_reply_t *reply) {
+  const redis_reply_t *host_reply;
+  const redis_reply_t *port_reply;
+  char *end = NULL;
+  unsigned long port;
+  tstr host;
+  if (!reply || reply->type != REDIS_REPLY_ARRAY ||
+      reply->element_count != 2u)
+    return TURBO_EPROTO;
+  host_reply = reply->elements[0];
+  port_reply = reply->elements[1];
+  if (!host_reply || !port_reply ||
+      (host_reply->type != REDIS_REPLY_BULK_STRING &&
+       host_reply->type != REDIS_REPLY_STRING) ||
+      (port_reply->type != REDIS_REPLY_BULK_STRING &&
+       port_reply->type != REDIS_REPLY_STRING) ||
+      !host_reply->str || host_reply->len == 0u || !port_reply->str ||
+      port_reply->len == 0u)
+    return TURBO_EPROTO;
+  errno = 0;
+  port = strtoul(port_reply->str, &end, 10);
+  if (errno != 0 || end != port_reply->str + port_reply->len || port == 0u ||
+      port > UINT16_MAX)
+    return TURBO_EPROTO;
+  host = tstr_new_len(host_reply->str, host_reply->len);
+  if (!host) return TURBO_ENOMEM;
+  tstr_free(impl->master_host);
+  impl->master_host = host;
+  impl->master_port = (uint16_t)port;
+  return TURBO_OK;
 }
 
-static redis_sentinel_generation_t *
-redis_sentinel_generation_create(redis_sentinel_t *sentinel, const char *host, uint16_t port) {
-  redis_pool_config_t pool_config = REDIS_POOL_CONFIG_DEFAULT;
-  redis_sentinel_generation_t *generation;
-
-  generation = calloc(1, sizeof(*generation));
-  if (!generation) return NULL;
-  generation->host = tstr_dup(host);
-  generation->port = port;
-  if (!generation->host) goto fail;
-
-  pool_config.master_host = host;
-  pool_config.master_port = port;
-  pool_config.username = sentinel->config.username;
-  pool_config.password = sentinel->config.password;
-  pool_config.database = sentinel->config.database;
-  pool_config.min_connections = sentinel->config.min_connections;
-  pool_config.max_connections = sentinel->config.max_connections;
-  pool_config.connect_timeout_ms = sentinel->config.connect_timeout_ms;
-  pool_config.command_timeout_ms = sentinel->config.command_timeout_ms;
-  pool_config.idle_timeout_ms = sentinel->config.idle_timeout_ms;
-  generation->pool = redis_pool_create(&pool_config);
-  if (!generation->pool || redis_pool_start(generation->pool) != TURBO_OK ||
-      redis_sentinel_pool_is_master(generation->pool) != TURBO_OK)
-    goto fail;
-  return generation;
-
-fail:
-  redis_sentinel_generation_destroy(generation);
-  return NULL;
+static void redis_sentinel_free_impl(redis_sentinel_impl *impl) {
+  size_t index;
+  if (!impl) return;
+  for (index = 0u; index < impl->sentinel_count; ++index)
+    tstr_free(impl->sentinel_hosts ? impl->sentinel_hosts[index] : NULL);
+  tstr_free(impl->master_host);
+  tstr_free(impl->password);
+  tstr_free(impl->username);
+  tstr_free(impl->sentinel_password);
+  tstr_free(impl->sentinel_username);
+  tstr_free(impl->service_name);
+  free(impl->sentinel_ports);
+  free(impl->sentinel_hosts);
+  free(impl);
 }
 
-static void redis_sentinel_retired_remove(redis_sentinel_t *sentinel,
-                                          redis_sentinel_generation_t *generation) {
-  redis_sentinel_generation_t **link;
-  if (!sentinel || !generation) return;
-  link = &sentinel->retired;
-  while (*link) {
-    if (*link == generation) {
-      *link = generation->next;
-      generation->next = NULL;
-      return;
+int redis_sentinel_init(redis_sentinel *sentinel,
+                        const redis_sentinel_config *config) {
+  redis_sentinel_impl *impl;
+  size_t index;
+  if (!sentinel || sentinel->impl || !config ||
+      !redis_io_runtime_valid(config->runtime) || !config->sentinel_hosts ||
+      !config->sentinel_ports || config->sentinel_count == 0u ||
+      !config->service_name || config->service_name[0] == '\0' ||
+      config->database < 0 || config->connection_capacity == 0u ||
+      config->base_lease_id == 0u || config->address_capacity == 0u ||
+      config->max_command_bytes == 0u ||
+      config->initial_buffer_bytes == 0u ||
+      config->max_buffer_bytes < config->initial_buffer_bytes ||
+      config->receive_chunk_bytes == 0u ||
+      config->discovery_reply_bytes == 0u || config->cancel_timeout_ns == 0u ||
+      config->connection_capacity > UINT64_MAX - config->base_lease_id ||
+      config->sentinel_count > SIZE_MAX / sizeof(tstr) ||
+      config->sentinel_count > SIZE_MAX / sizeof(uint16_t))
+    return TURBO_EINVAL;
+  impl = (redis_sentinel_impl *)calloc(1, sizeof(*impl));
+  if (!impl) return TURBO_ENOMEM;
+  impl->sentinel_hosts =
+      (tstr *)calloc(config->sentinel_count, sizeof(tstr));
+  impl->sentinel_ports =
+      (uint16_t *)calloc(config->sentinel_count, sizeof(uint16_t));
+  impl->service_name = redis_sentinel_copy(config->service_name);
+  impl->sentinel_username = redis_sentinel_copy(config->sentinel_username);
+  impl->sentinel_password = redis_sentinel_copy(config->sentinel_password);
+  impl->username = redis_sentinel_copy(config->username);
+  impl->password = redis_sentinel_copy(config->password);
+  impl->sentinel_count = config->sentinel_count;
+  if (!impl->sentinel_hosts || !impl->sentinel_ports || !impl->service_name ||
+      (config->sentinel_username && !impl->sentinel_username) ||
+      (config->sentinel_password && !impl->sentinel_password) ||
+      (config->username && !impl->username) ||
+      (config->password && !impl->password))
+    goto no_memory;
+  for (index = 0u; index < config->sentinel_count; ++index) {
+    if (!config->sentinel_hosts[index] ||
+        config->sentinel_hosts[index][0] == '\0' ||
+        config->sentinel_ports[index] == 0u)
+      goto invalid;
+    impl->sentinel_hosts[index] =
+        redis_sentinel_copy(config->sentinel_hosts[index]);
+    if (!impl->sentinel_hosts[index]) goto no_memory;
+    impl->sentinel_ports[index] = config->sentinel_ports[index];
+  }
+  impl->runtime = config->runtime;
+  impl->database = config->database;
+  impl->connection_capacity = config->connection_capacity;
+  impl->base_lease_id = config->base_lease_id;
+  impl->address_capacity = config->address_capacity;
+  impl->max_command_bytes = config->max_command_bytes;
+  impl->initial_buffer_bytes = config->initial_buffer_bytes;
+  impl->max_buffer_bytes = config->max_buffer_bytes;
+  impl->receive_chunk_bytes = config->receive_chunk_bytes;
+  impl->discovery_reply_bytes = config->discovery_reply_bytes;
+  impl->cancel_timeout_ns = config->cancel_timeout_ns;
+  impl->phase = REDIS_SENTINEL_PHASE_DISCOVERY_CONNECT;
+  {
+    redis_pool_config pool_config = redis_sentinel_pool_config(
+        impl, impl->sentinel_hosts[0], impl->sentinel_ports[0],
+        impl->sentinel_username, impl->sentinel_password, 0, 1u,
+        impl->base_lease_id);
+    if (redis_pool_init(&impl->discovery_pool, &pool_config) != TURBO_OK)
+      goto invalid;
+  }
+  sentinel->impl = impl;
+  return TURBO_OK;
+
+invalid:
+  redis_sentinel_free_impl(impl);
+  return TURBO_EINVAL;
+no_memory:
+  redis_sentinel_free_impl(impl);
+  return TURBO_ENOMEM;
+}
+
+redis_sentinel_connect_step redis_sentinel_connect_next(
+    redis_sentinel *sentinel) {
+  redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
+  cflow_waitable empty_waitable;
+  memset(&empty_waitable, 0, sizeof(empty_waitable));
+  if (!impl)
+    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
+                                 TURBO_EINVAL, empty_waitable);
+  if (impl->phase == REDIS_SENTINEL_PHASE_READY)
+    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_DONE, TURBO_OK,
+                                 empty_waitable);
+  if (impl->phase == REDIS_SENTINEL_PHASE_DISCOVERY_CONNECT) {
+    redis_pool_connect_step connected =
+        redis_pool_connect_next(&impl->discovery_pool);
+    if (connected.kind == REDIS_POOL_CONNECT_WAIT)
+      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK,
+                                   connected.waitable);
+    if (connected.kind == REDIS_POOL_CONNECT_ERROR) {
+      impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
+                                   connected.status, empty_waitable);
     }
-    link = &(*link)->next;
-  }
-}
-
-static void redis_sentinel_generation_release(redis_sentinel_t *sentinel,
-                                              redis_sentinel_generation_t *generation) {
-  if (!sentinel || !generation || generation->active_leases == 0) return;
-  generation->active_leases--;
-  if (generation->retired && generation->active_leases == 0) {
-    redis_sentinel_retired_remove(sentinel, generation);
-    redis_sentinel_generation_destroy(generation);
-  }
-}
-
-static void redis_sentinel_generation_retire(redis_sentinel_t *sentinel,
-                                             redis_sentinel_generation_t *generation) {
-  if (!sentinel || !generation || generation->retired) return;
-  generation->retired = 1;
-  redis_pool_stop(generation->pool);
-  if (generation->active_leases == 0) {
-    redis_sentinel_generation_destroy(generation);
-    return;
-  }
-  generation->next = sentinel->retired;
-  sentinel->retired = generation;
-}
-
-static int redis_sentinel_endpoint_equal(const redis_sentinel_generation_t *generation,
-                                         const char *host, uint16_t port) {
-  return generation && generation->port == port && host && strcmp(generation->host, host) == 0;
-}
-
-static void redis_sentinel_commit_generation(redis_sentinel_t *sentinel,
-                                             redis_sentinel_generation_t *candidate) {
-  redis_sentinel_generation_t *previous = sentinel->current;
-  sentinel->current = candidate;
-  sentinel->connected = 1;
-  sentinel->last_topology_refresh_ns = turbo_hrtime();
-  sentinel->stats.topology_refreshes++;
-  if (previous) sentinel->stats.failovers++;
-  redis_sentinel_generation_retire(sentinel, previous);
-}
-
-static int redis_sentinel_refresh_internal(redis_sentinel_t *sentinel) {
-  uint64_t epoch;
-  int final_rc = TURBO_ENOTCONN;
-
-  if (!sentinel || sentinel->closing) return TURBO_ECANCELED;
-  if (sentinel->refreshing) return TURBO_EBUSY;
-  sentinel->refreshing = 1;
-  epoch = sentinel->control_epoch;
-
-  for (size_t offset = 0; offset < sentinel->config.sentinel_count; ++offset) {
-    size_t index = (sentinel->preferred_sentinel + offset) % sentinel->config.sentinel_count;
-    redis_sentinel_generation_t *candidate = NULL;
-    tstr host = NULL;
-    uint16_t port = 0;
-    int rc;
-
-    sentinel->stats.discovery_attempts++;
-    rc = redis_sentinel_query_master(sentinel, index, &host, &port);
-    if (rc != TURBO_OK) {
-      final_rc = rc;
-      continue;
-    }
-
-    if (redis_sentinel_endpoint_equal(sentinel->current, host, port)) {
-      rc = redis_sentinel_endpoint_is_master(sentinel, host, port);
-      if (rc == TURBO_OK && !sentinel->closing && epoch == sentinel->control_epoch) {
-        sentinel->preferred_sentinel = index;
-        sentinel->connected = 1;
-        sentinel->last_topology_refresh_ns = turbo_hrtime();
-        sentinel->stats.topology_refreshes++;
-        tstr_free(host);
-        final_rc = TURBO_OK;
-        break;
+    {
+      const char *arguments[] = {"SENTINEL", "get-master-addr-by-name",
+                                 impl->service_name};
+      int status = redis_pool_command_open(
+          &impl->discovery_pool, 3, arguments, NULL,
+          impl->discovery_reply_bytes, &impl->discovery_stream);
+      if (status != TURBO_OK) {
+        impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, status,
+                                     empty_waitable);
       }
-      final_rc = rc;
-      tstr_free(host);
-      continue;
     }
-
-    candidate = redis_sentinel_generation_create(sentinel, host, port);
-    tstr_free(host);
-    if (!candidate) {
-      final_rc = TURBO_ENOTCONN;
-      continue;
-    }
-    if (sentinel->closing || epoch != sentinel->control_epoch) {
-      redis_sentinel_generation_destroy(candidate);
-      final_rc = TURBO_ECANCELED;
+    impl->phase = REDIS_SENTINEL_PHASE_DISCOVERY_COMMAND;
+  }
+  if (impl->phase == REDIS_SENTINEL_PHASE_DISCOVERY_COMMAND) {
+    for (;;) {
+      redis_cflow_stream_step discovered =
+          redis_pool_stream_next(&impl->discovery_stream);
+      if (discovered.kind == REDIS_CFLOW_STREAM_WAIT)
+        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK,
+                                     discovered.waitable);
+      if (discovered.kind == REDIS_CFLOW_STREAM_ERROR) {
+        redis_reply_free(discovered.item);
+        impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
+                                     discovered.status, empty_waitable);
+      }
+      if (discovered.kind == REDIS_CFLOW_STREAM_ITEM) {
+        int status = redis_sentinel_parse_master(impl, discovered.item);
+        redis_reply_free(discovered.item);
+        if (status != TURBO_OK) {
+          impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+          return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, status,
+                                       empty_waitable);
+        }
+        impl->discovery_item_seen = 1;
+        continue;
+      }
+      if (!impl->discovery_item_seen ||
+          redis_pool_stream_destroy(&impl->discovery_stream) != TURBO_OK ||
+          redis_pool_close(&impl->discovery_pool) != TURBO_OK ||
+          redis_pool_destroy(&impl->discovery_pool) != TURBO_OK) {
+        impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
+                                     TURBO_EPROTO, empty_waitable);
+      }
+      {
+        redis_pool_config pool_config = redis_sentinel_pool_config(
+            impl, impl->master_host, impl->master_port, impl->username,
+            impl->password, impl->database, impl->connection_capacity,
+            impl->base_lease_id + 1u);
+        int status = redis_pool_init(&impl->master_pool, &pool_config);
+        if (status != TURBO_OK) {
+          impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+          return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, status,
+                                       empty_waitable);
+        }
+      }
+      impl->phase = REDIS_SENTINEL_PHASE_MASTER_CONNECT;
       break;
     }
-
-    sentinel->preferred_sentinel = index;
-    redis_sentinel_commit_generation(sentinel, candidate);
-    final_rc = TURBO_OK;
-    break;
   }
-
-  if (final_rc != TURBO_OK) sentinel->stats.discovery_failures++;
-  sentinel->refreshing = 0;
-  return final_rc;
-}
-
-static void redis_sentinel_free(redis_sentinel_t *sentinel) {
-  if (!sentinel) return;
-  redis_sentinel_config_clear(&sentinel->config);
-  free(sentinel);
-}
-
-static int redis_sentinel_operation_begin(redis_sentinel_t *sentinel) {
-  if (!sentinel) return TURBO_EINVAL;
-  if (sentinel->closing) return TURBO_ECANCELED;
-  sentinel->active_calls++;
-  return TURBO_OK;
-}
-
-static void redis_sentinel_operation_end(redis_sentinel_t *sentinel) {
-  if (!sentinel || sentinel->active_calls == 0) return;
-  sentinel->active_calls--;
-  if (sentinel->destroy_pending && sentinel->active_calls == 0) redis_sentinel_free(sentinel);
-}
-
-static int redis_sentinel_attempt_begin(redis_sentinel_t *sentinel,
-                                        redis_sentinel_attempt_t *attempt,
-                                        redis_command_result_t *out) {
-  redis_sentinel_generation_t *generation;
-  if (!sentinel || !attempt || !out) return TURBO_EINVAL;
-  memset(attempt, 0, sizeof(*attempt));
-  generation = sentinel->current;
-  if (!sentinel->connected || !generation || generation->retired) {
-    out->status = TURBO_ENOTCONN;
-    return out->status;
-  }
-  generation->active_leases++;
-  attempt->generation = generation;
-  attempt->connection = redis_pool_acquire(generation->pool, 0);
-  if (!attempt->connection) {
-    redis_sentinel_generation_release(sentinel, generation);
-    memset(attempt, 0, sizeof(*attempt));
-    out->status = TURBO_ENOTCONN;
-    return out->status;
-  }
-  attempt->client = redis_pool_conn_client(attempt->connection);
-  if (!attempt->client) {
-    redis_pool_release(generation->pool, attempt->connection);
-    redis_sentinel_generation_release(sentinel, generation);
-    memset(attempt, 0, sizeof(*attempt));
-    out->status = TURBO_ENOTCONN;
-    return out->status;
-  }
-  return TURBO_OK;
-}
-
-static void redis_sentinel_attempt_end(redis_sentinel_t *sentinel,
-                                       redis_sentinel_attempt_t *attempt) {
-  if (!sentinel || !attempt || !attempt->generation) return;
-  if (attempt->connection) redis_pool_release(attempt->generation->pool, attempt->connection);
-  redis_sentinel_generation_release(sentinel, attempt->generation);
-  memset(attempt, 0, sizeof(*attempt));
-}
-
-static int redis_sentinel_should_refresh(const redis_command_result_t *result) {
-  if (!result) return 0;
-  if (result->outcome != REDIS_COMMAND_REPLIED) return 1;
-  return result->server_error == REDIS_SERVER_ERROR_READ_ONLY ||
-         result->server_error == REDIS_SERVER_ERROR_MASTER_DOWN;
-}
-
-static int redis_sentinel_retry_is_safe(const redis_command_result_t *result) {
-  if (!result) return 0;
-  return result->outcome == REDIS_COMMAND_NOT_SENT ||
-         result->server_error == REDIS_SERVER_ERROR_READ_ONLY ||
-         result->server_error == REDIS_SERVER_ERROR_MASTER_DOWN;
-}
-
-static int redis_sentinel_periodic_refresh_due(const redis_sentinel_t *sentinel) {
-  uint64_t interval_ns;
-  if (!sentinel || sentinel->config.topology_refresh_ms == 0 ||
-      sentinel->last_topology_refresh_ns == 0)
-    return 0;
-  interval_ns = (uint64_t)sentinel->config.topology_refresh_ms * REDIS_SENTINEL_NS_PER_MS;
-  return turbo_hrtime() - sentinel->last_topology_refresh_ns >= interval_ns;
-}
-
-static int redis_sentinel_commandv_core(redis_sentinel_t *sentinel, int argc, const char **argv,
-                                        const size_t *argvlen, redis_command_cb_t callback,
-                                        void *user_data, redis_command_result_t *out) {
-  redis_sentinel_attempt_t attempt;
-  int rc;
-
-  if (!out) return TURBO_EINVAL;
-  *out = (redis_command_result_t)REDIS_COMMAND_RESULT_INIT;
-  if (!sentinel || argc <= 0 || !argv) {
-    out->status = TURBO_EINVAL;
-    return out->status;
-  }
-  for (int i = 0; i < argc; ++i) {
-    if (!argv[i]) {
-      out->status = TURBO_EINVAL;
-      return out->status;
+  if (impl->phase == REDIS_SENTINEL_PHASE_MASTER_CONNECT) {
+    redis_pool_connect_step connected =
+        redis_pool_connect_next(&impl->master_pool);
+    if (connected.kind == REDIS_POOL_CONNECT_WAIT)
+      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK,
+                                   connected.waitable);
+    if (connected.kind == REDIS_POOL_CONNECT_ERROR) {
+      impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
+                                   connected.status, empty_waitable);
     }
+    impl->phase = REDIS_SENTINEL_PHASE_READY;
+    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_DONE, TURBO_OK,
+                                 empty_waitable);
   }
-  rc = redis_sentinel_operation_begin(sentinel);
-  if (rc != TURBO_OK) {
-    out->status = rc;
-    return rc;
-  }
-
-  if (redis_sentinel_periodic_refresh_due(sentinel))
-    (void)redis_sentinel_refresh_internal(sentinel);
-
-  rc = redis_sentinel_attempt_begin(sentinel, &attempt, out);
-  if (rc != TURBO_OK) {
-    sentinel->stats.commands_failed++;
-    goto finish_operation;
-  }
-  rc = redis_commandv_result(attempt.client, argc, argv, argvlen, out);
-
-  if (redis_sentinel_should_refresh(out)) {
-    redis_sentinel_generation_t *attempt_generation = attempt.generation;
-    int refresh_rc = redis_sentinel_refresh_internal(sentinel);
-    if (refresh_rc == TURBO_OK && sentinel->current != attempt_generation &&
-        redis_sentinel_retry_is_safe(out)) {
-      redis_sentinel_attempt_end(sentinel, &attempt);
-      redis_command_result_clear(out);
-      sentinel->stats.safe_retries++;
-      rc = redis_sentinel_attempt_begin(sentinel, &attempt, out);
-      if (rc == TURBO_OK) rc = redis_commandv_result(attempt.client, argc, argv, argvlen, out);
-    }
-  }
-
-  if (out->outcome == REDIS_COMMAND_REPLIED) sentinel->stats.commands_sent++;
-  if (rc != TURBO_OK) sentinel->stats.commands_failed++;
-  if (out->outcome == REDIS_COMMAND_REPLIED && callback)
-    callback(attempt.client, out->reply, user_data);
-  redis_sentinel_attempt_end(sentinel, &attempt);
-
-finish_operation:
-  redis_sentinel_operation_end(sentinel);
-  return rc;
+  return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR,
+                               TURBO_ESHUTDOWN, empty_waitable);
 }
 
-redis_sentinel_t *redis_sentinel_create(const redis_sentinel_config_t *config) {
-  redis_sentinel_t *sentinel;
-  if (!redis_sentinel_config_valid(config)) return NULL;
-  sentinel = calloc(1, sizeof(*sentinel));
-  if (!sentinel) return NULL;
-  if (redis_sentinel_config_copy(&sentinel->config, config) != TURBO_OK) {
-    free(sentinel);
-    return NULL;
-  }
-  return sentinel;
+int redis_sentinel_command_open(redis_sentinel *sentinel, int argc,
+                                const char **argv, const size_t *argvlen,
+                                size_t max_reply_bytes,
+                                redis_pool_stream *out_stream) {
+  redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
+  if (!impl || impl->phase != REDIS_SENTINEL_PHASE_READY)
+    return impl ? TURBO_ESHUTDOWN : TURBO_EINVAL;
+  return redis_pool_command_open(&impl->master_pool, argc, argv, argvlen,
+                                 max_reply_bytes, out_stream);
 }
 
-int redis_sentinel_connect(redis_sentinel_t *sentinel) {
-  int rc = redis_sentinel_operation_begin(sentinel);
-  if (rc != TURBO_OK) return rc;
-  rc = redis_sentinel_refresh_internal(sentinel);
-  redis_sentinel_operation_end(sentinel);
-  return rc;
-}
-
-int redis_sentinel_refresh(redis_sentinel_t *sentinel) {
-  int rc = redis_sentinel_operation_begin(sentinel);
-  if (rc != TURBO_OK) return rc;
-  rc = redis_sentinel_refresh_internal(sentinel);
-  redis_sentinel_operation_end(sentinel);
-  return rc;
-}
-
-void redis_sentinel_disconnect(redis_sentinel_t *sentinel) {
-  redis_sentinel_generation_t *current;
-  if (!sentinel || sentinel->closing) return;
-  sentinel->control_epoch++;
-  sentinel->connected = 0;
-  current = sentinel->current;
-  sentinel->current = NULL;
-  redis_sentinel_generation_retire(sentinel, current);
-}
-
-void redis_sentinel_destroy(redis_sentinel_t *sentinel) {
-  redis_sentinel_generation_t *current;
-  if (!sentinel || sentinel->destroy_pending) return;
-  sentinel->closing = 1;
-  sentinel->destroy_pending = 1;
-  sentinel->control_epoch++;
-  sentinel->connected = 0;
-  current = sentinel->current;
-  sentinel->current = NULL;
-  redis_sentinel_generation_retire(sentinel, current);
-  if (sentinel->active_calls == 0) redis_sentinel_free(sentinel);
-}
-
-int redis_sentinel_commandv_result(redis_sentinel_t *sentinel, int argc, const char **argv,
-                                   const size_t *argvlen, redis_command_result_t *out) {
-  return redis_sentinel_commandv_core(sentinel, argc, argv, argvlen, NULL, NULL, out);
-}
-
-int redis_sentinel_commandv(redis_sentinel_t *sentinel, int argc, const char **argv,
-                            const size_t *argvlen, redis_command_cb_t callback, void *user_data) {
-  redis_command_result_t result = REDIS_COMMAND_RESULT_INIT;
-  int rc =
-      redis_sentinel_commandv_core(sentinel, argc, argv, argvlen, callback, user_data, &result);
-  (void)rc;
-  rc = result.outcome == REDIS_COMMAND_REPLIED ? 0 : -1;
-  redis_command_result_clear(&result);
-  return rc;
-}
-
-int redis_sentinel_set(redis_sentinel_t *sentinel, const char *key, const char *value,
-                       redis_command_cb_t callback, void *user_data) {
-  const char *argv[] = {"SET", key, value};
-  return redis_sentinel_commandv(sentinel, 3, argv, NULL, callback, user_data);
-}
-
-int redis_sentinel_get(redis_sentinel_t *sentinel, const char *key, redis_command_cb_t callback,
-                       void *user_data) {
-  const char *argv[] = {"GET", key};
-  return redis_sentinel_commandv(sentinel, 2, argv, NULL, callback, user_data);
-}
-
-int redis_sentinel_del(redis_sentinel_t *sentinel, const char *key, redis_command_cb_t callback,
-                       void *user_data) {
-  const char *argv[] = {"DEL", key};
-  return redis_sentinel_commandv(sentinel, 2, argv, NULL, callback, user_data);
-}
-
-int redis_sentinel_get_master(const redis_sentinel_t *sentinel, char *host, size_t host_size,
-                              uint16_t *port) {
-  size_t length;
-  if (!sentinel || !host || host_size == 0 || !port) return TURBO_EINVAL;
-  if (!sentinel->connected || !sentinel->current) return TURBO_ENOTCONN;
-  length = tstr_len(sentinel->current->host);
-  if (length >= host_size) return TURBO_ERANGE;
-  memcpy(host, sentinel->current->host, length + 1u);
-  *port = sentinel->current->port;
+int redis_sentinel_get_master(const redis_sentinel *sentinel,
+                              redis_sentinel_master *master) {
+  const redis_sentinel_impl *impl = redis_sentinel_get_const(sentinel);
+  if (!impl || !master || impl->phase != REDIS_SENTINEL_PHASE_READY)
+    return TURBO_EINVAL;
+  master->host = impl->master_host;
+  master->port = impl->master_port;
   return TURBO_OK;
 }
 
-int redis_sentinel_is_healthy(const redis_sentinel_t *sentinel) {
-  return sentinel && sentinel->connected && sentinel->current &&
-         redis_pool_is_healthy(sentinel->current->pool);
+int redis_sentinel_ready(const redis_sentinel *sentinel) {
+  const redis_sentinel_impl *impl = redis_sentinel_get_const(sentinel);
+  return impl && impl->phase == REDIS_SENTINEL_PHASE_READY;
 }
 
-void redis_sentinel_get_stats(const redis_sentinel_t *sentinel, redis_sentinel_stats_t *stats) {
-  if (!stats) return;
-  if (!sentinel) {
-    memset(stats, 0, sizeof(*stats));
-    return;
+int redis_sentinel_close(redis_sentinel *sentinel) {
+  redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
+  int status;
+  if (!impl) return TURBO_EINVAL;
+  if (impl->phase == REDIS_SENTINEL_PHASE_CLOSED) return TURBO_OK;
+  impl->phase = REDIS_SENTINEL_PHASE_CLOSING;
+  if (impl->discovery_stream.impl) {
+    status = redis_pool_stream_destroy(&impl->discovery_stream);
+    if (status != TURBO_OK) return status;
   }
-  *stats = sentinel->stats;
+  if (impl->discovery_pool.impl) {
+    status = redis_pool_close(&impl->discovery_pool);
+    if (status != TURBO_OK) return status;
+    status = redis_pool_destroy(&impl->discovery_pool);
+    if (status != TURBO_OK) return status;
+  }
+  if (impl->master_pool.impl) {
+    status = redis_pool_close(&impl->master_pool);
+    if (status != TURBO_OK) return status;
+  }
+  impl->phase = REDIS_SENTINEL_PHASE_CLOSED;
+  return TURBO_OK;
 }
 
-void redis_sentinel_reset_stats(redis_sentinel_t *sentinel) {
-  if (!sentinel) return;
-  memset(&sentinel->stats, 0, sizeof(sentinel->stats));
+int redis_sentinel_destroy(redis_sentinel *sentinel) {
+  redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
+  int status;
+  if (!impl) return TURBO_EINVAL;
+  status = redis_sentinel_close(sentinel);
+  if (status != TURBO_OK) return status;
+  if (impl->master_pool.impl) {
+    status = redis_pool_destroy(&impl->master_pool);
+    if (status != TURBO_OK) return status;
+  }
+  redis_sentinel_free_impl(impl);
+  sentinel->impl = NULL;
+  return TURBO_OK;
 }

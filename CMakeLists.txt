@@ -53,8 +53,7 @@ include(CMakeOptions.cmake)
 include(Sanitizers)
 include(CmakeUtils)
  
-foreach(_turbodb_dependency_root IN ITEMS
-        TURBOUTILS_ROOT TURBOPARSER_ROOT TURBONET_ROOT)
+foreach(_turbodb_dependency_root IN ITEMS TURBOUTILS_ROOT)
   if(NOT DEFINED ENV{${_turbodb_dependency_root}} OR
      "$ENV{${_turbodb_dependency_root}}" STREQUAL "")
     message(FATAL_ERROR
@@ -66,13 +65,8 @@ foreach(_turbodb_dependency_root IN ITEMS
   endif()
 endforeach()
 
-find_package(TurboParser CONFIG REQUIRED
-             PATHS "$ENV{TURBOPARSER_ROOT}" NO_DEFAULT_PATH)
 find_package(TurboUtils CONFIG REQUIRED
              PATHS "$ENV{TURBOUTILS_ROOT}" NO_DEFAULT_PATH)
-find_package(TurboNet CONFIG REQUIRED
-             PATHS "$ENV{TURBONET_ROOT}" NO_DEFAULT_PATH)
-
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(zstd CONFIG REQUIRED)

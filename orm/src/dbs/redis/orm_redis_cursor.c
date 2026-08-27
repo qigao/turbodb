@@ -51,7 +51,8 @@ static int orm_redis_driver_valid(const orm_redis_row_driver *driver) {
   return ops != NULL && reply_ops != NULL &&
          ops->struct_size >= sizeof(*ops) &&
          ops->abi_version == ORM_REDIS_ROW_DRIVER_OPS_ABI_VERSION &&
-         ops->next != NULL && ops->release_row != NULL && ops->destroy != NULL &&
+         ops->next != NULL && ops->cancel != NULL &&
+         ops->release_row != NULL && ops->destroy != NULL &&
          reply_ops->struct_size >= sizeof(*reply_ops) &&
          reply_ops->abi_version == ORM_REDIS_REPLY_OPS_ABI_VERSION &&
          reply_ops->kind != NULL && reply_ops->integer != NULL &&
@@ -185,6 +186,18 @@ static orm_row_cursor_step orm_redis_cursor_next(void *context,
   if (state->terminal) return step;
   orm_redis_release_row(state);
   native_step = state->driver.ops->next(state->driver.context, &state->row);
+  if (native_step.kind == ORM_REDIS_DRIVER_WAIT) {
+    if (state->row != NULL || !cflow_waitable_valid(&native_step.waitable)) {
+      state->terminal = 1;
+      step.kind = ORM_ROW_CURSOR_ERROR;
+      step.status = ORM_STATUS_INTERNAL_ERROR;
+      step.message = "Redis driver returned an invalid WAIT step";
+      return step;
+    }
+    step.kind = ORM_ROW_CURSOR_WAIT;
+    step.waitable = native_step.waitable;
+    return step;
+  }
   if (native_step.kind == ORM_REDIS_DRIVER_DONE) {
     state->terminal = 1;
     return step;
@@ -232,7 +245,10 @@ static orm_row_cursor_step orm_redis_cursor_next(void *context,
 
 static void orm_redis_cursor_cancel(void *context) {
   orm_redis_cursor_state *state = (orm_redis_cursor_state *)context;
-  if (state != NULL) state->terminal = 1;
+  if (state == NULL || state->terminal) return;
+  state->terminal = 1;
+  orm_redis_release_row(state);
+  state->driver.ops->cancel(state->driver.context);
 }
 
 static void orm_redis_cursor_destroy(void *context) {
@@ -262,6 +278,7 @@ orm_status_t orm_redis_cursor_start(
       config == NULL || config->struct_size < sizeof(*config) ||
       config->abi_version != ORM_REDIS_CURSOR_CONFIG_ABI_VERSION ||
       config->max_rows == 0u || config->max_field_name_bytes == 0u ||
+      config->wait_timeout_ns == 0u ||
       (field_count != 0u && fields == NULL)) {
     orm_redis_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
                         "invalid Redis cursor configuration");
@@ -312,6 +329,7 @@ orm_status_t orm_redis_cursor_start(
   state->max_rows = config->max_rows;
   out_cursor->ops = &orm_redis_cursor_ops;
   out_cursor->context = state;
+  out_cursor->wait_timeout_ns = config->wait_timeout_ns;
   orm_redis_set_error(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }

@@ -73,10 +73,6 @@ if(ORM_WITH_MONGODB)
   find_package(mongoc-1.0 CONFIG REQUIRED)
 endif()
 
-if(ORM_WITH_REDIS AND WIN32 AND NOT TARGET TurboNet::CoroNet)
-  find_package(TurboNet CONFIG REQUIRED)
-endif()
-
 set(ORM_VERSION 2.1.0)
 set(ORM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/orm)
 set(ORM_ABI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/abi)
@@ -584,7 +580,7 @@ if(WIN32)
     string(
       APPEND
       ORM_TEST_RUNTIME_PATH
-      ";PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboNet::CoroNet>;PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboDB::Redis>"
+      ";PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboDB::Redis>"
     )
     list(APPEND ORM_RUNTIME_TESTS orm_redis_query orm_redis_backend_contract)
   endif()

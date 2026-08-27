@@ -43,9 +43,10 @@ spec("ORM thin C++ CFlow facade") {
     auto rows = std::move(connection.raw(
         "select 7 as id, 19 as score union all select 11, 29 order by id"))
                     .open<orm_cpp_flow_row>(orm_cpp_flow_row_data);
+    cflow_resume_ctx context{};
     orm_cpp_flow_row first{};
     orm_cpp_flow_row second{};
-    check_equal(rows.next(first).kind, CFLOW_STEP_VALUE);
+    check_equal(rows.next(first, context).kind, CFLOW_STEP_VALUE);
     check_equal(first.id, 7);
     check_equal(first.score, 19L);
     check_equal(rows.next(second).kind, CFLOW_STEP_VALUE);
