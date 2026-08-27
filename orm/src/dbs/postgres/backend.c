@@ -260,7 +260,8 @@ static orm_status_t orm_postgres_open_impl(
   request.result_format = 0;
   cursor_config = (orm_postgres_cursor_config)
       ORM_POSTGRES_CURSOR_CONFIG_INIT(
-          limits->max_columns, (size_t)limits->max_result_bytes,
+          limits->max_columns, limits->max_result_rows,
+          (size_t)limits->max_result_bytes,
           column_count, affected_rows, NULL);
   status = orm_postgres_cursor_start(out_cursor, &driver, &request,
                                      &cursor_config, error);

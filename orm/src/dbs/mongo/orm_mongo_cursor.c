@@ -16,7 +16,6 @@ typedef struct orm_mongo_cursor_state orm_mongo_cursor_state;
 
 typedef struct orm_mongo_reader_state {
   orm_mongo_cursor_state *cursor;
-  const void *document;
   size_t column;
   orm_mongo_reader_phase phase;
 } orm_mongo_reader_state;
@@ -25,9 +24,12 @@ struct orm_mongo_cursor_state {
   orm_mongo_driver driver;
   orm_mongo_field *fields;
   unsigned char *names;
+  orm_mongo_value *values;
   size_t field_count;
-  size_t max_rows;
-  size_t rows;
+  uint64_t max_rows;
+  uint64_t max_result_bytes;
+  uint64_t rows;
+  uint64_t result_bytes;
   int terminal;
   orm_mongo_reader_state reader;
   char error_message[ORM_C_ERROR_MESSAGE_CAPACITY];
@@ -58,7 +60,6 @@ static cserde_status orm_mongo_reader_next(void *context,
   orm_mongo_reader_state *reader = (orm_mongo_reader_state *)context;
   orm_mongo_cursor_state *state;
   orm_mongo_value value = ORM_MONGO_VALUE_INIT;
-  orm_status_t status;
   if (reader == NULL || out == NULL || reader->cursor == NULL)
     return CSERDE_INVALID_ARGUMENT;
   state = reader->cursor;
@@ -78,12 +79,7 @@ static cserde_status orm_mongo_reader_next(void *context,
       reader->phase = ORM_MONGO_READER_VALUE;
       return CSERDE_OK;
     case ORM_MONGO_READER_VALUE:
-      status = state->driver.ops->find(
-          state->driver.context, reader->document,
-          state->fields[reader->column].source_path.data,
-          state->fields[reader->column].source_path.size, &value);
-      if (status != ORM_STATUS_OK)
-        return CSERDE_SOURCE_ERROR;
+      value = state->values[reader->column];
       switch (value.kind) {
         case ORM_MONGO_VALUE_NULL:
           out->kind = CSERDE_NULL;
@@ -139,6 +135,51 @@ static const cserde_reader_ops orm_mongo_reader_ops = {
     sizeof(cserde_reader_ops), CSERDE_READER_OPS_ABI_VERSION,
     orm_mongo_reader_next};
 
+static orm_status_t orm_mongo_prepare_values(orm_mongo_cursor_state *state,
+                                             const void *document) {
+  uint64_t row_bytes = 0u;
+  size_t index;
+  for (index = 0u; index < state->field_count; ++index) {
+    uint64_t value_bytes;
+    orm_status_t status = state->driver.ops->find(
+        state->driver.context, document,
+        state->fields[index].source_path.data,
+        state->fields[index].source_path.size, &state->values[index]);
+    if (status != ORM_STATUS_OK)
+      return status;
+    switch (state->values[index].kind) {
+      case ORM_MONGO_VALUE_NULL:
+        value_bytes = 0u;
+        break;
+      case ORM_MONGO_VALUE_BOOL:
+        value_bytes = sizeof(uint8_t);
+        break;
+      case ORM_MONGO_VALUE_SINT:
+      case ORM_MONGO_VALUE_UINT:
+      case ORM_MONGO_VALUE_FLOAT:
+        value_bytes = sizeof(uint64_t);
+        break;
+      case ORM_MONGO_VALUE_STRING:
+      case ORM_MONGO_VALUE_BYTES:
+        if (state->values[index].data.slice.size != 0u &&
+            state->values[index].data.slice.data == NULL)
+          return ORM_STATUS_DATASTORE_ERROR;
+        value_bytes = (uint64_t)state->values[index].data.slice.size;
+        break;
+      default:
+        return ORM_STATUS_DATASTORE_ERROR;
+    }
+    if (value_bytes > UINT64_MAX - row_bytes)
+      return ORM_STATUS_LIMIT_EXCEEDED;
+    row_bytes += value_bytes;
+  }
+  if (state->result_bytes > state->max_result_bytes ||
+      row_bytes > state->max_result_bytes - state->result_bytes)
+    return ORM_STATUS_LIMIT_EXCEEDED;
+  state->result_bytes += row_bytes;
+  return ORM_STATUS_OK;
+}
+
 static orm_row_cursor_step orm_mongo_cursor_next(void *context,
                                                   cserde_reader *out_row) {
   orm_mongo_cursor_state *state = (orm_mongo_cursor_state *)context;
@@ -176,8 +217,19 @@ static orm_row_cursor_step orm_mongo_cursor_next(void *context,
     step.message = "MongoDB result exceeds max_rows";
     return step;
   }
+  {
+    const orm_status_t status = orm_mongo_prepare_values(state, document);
+    if (status != ORM_STATUS_OK) {
+      state->terminal = 1;
+      step.kind = ORM_ROW_CURSOR_ERROR;
+      step.status = status;
+      step.message = status == ORM_STATUS_LIMIT_EXCEEDED
+                         ? "MongoDB result exceeds max_result_bytes"
+                         : "read MongoDB result fields";
+      return step;
+    }
+  }
   state->reader.cursor = state;
-  state->reader.document = document;
   state->reader.column = 0u;
   state->reader.phase = ORM_MONGO_READER_MAP_BEGIN;
   if (cserde_reader_init(out_row, &orm_mongo_reader_ops,
@@ -204,6 +256,7 @@ static void orm_mongo_cursor_destroy(void *context) {
   if (state == NULL)
     return;
   state->driver.ops->destroy(state->driver.context);
+  free(state->values);
   free(state->names);
   free(state->fields);
   free(state);
@@ -225,7 +278,8 @@ orm_status_t orm_mongo_cursor_start(
       out_cursor->context != NULL || !orm_mongo_driver_valid(driver) ||
       config == NULL || config->struct_size < sizeof(*config) ||
       config->abi_version != ORM_MONGO_CURSOR_CONFIG_ABI_VERSION ||
-      config->max_rows == 0u || config->max_field_name_bytes == 0u ||
+      config->max_rows == 0u || config->max_result_bytes == 0u ||
+      config->max_field_name_bytes == 0u ||
       (field_count != 0u && fields == NULL)) {
     orm_mongo_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
                         "invalid MongoDB cursor configuration");
@@ -267,9 +321,12 @@ orm_status_t orm_mongo_cursor_start(
   }
   state->fields = (orm_mongo_field *)calloc(
       field_count == 0u ? 1u : field_count, sizeof(*state->fields));
+  state->values = (orm_mongo_value *)calloc(
+      field_count == 0u ? 1u : field_count, sizeof(*state->values));
   state->names = (unsigned char *)malloc(name_bytes == 0u ? 1u : name_bytes);
-  if (state->fields == NULL || state->names == NULL) {
+  if (state->fields == NULL || state->values == NULL || state->names == NULL) {
     free(state->names);
+    free(state->values);
     free(state->fields);
     free(state);
     orm_mongo_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
@@ -295,6 +352,7 @@ orm_status_t orm_mongo_cursor_start(
   state->driver = *driver;
   state->field_count = field_count;
   state->max_rows = config->max_rows;
+  state->max_result_bytes = config->max_result_bytes;
   driver->ops = NULL;
   driver->context = NULL;
   out_cursor->ops = &orm_mongo_cursor_ops;

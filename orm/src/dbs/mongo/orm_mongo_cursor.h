@@ -82,13 +82,15 @@ typedef struct orm_mongo_field {
 typedef struct orm_mongo_cursor_config {
   size_t struct_size;
   uint32_t abi_version;
-  size_t max_rows;
+  uint64_t max_rows;
+  uint64_t max_result_bytes;
   size_t max_field_name_bytes;
 } orm_mongo_cursor_config;
 
-#define ORM_MONGO_CURSOR_CONFIG_INIT(max_rows_, max_field_name_bytes_)       \
+#define ORM_MONGO_CURSOR_CONFIG_INIT(max_rows_, max_result_bytes_,           \
+                                     max_field_name_bytes_)                  \
   { sizeof(orm_mongo_cursor_config), ORM_MONGO_CURSOR_CONFIG_ABI_VERSION,    \
-    (max_rows_), (max_field_name_bytes_) }
+    (max_rows_), (max_result_bytes_), (max_field_name_bytes_) }
 
 /* Success moves and clears driver and copies every field name/path. */
 orm_status_t orm_mongo_cursor_start(

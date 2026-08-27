@@ -13,6 +13,7 @@
 #define REDIS_RESP_MAX_DEPTH 128u
 
 typedef enum redis_resp_array_step {
+  REDIS_RESP_ARRAY_LIMIT = -2,
   REDIS_RESP_ARRAY_ERROR = -1,
   REDIS_RESP_ARRAY_NEED_MORE = 0,
   REDIS_RESP_ARRAY_ITEM = 1,
@@ -23,6 +24,7 @@ typedef enum redis_resp_array_step {
 typedef struct redis_resp_array_reader {
   size_t remaining;
   size_t max_items;
+  size_t max_reply_bytes;
   int header_read;
   int terminal;
 } redis_resp_array_reader;
@@ -34,8 +36,12 @@ REDIS_API int redis_recv_buffer_append_bounded(redis_client_t *client,
                                                const char *data, size_t len,
                                                size_t max_buffer_bytes);
 REDIS_API int redis_parse_resp_reply(redis_client_t *client, redis_reply_t **reply);
+REDIS_API int redis_parse_resp_reply_bounded(redis_client_t *client,
+                                             size_t max_reply_bytes,
+                                             redis_reply_t **reply);
 REDIS_API void redis_resp_array_reader_init(redis_resp_array_reader *reader,
-                                            size_t max_items);
+                                            size_t max_items,
+                                            size_t max_reply_bytes);
 REDIS_API redis_resp_array_step redis_resp_array_reader_next(
     redis_client_t *client, redis_resp_array_reader *reader,
     redis_reply_t **item);

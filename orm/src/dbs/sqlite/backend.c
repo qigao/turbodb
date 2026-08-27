@@ -221,6 +221,7 @@ static orm_status_t orm_sqlite_open_impl(
     const orm_limits *limits, int allow_transaction,
     orm_row_cursor *out_cursor, orm_error_t *error) {
   sqlite3_stmt *statement = NULL;
+  orm_sqlite_cursor_config cursor_config;
   orm_status_t status;
   int columns;
   if (!allow_transaction && state->transaction_active) {
@@ -244,7 +245,10 @@ static orm_status_t orm_sqlite_open_impl(
                   "SQLite result exceeds max_columns");
     return ORM_STATUS_LIMIT_EXCEEDED;
   }
-  status = orm_sqlite_cursor_from_statement(out_cursor, &statement, error);
+  cursor_config = (orm_sqlite_cursor_config)ORM_SQLITE_CURSOR_CONFIG_INIT(
+      limits->max_result_rows, limits->max_result_bytes);
+  status = orm_sqlite_cursor_from_statement(out_cursor, &statement,
+                                            &cursor_config, error);
   if (statement != NULL)
     (void)sqlite3_finalize(statement);
   return status;

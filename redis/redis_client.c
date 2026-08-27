@@ -454,7 +454,8 @@ int redis_commandv_stream_open(redis_client_t *client, int argc,
   }
   stream->client = client;
   stream->max_buffer_bytes = max_buffer_bytes;
-  redis_resp_array_reader_init(&stream->reader, max_items);
+  redis_resp_array_reader_init(&stream->reader, max_items,
+                               max_buffer_bytes);
   client->active_stream = stream;
   *out_stream = stream;
   return TURBO_OK;
@@ -526,6 +527,13 @@ redis_command_stream_step_t redis_command_stream_next(
     if (parsed == REDIS_RESP_ARRAY_SERVER_ERROR)
       return redis_command_stream_error(stream, TURBO_EIO,
                                         REDIS_COMMAND_REPLIED, item);
+    if (parsed == REDIS_RESP_ARRAY_LIMIT) {
+      client->is_connected = 0;
+      redis_client_disconnect(client);
+      client->recv_buffer_used = 0u;
+      return redis_command_stream_error(stream, TURBO_ENOBUFS,
+                                        REDIS_COMMAND_REPLY_UNKNOWN, NULL);
+    }
     if (parsed == REDIS_RESP_ARRAY_ERROR) {
       client->is_connected = 0;
       redis_client_disconnect(client);

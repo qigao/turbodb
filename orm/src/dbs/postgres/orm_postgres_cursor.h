@@ -67,19 +67,21 @@ typedef struct orm_postgres_cursor_config {
   size_t struct_size;
   uint32_t abi_version;
   size_t max_columns;
+  uint64_t max_result_rows;
   size_t max_result_bytes;
   size_t *column_count;
   uint64_t *affected_rows;
   orm_error_t *runtime_error;
 } orm_postgres_cursor_config;
 
-#define ORM_POSTGRES_CURSOR_CONFIG_INIT(max_columns_, max_result_bytes_,    \
-                                        column_count_, affected_rows_,      \
-                                        runtime_error_)                    \
+#define ORM_POSTGRES_CURSOR_CONFIG_INIT(max_columns_, max_result_rows_,     \
+                                        max_result_bytes_, column_count_,   \
+                                        affected_rows_, runtime_error_)     \
   {                                                                        \
     sizeof(orm_postgres_cursor_config),                                    \
         ORM_POSTGRES_CURSOR_CONFIG_ABI_VERSION, (max_columns_),             \
-        (max_result_bytes_), (column_count_), (affected_rows_),             \
+        (max_result_rows_), (max_result_bytes_), (column_count_),           \
+        (affected_rows_),                                                   \
         (runtime_error_)                                                    \
   }
 

@@ -271,8 +271,10 @@ REDIS_API int redis_commandv_result(redis_client_t *client, int argc,
 /**
  * Prepare a demand-driven stream over the direct children of one RESP array.
  * No bytes are sent until the first redis_command_stream_next() call.
- * `max_buffer_bytes` bounds retained, unparsed network payload and
- * `max_items` bounds the top-level array cardinality.
+ * `max_buffer_bytes` independently bounds retained, unparsed network payload
+ * and each decoded reply item's logical allocation (reply nodes, arrays,
+ * strings, and allocator-owned metadata). `max_items` bounds the top-level
+ * array cardinality.
  */
 REDIS_API int redis_commandv_stream_open(redis_client_t *client, int argc,
                                          const char **argv,

@@ -16,13 +16,16 @@ typedef struct orm_sqlite_reader_state {
   sqlite3_stmt *statement;
   int column_count;
   int column;
-  int text_projection;
   orm_sqlite_reader_phase phase;
 } orm_sqlite_reader_state;
 
 typedef struct orm_sqlite_cursor_state {
   sqlite3_stmt *statement;
   orm_sqlite_reader_state reader;
+  uint64_t max_result_rows;
+  uint64_t max_result_bytes;
+  uint64_t result_rows;
+  uint64_t result_bytes;
   int terminal;
   char error_message[ORM_C_ERROR_MESSAGE_CAPACITY];
 } orm_sqlite_cursor_state;
@@ -64,21 +67,6 @@ static cserde_status orm_sqlite_reader_emit_value(
     orm_sqlite_reader_state *state, cserde_token *out) {
   const int column = state->column;
   const int sqlite_type = sqlite3_column_type(state->statement, column);
-
-  if (state->text_projection && sqlite_type != SQLITE_NULL) {
-    const void *data = sqlite_type == SQLITE_BLOB
-                           ? sqlite3_column_blob(state->statement, column)
-                           : (const void *)sqlite3_column_text(
-                                 state->statement, column);
-    const int bytes = sqlite3_column_bytes(state->statement, column);
-    if (bytes < 0 || data == NULL)
-      return CSERDE_SOURCE_ERROR;
-    out->kind = sqlite_type == SQLITE_BLOB ? CSERDE_BYTES : CSERDE_STRING;
-    out->value.slice.data = (const unsigned char *)data;
-    out->value.slice.size = (size_t)bytes;
-    out->value.slice.lifetime = CSERDE_VIEW_TRANSIENT;
-    return CSERDE_OK;
-  }
 
   switch (sqlite_type) {
     case SQLITE_NULL:
@@ -161,10 +149,42 @@ static const cserde_reader_ops orm_sqlite_reader_ops = {
     sizeof(cserde_reader_ops), CSERDE_READER_OPS_ABI_VERSION,
     orm_sqlite_reader_next};
 
+static orm_status_t orm_sqlite_row_payload_bytes(sqlite3_stmt *statement,
+                                                 uint64_t *out_bytes) {
+  const int columns = sqlite3_column_count(statement);
+  uint64_t total = 0u;
+  int column;
+  if (out_bytes == NULL || columns < 0)
+    return ORM_STATUS_INTERNAL_ERROR;
+  for (column = 0; column < columns; ++column) {
+    uint64_t bytes;
+    const int type = sqlite3_column_type(statement, column);
+    if (type == SQLITE_NULL)
+      bytes = 0u;
+    else if (type == SQLITE_INTEGER || type == SQLITE_FLOAT)
+      bytes = sizeof(int64_t);
+    else if (type == SQLITE_TEXT || type == SQLITE_BLOB) {
+      const int length = sqlite3_column_bytes(statement, column);
+      if (length < 0)
+        return ORM_STATUS_INTERNAL_ERROR;
+      bytes = (uint64_t)length;
+    } else {
+      return ORM_STATUS_TYPE_ERROR;
+    }
+    if (bytes > UINT64_MAX - total)
+      return ORM_STATUS_LIMIT_EXCEEDED;
+    total += bytes;
+  }
+  *out_bytes = total;
+  return ORM_STATUS_OK;
+}
+
 static orm_row_cursor_step orm_sqlite_cursor_next(void *context,
                                                    cserde_reader *out_row) {
   orm_sqlite_cursor_state *state = (orm_sqlite_cursor_state *)context;
   orm_row_cursor_step result = ORM_ROW_CURSOR_STEP_INIT;
+  orm_status_t budget_status;
+  uint64_t row_bytes;
   int sqlite_status;
 
   if (state->terminal) {
@@ -191,6 +211,22 @@ static orm_row_cursor_step orm_sqlite_cursor_next(void *context,
     return result;
   }
 
+  budget_status = orm_sqlite_row_payload_bytes(state->statement, &row_bytes);
+  if (budget_status == ORM_STATUS_OK &&
+      (state->result_rows >= state->max_result_rows ||
+       state->result_bytes > state->max_result_bytes ||
+       row_bytes > state->max_result_bytes - state->result_bytes))
+    budget_status = ORM_STATUS_LIMIT_EXCEEDED;
+  if (budget_status != ORM_STATUS_OK) {
+    result.kind = ORM_ROW_CURSOR_ERROR;
+    result.status = budget_status;
+    result.message = budget_status == ORM_STATUS_LIMIT_EXCEEDED
+                         ? "SQLite result exceeds configured bounds"
+                         : "inspect SQLite result payload";
+    state->terminal = 1;
+    return result;
+  }
+
   state->reader.statement = state->statement;
   state->reader.column_count = sqlite3_column_count(state->statement);
   state->reader.column = 0;
@@ -203,6 +239,8 @@ static orm_row_cursor_step orm_sqlite_cursor_next(void *context,
     state->terminal = 1;
     return result;
   }
+  ++state->result_rows;
+  state->result_bytes += row_bytes;
   result.kind = ORM_ROW_CURSOR_ROW;
   return result;
 }
@@ -230,13 +268,15 @@ static const orm_row_cursor_ops orm_sqlite_cursor_ops = {
     orm_sqlite_cursor_destroy};
 
 static orm_status_t orm_sqlite_cursor_from_statement_impl(
-    orm_row_cursor *out_cursor, sqlite3_stmt **statement, int text_projection,
+    orm_row_cursor *out_cursor, sqlite3_stmt **statement,
+    const orm_sqlite_cursor_config *config,
     orm_error_t *error) {
   orm_sqlite_cursor_state *state;
 
   if (out_cursor == NULL || out_cursor->ops != NULL ||
       out_cursor->context != NULL || statement == NULL || *statement == NULL ||
-      sqlite3_stmt_busy(*statement)) {
+      sqlite3_stmt_busy(*statement) || config == NULL ||
+      config->max_result_rows == 0u || config->max_result_bytes == 0u) {
     orm_sqlite_cursor_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
                                 "invalid or active SQLite statement");
     return ORM_STATUS_INVALID_ARGUMENT;
@@ -247,7 +287,8 @@ static orm_status_t orm_sqlite_cursor_from_statement_impl(
     return ORM_STATUS_OUT_OF_MEMORY;
   }
   state->statement = *statement;
-  state->reader.text_projection = text_projection;
+  state->max_result_rows = config->max_result_rows;
+  state->max_result_bytes = config->max_result_bytes;
   out_cursor->ops = &orm_sqlite_cursor_ops;
   out_cursor->context = state;
   *statement = NULL;
@@ -257,13 +298,8 @@ static orm_status_t orm_sqlite_cursor_from_statement_impl(
 
 orm_status_t orm_sqlite_cursor_from_statement(orm_row_cursor *out_cursor,
                                               sqlite3_stmt **statement,
+                                              const orm_sqlite_cursor_config *config,
                                               orm_error_t *error) {
-  return orm_sqlite_cursor_from_statement_impl(out_cursor, statement, 0,
-                                               error);
-}
-
-orm_status_t orm_sqlite_text_cursor_from_statement(
-    orm_row_cursor *out_cursor, sqlite3_stmt **statement, orm_error_t *error) {
-  return orm_sqlite_cursor_from_statement_impl(out_cursor, statement, 1,
+  return orm_sqlite_cursor_from_statement_impl(out_cursor, statement, config,
                                                error);
 }

@@ -106,6 +106,66 @@ static const orm_mongo_driver_ops orm_mongo_test_ops = {
     orm_mongo_test_next, orm_mongo_test_find, orm_mongo_test_destroy};
 
 spec("ORM MongoDB CFlow cursor") {
+  it("accepts the exact byte budget then rejects the next document") {
+    static const unsigned char id[] = "id";
+    static const unsigned char native_id[] = "_id";
+    static const unsigned char score[] = "score";
+    const orm_mongo_test_document documents[] = {{7, 19}, {11, 29}};
+    orm_mongo_test_driver_state state = {documents, 2u, 0u, 0};
+    orm_mongo_driver driver = {&orm_mongo_test_ops, &state};
+    const orm_mongo_field fields[] = {
+        {{id, 2u}, {native_id, 3u}}, {{score, 5u}, {score, 5u}}};
+    orm_mongo_cursor_config cursor_config = ORM_MONGO_CURSOR_CONFIG_INIT(
+        4u, sizeof(int64_t) * 2u, 32u);
+    orm_row_cursor cursor = {0};
+    orm_error_t error;
+    cserde_reader reader = {0};
+    orm_row_cursor_step step;
+
+    orm_error_init(&error);
+    mock_orm_mongo_test_destroy_reset();
+    mock_orm_mongo_test_destroy_expect(TINYMOCk_ARG((void *)&state));
+    check_equal(orm_mongo_cursor_start(&cursor, &driver, fields, 2u,
+                                       &cursor_config, &error),
+                ORM_STATUS_OK);
+    check_equal(cursor.ops->next(cursor.context, &reader).kind,
+                ORM_ROW_CURSOR_ROW);
+    step = cursor.ops->next(cursor.context, &reader);
+    check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
+    check_equal(step.status, ORM_STATUS_LIMIT_EXCEEDED);
+    cursor.ops->destroy(cursor.context);
+    mock_orm_mongo_test_destroy_verify();
+  }
+
+  it("rejects a document beyond max_result_bytes") {
+    static const unsigned char id[] = "id";
+    static const unsigned char native_id[] = "_id";
+    static const unsigned char score[] = "score";
+    const orm_mongo_test_document documents[] = {{7, 19}};
+    orm_mongo_test_driver_state state = {documents, 1u, 0u, 0};
+    orm_mongo_driver driver = {&orm_mongo_test_ops, &state};
+    const orm_mongo_field fields[] = {
+        {{id, 2u}, {native_id, 3u}}, {{score, 5u}, {score, 5u}}};
+    orm_mongo_cursor_config cursor_config =
+        ORM_MONGO_CURSOR_CONFIG_INIT(4u, sizeof(int64_t) * 2u - 1u, 32u);
+    orm_row_cursor cursor = {0};
+    orm_error_t error;
+    cserde_reader reader = {0};
+    orm_row_cursor_step step;
+
+    orm_error_init(&error);
+    mock_orm_mongo_test_destroy_reset();
+    mock_orm_mongo_test_destroy_expect(TINYMOCk_ARG((void *)&state));
+    check_equal(orm_mongo_cursor_start(&cursor, &driver, fields, 2u,
+                                       &cursor_config, &error),
+                ORM_STATUS_OK);
+    step = cursor.ops->next(cursor.context, &reader);
+    check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
+    check_equal(step.status, ORM_STATUS_LIMIT_EXCEEDED);
+    cursor.ops->destroy(cursor.context);
+    mock_orm_mongo_test_destroy_verify();
+  }
+
   it("advances one native document per resume and destroys the driver once") {
     static const unsigned char id[] = "id";
     static const unsigned char native_id[] = "_id";
@@ -116,7 +176,7 @@ spec("ORM MongoDB CFlow cursor") {
     const orm_mongo_field fields[] = {
         {{id, 2u}, {native_id, 3u}}, {{score, 5u}, {score, 5u}}};
     orm_mongo_cursor_config cursor_config =
-        ORM_MONGO_CURSOR_CONFIG_INIT(4u, 32u);
+        ORM_MONGO_CURSOR_CONFIG_INIT(4u, UINT64_MAX, 32u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
@@ -159,7 +219,7 @@ spec("ORM MongoDB CFlow cursor") {
     orm_mongo_driver driver = {&orm_mongo_test_ops, &state};
     const orm_mongo_field field = {{id, 2u}, {native_id, 3u}};
     orm_mongo_cursor_config cursor_config =
-        ORM_MONGO_CURSOR_CONFIG_INIT(4u, 32u);
+        ORM_MONGO_CURSOR_CONFIG_INIT(4u, UINT64_MAX, 32u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(

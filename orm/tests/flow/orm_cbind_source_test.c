@@ -143,6 +143,11 @@ static const orm_row_cursor_ops orm_flow_test_cursor_ops = {
     "flow-test", orm_flow_test_cursor_next,
     orm_flow_test_cursor_cancel, orm_flow_test_cursor_destroy};
 
+static const orm_row_cursor_ops orm_flow_test_partial_cursor_ops = {
+    sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
+    "partial-flow-test", NULL, orm_flow_test_cursor_cancel,
+    orm_flow_test_cursor_destroy};
+
 typedef struct orm_flow_test_sink_state {
   orm_flow_test_row row;
   size_t value_count;
@@ -172,6 +177,17 @@ static void orm_flow_test_sink_done(void *context) {
 }
 
 spec("ORM CBind CFlow source") {
+  it("disposes a partially initialized cursor from a failed backend contract") {
+    orm_flow_test_cursor_state state = {0};
+    orm_row_cursor cursor = {&orm_flow_test_partial_cursor_ops, &state};
+
+    check_false(orm_row_cursor_valid(&cursor));
+    orm_row_cursor_dispose(&cursor);
+    check_equal(state.destroy_count, (size_t)1u);
+    check_null(cursor.ops);
+    check_null(cursor.context);
+  }
+
   it("decodes a final cursor row into one owning typed value") {
     static const unsigned char id_name[] = "id";
     static const unsigned char score_name[] = "score";

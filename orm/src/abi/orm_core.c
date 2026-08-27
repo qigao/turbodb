@@ -328,7 +328,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                      &query->connection->limits, &cursor, error);
   if (status != ORM_STATUS_OK)
     return status;
-  if (cursor.ops == NULL || cursor.context == NULL) {
+  if (!orm_row_cursor_valid(&cursor)) {
+    orm_row_cursor_dispose(&cursor);
     orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
                   "ORM backend returned an invalid cursor");
     return ORM_STATUS_INTERNAL_ERROR;
@@ -337,8 +338,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
   status = orm_cbind_source_init(out_source, &cursor, &source_config, error);
-  if (status != ORM_STATUS_OK && cursor.ops != NULL)
-    cursor.ops->destroy(cursor.context);
+  if (status != ORM_STATUS_OK)
+    orm_row_cursor_dispose(&cursor);
   return status;
 }
 
@@ -671,6 +672,11 @@ orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit,
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
                   "limit requires a SELECT query");
     return ORM_STATUS_INVALID_STATE;
+  }
+  if (limit > query->connection->limits.max_result_rows) {
+    orm_error_set(error, ORM_STATUS_LIMIT_EXCEEDED,
+                  "query limit exceeds max_result_rows");
+    return ORM_STATUS_LIMIT_EXCEEDED;
   }
   query->plan.limit = limit;
   query->plan.has_limit = true;

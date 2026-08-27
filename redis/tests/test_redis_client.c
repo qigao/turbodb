@@ -269,7 +269,7 @@ void test_resp_array_reader_yields_fragmented_top_level_items(void) {
     redis_reply_t *item = NULL;
 
     TEST_ASSERT_NOT_NULL(client);
-    redis_resp_array_reader_init(&reader, 3u);
+    redis_resp_array_reader_init(&reader, 3u, 512u);
     TEST_ASSERT_EQUAL(0, redis_recv_buffer_append_bounded(
                              client, first, sizeof(first) - 1u, 64u));
     TEST_ASSERT_EQUAL(REDIS_RESP_ARRAY_ITEM,
@@ -310,6 +310,49 @@ void test_resp_bounded_append_rejects_oversized_fragment(void) {
     TEST_ASSERT_EQUAL(0, redis_recv_buffer_append_bounded(client, "1234", 4u, 4u));
     TEST_ASSERT_EQUAL(-2, redis_recv_buffer_append_bounded(client, "5", 1u, 4u));
     TEST_ASSERT_EQUAL(4, client->recv_buffer_used);
+    redis_client_destroy(client);
+}
+
+void test_resp_array_reader_rejects_reply_allocation_over_budget(void) {
+    static const char reply_data[] = "*1\r\n$32\r\n0123456789abcdefghijklmnopqrstuv\r\n";
+    redis_client_t *client = redis_client_create("127.0.0.1", 6379);
+    redis_resp_array_reader reader;
+    redis_reply_t *item = NULL;
+
+    TEST_ASSERT_NOT_NULL(client);
+    redis_resp_array_reader_init(&reader, 1u, 32u);
+    TEST_ASSERT_EQUAL(0, redis_recv_buffer_append_bounded(
+                             client, reply_data, sizeof(reply_data) - 1u,
+                             sizeof(reply_data)));
+    TEST_ASSERT_EQUAL(REDIS_RESP_ARRAY_LIMIT,
+                      redis_resp_array_reader_next(client, &reader, &item));
+    TEST_ASSERT_NULL(item);
+    redis_client_destroy(client);
+}
+
+void test_command_stream_reserves_transport_until_destroyed(void) {
+    const char *arguments[] = {"PING"};
+    redis_client_t *client = redis_client_create("127.0.0.1", 6379);
+    redis_command_stream_t *first = NULL;
+    redis_command_stream_t *second = NULL;
+
+    TEST_ASSERT_NOT_NULL(client);
+    client->is_connected = 1;
+    client->socket = (coro_socket_t *)(uintptr_t)1u;
+    TEST_ASSERT_EQUAL(TURBO_OK,
+                      redis_commandv_stream_open(client, 1, arguments, NULL,
+                                                 256u, 1u, &first));
+    TEST_ASSERT_NOT_NULL(first);
+    TEST_ASSERT_EQUAL(TURBO_EBUSY,
+                      redis_commandv_stream_open(client, 1, arguments, NULL,
+                                                 256u, 1u, &second));
+    TEST_ASSERT_NULL(second);
+
+    redis_command_stream_destroy(first);
+    TEST_ASSERT_NULL(client->active_stream);
+    TEST_ASSERT_EQUAL(1, client->is_connected);
+    client->socket = NULL;
+    client->is_connected = 0;
     redis_client_destroy(client);
 }
 
@@ -890,6 +933,7 @@ suite("redis_client") {
         REDIS_RUN_TEST(test_resp_parser_rejects_malformed_headers, "should reject malformed RESP headers and framing");
         REDIS_RUN_TEST(test_resp_array_reader_yields_fragmented_top_level_items, "should yield top-level RESP items across arbitrary fragments");
         REDIS_RUN_TEST(test_resp_bounded_append_rejects_oversized_fragment, "should reject a fragment beyond the configured buffer bound");
+        REDIS_RUN_TEST(test_resp_array_reader_rejects_reply_allocation_over_budget, "should reject decoded reply allocation beyond the configured bound");
     }
 
     group("Stream Structure") {
@@ -907,6 +951,7 @@ suite("redis_client") {
         REDIS_RUN_TEST(test_command_result_distinguishes_not_sent, "should report commands rejected before send");
         REDIS_RUN_TEST(test_script_results_preserve_not_sent, "should preserve scripting commands rejected before send");
         REDIS_RUN_TEST(test_server_error_classification, "should classify stable Redis server errors");
+        REDIS_RUN_TEST(test_command_stream_reserves_transport_until_destroyed, "should reject a second stream and release an unsent stream cleanly");
     }
 
     group("Stream API") {

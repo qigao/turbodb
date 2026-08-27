@@ -13,6 +13,9 @@
 #define ORM_SQLITE_TEST_DATA_PREFIX_SIZE \
   (offsetof(cmeta_data_desc, shape) + sizeof(((cmeta_data_desc *)0)->shape))
 
+static const orm_sqlite_cursor_config orm_sqlite_test_cursor_config =
+    ORM_SQLITE_CURSOR_CONFIG_INIT(UINT64_MAX, UINT64_MAX);
+
 Struct(orm_sqlite_test_row,
     (int, id),
     (long, score)
@@ -257,7 +260,8 @@ spec("ORM SQLite CFlow cursor") {
                     database, "select 1 as id, 2 as score where 0", -1,
                     &statement, NULL),
                 SQLITE_OK);
-    check_equal(orm_sqlite_cursor_from_statement(&cursor, &statement, &error),
+    check_equal(orm_sqlite_cursor_from_statement(
+                    &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
@@ -311,7 +315,8 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(sqlite3_exec(database, create_sql, NULL, NULL, NULL), SQLITE_OK);
     check_equal(sqlite3_prepare_v2(database, select_sql, -1, &statement, NULL),
                 SQLITE_OK);
-    check_equal(orm_sqlite_cursor_from_statement(&cursor, &statement, &error),
+    check_equal(orm_sqlite_cursor_from_statement(
+                    &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_equal(orm_cbind_source_init(&source, &cursor, &source_config, &error),
                 ORM_STATUS_OK);
@@ -364,7 +369,8 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(sqlite3_open(":memory:", &database), SQLITE_OK);
     check_equal(sqlite3_prepare_v2(database, sql, -1, &statement, NULL),
                 SQLITE_OK);
-    check_equal(orm_sqlite_cursor_from_statement(&cursor, &statement, &error),
+    check_equal(orm_sqlite_cursor_from_statement(
+                    &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_null(statement);
     check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
@@ -420,7 +426,8 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(sqlite3_open(":memory:", &database), SQLITE_OK);
     check_equal(sqlite3_prepare_v2(database, sql, -1, &statement, NULL),
                 SQLITE_OK);
-    check_equal(orm_sqlite_cursor_from_statement(&cursor, &statement, &error),
+    check_equal(orm_sqlite_cursor_from_statement(
+                    &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
@@ -459,7 +466,8 @@ spec("ORM SQLite CFlow cursor") {
                     database, "select 1 as id, 'Alice' as name", -1,
                     &statement, NULL),
                 SQLITE_OK);
-    check_equal(orm_sqlite_cursor_from_statement(&cursor, &statement, &error),
+    check_equal(orm_sqlite_cursor_from_statement(
+                    &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
@@ -494,7 +502,8 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(sqlite3_open(":memory:", &database), SQLITE_OK);
     check_equal(sqlite3_prepare_v2(database, sql, -1, &statement, NULL),
                 SQLITE_OK);
-    check_equal(orm_sqlite_cursor_from_statement(&cursor, &statement, &error),
+    check_equal(orm_sqlite_cursor_from_statement(
+                    &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
@@ -532,7 +541,8 @@ spec("ORM SQLite CFlow cursor") {
                     database, "select 7 as id, 19 as score", -1,
                     &statement, NULL),
                 SQLITE_OK);
-    check_equal(orm_sqlite_cursor_from_statement(&cursor, &statement, &error),
+    check_equal(orm_sqlite_cursor_from_statement(
+                    &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);

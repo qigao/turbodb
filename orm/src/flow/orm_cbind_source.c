@@ -27,12 +27,24 @@ static void orm_cbind_set_error(orm_error_t *error, orm_status_t status,
                  message != NULL ? message : orm_status_message(status));
 }
 
-static int orm_row_cursor_valid(const orm_row_cursor *cursor) {
+int orm_row_cursor_valid(const orm_row_cursor *cursor) {
   return cursor != NULL && cursor->ops != NULL && cursor->context != NULL &&
          cursor->ops->struct_size >= sizeof(orm_row_cursor_ops) &&
          cursor->ops->abi_version == ORM_ROW_CURSOR_OPS_ABI_VERSION &&
          cursor->ops->name != NULL && cursor->ops->next != NULL &&
          cursor->ops->cancel != NULL && cursor->ops->destroy != NULL;
+}
+
+void orm_row_cursor_dispose(orm_row_cursor *cursor) {
+  if (cursor == NULL)
+    return;
+  if (cursor->ops != NULL && cursor->context != NULL &&
+      cursor->ops->struct_size >= sizeof(orm_row_cursor_ops) &&
+      cursor->ops->abi_version == ORM_ROW_CURSOR_OPS_ABI_VERSION &&
+      cursor->ops->destroy != NULL)
+    cursor->ops->destroy(cursor->context);
+  cursor->ops = NULL;
+  cursor->context = NULL;
 }
 
 static int orm_cbind_source_config_valid(

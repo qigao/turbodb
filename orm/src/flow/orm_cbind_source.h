@@ -54,6 +54,9 @@ typedef struct orm_row_cursor {
   void *context;
 } orm_row_cursor;
 
+int orm_row_cursor_valid(const orm_row_cursor *cursor);
+void orm_row_cursor_dispose(orm_row_cursor *cursor);
+
 typedef struct orm_cbind_source_config {
   size_t struct_size;
   uint32_t abi_version;

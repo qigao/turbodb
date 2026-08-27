@@ -135,6 +135,65 @@ static void orm_postgres_test_check_token(cserde_reader *reader,
 }
 
 spec("ORM PostgreSQL single-row cursor") {
+  it("rejects a row beyond max_result_rows") {
+    static const char *const names[] = {"value"};
+    static const uint32_t types[] = {25u};
+    static const char *const values[] = {"x"};
+    static const size_t lengths[] = {1u};
+    static const uint8_t nulls[] = {0u};
+    orm_postgres_test_result first = {
+        ORM_POSTGRES_RESULT_SINGLE_ROW, 1u, names, types, values, lengths,
+        nulls, NULL, NULL};
+    orm_postgres_test_result second = first;
+    orm_postgres_test_result terminal = {
+        ORM_POSTGRES_RESULT_TUPLES_DONE, 1u, names, types, NULL, NULL, NULL,
+        NULL, NULL};
+    int connection_token = 0;
+    orm_postgres_driver driver = {
+        &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
+        &connection_token};
+    orm_postgres_query_request request = {
+        "select value from rows", 0, NULL, NULL, NULL, NULL, 0};
+    orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+        1u, 1u, 128u, NULL, NULL, NULL);
+    orm_row_cursor cursor = {0};
+    orm_error_t error;
+    cserde_reader reader = {0};
+
+    orm_error_init(&error);
+    orm_postgres_test_reset_mocks();
+    orm_postgres_test_expect_start(&connection_token, &request);
+    mock_orm_postgres_test_next_result_expect(
+        TINYMOCk_ARG((void *)&connection_token),
+        TINYMOCk_RETURN((void *)&first));
+    mock_orm_postgres_test_next_result_expect(
+        TINYMOCk_ARG((void *)&connection_token),
+        TINYMOCk_RETURN((void *)&second));
+    mock_orm_postgres_test_next_result_expect(
+        TINYMOCk_ARG((void *)&connection_token),
+        TINYMOCk_RETURN((void *)&terminal));
+    mock_orm_postgres_test_next_result_expect(
+        TINYMOCk_ARG((void *)&connection_token),
+        TINYMOCk_RETURN((void *)NULL));
+    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&first));
+    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&second));
+    mock_orm_postgres_test_release_result_expect(
+        TINYMOCk_ARG((void *)&terminal));
+
+    check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
+                                          &error),
+                ORM_STATUS_OK);
+    check_equal(cursor.ops->next(cursor.context, &reader).kind,
+                ORM_ROW_CURSOR_ROW);
+    {
+      const orm_row_cursor_step step = cursor.ops->next(cursor.context, &reader);
+      check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
+      check_equal(step.status, ORM_STATUS_LIMIT_EXCEEDED);
+    }
+    cursor.ops->destroy(cursor.context);
+    orm_postgres_test_verify_mocks();
+  }
+
   it("owns optional execution metadata and drains on destroy") {
     int connection_token = 0;
     orm_postgres_driver driver = {
@@ -143,7 +202,7 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_postgres_query_request request = {
         "select 1", 0, NULL, NULL, NULL, NULL, 0};
     orm_postgres_cursor_config config =
-        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, 64u, NULL, NULL, NULL);
+        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, UINT64_MAX, 64u, NULL, NULL, NULL);
     orm_row_cursor cursor = {0};
     orm_error_t error;
 
@@ -183,7 +242,7 @@ spec("ORM PostgreSQL single-row cursor") {
     size_t columns = 0u;
     orm_error_t runtime_error;
     orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
-        2u, 1024u, &columns, &affected_rows, &runtime_error);
+        2u, UINT64_MAX, 1024u, &columns, &affected_rows, &runtime_error);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     cserde_reader reader = {0};
@@ -243,7 +302,8 @@ spec("ORM PostgreSQL single-row cursor") {
         "select payload, missing from files", 0, NULL, NULL, NULL, NULL, 0};
     orm_error_t runtime_error;
     orm_postgres_cursor_config config =
-        ORM_POSTGRES_CURSOR_CONFIG_INIT(2u, 1024u, NULL, NULL, &runtime_error);
+        ORM_POSTGRES_CURSOR_CONFIG_INIT(2u, UINT64_MAX, 1024u, NULL, NULL,
+                                        &runtime_error);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     cserde_reader reader = {0};
@@ -306,7 +366,8 @@ spec("ORM PostgreSQL single-row cursor") {
         "select value from payloads", 0, NULL, NULL, NULL, NULL, 0};
     orm_error_t runtime_error;
     orm_postgres_cursor_config config =
-        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, 4u, NULL, NULL, &runtime_error);
+        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, UINT64_MAX, 4u, NULL, NULL,
+                                        &runtime_error);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     cserde_reader reader = {0};
@@ -361,7 +422,8 @@ spec("ORM PostgreSQL single-row cursor") {
         "select value from unstable_query", 0, NULL, NULL, NULL, NULL, 0};
     orm_error_t runtime_error;
     orm_postgres_cursor_config config =
-        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, 128u, NULL, NULL, &runtime_error);
+        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, UINT64_MAX, 128u, NULL, NULL,
+                                        &runtime_error);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     cserde_reader reader = {0};
@@ -406,7 +468,7 @@ spec("ORM PostgreSQL single-row cursor") {
     uint64_t affected_rows = 0u;
     orm_error_t runtime_error;
     orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
-        1u, 1u, NULL, &affected_rows, &runtime_error);
+        1u, UINT64_MAX, 1u, NULL, &affected_rows, &runtime_error);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     cserde_reader reader = {0};
@@ -444,7 +506,8 @@ spec("ORM PostgreSQL single-row cursor") {
         "update person set active = false", 0, NULL, NULL, NULL, NULL, 0};
     orm_error_t runtime_error;
     orm_postgres_cursor_config config =
-        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, 1u, NULL, NULL, &runtime_error);
+        ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, UINT64_MAX, 1u, NULL, NULL,
+                                        &runtime_error);
     orm_row_cursor cursor = {0};
     orm_error_t error;
     cserde_reader reader = {0};

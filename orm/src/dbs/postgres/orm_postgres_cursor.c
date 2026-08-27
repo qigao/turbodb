@@ -32,6 +32,7 @@ struct orm_postgres_cursor_state {
   size_t bytea_capacity;
   size_t bytea_used;
   size_t result_bytes;
+  uint64_t result_rows;
   size_t *bytea_offsets;
   size_t *bytea_sizes;
   int query_active;
@@ -79,7 +80,8 @@ static int orm_postgres_config_valid(
     const orm_postgres_cursor_config *config) {
   return config != NULL && config->struct_size >= sizeof(*config) &&
          config->abi_version == ORM_POSTGRES_CURSOR_CONFIG_ABI_VERSION &&
-         config->max_columns != 0u && config->max_result_bytes != 0u;
+         config->max_columns != 0u && config->max_result_rows != 0u &&
+         config->max_result_bytes != 0u;
 }
 
 static void orm_postgres_release_current(orm_postgres_cursor_state *state) {
@@ -409,6 +411,10 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
                     : "PostgreSQL returned inconsistent dimensions");
 
     if (result_status == ORM_POSTGRES_RESULT_SINGLE_ROW) {
+      if (state->result_rows >= state->config.max_result_rows)
+        return orm_postgres_cursor_error(
+            state, ORM_STATUS_LIMIT_EXCEEDED,
+            "PostgreSQL result exceeds max_result_rows");
       status = orm_postgres_validate_row_bytes(state);
       if (status != ORM_STATUS_OK)
         return orm_postgres_cursor_error(
@@ -430,6 +436,7 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
         return orm_postgres_cursor_error(
             state, ORM_STATUS_INTERNAL_ERROR,
             "initialize PostgreSQL row reader");
+      ++state->result_rows;
       step.kind = ORM_ROW_CURSOR_ROW;
       return step;
     }

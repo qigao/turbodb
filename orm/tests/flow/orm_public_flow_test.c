@@ -46,6 +46,151 @@ static const cmeta_data_desc orm_public_flow_row_data = {
     .shape = &orm_public_flow_row_shape};
 
 spec("ORM public reactive flow") {
+  it("rejects a query LIMIT above max_result_rows") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    connection_config.max_result_rows = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_create(connection, orm_view("rows"), &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_set_limit(query, 1u, &error), ORM_STATUS_OK);
+    check_equal(orm_query_set_limit(query, 2u, &error),
+                ORM_STATUS_LIMIT_EXCEEDED);
+
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("rejects a SQLite row beyond max_result_rows") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_flow_config_t flow_config;
+    cflow_source source = {0};
+    orm_public_flow_row row = {0};
+    cflow_step step;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    connection_config.max_result_rows = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection,
+                        orm_view("select 7 as id, 19 as score "
+                                 "union all select 11, 29"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    orm_flow_config(&flow_config, &orm_public_flow_row_data);
+    check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
+                ORM_STATUS_OK);
+
+    step = cflow_source_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_VALUE);
+    step = cflow_source_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_ERROR);
+    check_not_null(step.error);
+
+    cflow_source_destroy(&source);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("rejects a SQLite row beyond max_result_bytes") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_flow_config_t flow_config;
+    cflow_source source = {0};
+    orm_public_flow_row row = {0};
+    cflow_step step;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    connection_config.max_result_bytes = sizeof(int64_t) * 2u - 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection, orm_view("select 7 as id, 19 as score"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    orm_flow_config(&flow_config, &orm_public_flow_row_data);
+    check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
+                ORM_STATUS_OK);
+
+    step = cflow_source_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_ERROR);
+    check_not_null(step.error);
+
+    cflow_source_destroy(&source);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("accepts a SQLite row at the exact max_result_bytes boundary") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_flow_config_t flow_config;
+    cflow_source source = {0};
+    orm_public_flow_row row = {0};
+    cflow_step step;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    connection_config.max_result_bytes = sizeof(int64_t) * 2u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection, orm_view("select 7 as id, 19 as score"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    orm_flow_config(&flow_config, &orm_public_flow_row_data);
+    check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
+                ORM_STATUS_OK);
+
+    step = cflow_source_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_VALUE);
+    check_equal(row.id, 7);
+    check_equal(row.score, 19L);
+    step = cflow_source_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_DONE);
+
+    cflow_source_destroy(&source);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
   it("opens a typed SQLite Source that advances one row per resume") {
     orm_error_t error;
     orm_config_t connection_config;

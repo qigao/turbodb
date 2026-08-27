@@ -336,7 +336,8 @@ static orm_status_t orm_mongo_open_select(
   if (status != ORM_STATUS_OK)
     goto cleanup;
   cursor_config = (orm_mongo_cursor_config)ORM_MONGO_CURSOR_CONFIG_INIT(
-      (size_t)limits->max_result_rows, (size_t)limits->max_result_bytes);
+      limits->max_result_rows, limits->max_result_bytes,
+      limits->max_query_bytes);
   status = orm_mongo_cursor_start(out_cursor, &driver, fields,
                                   vec_size(&plan->columns), &cursor_config,
                                   error);
