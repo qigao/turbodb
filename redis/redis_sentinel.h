@@ -1,141 +1,91 @@
-/**
- * @file redis_sentinel.h
- * @brief Redis Sentinel service discovery and failover client
- */
-
 #ifndef REDIS_SENTINEL_H
 #define REDIS_SENTINEL_H
 
-#include "platform.h"
-#include "redis_export.h"
-#include "redis_client.h"
-#include <stddef.h>
-#include <stdint.h>
+#include "redis_pool.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define REDIS_SENTINEL_MAX_ENDPOINTS 64u
+typedef struct redis_sentinel {
+  void *impl;
+} redis_sentinel;
 
-typedef struct redis_sentinel_s redis_sentinel_t;
+/** Borrowed master endpoint view, invalidated by close/destroy. */
+typedef struct redis_sentinel_master {
+  const char *host;
+  uint16_t port;
+} redis_sentinel_master;
 
-/** Sentinel and data-node configuration. */
-typedef struct {
+typedef struct redis_sentinel_config {
+  redis_io_runtime *runtime;
   const char **sentinel_hosts;
-  uint16_t *sentinel_ports;
+  const uint16_t *sentinel_ports;
   size_t sentinel_count;
   const char *service_name;
-
-  /* Credentials used when talking to Sentinel instances. */
   const char *sentinel_username;
   const char *sentinel_password;
-
-  /* Credentials and database used by discovered Redis masters. */
   const char *username;
   const char *password;
   int database;
+  size_t connection_capacity;
+  cflow_io_lease_id base_lease_id;
+  size_t address_capacity;
+  size_t max_command_bytes;
+  size_t initial_buffer_bytes;
+  size_t max_buffer_bytes;
+  size_t receive_chunk_bytes;
+  size_t discovery_reply_bytes;
+  uint64_t cancel_timeout_ns;
+} redis_sentinel_config;
 
-  size_t min_connections;
-  size_t max_connections;
-  uint32_t sentinel_connect_timeout_ms;
-  uint32_t sentinel_command_timeout_ms;
-  uint32_t connect_timeout_ms;
-  uint32_t command_timeout_ms;
-  uint32_t idle_timeout_ms;
-  uint32_t topology_refresh_ms;
-} redis_sentinel_config_t;
+#define REDIS_SENTINEL_CONFIG_INIT                                        \
+  {                                                                      \
+    NULL, NULL, NULL, 0u, NULL, NULL, NULL, NULL, NULL, 0, 2u, 1u, 8u,  \
+        8u * 1024u * 1024u, 4096u, 8u * 1024u * 1024u,                 \
+        16u * 1024u, 64u * 1024u,                                      \
+        UINT64_C(5000000000)                                             \
+  }
 
-#define REDIS_SENTINEL_CONFIG_DEFAULT                                                              \
-  {.sentinel_hosts = NULL,                                                                         \
-   .sentinel_ports = NULL,                                                                         \
-   .sentinel_count = 0,                                                                            \
-   .service_name = NULL,                                                                           \
-   .sentinel_username = NULL,                                                                      \
-   .sentinel_password = NULL,                                                                      \
-   .username = NULL,                                                                               \
-   .password = NULL,                                                                               \
-   .database = 0,                                                                                  \
-   .min_connections = 2,                                                                           \
-   .max_connections = 10,                                                                          \
-   .sentinel_connect_timeout_ms = 1000,                                                            \
-   .sentinel_command_timeout_ms = 2000,                                                            \
-   .connect_timeout_ms = 5000,                                                                     \
-   .command_timeout_ms = 5000,                                                                     \
-   .idle_timeout_ms = 60000,                                                                       \
-   .topology_refresh_ms = 30000}
+typedef enum redis_sentinel_connect_step_kind {
+  REDIS_SENTINEL_CONNECT_WAIT = 0,
+  REDIS_SENTINEL_CONNECT_DONE,
+  REDIS_SENTINEL_CONNECT_ERROR
+} redis_sentinel_connect_step_kind;
 
-typedef struct {
-  uint64_t commands_sent;
-  uint64_t commands_failed;
-  uint64_t discovery_attempts;
-  uint64_t discovery_failures;
-  uint64_t topology_refreshes;
-  uint64_t failovers;
-  uint64_t safe_retries;
-} redis_sentinel_stats_t;
+typedef struct redis_sentinel_connect_step {
+  redis_sentinel_connect_step_kind kind;
+  cflow_waitable waitable;
+  int status;
+} redis_sentinel_connect_step;
+
+/** Copy configuration and initialize a bounded discovery state machine. */
+REDIS_API int redis_sentinel_init(redis_sentinel *sentinel,
+                                  const redis_sentinel_config *config);
 
 /**
- * Create a Sentinel client and copy its configuration.
- *
- * The object is event-loop affine and is not thread-safe. connect(), refresh(),
- * and command functions must run inside a CoroNet coroutine.
+ * Query the first configured endpoint with `SENTINEL
+ * get-master-addr-by-name`, then connect the discovered master pool. WAIT
+ * carries the exact underlying CFlow waitable. Discovery is startup-only; a
+ * failover requires close/destroy followed by init.
  */
-REDIS_API redis_sentinel_t *redis_sentinel_create(const redis_sentinel_config_t *config);
+REDIS_API redis_sentinel_connect_step redis_sentinel_connect_next(
+    redis_sentinel *sentinel);
 
-/** Discover and validate the current master, then start its connection pool. */
-REDIS_API int redis_sentinel_connect(redis_sentinel_t *sentinel);
+/** Open one command against the currently discovered master pool. */
+REDIS_API int redis_sentinel_command_open(
+    redis_sentinel *sentinel, int argc, const char **argv,
+    const size_t *argvlen, size_t max_reply_bytes,
+    redis_pool_stream *out_stream);
 
-/** Re-query Sentinel and atomically replace the current validated master pool. */
-REDIS_API int redis_sentinel_refresh(redis_sentinel_t *sentinel);
-
-/** Stop accepting commands and retire the current pool generation. */
-REDIS_API void redis_sentinel_disconnect(redis_sentinel_t *sentinel);
-
-/**
- * Destroy the Sentinel client.
- *
- * Pool generations borrowed by in-flight commands are drained before their
- * storage is released. The pointer must not be used after this call.
- */
-REDIS_API void redis_sentinel_destroy(redis_sentinel_t *sentinel);
-
-/**
- * Execute a binary-safe command against the discovered master.
- *
- * READONLY, MASTERDOWN, and commands rejected before sending may be retried
- * once after a successful master switch. Uncertain sends and unknown replies
- * are never retried. `out` owns its reply and must be cleared with
- * redis_command_result_clear().
- */
-REDIS_API int redis_sentinel_commandv_result(redis_sentinel_t *sentinel, int argc,
-                                             const char **argv, const size_t *argvlen,
-                                             redis_command_result_t *out);
-
-/** Callback variant; returns 0 whenever a final Redis reply was received. */
-REDIS_API int redis_sentinel_commandv(redis_sentinel_t *sentinel, int argc, const char **argv,
-                                      const size_t *argvlen, redis_command_cb_t callback,
-                                      void *user_data);
-
-/** Common command helpers. */
-REDIS_API int redis_sentinel_set(redis_sentinel_t *sentinel, const char *key, const char *value,
-                                 redis_command_cb_t callback, void *user_data);
-REDIS_API int redis_sentinel_get(redis_sentinel_t *sentinel, const char *key,
-                                 redis_command_cb_t callback, void *user_data);
-REDIS_API int redis_sentinel_del(redis_sentinel_t *sentinel, const char *key,
-                                 redis_command_cb_t callback, void *user_data);
-
-/** Copy the current master endpoint into caller-owned storage. */
-REDIS_API int redis_sentinel_get_master(const redis_sentinel_t *sentinel, char *host,
-                                        size_t host_size, uint16_t *port);
-
-REDIS_API int redis_sentinel_is_healthy(const redis_sentinel_t *sentinel);
-REDIS_API void redis_sentinel_get_stats(const redis_sentinel_t *sentinel,
-                                        redis_sentinel_stats_t *stats);
-REDIS_API void redis_sentinel_reset_stats(redis_sentinel_t *sentinel);
+REDIS_API int redis_sentinel_get_master(const redis_sentinel *sentinel,
+                                        redis_sentinel_master *master);
+REDIS_API int redis_sentinel_ready(const redis_sentinel *sentinel);
+REDIS_API int redis_sentinel_close(redis_sentinel *sentinel);
+REDIS_API int redis_sentinel_destroy(redis_sentinel *sentinel);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* REDIS_SENTINEL_H */
+#endif

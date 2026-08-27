@@ -21,18 +21,16 @@ Android NDK 交叉编译，并使用 `tools/android-test.ps1` 将单个测试 ta
 和 x86 的 Debug/Release configure、build、install presets。
 `CMakeUserPresets.json` 只保存本机 NDK、Ninja、vcpkg、宿主生成器和依赖路径。
 
-Android 的 TurboUtils、TurboParser、TurboNet、TurboDB 必须使用相同 ABI 和构建类型。
+Android 的 TurboUtils 与 TurboDB 必须使用相同 ABI 和构建类型。
 ARM64 Release 默认读取：
 
 - `C:/projects/cpp/turbonet/turbo-utils/build/android-arm64-v8a-release`
-- `C:/projects/cpp/turbonet/turbo-parser/build/android-arm64-v8a-release`
-- `C:/projects/cpp/turbonet/turbonet/build/android-arm64-v8a-release`
 
 ## 前置条件
 
 - PowerShell 7、CMake、Ninja、Android SDK Platform Tools 和 NDK。
 - `CMakeUserPresets.json` 中的本机路径存在。
-- 同 ABI/配置的 TurboUtils 与 TurboNet Android build tree 已配置并构建。
+- 同 ABI/配置的 TurboUtils Android build tree 已配置并构建。
 - ADB 设备状态为 `device`，且设备 ABI 与 preset 一致。
 - TurboDB 的宿主 lemon 已构建。当前 Windows 路径为
   `build/Msvc-Release/bin/lemon.exe`；re2c 使用宿主机可执行文件。
@@ -68,7 +66,7 @@ cmake --build --preset android-arm64-v8a-debug-win --parallel
 ```
 
 安装内容包含 headers、库、`TurboDBConfig.cmake`、`TidesDBConfig.cmake` 和导出 targets。
-消费项目仍需提供同 ABI/配置的 TurboUtils、TurboParser、TurboNet、xxHash 和 zstd；
+消费项目仍需提供同 ABI/配置的 TurboUtils、xxHash 和 zstd；
 package 不复制这些依赖。
 
 消费端示例：
@@ -82,18 +80,17 @@ target_link_libraries(app PRIVATE
     TidesDB::tidesdb)
 ```
 
-消费项目的 `CMAKE_PREFIX_PATH` 应包含 TurboUtils、TurboParser、TurboNet、TurboDB package
+消费项目的 `CMAKE_PREFIX_PATH` 应包含 TurboUtils、TurboDB package
 以及对应 vcpkg Android triplet，不能混入 Windows package。
 
 ## WiFi 真机测试
 
 ```powershell
-./tools/android-test.ps1 test_redis_client `
+./tools/android-test.ps1 test_redis_cflow `
   -Serial "adb-38101FDJG00AVU-Rx6MV9._adb-tls-connect._tcp" `
   -Tap `
   -LibraryDirectory @(
-    "C:/projects/cpp/turbonet/turbo-utils/build/android-arm64-v8a-release/bin",
-    "C:/projects/cpp/turbonet/turbonet/build/android-arm64-v8a-release/bin"
+    "C:/projects/cpp/turbonet/turbo-utils/build/android-arm64-v8a-release/bin"
   )
 ```
 
@@ -103,7 +100,7 @@ target_link_libraries(app PRIVATE
 TinyTest 与已有产物：
 
 ```powershell
-./tools/android-test.ps1 test_redis_client -Filter "response" -Tap
+./tools/android-test.ps1 test_redis_cflow -Filter "RESP stream" -Tap
 ./tools/android-test.ps1 manifest_tests -JUnit artifacts/manifest_tests.android.xml
 ./tools/android-test.ps1 manifest_tests -TestArgument @("--list", "--no-color")
 ./tools/android-test.ps1 manifest_tests -NoBuild
@@ -134,9 +131,9 @@ runner 不解析 CTest XML，也不从 CMake 输出文本猜测路径：
 ## LLDB 调试
 
 ```powershell
-./tools/android-test.ps1 test_redis_client -Lldb
+./tools/android-test.ps1 test_redis_cflow -Lldb
 
-./tools/android-test.ps1 test_redis_client `
+./tools/android-test.ps1 test_redis_cflow `
   -NoBuild -Lldb `
   -LldbCommand @(
     "breakpoint set --name main",

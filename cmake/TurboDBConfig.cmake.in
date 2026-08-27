@@ -4,21 +4,22 @@ include(CMakeFindDependencyMacro)
 
 find_dependency(Threads)
 find_dependency(TurboUtils CONFIG)
-find_dependency(TurboParser CONFIG)
-find_dependency(TurboNet CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/TurboDBTargets.cmake")
+set(TurboDB_Redis_FOUND TRUE)
 
-# Import TurboDB targets before ORM.  A Redis-enabled ORM package asks for
-# TurboDB only when TurboDB::Redis is not available; reversing this order
-# creates TurboDBConfig -> OrmConfig -> TurboDBConfig recursion downstream.
-find_dependency(Orm CONFIG
-                PATHS "${CMAKE_CURRENT_LIST_DIR}/../Orm"
-                NO_DEFAULT_PATH)
-
-if(NOT TARGET TurboDB::ORM)
-  add_library(TurboDB::ORM INTERFACE IMPORTED)
-  set_target_properties(TurboDB::ORM PROPERTIES INTERFACE_LINK_LIBRARIES Orm::C)
+if("ORM" IN_LIST TurboDB_FIND_COMPONENTS)
+  # Import Redis before ORM. A Redis-enabled ORM package asks for TurboDB only
+  # when TurboDB::Redis is unavailable, so this order avoids config recursion.
+  find_dependency(Orm CONFIG
+                  PATHS "${CMAKE_CURRENT_LIST_DIR}/../Orm"
+                  NO_DEFAULT_PATH)
+  if(NOT TARGET TurboDB::ORM)
+    add_library(TurboDB::ORM INTERFACE IMPORTED)
+    set_target_properties(TurboDB::ORM PROPERTIES
+                          INTERFACE_LINK_LIBRARIES Orm::C)
+  endif()
+  set(TurboDB_ORM_FOUND TRUE)
 endif()
 
 check_required_components(TurboDB)

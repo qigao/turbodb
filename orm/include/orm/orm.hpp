@@ -100,6 +100,9 @@ public:
   [[nodiscard]] cflow_step next(Row &row) {
     return cflow_source_resume(&source_, nullptr, &row);
   }
+  [[nodiscard]] cflow_step next(Row &row, cflow_resume_ctx &context) {
+    return cflow_source_resume(&source_, &context, &row);
+  }
   void cancel() noexcept {
     if (cflow_source_valid(&source_)) cflow_source_cancel(&source_);
   }

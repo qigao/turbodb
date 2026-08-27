@@ -1,6 +1,6 @@
 #include "orm_redis_lib.h"
 
-#include <redis_client.h>
+#include <redis_reply.h>
 
 static orm_redis_reply_kind orm_redis_lib_kind(void *context,
                                                const void *reply_) {

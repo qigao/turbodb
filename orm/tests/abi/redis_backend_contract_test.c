@@ -24,12 +24,15 @@ int main(void) {
     return 1;
   }
 
-  config.options = NULL;
-  config.option_count = 0;
+  invalid_option.keyword = view("port");
+  invalid_option.value = view("1");
+  config.options = &invalid_option;
+  config.option_count = 1;
   orm_error_init(&error);
   if (orm_connect(&config, &connection, &error) != ORM_STATUS_CONNECTION_ERROR ||
-      connection != NULL || strstr(error.message, "active CoroNet coroutine") == NULL) {
-    fprintf(stderr, "Redis ORM did not fail fast outside CoroNet: %s\n", error.message);
+      connection != NULL || strstr(error.message, "CFlow") == NULL) {
+    fprintf(stderr, "Redis ORM did not report its CFlow connect failure: %s\n",
+            error.message);
     orm_disconnect(connection);
     return 1;
   }

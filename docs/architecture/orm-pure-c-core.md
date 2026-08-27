@@ -108,13 +108,13 @@ fallback and no hidden eager result.
   one projected Query Engine row at the ORM cursor boundary. The response root
   is never materialized.
 - The command stream owns its encoded request and sends it only on first
-  demand. Each `next` parses buffered bytes first and asks CoroNet for another
-  owned receive chunk only when the current item is incomplete.
-- CoroNet receive memory is copied into the bounded Redis receive buffer and
+  demand. Each `next` parses buffered bytes first and submits another CFlow
+  native receive only when the current item is incomplete.
+- Native receive memory is copied into the bounded Redis receive buffer and
   immediately released. A parsed item is owned until the ORM cursor calls
   `release_row` before its next resume; CSerde views into that item are
   transient.
-- One client permits one active RESP stream in its single coroutine domain.
+- One connection permits one active RESP stream in its scheduler-affine domain.
   `max_result_rows`, cumulative payload bytes, top-level item count, and
   retained unparsed network bytes are hard bounds.
 - Destroying a stream before its reply is complete closes the connection and

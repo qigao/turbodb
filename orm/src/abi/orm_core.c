@@ -303,6 +303,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                                   orm_error_t *error) {
   orm_row_cursor cursor = {0};
   orm_cbind_source_config source_config;
+  cflow_source timed_source = {0};
+  uint64_t wait_timeout_ns;
   orm_status_t status;
   if (query == NULL || query->connection == NULL || config == NULL ||
       config->struct_size != sizeof(*config) ||
@@ -337,9 +339,21 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   source_config = (orm_cbind_source_config)ORM_CBIND_SOURCE_CONFIG_INIT(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
+  wait_timeout_ns = cursor.wait_timeout_ns;
   status = orm_cbind_source_init(out_source, &cursor, &source_config, error);
-  if (status != ORM_STATUS_OK)
+  if (status != ORM_STATUS_OK) {
     orm_row_cursor_dispose(&cursor);
+    return status;
+  }
+  if (wait_timeout_ns != 0u &&
+      !cflow_source_timeout(&timed_source, out_source,
+                            cflow_duration_from_ns(wait_timeout_ns))) {
+    cflow_source_destroy(out_source);
+    orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
+                  "allocate ORM row WAIT timeout source");
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+  if (cflow_source_valid(&timed_source)) *out_source = timed_source;
   return status;
 }
 

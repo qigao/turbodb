@@ -55,7 +55,32 @@ typedef struct orm_redis_test_reply {
 typedef struct orm_redis_test_driver {
   const orm_redis_test_reply *rows[2];
   size_t next;
+  cflow_waitable waitable;
+  size_t waits_remaining;
+  size_t cancel_count;
 } orm_redis_test_driver;
+
+typedef struct orm_redis_test_waitable {
+  size_t arm_count;
+  size_t cancel_count;
+} orm_redis_test_waitable;
+
+static bool orm_redis_test_waitable_arm(void *context, cflow_waker waker) {
+  orm_redis_test_waitable *waitable = (orm_redis_test_waitable *)context;
+  (void)waker;
+  ++waitable->arm_count;
+  return true;
+}
+
+static void orm_redis_test_waitable_cancel(void *context) {
+  orm_redis_test_waitable *waitable = (orm_redis_test_waitable *)context;
+  ++waitable->cancel_count;
+}
+
+CMETA_IMPLEMENTS(cflow_waitable, orm_redis_test_waitable, 0,
+    .arm = orm_redis_test_waitable_arm,
+    .cancel = orm_redis_test_waitable_cancel
+);
 
 TINYMOCk_MOCK_VOID(orm_redis_test_release, void *, void *)
 TINYMOCk_MOCK_VOID(orm_redis_test_destroy, void *)
@@ -95,10 +120,21 @@ static orm_redis_driver_step orm_redis_test_next(void *context, void **row) {
   orm_redis_test_driver *driver = (orm_redis_test_driver *)context;
   orm_redis_driver_step step = ORM_REDIS_DRIVER_STEP_INIT;
   *row = NULL;
+  if (driver->waits_remaining != 0u) {
+    --driver->waits_remaining;
+    step.kind = ORM_REDIS_DRIVER_WAIT;
+    step.waitable = driver->waitable;
+    return step;
+  }
   if (driver->next == 2u) return step;
   *row = (void *)driver->rows[driver->next++];
   step.kind = ORM_REDIS_DRIVER_ROW;
   return step;
+}
+
+static void orm_redis_test_cancel(void *context) {
+  orm_redis_test_driver *driver = (orm_redis_test_driver *)context;
+  ++driver->cancel_count;
 }
 
 static void orm_redis_test_release_call(void *context, void *row) {
@@ -116,7 +152,7 @@ static const orm_redis_reply_ops orm_redis_test_reply_ops = {
 
 static const orm_redis_row_driver_ops orm_redis_test_driver_ops = {
     sizeof(orm_redis_row_driver_ops), ORM_REDIS_ROW_DRIVER_OPS_ABI_VERSION,
-    orm_redis_test_next, orm_redis_test_release_call,
+    orm_redis_test_next, orm_redis_test_cancel, orm_redis_test_release_call,
     orm_redis_test_destroy_call};
 
 spec("ORM Redis CFlow cursor") {
@@ -145,11 +181,12 @@ spec("ORM Redis CFlow cursor") {
         ORM_REDIS_REPLY_ARRAY, 0, NULL, 0u, row_2_children, 4u};
     const orm_redis_field_view fields[] = {
         {id_name, 2u}, {score_name, 5u}};
-    orm_redis_test_driver driver_context = {{&row_1, &row_2}, 0u};
+    orm_redis_test_driver driver_context = {
+        .rows = {&row_1, &row_2}, .next = 0u};
     orm_redis_row_driver driver = {
         &orm_redis_test_driver_ops, &orm_redis_test_reply_ops, &driver_context};
     orm_redis_cursor_config cursor_config =
-        ORM_REDIS_CURSOR_CONFIG_INIT(4u, 16u);
+        ORM_REDIS_CURSOR_CONFIG_INIT(4u, 16u, UINT64_C(5000000000));
     orm_row_cursor cursor = {0};
     orm_error_t error;
     orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
@@ -172,8 +209,10 @@ spec("ORM Redis CFlow cursor") {
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
     check_null(driver.context);
+    check_equal(cursor.wait_timeout_ns, UINT64_C(5000000000));
     check_equal(orm_cbind_source_init(&source, &cursor, &source_config, &error),
                 ORM_STATUS_OK);
+    check_equal(cursor.wait_timeout_ns, 0u);
 
     step = cflow_source_resume(&source, NULL, &first);
     check_equal(step.kind, CFLOW_STEP_VALUE);
@@ -188,6 +227,48 @@ spec("ORM Redis CFlow cursor") {
 
     cflow_source_destroy(&source);
     mock_orm_redis_test_release_verify();
+    mock_orm_redis_test_destroy_verify();
+  }
+
+  it("propagates driver WAIT and cancellation without manufacturing a row") {
+    orm_redis_test_waitable waitable = {0};
+    orm_redis_test_driver driver_context = {
+        .waitable = orm_redis_test_waitable_as_cflow_waitable(&waitable),
+        .waits_remaining = 1u};
+    orm_redis_row_driver driver = {
+        &orm_redis_test_driver_ops, &orm_redis_test_reply_ops, &driver_context};
+    orm_redis_cursor_config cursor_config =
+        ORM_REDIS_CURSOR_CONFIG_INIT(1u, 1u, UINT64_C(5000000000));
+    orm_row_cursor cursor = {0};
+    orm_error_t error;
+    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+        &orm_redis_test_row_data, 1u, 1u, 2u, 1u);
+    cflow_source source = {0};
+    orm_redis_test_row row = {0};
+    cflow_step step;
+
+    orm_error_init(&error);
+    mock_orm_redis_test_release_reset();
+    mock_orm_redis_test_destroy_reset();
+    mock_orm_redis_test_destroy_expect(
+        TINYMOCk_ARG((void *)&driver_context));
+    check_equal(orm_redis_cursor_start(&cursor, &driver, NULL, 0u,
+                                       &cursor_config, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_cbind_source_init(&source, &cursor, &source_config, &error),
+                ORM_STATUS_OK);
+
+    step = cflow_source_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_WAIT);
+    check_true(cflow_waitable_valid(&step.waitable));
+    check_true(cflow_waitable_arm(&step.waitable, (cflow_waker){0}));
+    cflow_waitable_cancel(&step.waitable);
+    check_equal(waitable.arm_count, 1u);
+    check_equal(waitable.cancel_count, 1u);
+
+    cflow_source_cancel(&source);
+    check_equal(driver_context.cancel_count, 1u);
+    cflow_source_destroy(&source);
     mock_orm_redis_test_destroy_verify();
   }
 }
