@@ -8,7 +8,6 @@ if(@ORM_WITH_SQLITE@)
   find_dependency(SQLite3)
 endif()
 find_dependency(TurboUtils CONFIG)
-find_dependency(TurboParser CONFIG)
 
 if(@ORM_WITH_REDIS@ AND NOT TARGET TurboDB::Redis)
   find_dependency(TurboDB CONFIG)

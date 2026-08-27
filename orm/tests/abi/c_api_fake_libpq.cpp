@@ -6,13 +6,37 @@
 #include <limits>
 #include <optional>
 
+namespace {
+
+PGresult* pending_full_result = nullptr;
+std::vector<PGresult*> pending_results;
+std::size_t pending_result_index = 0;
+int send_query_count = 0;
+int single_row_count = 0;
+
+void clear_pending_results()
+{
+    delete pending_full_result;
+    pending_full_result = nullptr;
+    for (std::size_t index = pending_result_index;
+         index < pending_results.size(); ++index)
+        delete pending_results[index];
+    pending_results.clear();
+    pending_result_index = 0;
+}
+
+} // namespace
+
 extern "C" {
 
 void fake_pg_reset(void)
 {
+    clear_pending_results();
     pg_fake::reset_script_state();
     pg_fake::finished_connections = 0;
     pg_fake::cleared_results = 0;
+    send_query_count = 0;
+    single_row_count = 0;
 }
 
 void fake_pg_set_result(size_t rows,
@@ -79,6 +103,16 @@ int fake_pg_finished_connections(void)
 int fake_pg_cleared_results(void)
 {
     return pg_fake::cleared_results;
+}
+
+int fake_pg_send_query_count(void)
+{
+    return send_query_count;
+}
+
+int fake_pg_single_row_count(void)
+{
+    return single_row_count;
 }
 
 PGconn* PQconnectdbParams(const char* const*, const char* const*, int)
@@ -169,6 +203,69 @@ PGresult* PQexecParams(PGconn*,
     return result;
 }
 
+int PQsendQueryParams(PGconn* connection,
+                      const char* sql,
+                      int parameter_count,
+                      const Oid* parameter_types,
+                      const char* const* parameter_values,
+                      const int* parameter_lengths,
+                      const int* parameter_formats,
+                      int result_format)
+{
+    ++send_query_count;
+    if (pending_full_result != nullptr ||
+        pending_result_index < pending_results.size())
+        return 0;
+    pending_full_result = PQexecParams(
+        connection, sql, parameter_count, parameter_types, parameter_values,
+        parameter_lengths, parameter_formats, result_format);
+    return pending_full_result != nullptr ? 1 : 0;
+}
+
+int PQsetSingleRowMode(PGconn*)
+{
+    ++single_row_count;
+    if (pending_full_result == nullptr)
+        return 0;
+    if (pending_full_result->status == PGRES_TUPLES_OK) {
+        for (const auto& row : pending_full_result->rows) {
+            auto* single = pg_fake::make_result(PGRES_SINGLE_TUPLE);
+            single->columns = pending_full_result->columns;
+            single->column_types = pending_full_result->column_types;
+            single->rows.push_back(row);
+            pending_results.push_back(single);
+        }
+        auto* terminal = pg_fake::make_result(PGRES_TUPLES_OK);
+        terminal->columns = pending_full_result->columns;
+        terminal->column_types = pending_full_result->column_types;
+        terminal->scripted_dimensions =
+            pending_full_result->scripted_dimensions;
+        terminal->scripted_rows = pending_full_result->scripted_rows;
+        terminal->scripted_columns = pending_full_result->scripted_columns;
+        pending_results.push_back(terminal);
+        delete pending_full_result;
+    } else {
+        pending_results.push_back(pending_full_result);
+    }
+    pending_full_result = nullptr;
+    pending_result_index = 0;
+    return 1;
+}
+
+PGresult* PQgetResult(PGconn*)
+{
+    PGresult* result;
+    if (pending_result_index == pending_results.size()) {
+        pending_results.clear();
+        pending_result_index = 0;
+        return nullptr;
+    }
+    result = pending_results[pending_result_index];
+    pending_results[pending_result_index] = nullptr;
+    ++pending_result_index;
+    return result;
+}
+
 ExecStatusType PQresultStatus(const PGresult* result)
 {
     return result->status;
@@ -191,6 +288,12 @@ int PQnfields(const PGresult* result)
     return result->scripted_dimensions
         ? result->scripted_columns
         : result->columns;
+}
+
+char* PQfname(const PGresult*, int)
+{
+    static char name[] = "column";
+    return name;
 }
 
 char* PQcmdTuples(PGresult* result)

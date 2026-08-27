@@ -10,6 +10,7 @@
 #define REDIS_REPLY_OWNER_MAGIC UINT32_C(0x52535032)
 #define REDIS_RECV_BUFFER_INITIAL_SIZE 16384u
 #define REDIS_RESP_MIN_VALUE_SIZE 3u
+#define REDIS_TSTR_ALLOCATION_OVERHEAD (sizeof(size_t) * 2u + 1u)
 
 typedef struct redis_reply_string_s {
   tstr value;
@@ -20,6 +21,9 @@ typedef struct {
   uint32_t magic;
   mem_pool_t pool;
   redis_reply_string_t *strings;
+  size_t allocation_bytes;
+  size_t max_allocation_bytes;
+  int failure;
 } redis_reply_owner_t;
 
 typedef struct {
@@ -27,8 +31,18 @@ typedef struct {
   redis_reply_t reply;
 } redis_reply_allocation_t;
 
+static int redis_reply_owner_charge(redis_reply_owner_t *owner, size_t bytes) {
+  if (!owner || bytes > owner->max_allocation_bytes - owner->allocation_bytes) {
+    if (owner) owner->failure = -2;
+    return -1;
+  }
+  owner->allocation_bytes += bytes;
+  return 0;
+}
+
 static redis_reply_t *redis_reply_alloc(redis_reply_owner_t *owner) {
   redis_reply_allocation_t *allocation;
+  if (redis_reply_owner_charge(owner, sizeof(*allocation)) != 0) return NULL;
   allocation = mem_alloc(&owner->pool, sizeof(*allocation));
   if (!allocation) return NULL;
   memset(allocation, 0, sizeof(*allocation));
@@ -38,7 +52,15 @@ static redis_reply_t *redis_reply_alloc(redis_reply_owner_t *owner) {
 
 static tstr redis_reply_string_create(redis_reply_owner_t *owner, vstr value) {
   redis_reply_string_t *tracked;
-  tstr string = tstr_from_v(value);
+  tstr string;
+  size_t allocation_bytes;
+  if (value.len > SIZE_MAX - sizeof(*tracked) - REDIS_TSTR_ALLOCATION_OVERHEAD) {
+    owner->failure = -2;
+    return NULL;
+  }
+  allocation_bytes = sizeof(*tracked) + REDIS_TSTR_ALLOCATION_OVERHEAD + value.len;
+  if (redis_reply_owner_charge(owner, allocation_bytes) != 0) return NULL;
+  string = tstr_from_v(value);
   if (!string) return NULL;
   tracked = mem_alloc(&owner->pool, sizeof(*tracked));
   if (!tracked) {
@@ -126,6 +148,10 @@ static int redis_parse_resp_value(const char *data, size_t len, size_t depth,
     parsed->element_count = count;
     if (count > (len - token.header_len) / REDIS_RESP_MIN_VALUE_SIZE) return 0;
     if (count != 0) {
+      if (count > SIZE_MAX / sizeof(*parsed->elements)) return -1;
+      if (redis_reply_owner_charge(owner,
+                                   count * sizeof(*parsed->elements)) != 0)
+        return -2;
       parsed->elements = mem_alloc_array(&owner->pool, sizeof(*parsed->elements), count);
       if (!parsed->elements) return -1;
       memset(parsed->elements, 0, count * sizeof(*parsed->elements));
@@ -193,20 +219,106 @@ int redis_recv_buffer_append(redis_client_t *client, const char *data, size_t le
   return 0;
 }
 
-int redis_parse_resp_reply(redis_client_t *client, redis_reply_t **reply) {
+int redis_recv_buffer_append_bounded(redis_client_t *client,
+                                     const char *data, size_t len,
+                                     size_t max_buffer_bytes) {
+  if (!client || max_buffer_bytes == 0u || (!data && len != 0u)) return -1;
+  if (client->recv_buffer_used > max_buffer_bytes ||
+      len > max_buffer_bytes - client->recv_buffer_used)
+    return -2;
+  return redis_recv_buffer_append(client, data, len);
+}
+
+static void redis_recv_buffer_consume(redis_client_t *client,
+                                      size_t consumed) {
+  if (!client || consumed == 0u || consumed > client->recv_buffer_used) return;
+  memmove(client->recv_buffer, client->recv_buffer + consumed,
+          client->recv_buffer_used - consumed);
+  client->recv_buffer_used -= consumed;
+}
+
+void redis_resp_array_reader_init(redis_resp_array_reader *reader,
+                                  size_t max_items,
+                                  size_t max_reply_bytes) {
+  if (!reader) return;
+  memset(reader, 0, sizeof(*reader));
+  reader->max_items = max_items;
+  reader->max_reply_bytes = max_reply_bytes;
+}
+
+redis_resp_array_step redis_resp_array_reader_next(
+    redis_client_t *client, redis_resp_array_reader *reader,
+    redis_reply_t **item) {
+  redis_resp_token_t token;
+  int parsed;
+
+  if (item) *item = NULL;
+  if (!client || !reader || !item || reader->max_items == 0u ||
+      reader->max_reply_bytes == 0u)
+    return REDIS_RESP_ARRAY_ERROR;
+  if (reader->terminal)
+    return REDIS_RESP_ARRAY_DONE;
+
+  if (!reader->header_read) {
+    parsed = redis_resp_scan_token(client->recv_buffer,
+                                   client->recv_buffer_used, &token);
+    if (parsed <= 0)
+      return parsed == 0 ? REDIS_RESP_ARRAY_NEED_MORE
+                         : REDIS_RESP_ARRAY_ERROR;
+    if (token.type == '-') {
+      parsed = redis_parse_resp_reply_bounded(client, reader->max_reply_bytes,
+                                              item);
+      if (parsed <= 0)
+        return parsed == 0 ? REDIS_RESP_ARRAY_NEED_MORE :
+               parsed == -2 ? REDIS_RESP_ARRAY_LIMIT : REDIS_RESP_ARRAY_ERROR;
+      redis_recv_buffer_consume(client, (size_t)parsed);
+      reader->terminal = 1;
+      return REDIS_RESP_ARRAY_SERVER_ERROR;
+    }
+    if (token.type != '*' || token.int_value < 0 ||
+        (uint64_t)token.int_value > reader->max_items)
+      return REDIS_RESP_ARRAY_ERROR;
+    reader->remaining = (size_t)token.int_value;
+    reader->header_read = 1;
+    redis_recv_buffer_consume(client, token.header_len);
+  }
+
+  if (reader->remaining == 0u) {
+    reader->terminal = 1;
+    return REDIS_RESP_ARRAY_DONE;
+  }
+  parsed = redis_parse_resp_reply_bounded(client, reader->max_reply_bytes,
+                                          item);
+  if (parsed <= 0)
+    return parsed == 0 ? REDIS_RESP_ARRAY_NEED_MORE :
+           parsed == -2 ? REDIS_RESP_ARRAY_LIMIT : REDIS_RESP_ARRAY_ERROR;
+  redis_recv_buffer_consume(client, (size_t)parsed);
+  --reader->remaining;
+  return REDIS_RESP_ARRAY_ITEM;
+}
+
+int redis_parse_resp_reply_bounded(redis_client_t *client,
+                                   size_t max_reply_bytes,
+                                   redis_reply_t **reply) {
   redis_reply_owner_t *owner;
   int consumed;
-  if (!client || !reply) return -1;
+  if (!client || !reply || max_reply_bytes == 0u) return -1;
   *reply = NULL;
   if (client->recv_buffer_used == 0) return 0;
   owner = calloc(1, sizeof(*owner));
   if (!owner) return -1;
+  owner->max_allocation_bytes = max_reply_bytes;
+  if (redis_reply_owner_charge(owner, sizeof(*owner)) != 0) {
+    free(owner);
+    return -2;
+  }
   if (mem_init(&owner->pool, 0) != 0) {
     free(owner);
     return -1;
   }
   owner->magic = REDIS_REPLY_OWNER_MAGIC;
   consumed = redis_parse_resp_value(client->recv_buffer, client->recv_buffer_used, 0, owner, reply);
+  if (consumed < 0 && owner->failure != 0) consumed = owner->failure;
   if (consumed <= 0) {
     redis_reply_strings_destroy(owner);
     mem_destroy(&owner->pool);
@@ -215,6 +327,10 @@ int redis_parse_resp_reply(redis_client_t *client, redis_reply_t **reply) {
     *reply = NULL;
   }
   return consumed;
+}
+
+int redis_parse_resp_reply(redis_client_t *client, redis_reply_t **reply) {
+  return redis_parse_resp_reply_bounded(client, SIZE_MAX, reply);
 }
 
 void redis_reply_free(redis_reply_t *reply) {

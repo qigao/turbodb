@@ -20,6 +20,8 @@ size_t fake_pg_parameter_count(void);
 const char* fake_pg_parameter_at(size_t index);
 int fake_pg_finished_connections(void);
 int fake_pg_cleared_results(void);
+int fake_pg_send_query_count(void);
+int fake_pg_single_row_count(void);
 
 #ifdef __cplusplus
 }
