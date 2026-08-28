@@ -133,56 +133,56 @@ endif()
 foreach(ORM_C_SOURCE IN LISTS ORM_C_SOURCES ORM_FLOW_SOURCES)
   if(NOT ORM_C_SOURCE MATCHES "\\.c$")
     message(FATAL_ERROR
-            "orm_c accepts only C implementation sources: ${ORM_C_SOURCE}")
+            "turbo_orm accepts only C implementation sources: ${ORM_C_SOURCE}")
   endif()
 endforeach()
 
 if(ORM_BUILD_SHARED)
-  add_library(orm_c SHARED ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+  add_library(turbo_orm SHARED ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
 else()
-  add_library(orm_c STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+  add_library(turbo_orm STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
 endif()
 add_library(orm_cpp INTERFACE)
-add_library(TurboDB::ORM ALIAS orm_c)
-target_compile_features(orm_c PRIVATE c_std_11)
-target_compile_definitions(orm_c PRIVATE ORM_C_BUILD)
+add_library(TurboDB::ORM ALIAS turbo_orm)
+target_compile_features(turbo_orm PRIVATE c_std_11)
+target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD)
 
 if(NOT ORM_BUILD_SHARED)
-  target_compile_definitions(orm_c PUBLIC ORM_C_STATIC)
+  target_compile_definitions(turbo_orm PUBLIC ORM_C_STATIC)
 endif()
 
 target_include_directories(
-  orm_c
+  turbo_orm
   PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
          $<INSTALL_INTERFACE:include/shared/orm>
   PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
 target_link_libraries(
-  orm_c PUBLIC TurboUtils::Core
+  turbo_orm PUBLIC TurboUtils::Core
   PRIVATE TurboUtils::CSerde TurboUtils::CBind TurboUtils::CFlow
           TurboUtils::STL TurboUtils::Platform)
 
 if(ORM_WITH_SQLITE)
-  target_compile_definitions(orm_c PRIVATE ORM_WITH_SQLITE)
-  target_link_libraries(orm_c PRIVATE SQLite::SQLite3)
+  target_compile_definitions(turbo_orm PRIVATE ORM_WITH_SQLITE)
+  target_link_libraries(turbo_orm PRIVATE SQLite::SQLite3)
 endif()
 
 if(ORM_WITH_REDIS)
-  target_compile_definitions(orm_c PRIVATE ORM_WITH_REDIS)
-  target_link_libraries(orm_c PRIVATE TurboDB::Redis)
+  target_compile_definitions(turbo_orm PRIVATE ORM_WITH_REDIS)
+  target_link_libraries(turbo_orm PRIVATE TurboDB::Redis)
 endif()
 
 if(ORM_WITH_TIDESDB)
-  target_compile_definitions(orm_c PRIVATE ORM_WITH_TIDESDB)
-  target_link_libraries(orm_c PRIVATE TidesDB::tidesdb)
+  target_compile_definitions(turbo_orm PRIVATE ORM_WITH_TIDESDB)
+  target_link_libraries(turbo_orm PRIVATE TidesDB::tidesdb)
 endif()
 
 if(ORM_WITH_MONGODB)
-  target_compile_definitions(orm_c PRIVATE ORM_WITH_MONGO)
-  target_link_libraries(orm_c PRIVATE mongo::mongoc_shared)
+  target_compile_definitions(turbo_orm PRIVATE ORM_WITH_MONGO)
+  target_link_libraries(turbo_orm PRIVATE mongo::mongoc_shared)
 endif()
 
 set_target_properties(
-  orm_c
+  turbo_orm
   PROPERTIES C_STANDARD_REQUIRED ON
              LINKER_LANGUAGE C
              C_VISIBILITY_PRESET hidden)
@@ -190,7 +190,7 @@ target_compile_features(orm_cpp INTERFACE cxx_std_17)
 target_include_directories(
   orm_cpp INTERFACE $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
                     $<INSTALL_INTERFACE:include/shared/orm>)
-target_link_libraries(orm_cpp INTERFACE orm_c)
+target_link_libraries(orm_cpp INTERFACE turbo_orm)
 
 set(ORM_RUNTIME_DEPENDENCY_ARGS)
 if(ORM_BUILD_SHARED)
@@ -198,13 +198,11 @@ if(ORM_BUILD_SHARED)
        RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies)
 endif()
 cmake_config_target(
-  orm_c
+  turbo_orm
   ALIAS
   Orm::C
   EXPORT_NAME
   C
-  OUTPUT_NAME
-  turbo_orm
   EXPORT_SET
   OrmTargets
   FOLDER
@@ -255,7 +253,7 @@ if(ORM_WITH_PGSQL)
             ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/postgres)
   target_link_libraries(
     orm_postgresql
-    PUBLIC orm_c
+    PUBLIC turbo_orm
     PRIVATE PostgreSQL::PostgreSQL TurboUtils::CSerde TurboUtils::CBind
             TurboUtils::CFlow TurboUtils::STL)
   set(ORM_POSTGRESQL_LINKER_LANGUAGE C)
@@ -361,12 +359,12 @@ function(orm_enable_strict_warnings target)
   endif()
 endfunction()
 
-orm_enable_strict_warnings(orm_c)
+orm_enable_strict_warnings(turbo_orm)
 if(ORM_WITH_PGSQL)
   orm_enable_strict_warnings(orm_postgresql)
 endif()
 
-set(ORM_INTERNAL_TEST_LIBRARY orm_c)
+set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
 if(ORM_BUILD_SHARED AND ORM_BUILD_TESTS)
   add_library(orm_c_test_static STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
   target_compile_features(orm_c_test_static PRIVATE c_std_11)
@@ -412,7 +410,7 @@ function(orm_link_internal_test TARGET_NAME)
                                                ${ARGN})
   if(ORM_BUILD_SHARED)
     # The static test clone expands backend archives into the executable, so
-    # its final link must close the same C++ runtime dependencies as orm_c.
+    # its final link must close the same C++ runtime dependencies as turbo_orm.
     set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
   endif()
 endfunction()
@@ -490,6 +488,20 @@ if(MSVC)
 endif()
 add_test(NAME orm_postgres_libpq COMMAND orm_postgres_libpq_test)
 
+add_executable(orm_postgresql_component_test
+               tests/flow/orm_postgresql_component_test.c)
+target_compile_features(orm_postgresql_component_test PRIVATE c_std_11)
+target_link_libraries(orm_postgresql_component_test PRIVATE orm_postgresql
+                                                            TurboUtils::TinyTest)
+set_target_properties(orm_postgresql_component_test
+                      PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_postgresql_component_test)
+if(MSVC)
+  target_compile_options(orm_postgresql_component_test
+                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+add_test(NAME orm_postgresql_component COMMAND orm_postgresql_component_test)
+
 if(ORM_POSTGRES_LIVE_TESTS)
   add_executable(orm_postgres_live_test tests/integration/postgres_live_test.c)
   target_compile_features(orm_postgres_live_test PRIVATE c_std_11)
@@ -528,7 +540,7 @@ add_executable(orm_pure_c_build_test tests/flow/orm_pure_c_build_test.c)
 target_compile_features(orm_pure_c_build_test PRIVATE c_std_11)
 target_compile_definitions(orm_pure_c_build_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_pure_c_build_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_pure_c_build_test PRIVATE orm_c
+target_link_libraries(orm_pure_c_build_test PRIVATE turbo_orm
                                                     TurboUtils::TinyTest)
 set_target_properties(orm_pure_c_build_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -651,7 +663,7 @@ target_compile_features(orm_tidesdb_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_tidesdb_public_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_tidesdb_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(
-  orm_tidesdb_public_flow_test PRIVATE orm_c TurboUtils::CBind
+  orm_tidesdb_public_flow_test PRIVATE turbo_orm TurboUtils::CBind
                                        TurboUtils::CFlow TurboUtils::TinyTest)
 set_target_properties(orm_tidesdb_public_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -686,7 +698,7 @@ add_executable(orm_public_flow_test tests/flow/orm_public_flow_test.c)
 target_compile_features(orm_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_public_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_public_flow_test PRIVATE orm_c TurboUtils::CBind
+target_link_libraries(orm_public_flow_test PRIVATE turbo_orm TurboUtils::CBind
                                                    TurboUtils::CFlow
                                                    TurboUtils::TinyTest)
 set_target_properties(orm_public_flow_test
@@ -702,7 +714,7 @@ add_executable(orm_cpp_flow_test tests/flow/orm_cpp_flow_test.cpp)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_cpp_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_cpp_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_cpp_flow_test PRIVATE orm_c TurboUtils::CBind
+target_link_libraries(orm_cpp_flow_test PRIVATE turbo_orm TurboUtils::CBind
                                                 TurboUtils::CFlow
                                                 TurboUtils::TinyTest)
 set_target_properties(orm_cpp_flow_test

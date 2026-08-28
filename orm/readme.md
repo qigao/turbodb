@@ -38,12 +38,20 @@ as text.
 
 ## C API
 
-Load the installed TurboDB package, include `orm.h`, and link `TurboDB::ORM`.
-Backend dependencies enabled by the package are resolved transitively.
+When consuming the top-level TurboDB package, include `orm.h` and link
+`TurboDB::ORM`. When consuming the standalone installed ORM package, use
+`find_package(Orm CONFIG REQUIRED)` and link `Orm::C`. Both names refer to the
+same C11 core, whose shared-library file is `turbo_orm` (`turbo_orm.dll` on
+Windows).
 
 ```cmake
 find_package(TurboDB CONFIG REQUIRED COMPONENTS ORM)
 target_link_libraries(app PRIVATE TurboDB::ORM)
+```
+
+```cmake
+find_package(Orm CONFIG REQUIRED)
+target_link_libraries(app PRIVATE Orm::C)
 ```
 
 ```c
@@ -206,6 +214,51 @@ must outlive that Source.
 Backend options are validated at connection creation. Unknown options are
 rejected instead of silently enabling a fallback.
 
+### PostgreSQL component
+
+PostgreSQL is an explicit optional component rather than part of
+`turbo_orm`. Installed consumers discover and link it separately:
+
+```cmake
+find_package(Orm CONFIG REQUIRED)
+find_package(OrmPostgreSQL CONFIG REQUIRED)
+target_link_libraries(app PRIVATE Orm::PostgreSQL)
+```
+
+```c
+#include <orm_postgresql.h>
+
+orm_config_t config;
+orm_connection_t *connection = NULL;
+orm_error_t error;
+
+orm_config(&config);
+config.driver = orm_view("postgresql");
+/* Supply a borrowed "conninfo" option for this call. */
+if (orm_postgresql_connect(&config, &connection, &error) != ORM_STATUS_OK) {
+  /* Consume the error at the application boundary. */
+}
+```
+
+C++ consumers include `orm_postgresql.hpp` and call
+`orm::postgresql_connection(config)`. This is an inline wrapper over the same C
+connector; there is no C++ implementation library.
+
+Composite keys are expressed as one atomic, bounded batch:
+
+```c
+const orm_key_part_t key[] = {
+    {orm_view("domain_id"), orm_text("domain-a")},
+    {orm_view("user_id"), orm_text("user-a")},
+    {orm_view("group_id"), orm_text("group-a")}};
+
+orm_query_where_key(query, key, 3u, &error);
+```
+
+The call copies column names and text/blob payloads. The input array and its
+borrowed views may expire after the call; an invalid part leaves the query plan
+unchanged.
+
 ## Build and test
 
 Backend CMake options are `ORM_WITH_SQLITE`, `ORM_WITH_PGSQL`,
@@ -216,6 +269,17 @@ remain opt-in.
 cmake --preset win-dev-user
 cmake --build --preset win-dev-user
 ctest --preset win-dev-user --output-on-failure
+```
+
+The PostgreSQL live gate is opt-in and fail-fast. Set a non-empty conninfo in
+the environment before configuring the dedicated preset; the value is never
+printed by the test:
+
+```powershell
+$env:TURBODB_ORM_PGSQL_TEST_CONNINFO = 'host=127.0.0.1 port=5432 dbname=turbodb user=turbodb password=...'
+cmake --preset win-release-pg-live-user --fresh
+cmake --build --preset win-release-pg-live-user
+ctest --preset win-release-pg-live-user -R '^orm_postgres_live$' --output-on-failure
 ```
 
 The cursor and Source lifecycle tests use TinyTest; driver boundary tests use

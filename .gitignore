@@ -6,6 +6,7 @@ out/
 cmake-build-*/
 .vcpkg_installed/
 vcpkg_installed/
+/vcpkg_installed_pg/
 conan-cache/
 coverage.xml
 .codegraph/

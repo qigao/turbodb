@@ -47,7 +47,8 @@ static const cmeta_data_desc orm_public_flow_row_data = {
     .shape = &orm_public_flow_row_shape};
 
 static orm_connection_t *orm_public_flow_open_sqlite(
-    uint32_t max_predicates, orm_error_t *error) {
+    uint32_t max_predicates, uint64_t max_parameter_bytes,
+    orm_error_t *error) {
   orm_config_t config;
   orm_option_t filename;
   orm_connection_t *connection = NULL;
@@ -60,6 +61,8 @@ static orm_connection_t *orm_public_flow_open_sqlite(
   config.option_count = 1u;
   if (max_predicates != 0u)
     config.max_predicates = max_predicates;
+  if (max_parameter_bytes != 0u)
+    config.max_parameter_bytes = max_parameter_bytes;
   check_equal(orm_connect(&config, &connection, error), ORM_STATUS_OK);
   check_not_null(connection);
   return connection;
@@ -78,9 +81,10 @@ static void orm_public_flow_execute_sql(orm_connection_t *connection,
 }
 
 static orm_connection_t *orm_public_flow_composite_fixture(
-    uint32_t max_predicates, orm_error_t *error) {
+    uint32_t max_predicates, uint64_t max_parameter_bytes,
+    orm_error_t *error) {
   orm_connection_t *connection =
-      orm_public_flow_open_sqlite(max_predicates, error);
+      orm_public_flow_open_sqlite(max_predicates, max_parameter_bytes, error);
   orm_public_flow_execute_sql(
       connection,
       "create table memberships("
@@ -114,7 +118,7 @@ spec("ORM public reactive flow") {
     int64_t revision = 0;
 
     orm_error_init(&error);
-    connection = orm_public_flow_composite_fixture(0u, &error);
+    connection = orm_public_flow_composite_fixture(0u, 0u, &error);
     check_equal(orm_query_create(connection, orm_view("memberships"), &query,
                                  &error),
                 ORM_STATUS_OK);
@@ -147,7 +151,7 @@ spec("ORM public reactive flow") {
     uint64_t rows = 0u;
 
     orm_error_init(&error);
-    connection = orm_public_flow_composite_fixture(0u, &error);
+    connection = orm_public_flow_composite_fixture(0u, 0u, &error);
     check_equal(orm_query_create(connection, orm_view("memberships"), &query,
                                  &error),
                 ORM_STATUS_OK);
@@ -174,7 +178,7 @@ spec("ORM public reactive flow") {
     uint64_t rows = 0u;
 
     orm_error_init(&error);
-    connection = orm_public_flow_composite_fixture(0u, &error);
+    connection = orm_public_flow_composite_fixture(0u, 0u, &error);
     check_equal(orm_query_create(connection, orm_view("memberships"), &query,
                                  &error),
                 ORM_STATUS_OK);
@@ -202,13 +206,44 @@ spec("ORM public reactive flow") {
     uint64_t rows = 0u;
 
     orm_error_init(&error);
-    connection = orm_public_flow_composite_fixture(2u, &error);
+    connection = orm_public_flow_composite_fixture(2u, 0u, &error);
     check_equal(orm_query_create(connection, orm_view("memberships"), &query,
                                  &error),
                 ORM_STATUS_OK);
     check_equal(orm_query_select_all(query, &error), ORM_STATUS_OK);
     check_equal(orm_query_where_key(query, key, 3u, &error),
                 ORM_STATUS_LIMIT_EXCEEDED);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+    check_equal(rows, (uint64_t)2u);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("rolls back copied key parts when a later value exceeds the byte limit") {
+    orm_error_t error;
+    orm_connection_t *connection;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    const orm_key_part_t key[] = {
+        {orm_view("domain_id"), orm_text("domain-a")},
+        {orm_view("user_id"), orm_text("user-a")}};
+    uint64_t rows = 0u;
+
+    orm_error_init(&error);
+    connection = orm_public_flow_composite_fixture(0u, 8u, &error);
+    check_equal(orm_query_create(connection, orm_view("memberships"), &query,
+                                 &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_select_all(query, &error), ORM_STATUS_OK);
+    check_equal(orm_query_where_key(query, key, 2u, &error),
+                ORM_STATUS_LIMIT_EXCEEDED);
+    check_equal(orm_query_where(query, orm_view("domain_id"),
+                                ORM_COMPARE_EQUAL, orm_text("domain-a"),
+                                &error),
+                ORM_STATUS_OK);
     check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
     check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
     check_equal(rows, (uint64_t)2u);

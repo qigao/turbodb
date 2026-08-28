@@ -61,6 +61,7 @@ tar.exe -a -cf $bundlePath `
     --exclude='.worktrees' `
     --exclude='build' `
     --exclude='vcpkg_installed' `
+    --exclude='vcpkg_installed_pg' `
     --exclude='.env' `
     --exclude='.env.*' `
     --exclude='*.log' `
@@ -95,7 +96,10 @@ ssh root@eu "cd /root/dev/incoming && sha256sum -c '$bundleName.sha256' && print
 ssh -t root@eu 'tmux new-session -A -s turbodb-eu'
 ```
 
-进入远端后执行以下 Bash 脚本：
+进入远端后执行以下 Bash 脚本。默认不连接真实 PostgreSQL；需要把
+PostgreSQL live test 纳入同一次全量 CTest 时，先执行
+`export TURBODB_EU_POSTGRES_LIVE=1`。该模式只创建本次 run 专属的
+`postgres:16-alpine` 容器和 temporary table，不访问已有数据库：
 
 ```bash
 set -Eeuo pipefail
@@ -113,6 +117,12 @@ sha256sum -c "$bundle_name.sha256"
 run_id="turbodb-eu-$(date -u +%Y%m%dT%H%M%SZ)"
 run_root="/root/dev/runs/$run_id"
 container_name="$run_id"
+postgres_name="$run_id-postgres"
+enable_postgres_live="${TURBODB_EU_POSTGRES_LIVE:-0}"
+case "$enable_postgres_live" in
+    0|1) ;;
+    *) echo "TURBODB_EU_POSTGRES_LIVE must be 0 or 1" >&2; exit 2 ;;
+esac
 mkdir -p "$run_root/src" "$run_root/artifacts"
 unzip -q "$incoming/$bundle_name" -d "$run_root/src"
 cp "$incoming/$bundle_name.sha256" "$run_root/artifacts/source.sha256"
@@ -125,12 +135,41 @@ test -x /opt/vcpkg/vcpkg
 
 cleanup_container() {
     docker rm -f "$container_name" >/dev/null 2>&1 || true
+    docker rm -f "$postgres_name" >/dev/null 2>&1 || true
 }
 trap cleanup_container EXIT INT TERM
 cleanup_container
 
 docker pull ubuntu:24.04
 docker image inspect --format '{{.Id}}' ubuntu:24.04 > "$run_root/artifacts/container-image.txt"
+
+postgres_conninfo=""
+if [ "$enable_postgres_live" = 1 ]; then
+    docker pull postgres:16-alpine
+    docker image inspect --format '{{.Id}}' postgres:16-alpine \
+        >> "$run_root/artifacts/container-image.txt"
+    docker run -d --name "$postgres_name" \
+        -e POSTGRES_USER=turbodb \
+        -e POSTGRES_PASSWORD=turbodb \
+        -e POSTGRES_DB=turbodb \
+        -p 127.0.0.1::5432 \
+        postgres:16-alpine >/dev/null
+    for attempt in $(seq 1 60); do
+        if docker exec "$postgres_name" \
+            pg_isready -U turbodb -d turbodb >/dev/null 2>&1; then
+            break
+        fi
+        if [ "$attempt" -eq 60 ]; then
+            echo "PostgreSQL readiness timeout" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+    postgres_port="$(docker inspect -f \
+        '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' \
+        "$postgres_name")"
+    postgres_conninfo="host=127.0.0.1 port=$postgres_port dbname=turbodb user=turbodb password=turbodb connect_timeout=5"
+fi
 
 docker run --name "$container_name" \
     --network host \
@@ -140,13 +179,19 @@ docker run --name "$container_name" \
     -e VCPKG_ROOT=/opt/vcpkg \
     -e VCPKG_DEFAULT_BINARY_CACHE=/var/cache/vcpkg \
     -e DEBIAN_FRONTEND=noninteractive \
+    -e TURBODB_EU_POSTGRES_LIVE="$enable_postgres_live" \
+    -e TURBODB_ORM_PGSQL_TEST_CONNINFO="$postgres_conninfo" \
     ubuntu:24.04 bash -lc '
 set -Eeuo pipefail
 
 apt-get update
 apt-get install -y --no-install-recommends \
-    build-essential ca-certificates cmake curl git ninja-build \
-    pkg-config python3-minimal re2c unzip zip
+    autoconf automake bison build-essential ca-certificates cmake curl flex \
+    git libtool nasm ninja-build perl pkg-config python3 re2c unzip zip
+
+for tool in autoreconf automake bison flex libtoolize nasm ninja perl python3 re2c; do
+    command -v "$tool" >/dev/null
+done
 
 {
     date -u --iso-8601=seconds
@@ -154,12 +199,17 @@ apt-get install -y --no-install-recommends \
     gcc --version
     cmake --version
     ninja --version
+    autoreconf --version | head -n 1
+    bison --version | head -n 1
+    flex --version
+    nasm --version
     re2c --version
     /opt/vcpkg/vcpkg version
 } | tee /work/artifacts/environment.txt
 
 cd /work/src/turbo-utils
 cmake --fresh --preset linux-release-user \
+    -DCMAKE_INSTALL_PREFIX=/opt/turboutils/release \
     -DTURBO_ENABLE_EPOLL_READINESS=ON \
     -DENABLE_TESTS=OFF \
     -DBUILD_TESTS=OFF \
@@ -168,14 +218,20 @@ cmake --build --preset linux-release-user
 cmake --build --preset install-linux-release-user
 
 cd /work/src/turbodb
-cmake --fresh --preset linux-release-user \
+orm_preset=linux-release-user
+orm_install_preset=install-linux-release-user
+if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
+    orm_preset=linux-release-pg-live-user
+    orm_install_preset=install-linux-release-pg-live-user
+fi
+cmake --fresh --preset "$orm_preset" \
     -DTIDESDB_BUILD_TESTS=OFF \
     -DORM_WITH_TIDESDB=OFF \
     -DORM_WITH_REDIS=ON \
     -DENABLE_TESTS=ON \
     -DBUILD_TESTING=ON
-cmake --build --preset linux-release-user
-ctest --preset linux-release-user \
+cmake --build --preset "$orm_preset"
+ctest --preset "$orm_preset" \
     --timeout 60 \
     --output-on-failure \
     --output-junit /work/artifacts/turbodb-linux-release.xml
@@ -200,6 +256,52 @@ print(
     f"errors={errors} skipped={skipped}"
 )
 PY
+
+cmake --build --preset "$orm_install_preset"
+
+if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
+    shared_consumer_build=/work/package-consumer-shared
+    cmake --fresh \
+        -S /work/src/turbodb/orm/tests/package_consumer/postgresql \
+        -B "$shared_consumer_build" \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="/opt/turbodb/release;/opt/turboutils/release;/work/src/turbodb/vcpkg_installed_pg/x64-linux"
+    cmake --build "$shared_consumer_build"
+    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/turboutils/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
+        "$shared_consumer_build/orm_postgresql_c_consumer"
+    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/turboutils/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
+        "$shared_consumer_build/orm_postgresql_cpp_consumer"
+
+    static_root=/work/package-static
+    export TURBOUTILS_ROOT=/opt/turboutils/release
+    cmake --fresh \
+        -S /work/src/turbodb \
+        -B "$static_root/build" \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+        -DVCPKG_INSTALLED_DIR=/work/src/turbodb/vcpkg_installed_pg \
+        -DCMAKE_PREFIX_PATH="/work/src/turbodb/vcpkg_installed_pg/x64-linux;/opt/turboutils/release" \
+        -DCMAKE_INSTALL_PREFIX="$static_root/install" \
+        -DORM_BUILD_SHARED=OFF \
+        -DORM_BUILD_TESTS=OFF \
+        -DORM_WITH_PGSQL=ON \
+        -DORM_WITH_REDIS=OFF \
+        -DORM_WITH_TIDESDB=OFF \
+        -DTIDESDB_BUILD_TESTS=OFF
+    cmake --build "$static_root/build" --target install
+    cmake --fresh \
+        -S /work/src/turbodb/orm/tests/package_consumer/postgresql \
+        -B "$static_root/consumer" \
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="$static_root/install;/opt/turboutils/release;/work/src/turbodb/vcpkg_installed_pg/x64-linux"
+    cmake --build "$static_root/consumer"
+    "$static_root/consumer/orm_postgresql_c_consumer"
+    "$static_root/consumer/orm_postgresql_cpp_consumer"
+    echo "Installed package consumers verified: shared/static x C/C++"
+fi
 ' 2>&1 | tee "$run_root/artifacts/linux-build-test.log"
 
 cleanup_container
@@ -214,6 +316,7 @@ sha256sum \
     > "$run_root/artifacts/SHA256SUMS"
 
 test "$(docker ps -aq --filter "name=^/${container_name}$" | wc -l)" -eq 0
+test "$(docker ps -aq --filter "name=^/${postgres_name}$" | wc -l)" -eq 0
 
 result_name="$run_id-results.zip"
 cd "$run_root"
@@ -228,6 +331,8 @@ cat "$incoming/$result_name.sha256"
 ```
 
 `cmake --fresh` 保证每次使用新的配置事实，避免旧 cache 掩盖 feature 选项变化。`ctest --timeout 60` 为每个测试设置上限，防止网络 contract test 在初始化提前失败后无限等待。
+启用 live 模式时，configure 会验证 conninfo，且 `orm_postgres_live` 必须与
+其余测试一起出现在同一个 JUnit；连接失败会使测试失败，不会 skip。
 
 ## 6. 下载并复验结果
 
@@ -271,13 +376,34 @@ tar.exe -tf $localResult
 3. TurboDB 成功 configure/build，且独立 TidesDB engine tests 被关闭。
 4. CTest 实际发现至少一个测试，JUnit 的 failure、error 与 skipped 数均为零。
 5. Redis/CFlow 与 ORM contract tests 在同一次 run 内通过。
-6. 精确命名的测试容器已被删除，run 目录和证据文件仍保留。
+6. live 模式使用专用 PostgreSQL preset，并通过 shared/static × C/C++ 安装包 consumer matrix。
+7. 精确命名的构建容器和可选 PostgreSQL 容器已被删除，run 目录和证据文件仍保留。
 
 ## 8. 常见失败
 
 ### `re2c` 不存在
 
 TurboUtils 的生成步骤需要 `re2c`。确认 Ubuntu 容器安装命令包含 `re2c`，然后创建新的 run；不要复用已经部分配置的 build tree。
+
+### BoringSSL 构建报告 `Could not find nasm`
+
+PostgreSQL feature 会通过 libpq 引入 BoringSSL。确认 Ubuntu 容器安装命令
+包含 `nasm`；这是构建环境缺失，不应通过关闭 TLS 依赖或跳过 PostgreSQL
+测试规避。
+
+### libpq 构建报告缺少 `bison`、`flex` 或 `perl`
+
+仓库 overlay 的 `vcpkg-overlays/libpq/portfile.cmake` 明确要求这三个 host
+工具；vcpkg 的 `vcpkg_configure_make()` 还会调用 Autotools。runbook 在
+configure 前逐一执行 `command -v`；preflight 失败时先修正 builder 依赖集，
+不要反复尝试不完整镜像。
+
+### JUnit 校验报告 `No module named 'xml'`
+
+证据校验使用 Python 标准库的 `xml.etree`。builder 必须安装完整的
+`python3` 包，不能只安装 `python3-minimal`；后者在 Ubuntu 24.04 中不包含
+该模块。不要跳过 JUnit 结构校验，因为 CTest 的控制台摘要不能替代持久化的
+tests/failures/errors/skipped 证据。
 
 ### Redis runtime 返回 `TURBO_ENOTSUP (-4039)`
 
