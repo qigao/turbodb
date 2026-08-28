@@ -565,6 +565,63 @@ spec("ORM public reactive flow") {
     orm_disconnect(connection);
   }
 
+  it("enforces SQLite foreign keys on connect and classifies constraints") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    int64_t foreign_keys = 0;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error), ORM_STATUS_OK);
+
+    check_equal(orm_raw(connection, orm_view("pragma foreign_keys"), &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_get_int64(result, 0u, 0u, &foreign_keys, &error), ORM_STATUS_OK);
+    check_equal(foreign_keys, (int64_t)1);
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    result = NULL;
+    query = NULL;
+
+    check_equal(orm_raw(connection, orm_view("create table parent(id integer primary key)"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    result = NULL;
+    query = NULL;
+
+    check_equal(orm_raw(connection,
+                        orm_view("create table child(parent_id integer not null references parent(id))"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    result = NULL;
+    query = NULL;
+
+    check_equal(orm_raw(connection, orm_view("insert into child(parent_id) values(7)"), &query,
+                        &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_CONSTRAINT);
+    check_null(result);
+
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
   it("keeps a transaction result snapshot after commit") {
     orm_error_t error;
     orm_config_t connection_config;

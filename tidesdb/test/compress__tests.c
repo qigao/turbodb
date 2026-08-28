@@ -50,7 +50,7 @@ static void test_compress_decompress_algorithm(compression_algorithm algo, const
     free(decompressed_data);
 }
 
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
 void test_compress_decompress_snappy()
 {
     uint8_t data[] = "test data";
@@ -77,7 +77,8 @@ void test_compress_decompress_lz4()
     size_t data_size = sizeof(data);
     size_t compressed_size;
     size_t decompressed_size;
-    uint8_t *compressed_data = compress_data(data, data_size, &compressed_size, TDB_COMPRESS_LZ4);
+    uint8_t *compressed_data =
+        compress_data(data, data_size, &compressed_size, TDB_COMPRESS_LZ4);
     ASSERT_TRUE(compressed_data != NULL);
 
     uint8_t *decompressed_data =
@@ -130,10 +131,14 @@ void test_compress_empty_data()
 {
     uint8_t data[] = "";
     size_t data_size = 1; /* just null terminator */
+#ifdef TIDESDB_TEST_HAVE_LZ4
     test_compress_decompress_algorithm(TDB_COMPRESS_LZ4, "LZ4", data, data_size);
     test_compress_decompress_algorithm(TDB_COMPRESS_LZ4_FAST, "LZ4_FAST", data, data_size);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     test_compress_decompress_algorithm(TDB_COMPRESS_ZSTD, "ZSTD", data, data_size);
-#ifndef __sun
+#endif
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
     test_compress_decompress_algorithm(TDB_COMPRESS_SNAPPY, "SNAPPY", data, data_size);
 #endif
 }
@@ -150,10 +155,14 @@ void test_compress_large_data()
         data[i] = (uint8_t)(i % 256);
     }
 
+#ifdef TIDESDB_TEST_HAVE_LZ4
     test_compress_decompress_algorithm(TDB_COMPRESS_LZ4, "LZ4", data, data_size);
     test_compress_decompress_algorithm(TDB_COMPRESS_LZ4_FAST, "LZ4_FAST", data, data_size);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     test_compress_decompress_algorithm(TDB_COMPRESS_ZSTD, "ZSTD", data, data_size);
-#ifndef __sun
+#endif
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
     test_compress_decompress_algorithm(TDB_COMPRESS_SNAPPY, "SNAPPY", data, data_size);
 #endif
 
@@ -172,10 +181,14 @@ void test_compress_random_data()
         data[i] = (uint8_t)rand();
     }
 
+#ifdef TIDESDB_TEST_HAVE_LZ4
     test_compress_decompress_algorithm(TDB_COMPRESS_LZ4, "LZ4", data, data_size);
     test_compress_decompress_algorithm(TDB_COMPRESS_LZ4_FAST, "LZ4_FAST", data, data_size);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     test_compress_decompress_algorithm(TDB_COMPRESS_ZSTD, "ZSTD", data, data_size);
-#ifndef __sun
+#endif
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
     test_compress_decompress_algorithm(TDB_COMPRESS_SNAPPY, "SNAPPY", data, data_size);
 #endif
 
@@ -188,7 +201,8 @@ void test_decompress_corrupted_size_header()
     size_t data_size = sizeof(data);
     size_t compressed_size;
 
-    uint8_t *compressed_data = compress_data(data, data_size, &compressed_size, TDB_COMPRESS_LZ4);
+    uint8_t *compressed_data =
+        compress_data(data, data_size, &compressed_size, TIDESDB_TEST_COMPRESSION_ALGORITHM);
     ASSERT_TRUE(compressed_data != NULL);
 
     /* corrupt the size header to exceed UINT32_MAX */
@@ -198,7 +212,8 @@ void test_decompress_corrupted_size_header()
     /* decompression should fail */
     size_t decompressed_size;
     uint8_t *decompressed_data =
-        decompress_data(compressed_data, compressed_size, &decompressed_size, TDB_COMPRESS_LZ4);
+        decompress_data(compressed_data, compressed_size, &decompressed_size,
+                        TIDESDB_TEST_COMPRESSION_ALGORITHM);
     ASSERT_TRUE(decompressed_data == NULL);
 
     free(compressed_data);
@@ -209,20 +224,10 @@ void test_decompress_insufficient_data()
     uint8_t data[4] = {0x01, 0x02, 0x03, 0x04}; /* less than sizeof(uint64_t) */
     size_t decompressed_size;
 
-    /* should fail for all algorithms that use size header */
-    uint8_t *result = decompress_data(data, 4, &decompressed_size, TDB_COMPRESS_LZ4);
+    /* The selected enabled codec must reject data shorter than its size header. */
+    uint8_t *result =
+        decompress_data(data, 4, &decompressed_size, TIDESDB_TEST_COMPRESSION_ALGORITHM);
     ASSERT_TRUE(result == NULL);
-
-    result = decompress_data(data, 4, &decompressed_size, TDB_COMPRESS_LZ4_FAST);
-    ASSERT_TRUE(result == NULL);
-
-    result = decompress_data(data, 4, &decompressed_size, TDB_COMPRESS_ZSTD);
-    ASSERT_TRUE(result == NULL);
-
-#ifndef __sun
-    result = decompress_data(data, 4, &decompressed_size, TDB_COMPRESS_SNAPPY);
-    ASSERT_TRUE(result == NULL);
-#endif
 }
 
 void test_size_encoding_portability()
@@ -231,27 +236,11 @@ void test_size_encoding_portability()
     size_t data_size = sizeof(data);
     size_t compressed_size;
 
-    uint8_t *compressed_lz4 = compress_data(data, data_size, &compressed_size, TDB_COMPRESS_LZ4);
-    ASSERT_TRUE(compressed_lz4 != NULL);
-    uint64_t decoded_size_lz4 = decode_uint64_le_compat(compressed_lz4);
-    ASSERT_EQ(decoded_size_lz4, data_size);
-    free(compressed_lz4);
-
-    uint8_t *compressed_zstd = compress_data(data, data_size, &compressed_size, TDB_COMPRESS_ZSTD);
-    ASSERT_TRUE(compressed_zstd != NULL);
-    uint64_t decoded_size_zstd = decode_uint64_le_compat(compressed_zstd);
-    ASSERT_EQ(decoded_size_zstd, data_size);
-    free(compressed_zstd);
-
-#ifndef __sun
-    /* test SNAPPY */
-    uint8_t *compressed_snappy =
-        compress_data(data, data_size, &compressed_size, TDB_COMPRESS_SNAPPY);
-    ASSERT_TRUE(compressed_snappy != NULL);
-    uint64_t decoded_size_snappy = decode_uint64_le_compat(compressed_snappy);
-    ASSERT_EQ(decoded_size_snappy, data_size);
-    free(compressed_snappy);
-#endif
+    uint8_t *compressed =
+        compress_data(data, data_size, &compressed_size, TIDESDB_TEST_COMPRESSION_ALGORITHM);
+    ASSERT_TRUE(compressed != NULL);
+    ASSERT_EQ(decode_uint64_le_compat(compressed), data_size);
+    free(compressed);
 }
 
 void test_uint32_max_boundary()
@@ -279,7 +268,8 @@ void test_compressed_size_includes_header()
     size_t data_size = sizeof(data);
     size_t compressed_size;
 
-    uint8_t *compressed = compress_data(data, data_size, &compressed_size, TDB_COMPRESS_LZ4);
+    uint8_t *compressed =
+        compress_data(data, data_size, &compressed_size, TIDESDB_TEST_COMPRESSION_ALGORITHM);
     ASSERT_TRUE(compressed != NULL);
     /* compressed size should be at least sizeof(uint64_t) for the header */
     ASSERT_TRUE(compressed_size >= sizeof(uint64_t));
@@ -308,10 +298,10 @@ void test_compress_null_out_param()
     size_t data_size = sizeof(data);
 
     /* a NULL size out-param must return NULL rather than dereferencing it */
-    ASSERT_TRUE(compress_data(data, data_size, NULL, TDB_COMPRESS_LZ4) == NULL);
-    ASSERT_TRUE(compress_data(data, data_size, NULL, TDB_COMPRESS_ZSTD) == NULL);
-    ASSERT_TRUE(decompress_data(data, data_size, NULL, TDB_COMPRESS_LZ4) == NULL);
-    ASSERT_TRUE(decompress_data(data, data_size, NULL, TDB_COMPRESS_ZSTD) == NULL);
+    ASSERT_TRUE(
+        compress_data(data, data_size, NULL, TIDESDB_TEST_COMPRESSION_ALGORITHM) == NULL);
+    ASSERT_TRUE(
+        decompress_data(data, data_size, NULL, TIDESDB_TEST_COMPRESSION_ALGORITHM) == NULL);
 }
 
 void test_decompress_rejects_implausible_prefix()
@@ -322,17 +312,18 @@ void test_decompress_rejects_implausible_prefix()
     size_t data_size = sizeof(data);
     size_t compressed_size;
 
-    uint8_t *compressed = compress_data(data, data_size, &compressed_size, TDB_COMPRESS_LZ4);
+    uint8_t *compressed =
+        compress_data(data, data_size, &compressed_size, TIDESDB_TEST_COMPRESSION_ALGORITHM);
     ASSERT_TRUE(compressed != NULL);
     /* 16 MB claimed output from a few compressed bytes is impossible for LZ4 (max ~255x) yet well
      * under UINT32_MAX, so the old cap would have passed it */
     encode_uint64_le_compat(compressed, 16u * 1024u * 1024u);
     size_t decompressed_size;
-    ASSERT_TRUE(
-        decompress_data(compressed, compressed_size, &decompressed_size, TDB_COMPRESS_LZ4) == NULL);
+    ASSERT_TRUE(decompress_data(compressed, compressed_size, &decompressed_size,
+                                TIDESDB_TEST_COMPRESSION_ALGORITHM) == NULL);
     free(compressed);
 
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
     compressed = compress_data(data, data_size, &compressed_size, TDB_COMPRESS_SNAPPY);
     ASSERT_TRUE(compressed != NULL);
     encode_uint64_le_compat(compressed, 16u * 1024u * 1024u);
@@ -353,16 +344,18 @@ void test_highly_compressible_roundtrip()
 
     size_t compressed_size, decompressed_size;
 
-    uint8_t *c = compress_data(zeros, n, &compressed_size, TDB_COMPRESS_LZ4);
+    uint8_t *c =
+        compress_data(zeros, n, &compressed_size, TIDESDB_TEST_COMPRESSION_ALGORITHM);
     ASSERT_TRUE(c != NULL);
-    uint8_t *d = decompress_data(c, compressed_size, &decompressed_size, TDB_COMPRESS_LZ4);
+    uint8_t *d = decompress_data(c, compressed_size, &decompressed_size,
+                                 TIDESDB_TEST_COMPRESSION_ALGORITHM);
     ASSERT_TRUE(d != NULL);
     ASSERT_EQ(decompressed_size, n);
     ASSERT_EQ(memcmp(d, zeros, n), 0);
     free(c);
     free(d);
 
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
     c = compress_data(zeros, n, &compressed_size, TDB_COMPRESS_SNAPPY);
     ASSERT_TRUE(c != NULL);
     d = decompress_data(c, compressed_size, &decompressed_size, TDB_COMPRESS_SNAPPY);
@@ -439,18 +432,18 @@ void benchmark_compress_throughput(void)
 {
     printf("\n");
     algo_entry_t algos[] = {
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
         {TDB_COMPRESS_SNAPPY, "SNAPPY"},
 #endif
+#ifdef TIDESDB_TEST_HAVE_LZ4
         {TDB_COMPRESS_LZ4, "LZ4"},
         {TDB_COMPRESS_LZ4_FAST, "LZ4_FAST"},
-        {TDB_COMPRESS_ZSTD, "ZSTD"},
-    };
-#ifndef __sun
-    const int num_algos = 4;
-#else
-    const int num_algos = 3;
 #endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
+        {TDB_COMPRESS_ZSTD, "ZSTD"},
+#endif
+    };
+    const size_t num_algos = sizeof(algos) / sizeof(algos[0]);
     const size_t data_sizes[] = {1024, 64 * 1024, 1024 * 1024};
     const char *size_names[] = {"1KB", "64KB", "1MB"};
     const int num_sizes = 3;
@@ -516,18 +509,18 @@ void benchmark_compress_random_data(void)
 {
     printf("\n");
     algo_entry_t algos[] = {
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
         {TDB_COMPRESS_SNAPPY, "SNAPPY"},
 #endif
+#ifdef TIDESDB_TEST_HAVE_LZ4
         {TDB_COMPRESS_LZ4, "LZ4"},
         {TDB_COMPRESS_LZ4_FAST, "LZ4_FAST"},
-        {TDB_COMPRESS_ZSTD, "ZSTD"},
-    };
-#ifndef __sun
-    const int num_algos = 4;
-#else
-    const int num_algos = 3;
 #endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
+        {TDB_COMPRESS_ZSTD, "ZSTD"},
+#endif
+    };
+    const size_t num_algos = sizeof(algos) / sizeof(algos[0]);
     const size_t data_size = 64 * 1024;
     const int iterations = 5000;
 
@@ -584,18 +577,18 @@ void benchmark_compress_text_data(void)
 {
     printf("\n");
     algo_entry_t algos[] = {
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
         {TDB_COMPRESS_SNAPPY, "SNAPPY"},
 #endif
+#ifdef TIDESDB_TEST_HAVE_LZ4
         {TDB_COMPRESS_LZ4, "LZ4"},
         {TDB_COMPRESS_LZ4_FAST, "LZ4_FAST"},
-        {TDB_COMPRESS_ZSTD, "ZSTD"},
-    };
-#ifndef __sun
-    const int num_algos = 4;
-#else
-    const int num_algos = 3;
 #endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
+        {TDB_COMPRESS_ZSTD, "ZSTD"},
+#endif
+    };
+    const size_t num_algos = sizeof(algos) / sizeof(algos[0]);
     const size_t data_size = 64 * 1024;
     const int iterations = 5000;
 
@@ -649,18 +642,18 @@ void benchmark_compress_roundtrip(void)
 {
     printf("\n");
     algo_entry_t algos[] = {
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
         {TDB_COMPRESS_SNAPPY, "SNAPPY"},
 #endif
+#ifdef TIDESDB_TEST_HAVE_LZ4
         {TDB_COMPRESS_LZ4, "LZ4"},
         {TDB_COMPRESS_LZ4_FAST, "LZ4_FAST"},
-        {TDB_COMPRESS_ZSTD, "ZSTD"},
-    };
-#ifndef __sun
-    const int num_algos = 4;
-#else
-    const int num_algos = 3;
 #endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
+        {TDB_COMPRESS_ZSTD, "ZSTD"},
+#endif
+    };
+    const size_t num_algos = sizeof(algos) / sizeof(algos[0]);
     const size_t data_sizes[] = {1024, 64 * 1024, 1024 * 1024};
     const char *size_names[] = {"1KB", "64KB", "1MB"};
     const int num_sizes = 3;
@@ -703,18 +696,18 @@ void benchmark_compress_small_payloads(void)
 {
     printf("\n");
     algo_entry_t algos[] = {
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
         {TDB_COMPRESS_SNAPPY, "SNAPPY"},
 #endif
+#ifdef TIDESDB_TEST_HAVE_LZ4
         {TDB_COMPRESS_LZ4, "LZ4"},
         {TDB_COMPRESS_LZ4_FAST, "LZ4_FAST"},
-        {TDB_COMPRESS_ZSTD, "ZSTD"},
-    };
-#ifndef __sun
-    const int num_algos = 4;
-#else
-    const int num_algos = 3;
 #endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
+        {TDB_COMPRESS_ZSTD, "ZSTD"},
+#endif
+    };
+    const size_t num_algos = sizeof(algos) / sizeof(algos[0]);
     const size_t small_sizes[] = {32, 128, 512};
     const char *size_names[] = {"32B", "128B", "512B"};
     const int num_sizes = 3;
@@ -755,12 +748,16 @@ void benchmark_compress_small_payloads(void)
 int main(int argc, char **argv)
 {
     INIT_TEST_FILTER(argc, argv);
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
     RUN_TEST(test_compress_decompress_snappy, tests_passed);
 #endif
+#ifdef TIDESDB_TEST_HAVE_LZ4
     RUN_TEST(test_compress_decompress_lz4, tests_passed);
     RUN_TEST(test_compress_decompress_lz4_fast, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     RUN_TEST(test_compress_decompress_zstd, tests_passed);
+#endif
     RUN_TEST(test_compress_empty_data, tests_passed);
     RUN_TEST(test_compress_large_data, tests_passed);
     RUN_TEST(test_compress_random_data, tests_passed);

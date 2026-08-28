@@ -67,7 +67,8 @@ enum {
   ORM_STATUS_INTERNAL_ERROR = 11,
   ORM_STATUS_BUSY = 12,
   ORM_STATUS_UNSUPPORTED = 13,
-  ORM_STATUS_DATASTORE_ERROR = 14
+  ORM_STATUS_DATASTORE_ERROR = 14,
+  ORM_STATUS_CONSTRAINT = 15
 };
 
 typedef int32_t orm_value_kind_t;
@@ -219,6 +220,12 @@ ORM_C_API orm_status_t ORM_C_CALL orm_update(
 ORM_C_API orm_status_t ORM_C_CALL orm_delete(
     orm_connection_t *connection, orm_string_view_t table,
     orm_query_t **out_query, orm_error_t *error);
+/*
+ * Raw SQL accepts one-based ?N parameters as a portable spelling. SQL
+ * backends normalize that spelling to their native placeholder grammar while
+ * preserving quoted strings, identifiers, and comments. Driver-native
+ * placeholders remain accepted.
+ */
 ORM_C_API orm_status_t ORM_C_CALL orm_raw(
     orm_connection_t *connection, orm_string_view_t sql,
     orm_query_t **out_query, orm_error_t *error);

@@ -41,6 +41,7 @@ static orm_status_t orm_sqlite_status(int code, orm_status_t fallback) {
     case SQLITE_TOOBIG: return ORM_STATUS_LIMIT_EXCEEDED;
     case SQLITE_RANGE: return ORM_STATUS_OUT_OF_RANGE;
     case SQLITE_READONLY: return ORM_STATUS_INVALID_STATE;
+    case SQLITE_CONSTRAINT: return ORM_STATUS_CONSTRAINT;
     default: return fallback;
   }
 }
@@ -665,6 +666,17 @@ orm_status_t orm_sqlite_backend_create(const orm_config_t *config,
     goto cleanup;
   }
   (void)sqlite3_extended_result_codes(state->database, 1);
+  {
+    int foreign_keys = 0;
+    code = sqlite3_db_config(state->database, SQLITE_DBCONFIG_ENABLE_FKEY, 1,
+                             &foreign_keys);
+    if (code != SQLITE_OK || foreign_keys != 1) {
+      status = orm_sqlite_fail(state->database, code,
+                               ORM_STATUS_CONNECTION_ERROR,
+                               "enable SQLite foreign keys", error);
+      goto cleanup;
+    }
+  }
   code = sqlite3_busy_timeout(state->database, (int)timeout);
   if (code != SQLITE_OK) {
     status = orm_sqlite_fail(state->database, code,
