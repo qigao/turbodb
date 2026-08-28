@@ -18,12 +18,12 @@ typedef struct orm_sql_query {
   vec_t parameters;
 } orm_sql_query;
 
-orm_status_t orm_sql_render(const orm_query_plan *plan,
-                            const orm_limits *limits,
-                            orm_sql_dialect dialect,
-                            orm_sql_query *out_query,
-                            orm_error_t *error);
-void orm_sql_query_destroy(orm_sql_query *query);
+ORM_C_API orm_status_t orm_sql_render(const orm_query_plan *plan,
+                                      const orm_limits *limits,
+                                      orm_sql_dialect dialect,
+                                      orm_sql_query *out_query,
+                                      orm_error_t *error);
+ORM_C_API void orm_sql_query_destroy(orm_sql_query *query);
 
 #ifdef __cplusplus
 }

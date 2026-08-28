@@ -115,12 +115,6 @@ static orm_status_t orm_backend_create(const orm_config_t *config,
     status = orm_sqlite_backend_create(config, limits, backend, error);
   else
 #endif
-#if defined(ORM_WITH_PGSQL)
-  if (orm_view_equal_cstr(config->driver, "postgres") ||
-      orm_view_equal_cstr(config->driver, "postgresql"))
-    status = orm_postgres_backend_create(config, limits, backend, error);
-  else
-#endif
 #if defined(ORM_WITH_REDIS)
   if (orm_view_equal_cstr(config->driver, "redis"))
     status = orm_redis_backend_create(config, limits, backend, error);
@@ -141,15 +135,6 @@ static orm_status_t orm_backend_create(const orm_config_t *config,
     orm_error_set(error, ORM_STATUS_UNSUPPORTED,
                   "requested ORM driver is not enabled");
     status = ORM_STATUS_UNSUPPORTED;
-  }
-  if (status == ORM_STATUS_OK && !orm_backend_valid(backend)) {
-    if (backend->ops != NULL && backend->ops->destroy != NULL &&
-        backend->context != NULL)
-      backend->ops->destroy(backend->context);
-    memset(backend, 0, sizeof(*backend));
-    orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
-                  "ORM backend factory returned an invalid handle");
-    return ORM_STATUS_INTERNAL_ERROR;
   }
   return status;
 }
@@ -471,13 +456,20 @@ void ORM_C_CALL orm_flow_config(orm_flow_config_t *config,
 orm_status_t ORM_C_CALL orm_connect(const orm_config_t *config,
                                    orm_connection_t **out_connection,
                                    orm_error_t *error) {
+  return orm_connect_with_factory_v1(config, orm_backend_create,
+                                     out_connection, error);
+}
+
+orm_status_t ORM_C_CALL orm_connect_with_factory_v1(
+    const orm_config_t *config, orm_backend_factory_v1 factory,
+    orm_connection_t **out_connection, orm_error_t *error) {
   orm_connection_t *connection;
   orm_status_t status;
   if (out_connection != NULL)
     *out_connection = NULL;
-  if (out_connection == NULL) {
+  if (out_connection == NULL || factory == NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
-                  "out_connection pointer is null");
+                  "invalid ORM connection factory arguments");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   connection = (orm_connection_t *)calloc(1u, sizeof(*connection));
@@ -488,11 +480,20 @@ orm_status_t ORM_C_CALL orm_connect(const orm_config_t *config,
   }
   status = orm_limits_from_config(config, &connection->limits, error);
   if (status == ORM_STATUS_OK)
-    status = orm_backend_create(config, &connection->limits,
-                                &connection->backend, error);
+    status = factory(config, &connection->limits, &connection->backend, error);
   if (status != ORM_STATUS_OK) {
     free(connection);
     return status;
+  }
+  if (!orm_backend_valid(&connection->backend)) {
+    if (connection->backend.ops != NULL &&
+        connection->backend.ops->destroy != NULL &&
+        connection->backend.context != NULL)
+      connection->backend.ops->destroy(connection->backend.context);
+    free(connection);
+    orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
+                  "ORM backend factory returned an invalid handle");
+    return ORM_STATUS_INTERNAL_ERROR;
   }
   *out_connection = connection;
   orm_error_set(error, ORM_STATUS_OK, NULL);

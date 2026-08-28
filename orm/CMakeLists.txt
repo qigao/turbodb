@@ -30,9 +30,6 @@ if(NOT DEFINED ORM_WITH_SQLITE_DEFAULT)
   set(ORM_WITH_SQLITE_DEFAULT ON)
 endif()
 
-if(ORM_BUILD_TESTS AND NOT CMAKE_CXX_COMPILER_LOADED)
-  enable_language(CXX)
-endif()
 if(NOT DEFINED ORM_WITH_PGSQL_DEFAULT)
   set(ORM_WITH_PGSQL_DEFAULT OFF)
 endif()
@@ -51,6 +48,11 @@ option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_WITH_REDIS "Enable Redis backend" ${ORM_WITH_REDIS_DEFAULT})
 option(ORM_WITH_MONGODB "Enable MongoDB backend" ${ORM_WITH_MONGODB_DEFAULT})
 option(ORM_WITH_TIDESDB "Enable TidesDB embedded backend" ${ORM_WITH_TIDESDB_DEFAULT})
+
+if((ORM_BUILD_TESTS OR (ORM_BUILD_SHARED AND ORM_WITH_PGSQL)) AND
+   NOT CMAKE_CXX_COMPILER_LOADED)
+  enable_language(CXX)
+endif()
 
 # Find required base dependencies
 find_package(TurboUtils CONFIG REQUIRED)
@@ -92,11 +94,6 @@ set(ORM_FLOW_SOURCES src/flow/orm_cbind_source.c
                      src/dbs/redis/orm_redis_cursor.c
                      src/dbs/mongo/orm_mongo_cursor.c
                      src/dbs/tidesdb/orm_tidesdb_cursor.c)
-if(ORM_WITH_PGSQL)
-  list(APPEND ORM_C_SOURCES src/dbs/postgres/backend.c
-                            src/dbs/postgres/orm_postgres_libpq.c)
-  list(APPEND ORM_FLOW_SOURCES src/dbs/postgres/orm_postgres_cursor.c)
-endif()
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_C_SOURCES src/dbs/sqlite/backend.c)
   list(APPEND ORM_FLOW_SOURCES src/dbs/sqlite/orm_sqlite_cursor.c)
@@ -153,11 +150,6 @@ if(ORM_WITH_SQLITE)
   target_link_libraries(orm_c PRIVATE SQLite::SQLite3)
 endif()
 
-if(ORM_WITH_PGSQL)
-  target_compile_definitions(orm_c PRIVATE ORM_WITH_PGSQL)
-  target_link_libraries(orm_c PRIVATE PostgreSQL::PostgreSQL)
-endif()
-
 if(ORM_WITH_REDIS)
   target_compile_definitions(orm_c PRIVATE ORM_WITH_REDIS)
   target_link_libraries(orm_c PRIVATE TurboDB::Redis)
@@ -173,17 +165,10 @@ if(ORM_WITH_MONGODB)
   target_link_libraries(orm_c PRIVATE mongo::mongoc_shared)
 endif()
 
-set(ORM_LINKER_LANGUAGE C)
-if(ORM_BUILD_SHARED)
-  # Backend archives may have a C API while using C++ internally (for example,
-  # BoringSSL pulled in by a static libpq build).  The shared ORM must close
-  # those runtime dependencies itself so a pure-C consumer can link with cc.
-  set(ORM_LINKER_LANGUAGE CXX)
-endif()
 set_target_properties(
   orm_c
   PROPERTIES C_STANDARD_REQUIRED ON
-             LINKER_LANGUAGE ${ORM_LINKER_LANGUAGE}
+             LINKER_LANGUAGE C
              C_VISIBILITY_PRESET hidden)
 target_compile_features(orm_cpp INTERFACE cxx_std_17)
 target_include_directories(
@@ -220,9 +205,75 @@ cmake_config_target(
   "orm"
   NO_VERSION)
 
+if(ORM_WITH_PGSQL)
+  set(ORM_POSTGRESQL_SOURCES
+      src/dbs/postgres/component.c
+      src/dbs/postgres/backend.c
+      src/dbs/postgres/orm_postgres_libpq.c
+      src/dbs/postgres/orm_postgres_cursor.c
+      src/flow/orm_text_token.c)
+  foreach(ORM_POSTGRESQL_SOURCE IN LISTS ORM_POSTGRESQL_SOURCES)
+    if(NOT ORM_POSTGRESQL_SOURCE MATCHES "\\.c$")
+      message(FATAL_ERROR
+              "orm_postgresql accepts only C implementation sources: ${ORM_POSTGRESQL_SOURCE}")
+    endif()
+  endforeach()
+  if(ORM_BUILD_SHARED)
+    add_library(orm_postgresql SHARED ${ORM_POSTGRESQL_SOURCES})
+  else()
+    add_library(orm_postgresql STATIC ${ORM_POSTGRESQL_SOURCES})
+  endif()
+  target_compile_features(orm_postgresql PRIVATE c_std_11)
+  target_compile_definitions(orm_postgresql PRIVATE ORM_WITH_PGSQL
+                                                     ORM_POSTGRESQL_BUILD)
+  if(NOT ORM_BUILD_SHARED)
+    target_compile_definitions(orm_postgresql PUBLIC ORM_POSTGRESQL_STATIC)
+  endif()
+  target_include_directories(
+    orm_postgresql
+    PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
+           $<INSTALL_INTERFACE:include/shared/orm>
+    PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/postgres)
+  target_link_libraries(
+    orm_postgresql
+    PUBLIC orm_c
+    PRIVATE PostgreSQL::PostgreSQL TurboUtils::CSerde TurboUtils::CBind
+            TurboUtils::CFlow TurboUtils::STL)
+  set(ORM_POSTGRESQL_LINKER_LANGUAGE C)
+  if(ORM_BUILD_SHARED)
+    # Some libpq packages close static BoringSSL archives through the C++
+    # runtime. This changes only final linkage; every implementation source
+    # in the component remains C11.
+    set(ORM_POSTGRESQL_LINKER_LANGUAGE CXX)
+  endif()
+  set_target_properties(
+    orm_postgresql
+    PROPERTIES C_STANDARD_REQUIRED ON
+               LINKER_LANGUAGE ${ORM_POSTGRESQL_LINKER_LANGUAGE}
+               C_VISIBILITY_PRESET hidden)
+  set(ORM_POSTGRESQL_RUNTIME_DEPENDENCY_ARGS)
+  if(ORM_BUILD_SHARED)
+    list(APPEND ORM_POSTGRESQL_RUNTIME_DEPENDENCY_ARGS
+         RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies)
+  endif()
+  cmake_config_target(
+    orm_postgresql
+    ALIAS
+    Orm::PostgreSQL
+    EXPORT_NAME
+    PostgreSQL
+    EXPORT_SET
+    OrmPostgreSQLTargets
+    FOLDER
+    "orm"
+    ${ORM_POSTGRESQL_RUNTIME_DEPENDENCY_ARGS}
+    NO_VERSION)
+endif()
+
 if(ORM_BUILD_SHARED)
   set(ORM_RUNTIME_SEARCH_DIRECTORIES)
-  foreach(ORM_BACKEND_LIBRARY IN ITEMS "${SQLite3_LIBRARY}" "${PostgreSQL_LIBRARY}")
+  foreach(ORM_BACKEND_LIBRARY IN ITEMS "${SQLite3_LIBRARY}")
     if(ORM_BACKEND_LIBRARY)
       get_filename_component(ORM_BACKEND_LIBRARY_DIR "${ORM_BACKEND_LIBRARY}" DIRECTORY)
       get_filename_component(ORM_BACKEND_PREFIX_DIR "${ORM_BACKEND_LIBRARY_DIR}" DIRECTORY)
@@ -242,6 +293,30 @@ if(ORM_BUILD_SHARED)
       RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
       DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
       PRE_EXCLUDE_REGEXES "libturbo_.*"
+      POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
+endif()
+
+if(ORM_BUILD_SHARED AND ORM_WITH_PGSQL)
+  get_filename_component(ORM_POSTGRESQL_LIBRARY_DIR "${PostgreSQL_LIBRARY}"
+                         DIRECTORY)
+  get_filename_component(ORM_POSTGRESQL_PREFIX_DIR
+                         "${ORM_POSTGRESQL_LIBRARY_DIR}" DIRECTORY)
+  if(WIN32)
+    install(
+      RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies
+      DIRECTORIES "${ORM_POSTGRESQL_PREFIX_DIR}/bin"
+      PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                          "clang_rt.asan_dynamic-.*" "orm_c\\.dll"
+                          "turbo_utils\\.dll"
+      POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  else()
+    install(
+      RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies
+      DIRECTORIES "${ORM_POSTGRESQL_PREFIX_DIR}/bin"
+      PRE_EXCLUDE_REGEXES "liborm_c\\..*" "libturbo_.*"
       POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
   endif()
@@ -269,6 +344,9 @@ function(orm_enable_strict_warnings target)
 endfunction()
 
 orm_enable_strict_warnings(orm_c)
+if(ORM_WITH_PGSQL)
+  orm_enable_strict_warnings(orm_postgresql)
+endif()
 
 set(ORM_INTERNAL_TEST_LIBRARY orm_c)
 if(ORM_BUILD_SHARED AND ORM_BUILD_TESTS)
@@ -286,10 +364,6 @@ if(ORM_BUILD_SHARED AND ORM_BUILD_TESTS)
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
     target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
-  endif()
-  if(ORM_WITH_PGSQL)
-    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_PGSQL)
-    target_link_libraries(orm_c_test_static PRIVATE PostgreSQL::PostgreSQL)
   endif()
   if(ORM_WITH_REDIS)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_REDIS)
@@ -328,11 +402,6 @@ endfunction()
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_PRIVATE_LIBS SQLite::SQLite3 TurboUtils::CSerde
                                     TurboUtils::CFlow)
-elseif(ORM_WITH_PGSQL)
-  list(APPEND ORM_TEST_PRIVATE_LIBS TurboUtils::CSerde TurboUtils::CFlow)
-endif()
-if(ORM_WITH_PGSQL)
-  list(APPEND ORM_TEST_PRIVATE_LIBS PostgreSQL::PostgreSQL)
 endif()
 if(ORM_WITH_REDIS)
   list(APPEND ORM_TEST_PRIVATE_LIBS TurboDB::Redis)
@@ -346,9 +415,6 @@ endif()
 set(ORM_TEST_DEFINITIONS ORM_C_STATIC)
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_SQLITE)
-endif()
-if(ORM_WITH_PGSQL)
-  list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_PGSQL)
 endif()
 if(ORM_WITH_REDIS)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_REDIS)
@@ -457,11 +523,8 @@ if(MSVC)
 endif()
 add_test(NAME orm_sql_render COMMAND orm_sql_render_test)
 
-set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c)
-if(NOT ORM_WITH_PGSQL)
-  list(APPEND ORM_POSTGRES_FLOW_TEST_SOURCES
-              src/dbs/postgres/orm_postgres_cursor.c)
-endif()
+set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
+                                  src/dbs/postgres/orm_postgres_cursor.c)
 add_executable(orm_postgres_flow_test ${ORM_POSTGRES_FLOW_TEST_SOURCES})
 target_compile_features(orm_postgres_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_postgres_flow_test PRIVATE ORM_C_STATIC)
@@ -718,7 +781,17 @@ endif()
 
 include(GNUInstallDirs)
 
-cmake_install_headers(FILES include/orm/orm.h include/orm/orm.hpp DESTINATION
-                      ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+cmake_install_headers(
+  FILES include/orm/orm.h include/orm/orm.hpp
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+if(ORM_WITH_PGSQL)
+  cmake_install_headers(
+    FILES include/orm/orm_postgresql.h include/orm/orm_postgresql.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+endif()
 
 cmake_config_package(PACKAGE Orm VERSION "${ORM_VERSION}")
+if(ORM_WITH_PGSQL)
+  cmake_config_package(PACKAGE OrmPostgreSQL NAMESPACE Orm::
+                       VERSION "${ORM_VERSION}")
+endif()
