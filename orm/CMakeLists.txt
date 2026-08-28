@@ -203,6 +203,8 @@ cmake_config_target(
   Orm::C
   EXPORT_NAME
   C
+  OUTPUT_NAME
+  turbo_orm
   EXPORT_SET
   OrmTargets
   FOLDER
@@ -324,7 +326,7 @@ if(ORM_BUILD_SHARED AND ORM_WITH_PGSQL)
       RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies
       DIRECTORIES "${ORM_POSTGRESQL_PREFIX_DIR}/bin"
       PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
-                          "clang_rt.asan_dynamic-.*" "orm_c\\.dll"
+                          "clang_rt.asan_dynamic-.*" "turbo_orm\\.dll"
                           "turbo_utils\\.dll"
       POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
       RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -332,7 +334,7 @@ if(ORM_BUILD_SHARED AND ORM_WITH_PGSQL)
     install(
       RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies
       DIRECTORIES "${ORM_POSTGRESQL_PREFIX_DIR}/bin"
-      PRE_EXCLUDE_REGEXES "liborm_c\\..*" "libturbo_.*"
+      PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libturbo_.*"
       POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
   endif()
