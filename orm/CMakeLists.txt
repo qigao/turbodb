@@ -48,6 +48,22 @@ option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_WITH_REDIS "Enable Redis backend" ${ORM_WITH_REDIS_DEFAULT})
 option(ORM_WITH_MONGODB "Enable MongoDB backend" ${ORM_WITH_MONGODB_DEFAULT})
 option(ORM_WITH_TIDESDB "Enable TidesDB embedded backend" ${ORM_WITH_TIDESDB_DEFAULT})
+option(ORM_POSTGRES_LIVE_TESTS
+       "Run tests against TURBODB_ORM_PGSQL_TEST_CONNINFO" OFF)
+
+if(ORM_POSTGRES_LIVE_TESTS)
+  if(NOT ORM_BUILD_TESTS)
+    message(FATAL_ERROR "ORM_POSTGRES_LIVE_TESTS requires ORM_BUILD_TESTS=ON")
+  endif()
+  if(NOT ORM_WITH_PGSQL)
+    message(FATAL_ERROR "ORM_POSTGRES_LIVE_TESTS requires ORM_WITH_PGSQL=ON")
+  endif()
+  if(NOT DEFINED ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO} OR
+     "$ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO}" STREQUAL "")
+    message(FATAL_ERROR
+            "ORM_POSTGRES_LIVE_TESTS requires TURBODB_ORM_PGSQL_TEST_CONNINFO")
+  endif()
+endif()
 
 if((ORM_BUILD_TESTS OR (ORM_BUILD_SHARED AND ORM_WITH_PGSQL)) AND
    NOT CMAKE_CXX_COMPILER_LOADED)
@@ -472,6 +488,21 @@ if(MSVC)
 endif()
 add_test(NAME orm_postgres_libpq COMMAND orm_postgres_libpq_test)
 
+if(ORM_POSTGRES_LIVE_TESTS)
+  add_executable(orm_postgres_live_test tests/integration/postgres_live_test.c)
+  target_compile_features(orm_postgres_live_test PRIVATE c_std_11)
+  target_link_libraries(orm_postgres_live_test PRIVATE orm_postgresql
+                                                         TurboUtils::TinyTest)
+  set_target_properties(orm_postgres_live_test
+                        PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_postgres_live_test)
+  if(MSVC)
+    target_compile_options(orm_postgres_live_test
+                           PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+  endif()
+  add_test(NAME orm_postgres_live COMMAND orm_postgres_live_test)
+endif()
+
 endif()
 
 add_executable(orm_cbind_source_test tests/flow/orm_cbind_source_test.c)
@@ -732,6 +763,9 @@ if(WIN32)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:PostgreSQL::PostgreSQL>")
     list(APPEND ORM_RUNTIME_TESTS orm_postgres_libpq)
+    if(ORM_POSTGRES_LIVE_TESTS)
+      list(APPEND ORM_RUNTIME_TESTS orm_postgres_live)
+    endif()
   endif()
   if(ORM_WITH_REDIS)
     string(
