@@ -18,6 +18,7 @@ typedef struct orm_postgres_test_result {
   const uint8_t *nulls;
   const char *affected_rows;
   const char *error;
+  const char *sqlstate;
 } orm_postgres_test_result;
 
 TINYMOCk_MOCK(int, orm_postgres_test_send_mock, void *, void *)
@@ -88,7 +89,10 @@ static const char *orm_postgres_test_result_error(const void *result) {
 }
 
 static const char *orm_postgres_test_result_sqlstate(const void *result) {
-  return ((const orm_postgres_test_result *)result)->error ? "23505" : NULL;
+  const orm_postgres_test_result *typed =
+      (const orm_postgres_test_result *)result;
+  return typed->sqlstate != NULL ? typed->sqlstate
+                                 : typed->error != NULL ? "23505" : NULL;
 }
 
 static const orm_postgres_command_ops orm_postgres_test_command_ops = {
@@ -593,12 +597,63 @@ spec("ORM PostgreSQL single-row cursor") {
     {
       const orm_row_cursor_step step = cursor.ops->next(cursor.context, &reader);
       check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
-      check_equal(step.status, ORM_STATUS_SQL_ERROR);
+      check_equal(step.status, ORM_STATUS_CONSTRAINT);
       check_not_null(strstr(step.message, "SQLSTATE=23505"));
       check_not_null(strstr(step.message, "forced error after one row"));
     }
     cursor.ops->destroy(cursor.context);
     orm_postgres_test_verify_mocks();
+  }
+
+  it("classifies only PostgreSQL errors with a safe retry contract as busy") {
+    static const struct {
+      const char *sqlstate;
+      orm_status_t expected;
+    } cases[] = {{"40001", ORM_STATUS_BUSY},
+                 {"40P01", ORM_STATUS_BUSY},
+                 {"55P03", ORM_STATUS_BUSY},
+                 {"40003", ORM_STATUS_SQL_ERROR}};
+    int connection_token = 0;
+    orm_postgres_driver driver = {
+        &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
+        &connection_token};
+    orm_postgres_query_request request = {
+        "update retry_contract set value = 1", 0, NULL, NULL, NULL, NULL, 0};
+    orm_error_t runtime_error;
+    orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+        1u, UINT64_MAX, 1u, NULL, NULL, &runtime_error);
+
+    for (size_t index = 0u; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+      orm_postgres_test_result fatal = {
+          .status = ORM_POSTGRES_RESULT_ERROR,
+          .error = "retry classification",
+          .sqlstate = cases[index].sqlstate};
+      orm_row_cursor cursor = {0};
+      orm_error_t error;
+      cserde_reader reader = {0};
+
+      orm_error_init(&error);
+      orm_error_init(&runtime_error);
+      orm_postgres_test_reset_mocks();
+      orm_postgres_test_expect_start(&connection_token, &request);
+      mock_orm_postgres_test_next_result_expect(
+          TINYMOCk_ARG((void *)&connection_token),
+          TINYMOCk_RETURN((void *)&fatal));
+      mock_orm_postgres_test_next_result_expect(
+          TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
+      mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&fatal));
+
+      check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
+                                            &config, &error), ORM_STATUS_OK);
+      {
+        const orm_row_cursor_step step =
+            cursor.ops->next(cursor.context, &reader);
+        check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
+        check_equal(step.status, cases[index].expected);
+      }
+      cursor.ops->destroy(cursor.context);
+      orm_postgres_test_verify_mocks();
+    }
   }
 
   it("reports affected rows only after command completion") {

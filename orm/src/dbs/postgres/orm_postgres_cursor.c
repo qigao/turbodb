@@ -113,6 +113,17 @@ static int orm_postgres_result_ops_valid(const orm_postgres_result_ops *ops) {
          ops->sqlstate != NULL;
 }
 
+static orm_status_t orm_postgres_sqlstate_status(const char *sqlstate) {
+  if (sqlstate == NULL || strlen(sqlstate) != 5u)
+    return ORM_STATUS_SQL_ERROR;
+  if (sqlstate[0] == '2' && sqlstate[1] == '3')
+    return ORM_STATUS_CONSTRAINT;
+  if (strcmp(sqlstate, "40001") == 0 || strcmp(sqlstate, "40P01") == 0 ||
+      strcmp(sqlstate, "55P03") == 0)
+    return ORM_STATUS_BUSY;
+  return ORM_STATUS_SQL_ERROR;
+}
+
 static int orm_postgres_config_valid(
     const orm_postgres_cursor_config *config) {
   return config != NULL && config->struct_size >= sizeof(*config) &&
@@ -435,6 +446,7 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
     if (result_status == ORM_POSTGRES_RESULT_ERROR) {
       char diagnostic[ORM_C_ERROR_MESSAGE_CAPACITY];
       const char *sqlstate = state->driver.result->sqlstate(state->current_result);
+      const orm_status_t error_status = orm_postgres_sqlstate_status(sqlstate);
       message = state->driver.result->error(state->current_result);
       if (sqlstate != NULL && strlen(sqlstate) == 5u) {
         (void)snprintf(diagnostic, sizeof(diagnostic), "SQLSTATE=%s %s",
@@ -445,7 +457,7 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
         message = diagnostic;
       }
       return orm_postgres_cursor_error(
-          state, ORM_STATUS_SQL_ERROR,
+          state, error_status,
           message != NULL && *message != '\0' ? message
                                               : "PostgreSQL query failed");
     }

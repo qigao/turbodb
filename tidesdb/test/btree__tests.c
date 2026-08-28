@@ -1973,7 +1973,7 @@ void test_btree_compression_two_leaves()
                              .comparator = NULL,
                              .comparator_ctx = NULL,
                              .cmp_type = BTREE_CMP_MEMCMP,
-                             .compression_algo = TDB_COMPRESS_LZ4};
+                             .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM};
 
     btree_builder_t *builder = NULL;
     ASSERT_TRUE(btree_builder_new(&builder, bm, &config) == 0);
@@ -2020,7 +2020,7 @@ void test_btree_compression_three_leaves()
                              .comparator = NULL,
                              .comparator_ctx = NULL,
                              .cmp_type = BTREE_CMP_MEMCMP,
-                             .compression_algo = TDB_COMPRESS_LZ4};
+                             .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM};
 
     btree_builder_t *builder = NULL;
     ASSERT_TRUE(btree_builder_new(&builder, bm, &config) == 0);
@@ -2055,7 +2055,7 @@ void test_btree_compression_cursor_bidirectional()
                              .comparator = NULL,
                              .comparator_ctx = NULL,
                              .cmp_type = BTREE_CMP_MEMCMP,
-                             .compression_algo = TDB_COMPRESS_LZ4};
+                             .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM};
 
     btree_builder_t *builder = NULL;
     ASSERT_TRUE(btree_builder_new(&builder, bm, &config) == 0);
@@ -2116,7 +2116,7 @@ void test_btree_compression_single_leaf()
                              .comparator = NULL,
                              .comparator_ctx = NULL,
                              .cmp_type = BTREE_CMP_MEMCMP,
-                             .compression_algo = TDB_COMPRESS_LZ4};
+                             .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM};
 
     btree_builder_t *builder = NULL;
     ASSERT_TRUE(btree_builder_new(&builder, bm, &config) == 0);
@@ -2533,7 +2533,7 @@ void bench_btree_node_sizes()
                                  .comparator = NULL,
                                  .comparator_ctx = NULL,
                                  .cmp_type = BTREE_CMP_MEMCMP,
-                                 .compression_algo = TDB_COMPRESS_LZ4};
+                                 .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM};
 
         btree_builder_t *builder = NULL;
         btree_builder_new(&builder, bm, &config);
@@ -2611,12 +2611,20 @@ int main(int argc, char **argv)
     RUN_TEST(test_btree_multi_version_resolution, tests_passed);
     RUN_TEST(test_btree_large_keys_values, tests_passed);
     RUN_TEST(test_btree_seek_edge_cases, tests_passed);
+#ifdef TIDESDB_TEST_HAVE_COMPRESSION
     RUN_TEST(test_btree_compression_single_leaf, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_LZ4
     RUN_TEST(test_btree_compression_lz4, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     RUN_TEST(test_btree_compression_zstd, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_COMPRESSION
     RUN_TEST(test_btree_compression_two_leaves, tests_passed);
     RUN_TEST(test_btree_compression_three_leaves, tests_passed);
     RUN_TEST(test_btree_compression_cursor_bidirectional, tests_passed);
+#endif
     RUN_TEST(test_btree_arena, tests_passed);
     RUN_TEST(test_btree_comparator_string, tests_passed);
     RUN_TEST(test_btree_comparator_numeric, tests_passed);
@@ -2633,7 +2641,9 @@ int main(int argc, char **argv)
     RUN_TEST(bench_btree_build, tests_passed);
     RUN_TEST(bench_btree_get, tests_passed);
     RUN_TEST(bench_btree_cursor_scan, tests_passed);
+#if defined(TIDESDB_TEST_HAVE_LZ4) && defined(TIDESDB_TEST_HAVE_ZSTD)
     RUN_TEST(bench_btree_compression_comparison, tests_passed);
+#endif
     RUN_TEST(bench_btree_node_sizes, tests_passed);
 
     PRINT_TEST_RESULTS(tests_passed, tests_failed);

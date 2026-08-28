@@ -426,6 +426,7 @@ const char *ORM_C_CALL orm_status_message(orm_status_t status) {
     case ORM_STATUS_BUSY: return "busy";
     case ORM_STATUS_UNSUPPORTED: return "unsupported";
     case ORM_STATUS_DATASTORE_ERROR: return "datastore error";
+    case ORM_STATUS_CONSTRAINT: return "constraint violation";
     default: return "unknown ORM status";
   }
 }

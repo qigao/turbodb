@@ -3725,7 +3725,7 @@ static void test_compaction_basic(void)
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
     cf_config.level_size_ratio = 10;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "compact_cf", &cf_config), 0);
     tidesdb_column_family_t *cf = tidesdb_get_column_family(db, "compact_cf");
@@ -3816,7 +3816,7 @@ static void test_compaction_with_deletes(void)
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
     cf_config.level_size_ratio = 10;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "del_cf", &cf_config), 0);
     tidesdb_column_family_t *cf = tidesdb_get_column_family(db, "del_cf");
@@ -4056,7 +4056,7 @@ static void test_single_delete_pair_cancel_at_compaction(void)
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
     cf_config.level_size_ratio = 10;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "sd_pair_cf", &cf_config), 0);
     tidesdb_column_family_t *cf = tidesdb_get_column_family(db, "sd_pair_cf");
@@ -5071,7 +5071,7 @@ static void test_ini_config(void)
     tidesdb_t *db = create_test_db();
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 1024 * 1024;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.bloom_fpr = 0.01;
 
@@ -7251,7 +7251,7 @@ static void test_iterator_across_multiple_sources(void)
     tidesdb_t *db = create_test_db();
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "iter_multi_cf", &cf_config), 0);
     tidesdb_column_family_t *cf = tidesdb_get_column_family(db, "iter_multi_cf");
@@ -11659,7 +11659,7 @@ static void test_many_sstables_all_features_enabled(void)
     sim_test_config_t config = {.test_name = "all_features_enabled",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 25,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 60};
@@ -11683,7 +11683,7 @@ static void test_many_sstables_bloom_and_compression(void)
     sim_test_config_t config = {.test_name = "bloom_and_zstd",
                                 .enable_bloom = 1,
                                 .enable_indexes = 0,
-                                .compression_algo = TDB_COMPRESS_ZSTD,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 20,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 50};
@@ -11695,7 +11695,7 @@ static void test_many_sstables_indexes_and_compression(void)
     sim_test_config_t config = {.test_name = "indexes_and_snappy",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 20,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 50};
@@ -11781,7 +11781,7 @@ static void test_many_sstables_all_features_enabled_cached(void)
     sim_test_config_t config = {.test_name = "all_features_enabled_cached",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 25,
                                 .block_cache_size = 32 * 1024 * 1024, /* 32MB */
                                 .keys_per_sstable = 60};
@@ -11805,7 +11805,7 @@ static void test_many_sstables_bloom_and_compression_cached(void)
     sim_test_config_t config = {.test_name = "bloom_and_zstd_cached",
                                 .enable_bloom = 1,
                                 .enable_indexes = 0,
-                                .compression_algo = TDB_COMPRESS_ZSTD,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 20,
                                 .block_cache_size = 24 * 1024 * 1024, /* 24MB */
                                 .keys_per_sstable = 50};
@@ -11817,7 +11817,7 @@ static void test_many_sstables_read_uncommitted(void)
     sim_test_config_t config = {.test_name = "isolation_read_uncommitted",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11830,7 +11830,7 @@ static void test_many_sstables_read_committed(void)
     sim_test_config_t config = {.test_name = "isolation_read_committed",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11843,7 +11843,7 @@ static void test_many_sstables_repeatable_read(void)
     sim_test_config_t config = {.test_name = "isolation_repeatable_read",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_ZSTD,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11856,7 +11856,7 @@ static void test_many_sstables_serializable(void)
     sim_test_config_t config = {.test_name = "isolation_serializable",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11869,7 +11869,7 @@ static void test_many_sstables_comparator_memcmp(void)
     sim_test_config_t config = {.test_name = "comparator_memcmp",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11882,7 +11882,7 @@ static void test_many_sstables_comparator_lexicographic(void)
     sim_test_config_t config = {.test_name = "comparator_lexicographic",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_ZSTD,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11895,7 +11895,7 @@ static void test_many_sstables_comparator_reverse(void)
     sim_test_config_t config = {.test_name = "comparator_reverse",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11908,7 +11908,7 @@ static void test_many_sstables_comparator_case_insensitive(void)
     sim_test_config_t config = {.test_name = "comparator_case_insensitive",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 0,
                                 .keys_per_sstable = 40,
@@ -11921,7 +11921,7 @@ static void test_many_sstables_small_cache(void)
     sim_test_config_t config = {.test_name = "small_bm_cache",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_LZ4,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 20,
                                 .block_cache_size = 1024 * 1024, /* 1MB */
                                 .keys_per_sstable = 50,
@@ -11934,7 +11934,7 @@ static void test_many_sstables_large_cache(void)
     sim_test_config_t config = {.test_name = "large_bm_cache",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_ZSTD,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 20,
                                 .block_cache_size = 64 * 1024 * 1024, /* 64MB */
                                 .keys_per_sstable = 50,
@@ -11947,7 +11947,7 @@ static void test_many_sstables_all_comparators(void)
     sim_test_config_t config = {.test_name = "all_comparators_combined",
                                 .enable_bloom = 1,
                                 .enable_indexes = 1,
-                                .compression_algo = TDB_COMPRESS_ZSTD,
+                                .compression_algo = TIDESDB_TEST_COMPRESSION_ALGORITHM,
                                 .num_sstables = 15,
                                 .block_cache_size = 32 * 1024 * 1024,
                                 .keys_per_sstable = 40,
@@ -14661,7 +14661,7 @@ static void test_multi_cf_transaction_recovery_comprehensive(void)
     {
         tidesdb_t *db = create_test_db();
         tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
-        cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+        cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
         cf_config.write_buffer_size = 1024 * 1024; /* 1MB buffer */
 
         /* we create four column families with different purposes */
@@ -15540,7 +15540,7 @@ void test_concurrent_read_close_race(void)
     cf_config.min_levels = 3;
     cf_config.enable_bloom_filter = 1;
     cf_config.bloom_fpr = 0.01;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_block_indexes = 1;
     cf_config.sync_mode = TDB_SYNC_NONE;
 
@@ -15649,7 +15649,7 @@ static void test_crash_during_flush(void)
         tidesdb_t *db = create_test_db();
         tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
         cf_config.write_buffer_size = 4096; /* small buffer to trigger flush */
-        cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+        cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
 
         ASSERT_EQ(tidesdb_create_column_family(db, "crash_cf", &cf_config), 0);
         tidesdb_column_family_t *cf = tidesdb_get_column_family(db, "crash_cf");
@@ -22327,7 +22327,7 @@ static void test_merge_vlog_large_value_compression(void)
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
     cf_config.level_size_ratio = 4;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.klog_value_threshold = 128;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "vlog_comp_cf", &cf_config), 0);
@@ -22862,7 +22862,7 @@ static void test_concurrent_txn_commit_sequence_race(void)
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
 
     cf_config.write_buffer_size = 4 * 1024; /* 4KB */
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "race_cf", &cf_config), 0);
@@ -23200,7 +23200,7 @@ static void test_stress_unified_read_races(void)
     cf_config.write_buffer_size = 65536;
     cf_config.level_size_ratio = 4;
     cf_config.min_levels = 4;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.klog_value_threshold = 512;
 
@@ -24756,7 +24756,7 @@ static void test_concurrent_iter_seek_directions(void)
     tidesdb_t *db = create_test_db();
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.enable_block_indexes = 1;
 
@@ -24954,7 +24954,7 @@ static void test_concurrent_multi_cf_put_delete_iterate(void)
     tidesdb_t *db = create_test_db();
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "mcf_data", &cf_config), 0);
@@ -25005,7 +25005,7 @@ static void test_iterator_reuse_seek_patterns(void)
     tidesdb_t *db = create_test_db();
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 2048;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.enable_block_indexes = 1;
 
@@ -25111,7 +25111,7 @@ static void test_concurrent_savepoint_rollback_under_load(void)
     tidesdb_t *db = create_test_db();
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 4096;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "sp_cf", &cf_config), 0);
     tidesdb_column_family_t *cf = tidesdb_get_column_family(db, "sp_cf");
@@ -25239,7 +25239,7 @@ static void test_concurrent_iter_seek_directions_deep_sst(void)
     cf_config.write_buffer_size = 512;
     cf_config.level_size_ratio = 4;
     cf_config.min_levels = 5;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.enable_block_indexes = 1;
     cf_config.klog_value_threshold = 256;
@@ -25394,7 +25394,7 @@ static void test_concurrent_multi_cf_deep_sst_mixed_ops(void)
     cf_config.write_buffer_size = 512;
     cf_config.level_size_ratio = 4;
     cf_config.min_levels = 5;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.enable_block_indexes = 1;
 
@@ -25588,7 +25588,7 @@ static void test_multi_cf_flush_queue_saturation(void)
 
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 512;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
 
     tidesdb_column_family_t *cfs[4];
@@ -25765,7 +25765,7 @@ static void test_multi_cf_cross_txn_compaction_atomicity(void)
 
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 1024;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "atom_cf_a", &cf_config), 0);
@@ -26267,7 +26267,7 @@ static void test_multi_cf_iterator_during_level_mutation(void)
 
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 1024;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.enable_block_indexes = 1;
 
@@ -26368,7 +26368,7 @@ static void test_multi_cf_cascading_memory_pressure(void)
 
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 1024 * 4;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
 
     tidesdb_column_family_t *cfs[6];
@@ -26522,7 +26522,7 @@ static void test_multi_cf_create_drop_churn_under_load(void)
 
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 1024 * 4;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
 
     ASSERT_EQ(tidesdb_create_column_family(db, "stable_a", &cf_config), 0);
@@ -26727,7 +26727,7 @@ static void test_multi_cf_mixed_isolation_cross_txn(void)
 
     tidesdb_column_family_config_t cf_config = tidesdb_default_column_family_config();
     cf_config.write_buffer_size = 1024;
-    cf_config.compression_algorithm = TDB_COMPRESS_LZ4;
+    cf_config.compression_algorithm = TIDESDB_TEST_COMPRESSION_ALGORITHM;
     cf_config.enable_bloom_filter = 1;
     cf_config.enable_block_indexes = 1;
 
@@ -32755,8 +32755,12 @@ int main(int argc, char **argv)
     RUN_TEST(test_block_indexes, tests_passed);
     RUN_TEST(test_block_indexes_sparse_sample_ratio, tests_passed);
     RUN_TEST(test_sync_modes, tests_passed);
+#ifdef TIDESDB_TEST_HAVE_LZ4
     RUN_TEST(test_compression_lz4, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     RUN_TEST(test_compression_zstd, tests_passed);
+#endif
     RUN_TEST(test_compaction_basic, tests_passed);
     RUN_TEST(test_compaction_with_deletes, tests_passed);
     RUN_TEST(test_txn_single_delete_basic, tests_passed);
@@ -32822,8 +32826,12 @@ int main(int argc, char **argv)
     RUN_TEST(test_many_sstables_with_bloom_filter, tests_passed);
     RUN_TEST(test_many_sstables_without_bloom_filter, tests_passed);
     RUN_TEST(test_many_sstables_with_block_indexes, tests_passed);
+#ifdef TIDESDB_TEST_HAVE_LZ4
     RUN_TEST(test_many_sstables_with_lz4_compression, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     RUN_TEST(test_many_sstables_with_zstd_compression, tests_passed);
+#endif
     RUN_TEST(test_many_sstables_all_features_enabled, tests_passed);
     RUN_TEST(test_many_sstables_all_features_disabled, tests_passed);
     RUN_TEST(test_many_sstables_bloom_and_compression, tests_passed);
@@ -32831,10 +32839,14 @@ int main(int argc, char **argv)
     RUN_TEST(test_many_sstables_with_bloom_filter_cached, tests_passed);
     RUN_TEST(test_many_sstables_without_bloom_filter_cached, tests_passed);
     RUN_TEST(test_many_sstables_with_block_indexes_cached, tests_passed);
+#ifdef TIDESDB_TEST_HAVE_LZ4
     RUN_TEST(test_many_sstables_with_lz4_compression_cached, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     RUN_TEST(test_many_sstables_with_zstd_compression_cached, tests_passed);
+#endif
 
-#ifndef __sun
+#if defined(TIDESDB_TEST_HAVE_SNAPPY) && !defined(__sun)
     RUN_TEST(test_many_sstables_with_snappy_compression, tests_passed);
     RUN_TEST(test_many_sstables_with_snappy_compression_cached, tests_passed);
     RUN_TEST(test_compression_snappy, tests_passed);
@@ -32918,8 +32930,12 @@ int main(int argc, char **argv)
     RUN_TEST(test_merge_heap_source_exhaustion, tests_passed);
     RUN_TEST(test_compaction_max_seq_propagation, tests_passed);
     RUN_TEST(test_compaction_spooky_level_selection, tests_passed);
+#ifdef TIDESDB_TEST_HAVE_LZ4
     RUN_TEST(test_compaction_with_lz4_compression, tests_passed);
+#endif
+#ifdef TIDESDB_TEST_HAVE_ZSTD
     RUN_TEST(test_compaction_with_zstd_compression, tests_passed);
+#endif
     RUN_TEST(test_merge_with_bloom_filter_disabled, tests_passed);
     RUN_TEST(test_merge_with_block_indexes_disabled, tests_passed);
     RUN_TEST(test_flush_wal_rotation, tests_passed);

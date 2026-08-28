@@ -103,4 +103,64 @@ spec("ORM pure C SQL renderer") {
                               vstr_from_cstr("person;drop_table"), &limits,
                               &error), ORM_STATUS_INVALID_ARGUMENT);
   }
+
+  it("normalizes portable raw placeholders for PostgreSQL only") {
+    orm_limits limits = orm_sql_test_limits();
+    orm_query_plan plan;
+    orm_sql_query rendered;
+    orm_error_t error;
+
+    orm_error_init(&error);
+    check_equal(orm_plan_init(
+                    &plan, ORM_QUERY_RAW,
+                    vstr_from_cstr("select ?1, '?2', \"?3\", $tag$?4$tag$ -- ?5\n"
+                                   "/* ?6 /* ?7 */ */ where id=?2"),
+                    &limits, &error),
+                ORM_STATUS_OK);
+
+    check_equal(orm_sql_render(&plan, &limits, ORM_SQL_POSTGRES, &rendered, &error),
+                ORM_STATUS_OK);
+    check_equal(strcmp(rendered.text,
+                        "select $1, '?2', \"?3\", $tag$?4$tag$ -- ?5\n"
+                        "/* ?6 /* ?7 */ */ where id=$2"),
+                0);
+    orm_sql_query_destroy(&rendered);
+
+    check_equal(orm_sql_render(&plan, &limits, ORM_SQL_SQLITE, &rendered, &error), ORM_STATUS_OK);
+    check_equal(strcmp(rendered.text,
+                        "select ?1, '?2', \"?3\", $tag$?4$tag$ -- ?5\n"
+                        "/* ?6 /* ?7 */ */ where id=?2"),
+                0);
+
+    orm_sql_query_destroy(&rendered);
+    orm_plan_destroy(&plan);
+  }
+
+  it("uses PostgreSQL standard and escape string backslash rules") {
+    static const char standard_sql[] = "select 'x\\', ?1";
+    static const char escape_sql[] = "select E'x\\'?1', ?2";
+    orm_limits limits = orm_sql_test_limits();
+    orm_query_plan plan;
+    orm_sql_query rendered;
+    orm_error_t error;
+
+    orm_error_init(&error);
+    check_equal(orm_plan_init(&plan, ORM_QUERY_RAW,
+                              vstr_from_cstr(standard_sql), &limits, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_sql_render(&plan, &limits, ORM_SQL_POSTGRES, &rendered,
+                               &error), ORM_STATUS_OK);
+    check_equal(strcmp(rendered.text, "select 'x\\', $1"), 0);
+    orm_sql_query_destroy(&rendered);
+    orm_plan_destroy(&plan);
+
+    check_equal(orm_plan_init(&plan, ORM_QUERY_RAW,
+                              vstr_from_cstr(escape_sql), &limits, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_sql_render(&plan, &limits, ORM_SQL_POSTGRES, &rendered,
+                               &error), ORM_STATUS_OK);
+    check_equal(strcmp(rendered.text, "select E'x\\'?1', $2"), 0);
+    orm_sql_query_destroy(&rendered);
+    orm_plan_destroy(&plan);
+  }
 }

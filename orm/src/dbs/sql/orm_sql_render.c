@@ -320,13 +320,139 @@ static orm_status_t orm_sql_render_delete(const orm_query_plan *plan,
   return status;
 }
 
+typedef enum orm_sql_scan_state {
+  ORM_SQL_SCAN_NORMAL = 0,
+  ORM_SQL_SCAN_SINGLE_QUOTE,
+  ORM_SQL_SCAN_DOUBLE_QUOTE,
+  ORM_SQL_SCAN_LINE_COMMENT,
+  ORM_SQL_SCAN_BLOCK_COMMENT,
+  ORM_SQL_SCAN_DOLLAR_QUOTE
+} orm_sql_scan_state;
+
+static size_t orm_sql_dollar_delimiter(const char *sql, size_t size,
+                                       size_t offset) {
+  size_t index;
+  if (offset >= size || sql[offset] != '$')
+    return 0u;
+  for (index = offset + 1u; index < size; ++index) {
+    const unsigned char next = (unsigned char)sql[index];
+    if (next == '$')
+      return index - offset + 1u;
+    if (!((next >= (unsigned char)'a' && next <= (unsigned char)'z') ||
+          (next >= (unsigned char)'A' && next <= (unsigned char)'Z') ||
+          next == (unsigned char)'_' ||
+          (index != offset + 1u && next >= (unsigned char)'0' &&
+           next <= (unsigned char)'9')))
+      return 0u;
+  }
+  return 0u;
+}
+
+static int orm_sql_identifier_character(unsigned char value) {
+  return (value >= (unsigned char)'a' && value <= (unsigned char)'z') ||
+         (value >= (unsigned char)'A' && value <= (unsigned char)'Z') ||
+         (value >= (unsigned char)'0' && value <= (unsigned char)'9') ||
+         value == (unsigned char)'_' || value == (unsigned char)'$';
+}
+
+static int orm_sql_escape_string_prefix(const char *sql, size_t offset) {
+  const unsigned char prefix =
+      offset != 0u ? (unsigned char)sql[offset - 1u] : 0u;
+  return (prefix == (unsigned char)'e' || prefix == (unsigned char)'E') &&
+         (offset == 1u ||
+          !orm_sql_identifier_character((unsigned char)sql[offset - 2u]));
+}
+
+static void orm_sql_normalize_raw_placeholders(tstr sql,
+                                                orm_sql_dialect dialect) {
+  orm_sql_scan_state state = ORM_SQL_SCAN_NORMAL;
+  int single_backslash_escapes = 0;
+  size_t block_depth = 0u;
+  size_t dollar_offset = 0u;
+  size_t dollar_size = 0u;
+  size_t index;
+  const size_t size = tstr_len(sql);
+  if (sql == NULL || dialect != ORM_SQL_POSTGRES)
+    return;
+  for (index = 0u; index < size; ++index) {
+    const char next = sql[index];
+    const char after = index + 1u < size ? sql[index + 1u] : '\0';
+    switch (state) {
+      case ORM_SQL_SCAN_NORMAL:
+        if (next == '\'') {
+          single_backslash_escapes = orm_sql_escape_string_prefix(sql, index);
+          state = ORM_SQL_SCAN_SINGLE_QUOTE;
+        } else if (next == '"')
+          state = ORM_SQL_SCAN_DOUBLE_QUOTE;
+        else if (next == '-' && after == '-') {
+          state = ORM_SQL_SCAN_LINE_COMMENT;
+          ++index;
+        } else if (next == '/' && after == '*') {
+          state = ORM_SQL_SCAN_BLOCK_COMMENT;
+          block_depth = 1u;
+          ++index;
+        } else if (next == '$' &&
+                   (dollar_size = orm_sql_dollar_delimiter(sql, size, index)) != 0u) {
+          state = ORM_SQL_SCAN_DOLLAR_QUOTE;
+          dollar_offset = index;
+          index += dollar_size - 1u;
+        } else if (next == '?' && after >= '1' && after <= '9') {
+          sql[index] = '$';
+        }
+        break;
+      case ORM_SQL_SCAN_SINGLE_QUOTE:
+        if (single_backslash_escapes && next == '\\' && after != '\0')
+          ++index;
+        else if (next == '\'' && after == '\'')
+          ++index;
+        else if (next == '\'') {
+          state = ORM_SQL_SCAN_NORMAL;
+          single_backslash_escapes = 0;
+        }
+        break;
+      case ORM_SQL_SCAN_DOUBLE_QUOTE:
+        if (next == '"' && after == '"')
+          ++index;
+        else if (next == '"')
+          state = ORM_SQL_SCAN_NORMAL;
+        break;
+      case ORM_SQL_SCAN_LINE_COMMENT:
+        if (next == '\n' || next == '\r')
+          state = ORM_SQL_SCAN_NORMAL;
+        break;
+      case ORM_SQL_SCAN_BLOCK_COMMENT:
+        if (next == '/' && after == '*') {
+          ++block_depth;
+          ++index;
+        } else if (next == '*' && after == '/') {
+          --block_depth;
+          ++index;
+          if (block_depth == 0u)
+            state = ORM_SQL_SCAN_NORMAL;
+        }
+        break;
+      case ORM_SQL_SCAN_DOLLAR_QUOTE:
+        if (next == '$' && index + dollar_size <= size &&
+            memcmp(sql + index, sql + dollar_offset, dollar_size) == 0) {
+          index += dollar_size - 1u;
+          state = ORM_SQL_SCAN_NORMAL;
+        }
+        break;
+      default: return;
+    }
+  }
+}
+
 static orm_status_t orm_sql_render_raw(const orm_query_plan *plan,
                                        const orm_limits *limits,
+                                       orm_sql_dialect dialect,
                                        orm_sql_query *query,
                                        orm_error_t *error) {
   size_t index;
   orm_status_t status = orm_sql_append_tstr(query, limits, plan->raw_sql,
                                              error);
+  if (status == ORM_STATUS_OK)
+    orm_sql_normalize_raw_placeholders(query->text, dialect);
   for (index = 0u; status == ORM_STATUS_OK &&
                    index < vec_size(&plan->raw_parameters); ++index) {
     const orm_owned_value *value = (const orm_owned_value *)
@@ -383,7 +509,7 @@ orm_status_t orm_sql_render(const orm_query_plan *plan,
       status = orm_sql_render_delete(plan, limits, dialect, out_query, error);
       break;
     case ORM_QUERY_RAW:
-      status = orm_sql_render_raw(plan, limits, out_query, error);
+      status = orm_sql_render_raw(plan, limits, dialect, out_query, error);
       break;
     default:
       orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,

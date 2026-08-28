@@ -734,7 +734,9 @@ if(TIDESDB_BUILD_TESTS) # enable building tests and benchmarks
 
     add_executable(block_manager_tests test/block_manager__tests.c)
     add_executable(skip_list_tests test/skip_list__tests.c)
-    add_executable(compress_tests test/compress__tests.c)
+    if(TIDESDB_WITH_SNAPPY OR TIDESDB_WITH_LZ4 OR TIDESDB_WITH_ZSTD)
+        add_executable(compress_tests test/compress__tests.c)
+    endif()
     add_executable(bloom_filter_tests test/bloom_filter__tests.c)
     add_executable(clock_cache_tests test/clock_cache__tests.c)
     add_executable(manifest_tests test/manifest__tests.c)
@@ -743,6 +745,40 @@ if(TIDESDB_BUILD_TESTS) # enable building tests and benchmarks
     add_executable(local_cache_tests test/local_cache__tests.c)
     add_executable(objstore_tests test/objstore__tests.c)
     add_executable(tidesdb_tests test/tidesdb__tests.c)
+
+    # The library's codec definitions are private because public headers do not expose third-party
+    # types. Tests still need the same feature set so they register only scenarios supported by the
+    # configured build. Generic compression coverage uses one actually enabled codec.
+    set(TIDESDB_TEST_COMPRESSION_ALGORITHM TDB_COMPRESS_NONE)
+    if(TIDESDB_WITH_ZSTD)
+        set(TIDESDB_TEST_COMPRESSION_ALGORITHM TDB_COMPRESS_ZSTD)
+    elseif(TIDESDB_WITH_LZ4)
+        set(TIDESDB_TEST_COMPRESSION_ALGORITHM TDB_COMPRESS_LZ4)
+    elseif(TIDESDB_WITH_SNAPPY)
+        set(TIDESDB_TEST_COMPRESSION_ALGORITHM TDB_COMPRESS_SNAPPY)
+    endif()
+    set(TIDESDB_COMPRESSION_TEST_TARGETS btree_tests tidesdb_tests)
+    if(TARGET compress_tests)
+        list(APPEND TIDESDB_COMPRESSION_TEST_TARGETS compress_tests)
+    endif()
+    foreach(compression_test_target IN LISTS TIDESDB_COMPRESSION_TEST_TARGETS)
+        target_compile_definitions(
+                ${compression_test_target} PRIVATE
+                TIDESDB_TEST_COMPRESSION_ALGORITHM=${TIDESDB_TEST_COMPRESSION_ALGORITHM})
+        if(TIDESDB_WITH_SNAPPY)
+            target_compile_definitions(${compression_test_target} PRIVATE TIDESDB_TEST_HAVE_SNAPPY)
+        endif()
+        if(TIDESDB_WITH_LZ4)
+            target_compile_definitions(${compression_test_target} PRIVATE TIDESDB_TEST_HAVE_LZ4)
+        endif()
+        if(TIDESDB_WITH_ZSTD)
+            target_compile_definitions(${compression_test_target} PRIVATE TIDESDB_TEST_HAVE_ZSTD)
+        endif()
+        if(TIDESDB_WITH_SNAPPY OR TIDESDB_WITH_LZ4 OR TIDESDB_WITH_ZSTD)
+            target_compile_definitions(${compression_test_target} PRIVATE
+                    TIDESDB_TEST_HAVE_COMPRESSION)
+        endif()
+    endforeach()
     # crypto unit tests only make sense when the S3 crypto sources are compiled in
     if(TIDESDB_WITH_S3)
         add_executable(sha256_tests test/sha256__tests.c)
@@ -818,9 +854,12 @@ if(TIDESDB_BUILD_TESTS) # enable building tests and benchmarks
 
     # add include and link directories for test executables
     set(TIDESDB_TEST_LINK_TARGETS
-            block_manager_tests skip_list_tests compress_tests bloom_filter_tests
+            block_manager_tests skip_list_tests bloom_filter_tests
             manifest_tests clock_cache_tests queue_tests btree_tests local_cache_tests
             objstore_tests tidesdb_tests tidesdb_bench)
+    if(TARGET compress_tests)
+        list(APPEND TIDESDB_TEST_LINK_TARGETS compress_tests)
+    endif()
     if(TIDESDB_WITH_S3)
         list(APPEND TIDESDB_TEST_LINK_TARGETS sha256_tests hmac_sha256_tests)
     endif()
@@ -831,7 +870,9 @@ if(TIDESDB_BUILD_TESTS) # enable building tests and benchmarks
 
     add_test(NAME block_manager_tests COMMAND block_manager_tests)
     add_test(NAME skip_list_tests COMMAND skip_list_tests)
-    add_test(NAME compress_tests COMMAND compress_tests)
+    if(TARGET compress_tests)
+        add_test(NAME compress_tests COMMAND compress_tests)
+    endif()
     add_test(NAME bloom_filter_tests COMMAND bloom_filter_tests)
     add_test(NAME manifest_tests COMMAND manifest_tests)
     add_test(NAME clock_cache_tests COMMAND clock_cache_tests)
