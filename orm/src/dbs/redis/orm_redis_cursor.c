@@ -366,7 +366,7 @@ static orm_status_t orm_redis_cursor_configure_shape(
 static const orm_row_cursor_ops orm_redis_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "redis-resp-stream", orm_redis_cursor_next, orm_redis_cursor_cancel,
-    orm_redis_cursor_destroy, orm_redis_cursor_configure_shape};
+    orm_redis_cursor_destroy, orm_redis_cursor_configure_shape, NULL};
 
 orm_status_t orm_redis_cursor_start(
     orm_row_cursor *out_cursor, orm_redis_row_driver *driver,

@@ -106,6 +106,7 @@ enum {
 
 typedef struct orm_connection orm_connection_t;
 typedef struct orm_query orm_query_t;
+typedef struct orm_result orm_result_t;
 typedef struct orm_transaction orm_transaction_t;
 typedef vstr orm_string_view_t;
 
@@ -242,6 +243,49 @@ ORM_C_API orm_status_t ORM_C_CALL orm_query_set_limit(
     orm_query_t *query, uint64_t limit, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_set_offset(
     orm_query_t *query, uint64_t offset, orm_error_t *error);
+
+/*
+ * Materialized execution copies a bounded result snapshot owned by the
+ * caller. Text and blob views returned by accessors remain valid until
+ * orm_result_destroy(). Async cursors that yield WAIT are not supported by
+ * this synchronous interface; use the CFlow APIs for those backends.
+ */
+ORM_C_API orm_status_t ORM_C_CALL orm_query_execute(
+    orm_query_t *query, orm_result_t **out_result, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_query_execute_in_transaction(
+    orm_query_t *query, orm_transaction_t *transaction,
+    orm_result_t **out_result, orm_error_t *error);
+ORM_C_API void ORM_C_CALL orm_result_destroy(orm_result_t *result);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_row_count(
+    const orm_result_t *result, uint64_t *out_count, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_column_count(
+    const orm_result_t *result, uint64_t *out_count, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_affected_rows(
+    const orm_result_t *result, uint64_t *out_count, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_is_null(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    uint8_t *out_is_null, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_value_kind(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    orm_value_kind_t *out_kind, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_get_text(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    orm_string_view_t *out_value, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_get_blob(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    orm_blob_t *out_value, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_get_int64(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    int64_t *out_value, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_get_uint64(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    uint64_t *out_value, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_get_double(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    double *out_value, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_result_get_boolean(
+    const orm_result_t *result, uint64_t row, uint64_t column,
+    uint8_t *out_value, orm_error_t *error);
 
 /*
  * On success the Source owns its driver cursor. The query, connection,

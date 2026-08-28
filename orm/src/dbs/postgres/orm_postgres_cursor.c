@@ -109,7 +109,8 @@ static int orm_postgres_result_ops_valid(const orm_postgres_result_ops *ops) {
          ops->status != NULL && ops->rows != NULL && ops->columns != NULL &&
          ops->column_name != NULL && ops->column_type != NULL &&
          ops->is_null != NULL && ops->value != NULL && ops->length != NULL &&
-         ops->command_tuples != NULL && ops->error != NULL;
+         ops->command_tuples != NULL && ops->error != NULL &&
+         ops->sqlstate != NULL;
 }
 
 static int orm_postgres_config_valid(
@@ -432,7 +433,17 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
     }
     result_status = state->driver.result->status(state->current_result);
     if (result_status == ORM_POSTGRES_RESULT_ERROR) {
+      char diagnostic[ORM_C_ERROR_MESSAGE_CAPACITY];
+      const char *sqlstate = state->driver.result->sqlstate(state->current_result);
       message = state->driver.result->error(state->current_result);
+      if (sqlstate != NULL && strlen(sqlstate) == 5u) {
+        (void)snprintf(diagnostic, sizeof(diagnostic), "SQLSTATE=%s %s",
+                       sqlstate,
+                       message != NULL && *message != '\0'
+                           ? message
+                           : "PostgreSQL query failed");
+        message = diagnostic;
+      }
       return orm_postgres_cursor_error(
           state, ORM_STATUS_SQL_ERROR,
           message != NULL && *message != '\0' ? message
@@ -518,10 +529,21 @@ static void orm_postgres_cursor_destroy(void *context) {
   free(state);
 }
 
+static orm_status_t orm_postgres_cursor_column_count(void *context,
+                                                     uint64_t *out_count) {
+  const orm_postgres_cursor_state *state =
+      (const orm_postgres_cursor_state *)context;
+  if (state == NULL || state->config.column_count == NULL || out_count == NULL)
+    return ORM_STATUS_INVALID_ARGUMENT;
+  *out_count = (uint64_t)*state->config.column_count;
+  return ORM_STATUS_OK;
+}
+
 static const orm_row_cursor_ops orm_postgres_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "postgresql-single-row", orm_postgres_cursor_next,
-    orm_postgres_cursor_cancel, orm_postgres_cursor_destroy, NULL};
+    orm_postgres_cursor_cancel, orm_postgres_cursor_destroy, NULL,
+    orm_postgres_cursor_column_count};
 
 orm_status_t orm_postgres_cursor_start(
     orm_row_cursor *out_cursor, const orm_postgres_driver *driver,

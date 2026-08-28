@@ -262,10 +262,23 @@ static void orm_sqlite_cursor_destroy(void *context) {
   free(state);
 }
 
+static orm_status_t orm_sqlite_cursor_column_count(void *context,
+                                                   uint64_t *out_count) {
+  const orm_sqlite_cursor_state *state =
+      (const orm_sqlite_cursor_state *)context;
+  const int columns = state != NULL && state->statement != NULL
+                          ? sqlite3_column_count(state->statement)
+                          : -1;
+  if (out_count == NULL || columns < 0)
+    return ORM_STATUS_INVALID_ARGUMENT;
+  *out_count = (uint64_t)columns;
+  return ORM_STATUS_OK;
+}
+
 static const orm_row_cursor_ops orm_sqlite_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "sqlite", orm_sqlite_cursor_next, orm_sqlite_cursor_cancel,
-    orm_sqlite_cursor_destroy, NULL};
+    orm_sqlite_cursor_destroy, NULL, orm_sqlite_cursor_column_count};
 
 static orm_status_t orm_sqlite_cursor_from_statement_impl(
     orm_row_cursor *out_cursor, sqlite3_stmt **statement,

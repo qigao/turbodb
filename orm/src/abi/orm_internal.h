@@ -152,6 +152,8 @@ struct orm_transaction {
   orm_transaction_state state;
 };
 
+bool orm_query_returns_rows(const orm_query_plan *plan);
+
 void orm_error_set(orm_error_t *error, orm_status_t status,
                    const char *message);
 bool orm_view_valid(vstr value, bool allow_empty);

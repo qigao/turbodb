@@ -87,6 +87,10 @@ static const char *orm_postgres_test_result_error(const void *result) {
   return ((const orm_postgres_test_result *)result)->error;
 }
 
+static const char *orm_postgres_test_result_sqlstate(const void *result) {
+  return ((const orm_postgres_test_result *)result)->error ? "23505" : NULL;
+}
+
 static const orm_postgres_command_ops orm_postgres_test_command_ops = {
     sizeof(orm_postgres_command_ops), ORM_POSTGRES_COMMAND_OPS_ABI_VERSION,
     orm_postgres_test_send, orm_postgres_test_single_row,
@@ -99,7 +103,8 @@ static const orm_postgres_result_ops orm_postgres_test_result_ops = {
     orm_postgres_test_result_columns, orm_postgres_test_column_name,
     orm_postgres_test_column_type, orm_postgres_test_is_null,
     orm_postgres_test_value, orm_postgres_test_length,
-    orm_postgres_test_command_tuples, orm_postgres_test_result_error};
+    orm_postgres_test_command_tuples, orm_postgres_test_result_error,
+    orm_postgres_test_result_sqlstate};
 
 static void orm_postgres_test_reset_mocks(void) {
   mock_orm_postgres_test_send_mock_reset();
@@ -589,6 +594,7 @@ spec("ORM PostgreSQL single-row cursor") {
       const orm_row_cursor_step step = cursor.ops->next(cursor.context, &reader);
       check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
       check_equal(step.status, ORM_STATUS_SQL_ERROR);
+      check_not_null(strstr(step.message, "SQLSTATE=23505"));
       check_not_null(strstr(step.message, "forced error after one row"));
     }
     cursor.ops->destroy(cursor.context);

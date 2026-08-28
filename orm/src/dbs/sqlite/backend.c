@@ -233,12 +233,6 @@ static orm_status_t orm_sqlite_open_impl(
   if (status != ORM_STATUS_OK)
     return status;
   columns = sqlite3_column_count(statement);
-  if (columns <= 0) {
-    (void)sqlite3_finalize(statement);
-    orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                  "SQLite command must use a command Source");
-    return ORM_STATUS_UNSUPPORTED;
-  }
   if ((uint64_t)columns > (uint64_t)limits->max_columns) {
     (void)sqlite3_finalize(statement);
     orm_error_set(error, ORM_STATUS_LIMIT_EXCEEDED,

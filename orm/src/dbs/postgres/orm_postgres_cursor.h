@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define ORM_POSTGRES_COMMAND_OPS_ABI_VERSION 1u
-#define ORM_POSTGRES_RESULT_OPS_ABI_VERSION 1u
+#define ORM_POSTGRES_RESULT_OPS_ABI_VERSION 2u
 #define ORM_POSTGRES_CURSOR_CONFIG_ABI_VERSION 1u
 
 typedef enum orm_postgres_result_status {
@@ -55,6 +55,7 @@ typedef struct orm_postgres_result_ops {
   int64_t (*length)(const void *result, size_t row, size_t column);
   const char *(*command_tuples)(const void *result);
   const char *(*error)(const void *result);
+  const char *(*sqlstate)(const void *result);
 } orm_postgres_result_ops;
 
 typedef struct orm_postgres_driver {

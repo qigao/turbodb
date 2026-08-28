@@ -436,7 +436,7 @@ static void orm_tidesdb_cursor_destroy(void *context) {
 static const orm_row_cursor_ops orm_tidesdb_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "tidesdb-row", orm_tidesdb_cursor_next, orm_tidesdb_cursor_cancel,
-    orm_tidesdb_cursor_destroy, NULL};
+    orm_tidesdb_cursor_destroy, NULL, NULL};
 
 orm_status_t orm_tidesdb_cursor_start(
     orm_row_cursor *out_cursor, orm_tidesdb_driver *driver,

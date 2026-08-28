@@ -4,6 +4,7 @@
 #include "tinytest.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #define ORM_PUBLIC_FLOW_DATA_PREFIX_SIZE                                      \
   (offsetof(cmeta_data_desc, shape) +                                         \
@@ -316,6 +317,290 @@ spec("ORM public reactive flow") {
     check_equal(row.score, 19L);
     cflow_source_destroy(&row_source);
     orm_query_destroy(probe);
+    orm_disconnect(connection);
+  }
+
+  it("materializes an owned bounded SQLite result through the public ABI") {
+    const unsigned char expected_blob[] = {0x00u, 0x01u, 0xffu};
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    orm_string_view_t text = {0};
+    orm_blob_t blob = {0};
+    uint64_t rows = 0u;
+    uint64_t columns = 0u;
+    uint64_t affected = 0u;
+    uint8_t is_null = 0u;
+    orm_value_kind_t kind = ORM_VALUE_NULL;
+    int64_t integer = 0;
+    double floating = 0.0;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+
+    check_equal(
+        orm_raw(connection,
+                orm_view("select 7 as id, 2.5 as ratio, 'Alice' as name, "
+                         "x'0001ff' as payload, null as note"),
+                &query, &error),
+        ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_not_null(result);
+    check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+    check_equal(rows, (uint64_t)1u);
+    check_equal(orm_result_column_count(result, &columns, &error),
+                ORM_STATUS_OK);
+    check_equal(columns, (uint64_t)5u);
+    check_equal(orm_result_get_int64(result, 0u, 0u, &integer, &error),
+                ORM_STATUS_OK);
+    check_equal(integer, (int64_t)7);
+    check_equal(orm_result_value_kind(result, 0u, 0u, &kind, &error),
+                ORM_STATUS_OK);
+    check_equal(kind, ORM_VALUE_INT64);
+    check_equal(orm_result_get_double(result, 0u, 1u, &floating, &error),
+                ORM_STATUS_OK);
+    check_true(floating == 2.5);
+    check_equal(orm_result_get_text(result, 0u, 2u, &text, &error),
+                ORM_STATUS_OK);
+    check_equal(text.len, (size_t)5u);
+    check_true(memcmp(text.data, "Alice", text.len) == 0);
+    check_equal(orm_result_get_blob(result, 0u, 3u, &blob, &error),
+                ORM_STATUS_OK);
+    check_equal(blob.size, sizeof(expected_blob));
+    check_true(memcmp(blob.data, expected_blob, blob.size) == 0);
+    check_equal(orm_result_is_null(result, 0u, 4u, &is_null, &error),
+                ORM_STATUS_OK);
+    check_equal(is_null, (uint8_t)1u);
+    check_equal(orm_result_get_text(result, 0u, 4u, &text, &error),
+                ORM_STATUS_NULL_VALUE);
+    check_equal(orm_result_get_int64(result, 0u, 1u, &integer, &error),
+                ORM_STATUS_TYPE_ERROR);
+    check_equal(orm_result_get_text(result, 1u, 0u, &text, &error),
+                ORM_STATUS_OUT_OF_RANGE);
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    result = NULL;
+    query = NULL;
+
+    check_equal(
+        orm_raw(connection, orm_view("create table materialized(id integer)"),
+                &query, &error),
+        ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_affected_rows(result, &affected, &error),
+                ORM_STATUS_OK);
+    check_equal(affected, (uint64_t)0u);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    result = NULL;
+    query = NULL;
+    check_equal(orm_raw(connection, orm_view("PRAGMA foreign_keys"), &query,
+                        &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &affected, &error),
+                ORM_STATUS_OK);
+    check_equal(affected, (uint64_t)1u);
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    result = NULL;
+    query = NULL;
+    check_equal(orm_raw(connection, orm_view("PRAGMA journal_mode=WAL"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &affected, &error),
+                ORM_STATUS_OK);
+    check_equal(affected, (uint64_t)1u);
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("fails materialization atomically at the configured row bound") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    connection_config.max_result_rows = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection,
+                        orm_view("select 1 as id union all select 2"), &query,
+                        &error),
+                ORM_STATUS_OK);
+
+    check_equal(orm_query_execute(query, &result, &error),
+                ORM_STATUS_LIMIT_EXCEEDED);
+    check_null(result);
+
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("preserves result columns when a query returns no rows") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    uint64_t rows = 1u;
+    uint64_t columns = 0u;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection, orm_view("select 1 as id where 0"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+    check_equal(rows, (uint64_t)0u);
+    check_equal(orm_result_column_count(result, &columns, &error),
+                ORM_STATUS_OK);
+    check_equal(columns, (uint64_t)1u);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("materializes rows from a raw mutation with RETURNING") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    int64_t value = 0;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection, orm_view("create table returned(id integer)"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    result = NULL;
+    query = NULL;
+    check_equal(orm_raw(connection,
+                        orm_view("insert into returned values(7) returning id"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_get_int64(result, 0u, 0u, &value, &error),
+                ORM_STATUS_OK);
+    check_equal(value, (int64_t)7);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("executes a SQLite PRAGMA assignment as a command") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    uint64_t affected = 1u;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection, orm_view("PRAGMA foreign_keys=ON"),
+                        &query, &error),
+                ORM_STATUS_OK);
+
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_affected_rows(result, &affected, &error),
+                ORM_STATUS_OK);
+    check_equal(affected, (uint64_t)0u);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("keeps a transaction result snapshot after commit") {
+    orm_error_t error;
+    orm_config_t connection_config;
+    orm_option_t filename;
+    orm_connection_t *connection = NULL;
+    orm_transaction_t *transaction = NULL;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    int64_t value = 0;
+
+    orm_error_init(&error);
+    orm_config(&connection_config);
+    filename.keyword = orm_view("filename");
+    filename.value = orm_view(":memory:");
+    connection_config.driver = orm_view("sqlite");
+    connection_config.options = &filename;
+    connection_config.option_count = 1u;
+    check_equal(orm_connect(&connection_config, &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_transaction_begin(connection, ORM_ISOLATION_SERIALIZABLE,
+                                      &transaction, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_raw(connection, orm_view("select 41 + 1 as answer"),
+                        &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_execute_in_transaction(query, transaction, &result,
+                                                 &error),
+                ORM_STATUS_OK);
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
+    check_equal(orm_result_get_int64(result, 0u, 0u, &value, &error),
+                ORM_STATUS_OK);
+    check_equal(value, (int64_t)42);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_transaction_destroy(transaction);
     orm_disconnect(connection);
   }
 }

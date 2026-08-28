@@ -2,7 +2,8 @@
 
 function(cmake_config_target target_name)
     set(options NO_INSTALL NO_VERSION)
-    set(oneValueArgs FOLDER VERSION SOVERSION EXPORT_NAME EXPORT_SET ALIAS OUTPUT_NAME)
+    set(oneValueArgs FOLDER VERSION SOVERSION EXPORT_NAME EXPORT_SET ALIAS OUTPUT_NAME
+                     RUNTIME_DEPENDENCY_SET)
     set(multiValueArgs)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -59,9 +60,15 @@ function(cmake_config_target target_name)
                 "cmake_config_target: EXPORT_SET or CMAKE_CONFIG_TARGET_EXPORT_SET must name the export set")
         endif()
 
+        set(runtime_dependency_args)
+        if(ARG_RUNTIME_DEPENDENCY_SET)
+            list(APPEND runtime_dependency_args
+                 RUNTIME_DEPENDENCY_SET ${ARG_RUNTIME_DEPENDENCY_SET})
+        endif()
         install(
             TARGETS ${target_name}
             EXPORT ${export_set}
+            ${runtime_dependency_args}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
