@@ -11,16 +11,21 @@ The public library remains pure C. C++ consumers use header-only wrappers.
 ## Boundaries
 
 `redis_io_runtime` owns one explicitly selected native CFlow backend, one
-bounded I/O Actor, its Executor, operation slots, and completion delivery.
-`redis_cflow_connection` owns one socket and its RESP reassembly state.
-`redis_pool` owns a fixed array of those connections. RESP parsing remains
-protocol code and does not depend on native socket APIs.
+bounded bridge Actor, one serial Executor, Source admission accounting, and
+retiring socket identities. Each `redis_cflow_connection` owns one sequential
+`cflow_source_from_io_actor()` adapter, including its CFlow-owned Actor, typed
+completion slot, and socket/RESP reassembly state. Per-connection Actors submit
+through fixed runtime slots to the bridge Actor, which assigns request IDs that
+are unique across the shared native backend. `redis_pool` owns a fixed array of
+those connections. RESP parsing remains protocol code and does not depend on
+native socket APIs.
 
 ```text
 Redis command Source
   -> RESP command encoder / incremental parser
-  -> redis_io_connection lease
-  -> cflow_io_actor
+  -> per-connection CFlow I/O Source owner
+  -> capacity-one cflow_io_actor
+  -> runtime bridge cflow_io_actor
   -> cflow_io_native_backend
   -> native socket
 ```
@@ -35,14 +40,14 @@ latency-sensitive scheduler thread when hostname lookup may block.
 | Item | Contract |
 |---|---|
 | Data unit | One bounded SEND/RECV/CONNECT operation and one decoded top-level RESP item |
-| Fact source | The connection operation slot owns native completion state; the RESP reader owns protocol progress |
+| Fact source | The per-connection CFlow I/O Source owns native completion state; the RESP reader owns protocol progress |
 | Command bytes | Owned by the command Source until all partial SEND operations complete |
-| Receive bytes | Written exclusively into a fixed-capacity Source buffer while RECV is pending; copied into the bounded parser buffer before operation acknowledgement |
+| Receive bytes | Written exclusively into a fixed-capacity connection buffer while RECV is pending; copied into the bounded parser buffer before the next operation |
 | Decoded item | Owned by the consumer after an ITEM result and released with `redis_reply_free()` |
-| Thread topology | MPSC submission into one CFlow I/O Actor; one Actor driver; native completion may arrive from a backend worker |
-| Ordering | One read lane and one write lane per connection; Redis command replies remain FIFO |
-| Capacity | Runtime request slots, connection count, command bytes, receive bytes, decoded bytes, and top-level item count are hard limits |
-| Backpressure | Full Actor/pool returns a distinct busy/full status; no unbounded allocation and no silent fallback |
+| Thread topology | Scheduler-affine connection/Source resume; native completion may arrive from a backend worker; one runtime serial Executor orders bridge and Source-owner driver tasks |
+| Ordering | Exactly one native operation is active per connection; Redis command replies remain FIFO |
+| Capacity | Attached Sources, pool connections, command bytes, receive bytes, decoded bytes, and top-level item count are hard limits |
+| Backpressure | Full Source admission/pool capacity returns `TURBO_ENOBUFS`; no unbounded allocation or silent fallback |
 
 ## Connection Pool Lease Protocol
 
@@ -71,14 +76,13 @@ new admission and returns `TURBO_EBUSY` while leases remain. `destroy()` is only
 valid after quiescence. Pool statistics expose idle, borrowed, invalid, rejected,
 completed, and failed counts.
 
-An operation slot is runtime-owned from successful Actor admission through
-terminal completion and acknowledgement. A Source may detach its waker during
-cancellation, but it cannot free an in-flight slot. Waitables carry
-runtime-owned immutable generation tokens rather than pointers to mutable
-caller request handles. Cancellation waits for the matching callback to become
-quiescent even when that callback reuses the physical slot. Actor admission
-failure rolls back only the rejected generation and preserves any older active
-callback token until it returns.
+One connection-level I/O Source owns a move-only native operation from
+preparation through completion encoding and Actor acknowledgement. Positive
+downstream demand reserves exactly one completion; no second CONNECT, SEND, or
+RECV is prepared until the first completion has been delivered. The returned
+waitable is borrowed from that Source and remains valid until Source
+cancellation/destruction. CFlow owner quiescence is authoritative for driver,
+waker, callback, delivery, and acknowledgement completion.
 
 ## Command Source State Machine
 
@@ -93,10 +97,13 @@ Any protocol/transport/limit failure -> ERROR
 ```
 
 `resume()` never blocks. It consumes an already published completion, advances
-the RESP parser, submits at most the next required native operation, and
-returns `CFLOW_STEP_WAIT` while completion is outstanding. The completion
-callback only publishes terminal operation state and invokes the currently
-armed waker outside locks.
+the RESP parser, submits at most the next required native operation with
+downstream demand one, and returns `CFLOW_STEP_WAIT` while completion is
+outstanding. Backend drive notifications only schedule coalesced runtime tasks;
+they never synchronously re-enter `cflow_io_source_owner_run_ready()`.
+Completion encoding and the currently armed Source waker run outside owner
+locks. A waker schedules a later resume and must not recursively resume the
+same Source from the completion callback stack.
 
 The RESP reader retains its byte offset, top-level header scan cursor,
 nested-array frame stack, and partial bulk header across RECV fragments.
@@ -111,23 +118,24 @@ is submitted merely to read ahead after a value has been emitted.
 
 Cancellation follows this order:
 
-1. Clear the armed waker and stop new operation admission.
-2. Request Actor cancellation for an outstanding operation.
+1. Destroy/cancel the connection I/O Source and stop new operation admission.
+2. Drive its owner until Actor commands, native completion, delivery, and
+   acknowledgement are quiescent.
 3. If any command bytes were sent and the reply is incomplete, mark the
    connection non-reusable and close it after native completion settles.
-4. Acknowledge the terminal operation exactly once.
-5. Release the connection lease and Source state.
+4. Close the Source owner, then release the connection lease and Source state.
 
-Runtime shutdown stops pool admission, cancels active Sources, drains and
-acknowledges Actor completions, closes sockets, forgets backend socket
-identities, destroys the Actor, shuts down the native backend, and finally
-destroys the Executor.
+Runtime shutdown stops pool admission, destroys connection Sources, closes and
+forgets their socket identities, verifies that no Source remains attached,
+closes the bridge Actor, and then shuts down the native backend and serial
+Executor. Each Source owner destroys its own Actor and typed completion slot
+before it detaches from the runtime.
 
 ## Error Semantics
 
 - Invalid configuration and arithmetic overflow fail before resource creation.
-- Actor full, pool full, timeout, cancellation, EOF, protocol error, and server
-  RESP error remain distinguishable.
+- Source admission full, pool full, timeout, cancellation, EOF, protocol error,
+  and server RESP error remain distinguishable.
 - A partial SEND reports an uncertain command outcome.
 - EOF before a complete reply reports an unknown reply outcome and makes the
   connection non-reusable.
@@ -157,15 +165,15 @@ not supported.
 
 ## Verification
 
-- Unit: operation admission, partial SEND, fragmented RECV, WAIT/wake,
-  cancellation, stale wake, limits, EOF, and acknowledgement balance.
+- Unit: Source admission, partial SEND, fragmented RECV, WAIT/wake,
+  cancellation, limits, EOF, and owner quiescence.
 - Integration: local TCP fragmented RESP, AUTH/SELECT preparation, connection
   reuse, cancellation disconnect, pool saturation and recovery, static
   `CLUSTER SLOTS` routing, and startup Sentinel discovery.
 - Build: Redis and ORM targets link without TurboNet; installed package can be
   consumed with `TurboUtils::CFlow` only.
 - Safety: deterministic tests cover single-transfer reply ownership,
-  capacity-one acknowledge/resubmit, admission-rejection rollback, reentrant
-  destroy rejection, callback-quiescent cancellation, stale-generation
-  interleaving, and byte-fragmented top-level and nested parsing; sanitizer
-  profiles remain an additional CI validation layer.
+  capacity-one completion sequencing, Source admission recovery, reentrant
+  blocking-call rejection, callback-quiescent cancellation, and
+  byte-fragmented top-level and nested parsing; sanitizer profiles remain an
+  additional CI validation layer.

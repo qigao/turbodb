@@ -29,7 +29,7 @@ cmake_add_test(
 
 cmake_add_test(
   NAME test_redis_cflow
-  SOURCES test_redis_cflow.c ../redis_io.c
+  SOURCES test_redis_cflow.c
   LIBS ${REDIS_TEST_LIBS} TurboUtils::CFlow
   INCLUDES ${REDIS_TEST_INCLUDES}
   FOLDER "redis/tests")

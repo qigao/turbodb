@@ -151,7 +151,7 @@ suite("redis CFlow connection pool") {
     redis_pool_test_server server = {0};
     redis_io_runtime runtime = {0};
     redis_io_runtime_config runtime_config = {
-        redis_pool_test_backend(), 4u, 8u, 4u};
+        redis_pool_test_backend(), 4u, 4u};
     redis_pool pool = {0};
     redis_pool_config config = REDIS_POOL_CONFIG_INIT;
     redis_pool_stream first = {0};
@@ -172,7 +172,6 @@ suite("redis CFlow connection pool") {
     config.host = "127.0.0.1";
     config.port = port;
     config.connection_capacity = 1u;
-    config.base_lease_id = 100u;
     check_equal(redis_pool_init(&pool, &config), TURBO_OK);
     connected = redis_pool_test_connect(&pool, &runtime);
     check_equal(connected.kind, REDIS_POOL_CONNECT_DONE);
@@ -227,7 +226,7 @@ suite("redis CFlow connection pool") {
     redis_pool_test_server server = {0};
     redis_io_runtime runtime = {0};
     redis_io_runtime_config runtime_config = {
-        redis_pool_test_backend(), 4u, 8u, 4u};
+        redis_pool_test_backend(), 4u, 4u};
     redis_pool pool = {0};
     redis_pool_config config = REDIS_POOL_CONFIG_INIT;
     redis_pool_stream cancelled = {0};
@@ -246,7 +245,6 @@ suite("redis CFlow connection pool") {
     config.host = "127.0.0.1";
     config.port = port;
     config.connection_capacity = 1u;
-    config.base_lease_id = 150u;
     check_equal(redis_pool_init(&pool, &config), TURBO_OK);
     connected = redis_pool_test_connect(&pool, &runtime);
     check_equal(connected.kind, REDIS_POOL_CONNECT_DONE);

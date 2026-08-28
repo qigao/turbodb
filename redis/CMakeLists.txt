@@ -12,7 +12,7 @@ cmake_add_grammar(
   LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/parser/redis_resp_parser.re
   FOLDER "redis")
 
-add_library(tedis SHARED redis_io.c redis_socket.c redis_protocol.c redis_cflow.c
+add_library(tedis SHARED redis_io.c redis_io_flow.c redis_socket.c redis_protocol.c redis_cflow.c
                          redis_pool.c redis_cluster.c redis_sentinel.c
                          redis_parser.c
                          ${REDIS_RESP_LEXER_GEN}

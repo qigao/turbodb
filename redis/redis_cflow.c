@@ -1,6 +1,7 @@
 #include "redis_cflow.h"
 
 #include "redis_internal.h"
+#include "redis_io_flow.h"
 #include "redis_socket.h"
 #include "turbo_error.h"
 
@@ -21,12 +22,11 @@ typedef enum redis_cflow_mode {
 typedef struct redis_cflow_connection_impl {
   redis_io_runtime *runtime;
   uintptr_t socket;
-  cflow_io_lease_id lease_id;
   redis_resp_buffer buffer;
   redis_socket_address *addresses;
   size_t address_count;
   size_t next_address;
-  redis_io_request connect_request;
+  redis_io_flow io;
   int connect_status;
   int socket_cleanup_pending;
   int socket_retired;
@@ -46,7 +46,6 @@ typedef struct redis_cflow_connection_impl {
 typedef struct redis_cflow_stream_impl {
   redis_cflow_connection_impl *connection;
   redis_resp_array_reader reader;
-  redis_io_request request;
   size_t send_offset;
   redis_cflow_phase phase;
   redis_cflow_mode mode;
@@ -57,14 +56,14 @@ typedef struct redis_cflow_stream_impl {
 
 static int redis_cflow_connection_allocate(
     redis_cflow_connection *connection, redis_io_runtime *runtime,
-    uintptr_t socket_value, cflow_io_lease_id lease_id,
-    size_t max_command_bytes, size_t initial_buffer_bytes,
+    uintptr_t socket_value, size_t max_command_bytes, size_t initial_buffer_bytes,
     size_t max_buffer_bytes,
     size_t receive_chunk_bytes, uint64_t cancel_timeout_ns,
     int owns_socket, int usable) {
   redis_cflow_connection_impl *impl;
+  int status;
   if (!connection || connection->impl || !redis_io_runtime_valid(runtime) ||
-      lease_id == 0u || initial_buffer_bytes == 0u ||
+      initial_buffer_bytes == 0u ||
       max_command_bytes == 0u ||
       max_buffer_bytes == 0u || initial_buffer_bytes > max_buffer_bytes ||
       receive_chunk_bytes == 0u || receive_chunk_bytes > max_buffer_bytes ||
@@ -79,10 +78,16 @@ static int redis_cflow_connection_allocate(
     free(impl);
     return TURBO_ENOMEM;
   }
+  status = redis_io_flow_init(&impl->io, runtime, cancel_timeout_ns);
+  if (status != TURBO_OK) {
+    redis_resp_buffer_destroy(&impl->buffer);
+    free(impl->receive_chunk);
+    free(impl);
+    return status;
+  }
   impl->runtime = runtime;
   impl->socket = socket_value;
   impl->closed_socket_to_forget = REDIS_SOCKET_INVALID;
-  impl->lease_id = lease_id;
   impl->max_command_bytes = max_command_bytes;
   impl->max_buffer_bytes = max_buffer_bytes;
   impl->receive_chunk_bytes = receive_chunk_bytes;
@@ -143,21 +148,11 @@ static int redis_cflow_cleanup_socket(
   return close_status;
 }
 
-static int redis_cflow_submit_status(redis_io_submit_status status) {
-  switch (status) {
-    case REDIS_IO_SUBMIT_FULL: return TURBO_ENOBUFS;
-    case REDIS_IO_SUBMIT_LEASE_IN_USE: return TURBO_EBUSY;
-    case REDIS_IO_SUBMIT_CLOSED: return TURBO_ECANCELED;
-    case REDIS_IO_SUBMIT_ID_EXHAUSTED: return TURBO_ERANGE;
-    default: return TURBO_EINVAL;
-  }
-}
-
 static redis_cflow_stream_step redis_cflow_wait(
     redis_cflow_stream_impl *stream) {
   redis_cflow_stream_step step = REDIS_CFLOW_STREAM_STEP_INIT;
   step.kind = REDIS_CFLOW_STREAM_WAIT;
-  step.waitable = redis_io_request_waitable(&stream->request);
+  step.waitable = redis_io_flow_waitable(&stream->connection->io);
   step.outcome = stream->outcome;
   if (!cflow_waitable_valid(&step.waitable)) {
     step.kind = REDIS_CFLOW_STREAM_ERROR;
@@ -201,10 +196,8 @@ static int redis_cflow_submit_send(redis_cflow_stream_impl *stream) {
       .socket = connection->socket,
       .buffer = connection->command + stream->send_offset,
       .length = command_size - stream->send_offset};
-  redis_io_submit_status submitted = redis_io_runtime_try_submit(
-      connection->runtime, connection->lease_id, &operation, &stream->request);
-  if (submitted != REDIS_IO_SUBMIT_ACCEPTED)
-    return redis_cflow_submit_status(submitted);
+  int submitted = redis_io_flow_submit(&connection->io, &operation);
+  if (submitted != TURBO_OK) return submitted;
   stream->outcome = REDIS_COMMAND_SEND_UNCERTAIN;
   return TURBO_OK;
 }
@@ -216,10 +209,7 @@ static int redis_cflow_submit_receive(redis_cflow_stream_impl *stream) {
       .socket = connection->socket,
       .buffer = connection->receive_chunk,
       .length = connection->receive_chunk_bytes};
-  redis_io_submit_status submitted = redis_io_runtime_try_submit(
-      connection->runtime, connection->lease_id, &operation, &stream->request);
-  return submitted == REDIS_IO_SUBMIT_ACCEPTED
-             ? TURBO_OK : redis_cflow_submit_status(submitted);
+  return redis_io_flow_submit(&connection->io, &operation);
 }
 
 int redis_cflow_connection_init_attached(
@@ -230,7 +220,7 @@ int redis_cflow_connection_init_attached(
       config->socket == REDIS_SOCKET_INVALID)
     return TURBO_EINVAL;
   return redis_cflow_connection_allocate(
-      connection, config->runtime, config->socket, config->lease_id,
+      connection, config->runtime, config->socket,
       config->max_command_bytes, config->initial_buffer_bytes,
       config->max_buffer_bytes,
       config->receive_chunk_bytes, config->cancel_timeout_ns,
@@ -246,7 +236,7 @@ int redis_cflow_connection_open(redis_cflow_connection *connection,
       config->address_capacity > SIZE_MAX / sizeof(redis_socket_address))
     return TURBO_EINVAL;
   status = redis_cflow_connection_allocate(
-      connection, config->runtime, REDIS_SOCKET_INVALID, config->lease_id,
+      connection, config->runtime, REDIS_SOCKET_INVALID,
       config->max_command_bytes, config->initial_buffer_bytes,
       config->max_buffer_bytes,
       config->receive_chunk_bytes, config->cancel_timeout_ns, 1, 0);
@@ -271,7 +261,7 @@ int redis_cflow_connection_open(redis_cflow_connection *connection,
 static redis_cflow_connect_step redis_cflow_connect_wait(
     redis_cflow_connection_impl *impl) {
   redis_cflow_connect_step step = {REDIS_CFLOW_CONNECT_WAIT, {0}, TURBO_OK};
-  step.waitable = redis_io_request_waitable(&impl->connect_request);
+  step.waitable = redis_io_flow_waitable(&impl->io);
   if (!cflow_waitable_valid(&step.waitable)) {
     step.kind = REDIS_CFLOW_CONNECT_ERROR;
     step.status = TURBO_EINVAL;
@@ -294,17 +284,16 @@ redis_cflow_connect_step redis_cflow_connection_connect_next(
   }
   if (!impl->addresses) return step;
   for (;;) {
-    if (redis_io_request_valid(&impl->connect_request)) {
+    if (redis_io_flow_active(&impl->io)) {
+      redis_io_flow_step io = redis_io_flow_next(&impl->io);
       cflow_io_completion completion;
-      redis_io_request_poll_status polled = redis_io_request_poll(
-          &impl->connect_request, &completion);
-      if (polled == REDIS_IO_REQUEST_PENDING)
+      if (io.kind == REDIS_IO_FLOW_WAIT)
         return redis_cflow_connect_wait(impl);
-      if (polled != REDIS_IO_REQUEST_COMPLETED ||
-          redis_io_request_acknowledge(&impl->connect_request) != TURBO_OK) {
-        step.status = TURBO_EINVAL;
+      if (io.kind != REDIS_IO_FLOW_VALUE) {
+        step.status = io.status;
         return step;
       }
+      completion = io.completion;
       if (completion.kind == CFLOW_IO_COMPLETION_OK) {
         impl->usable = 1;
         step.kind = REDIS_CFLOW_CONNECT_DONE;
@@ -331,7 +320,6 @@ redis_cflow_connect_step redis_cflow_connection_connect_next(
     {
       redis_socket_address *address = &impl->addresses[impl->next_address++];
       cflow_io_native_operation operation;
-      redis_io_submit_status submitted;
       int status = redis_socket_open(address, &impl->socket);
       if (status != TURBO_OK) {
         impl->connect_status = status;
@@ -343,9 +331,8 @@ redis_cflow_connect_step redis_cflow_connection_connect_next(
       operation.address = address->storage.bytes;
       operation.address_capacity = address->length;
       operation.address_length = address->length;
-      submitted = redis_io_runtime_try_submit(
-          impl->runtime, impl->lease_id, &operation, &impl->connect_request);
-      if (submitted != REDIS_IO_SUBMIT_ACCEPTED) {
+      status = redis_io_flow_submit(&impl->io, &operation);
+      if (status != TURBO_OK) {
         int cleanup_status;
         impl->socket_cleanup_pending = 1;
         cleanup_status = redis_cflow_cleanup_socket(impl);
@@ -353,7 +340,7 @@ redis_cflow_connect_step redis_cflow_connection_connect_next(
           step.status = cleanup_status;
           return step;
         }
-        step.status = redis_cflow_submit_status(submitted);
+        step.status = status;
         return step;
       }
       return redis_cflow_connect_wait(impl);
@@ -376,20 +363,8 @@ int redis_cflow_connection_close(redis_cflow_connection *connection) {
   if (!impl) return TURBO_EINVAL;
   if (impl->active_stream) return TURBO_EBUSY;
   impl->usable = 0;
-  if (redis_io_request_valid(&impl->connect_request)) {
-    cflow_io_completion completion;
-    cflow_io_cancel_status cancelled =
-        redis_io_request_cancel(&impl->connect_request);
-    if (cancelled != CFLOW_IO_CANCEL_ACCEPTED &&
-        cancelled != CFLOW_IO_CANCEL_NOT_FOUND)
-      return TURBO_EBUSY;
-    status = redis_io_runtime_wait_idle(impl->runtime,
-                                        impl->cancel_timeout_ns);
-    if (status != TURBO_OK) return status;
-    if (redis_io_request_poll(&impl->connect_request, &completion) !=
-        REDIS_IO_REQUEST_COMPLETED)
-      return TURBO_EBUSY;
-    status = redis_io_request_acknowledge(&impl->connect_request);
+  if (redis_io_flow_active(&impl->io)) {
+    status = redis_io_flow_cancel(&impl->io);
     if (status != TURBO_OK) return status;
   }
   status = redis_cflow_cleanup_socket(impl);
@@ -411,6 +386,8 @@ int redis_cflow_connection_destroy(redis_cflow_connection *connection) {
   if (!impl) return TURBO_EINVAL;
   if (impl->active_stream) return TURBO_EBUSY;
   status = redis_cflow_connection_close(connection);
+  if (status != TURBO_OK) return status;
+  status = redis_io_flow_destroy(&impl->io);
   if (status != TURBO_OK) return status;
   tstr_free(impl->command);
   free(impl->addresses);
@@ -493,14 +470,12 @@ redis_cflow_stream_step redis_cflow_stream_next(redis_cflow_stream *stream_) {
   if (!connection->usable)
     return redis_cflow_fail(stream, TURBO_ENOTCONN, stream->outcome, NULL, 0);
 
-  if (redis_io_request_valid(&stream->request)) {
-    redis_io_request_poll_status polled =
-        redis_io_request_poll(&stream->request, &completion);
-    if (polled == REDIS_IO_REQUEST_PENDING) return redis_cflow_wait(stream);
-    if (polled != REDIS_IO_REQUEST_COMPLETED)
-      return redis_cflow_fail(stream, TURBO_EINVAL, stream->outcome, NULL, 0);
-    if (redis_io_request_acknowledge(&stream->request) != TURBO_OK)
-      return redis_cflow_fail(stream, TURBO_EBUSY, stream->outcome, NULL, 0);
+  if (redis_io_flow_active(&connection->io)) {
+    redis_io_flow_step io = redis_io_flow_next(&connection->io);
+    if (io.kind == REDIS_IO_FLOW_WAIT) return redis_cflow_wait(stream);
+    if (io.kind != REDIS_IO_FLOW_VALUE)
+      return redis_cflow_fail(stream, io.status, stream->outcome, NULL, 0);
+    completion = io.completion;
     if (completion.kind != CFLOW_IO_COMPLETION_OK || completion.bytes == 0u) {
       int status = completion.kind == CFLOW_IO_COMPLETION_EOF
                        ? TURBO_ENOTCONN
@@ -624,20 +599,18 @@ redis_cflow_stream_step redis_cflow_stream_next(redis_cflow_stream *stream_) {
 
 int redis_cflow_stream_cancel(redis_cflow_stream *stream_) {
   redis_cflow_stream_impl *stream = redis_cflow_stream_get(stream_);
-  cflow_io_cancel_status cancelled;
+  int status;
   if (!stream) return TURBO_EINVAL;
   if (stream->phase == REDIS_CFLOW_TERMINAL) return TURBO_OK;
   stream->connection->usable = 0;
   redis_resp_buffer_reset(&stream->connection->buffer);
-  if (!redis_io_request_valid(&stream->request)) {
+  if (!redis_io_flow_active(&stream->connection->io)) {
     stream->phase = REDIS_CFLOW_TERMINAL;
     redis_cflow_release_active(stream);
     return TURBO_OK;
   }
-  cancelled = redis_io_request_cancel(&stream->request);
-  if (cancelled != CFLOW_IO_CANCEL_ACCEPTED &&
-      cancelled != CFLOW_IO_CANCEL_NOT_FOUND)
-    return TURBO_EBUSY;
+  status = redis_io_flow_cancel(&stream->connection->io);
+  if (status != TURBO_OK) return status;
   stream->phase = REDIS_CFLOW_TERMINAL;
   redis_cflow_release_active(stream);
   return TURBO_OK;
@@ -649,17 +622,6 @@ int redis_cflow_stream_destroy(redis_cflow_stream *stream_) {
   if (!stream) return TURBO_EINVAL;
   status = redis_cflow_stream_cancel(stream_);
   if (status != TURBO_OK) return status;
-  if (redis_io_request_valid(&stream->request)) {
-    cflow_io_completion completion;
-    status = redis_io_runtime_wait_idle(stream->connection->runtime,
-                                        stream->connection->cancel_timeout_ns);
-    if (status != TURBO_OK) return status;
-    if (redis_io_request_poll(&stream->request, &completion) !=
-        REDIS_IO_REQUEST_COMPLETED)
-      return TURBO_EBUSY;
-    status = redis_io_request_acknowledge(&stream->request);
-    if (status != TURBO_OK) return status;
-  }
   stream->phase = REDIS_CFLOW_TERMINAL;
   redis_cflow_release_active(stream);
   redis_resp_array_reader_destroy(&stream->reader);

@@ -29,7 +29,6 @@ typedef struct redis_sentinel_config {
   const char *password;
   int database;
   size_t connection_capacity;
-  cflow_io_lease_id base_lease_id;
   size_t address_capacity;
   size_t max_command_bytes;
   size_t initial_buffer_bytes;
@@ -41,7 +40,7 @@ typedef struct redis_sentinel_config {
 
 #define REDIS_SENTINEL_CONFIG_INIT                                        \
   {                                                                      \
-    NULL, NULL, NULL, 0u, NULL, NULL, NULL, NULL, NULL, 0, 2u, 1u, 8u,  \
+    NULL, NULL, NULL, 0u, NULL, NULL, NULL, NULL, NULL, 0, 2u, 8u,      \
         8u * 1024u * 1024u, 4096u, 8u * 1024u * 1024u,                 \
         16u * 1024u, 64u * 1024u,                                      \
         UINT64_C(5000000000)                                             \

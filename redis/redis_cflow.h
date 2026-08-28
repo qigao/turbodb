@@ -4,6 +4,8 @@
 #include "redis_io.h"
 #include "redis_reply.h"
 
+#include <cflow/runtime.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,7 +24,6 @@ typedef struct redis_cflow_stream {
 typedef struct redis_cflow_connection_config {
   redis_io_runtime *runtime;
   uintptr_t socket;
-  cflow_io_lease_id lease_id;
   size_t max_command_bytes;
   size_t initial_buffer_bytes;
   /** Hard limit for incremental reply buffering. */
@@ -36,7 +37,6 @@ typedef struct redis_cflow_open_config {
   redis_io_runtime *runtime;
   const char *host;
   uint16_t port;
-  cflow_io_lease_id lease_id;
   size_t address_capacity;
   size_t max_command_bytes;
   size_t initial_buffer_bytes;
