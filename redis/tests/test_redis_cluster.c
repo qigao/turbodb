@@ -8,17 +8,17 @@
 #include <string.h>
 
 #if defined(_WIN32)
-#include <winsock2.h>
-#include <ws2tcpip.h>
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
 typedef SOCKET redis_cluster_test_socket;
-#define REDIS_CLUSTER_TEST_INVALID INVALID_SOCKET
+  #define REDIS_CLUSTER_TEST_INVALID INVALID_SOCKET
 #else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+  #include <arpa/inet.h>
+  #include <netinet/in.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
 typedef int redis_cluster_test_socket;
-#define REDIS_CLUSTER_TEST_INVALID (-1)
+  #define REDIS_CLUSTER_TEST_INVALID (-1)
 #endif
 
 typedef struct redis_cluster_test_server {
@@ -50,10 +50,8 @@ static int redis_cluster_test_listen(redis_cluster_test_server *server) {
   memset(&address, 0, sizeof(address));
   address.sin_family = AF_INET;
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (bind(server->listener, (const struct sockaddr *)&address,
-           (int)sizeof(address)) != 0 ||
-      getsockname(server->listener, (struct sockaddr *)&address,
-                  &address_size) != 0 ||
+  if (bind(server->listener, (const struct sockaddr *)&address, (int)sizeof(address)) != 0 ||
+      getsockname(server->listener, (struct sockaddr *)&address, &address_size) != 0 ||
       listen(server->listener, 2) != 0)
     return -1;
   server->port = ntohs(address.sin_port);
@@ -64,10 +62,10 @@ static void redis_cluster_test_server_main(void *argument) {
   redis_cluster_test_server *server = (redis_cluster_test_server *)argument;
   char command[256];
   char topology[256];
-  int topology_size = snprintf(
-      topology, sizeof(topology),
-      "*1\r\n*3\r\n:0\r\n:16383\r\n*3\r\n$9\r\n127.0.0.1\r\n:%u\r\n$6\r\nnode-1\r\n",
-      (unsigned)server->port);
+  int topology_size =
+      snprintf(topology, sizeof(topology),
+               "*1\r\n*3\r\n:0\r\n:16383\r\n*3\r\n$9\r\n127.0.0.1\r\n:%u\r\n$6\r\nnode-1\r\n",
+               (unsigned)server->port);
   while (server->connections < 2) {
     redis_cluster_test_socket client = accept(server->listener, NULL, NULL);
     int received;
@@ -76,10 +74,8 @@ static void redis_cluster_test_server_main(void *argument) {
     received = recv(client, command, (int)sizeof(command), 0);
     if (received > 0) {
       server->commands++;
-      if (server->connections == 1)
-        (void)send(client, topology, topology_size, 0);
-      else
-        (void)send(client, "$5\r\nvalue\r\n", 11, 0);
+      if (server->connections == 1) (void)send(client, topology, topology_size, 0);
+      else (void)send(client, "$5\r\nvalue\r\n", 11, 0);
     }
     if (server->connections == 1) {
       char extra;
@@ -107,8 +103,7 @@ suite("redis CFlow cluster") {
     check_equal(redis_cluster_keyslot("123456789", 9u), 12739u);
     check_equal(redis_cluster_keyslot("user:{42}:a", 11u),
                 redis_cluster_keyslot("other:{42}:b", 12u));
-    check_true(redis_cluster_keyslot("user:42:a", 9u) <
-               REDIS_CLUSTER_SLOT_COUNT);
+    check_true(redis_cluster_keyslot("user:42:a", 9u) < REDIS_CLUSTER_SLOT_COUNT);
   }
 
   it("discovers CLUSTER SLOTS and routes a command through a node pool") {
@@ -117,8 +112,7 @@ suite("redis CFlow cluster") {
     uint16_t ports[1];
     redis_cluster_test_server server = {0};
     redis_io_runtime runtime = {0};
-    redis_io_runtime_config runtime_config = {
-        redis_cluster_test_backend(), 8u, 16u, 8u};
+    redis_io_runtime_config runtime_config = {redis_cluster_test_backend(), 8u, 8u};
     redis_cluster cluster = {0};
     redis_cluster_config config = REDIS_CLUSTER_CONFIG_INIT;
     redis_cluster_connect_step connected;
@@ -130,8 +124,7 @@ suite("redis CFlow cluster") {
     check_equal(redis_io_runtime_init(&runtime, &runtime_config), TURBO_OK);
     check_equal(redis_cluster_test_listen(&server), 0);
     ports[0] = server.port;
-    check_equal(turbo_thread_create(&server.thread,
-                                    redis_cluster_test_server_main, &server),
+    check_equal(turbo_thread_create(&server.thread, redis_cluster_test_server_main, &server),
                 TURBO_OK);
     config.runtime = &runtime;
     config.seed_hosts = hosts;
@@ -139,15 +132,12 @@ suite("redis CFlow cluster") {
     config.seed_count = 1u;
     config.connections_per_node = 1u;
     config.max_nodes = 2u;
-    config.base_lease_id = 200u;
     check_equal(redis_cluster_init(&cluster, &config), TURBO_OK);
-    do {
+    connected = redis_cluster_connect_next(&cluster);
+    while (connected.kind == REDIS_CLUSTER_CONNECT_WAIT) {
+      check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
       connected = redis_cluster_connect_next(&cluster);
-      if (connected.kind == REDIS_CLUSTER_CONNECT_WAIT)
-        check_equal(redis_io_runtime_wait_idle(&runtime,
-                                               UINT64_C(5000000000)),
-                    TURBO_OK);
-    } while (connected.kind == REDIS_CLUSTER_CONNECT_WAIT);
+    }
     check_equal(connected.kind, REDIS_CLUSTER_CONNECT_DONE);
     check_equal(connected.status, TURBO_OK);
     check_equal(connected.node_count, 1u);
@@ -155,22 +145,18 @@ suite("redis CFlow cluster") {
     check_not_null(node);
     check_equal(node->port, server.port);
 
-    check_equal(redis_cluster_command_open(&cluster, "key", 3u, 2, get,
-                                           NULL, 1024u, &command),
+    check_equal(redis_cluster_command_open(&cluster, "key", 3u, 2, get, NULL, 1024u, &command),
                 TURBO_OK);
     do {
       step = redis_pool_stream_next(&command);
       if (step.kind == REDIS_CFLOW_STREAM_WAIT)
-        check_equal(redis_io_runtime_wait_idle(&runtime,
-                                               UINT64_C(5000000000)),
-                    TURBO_OK);
+        check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
     } while (step.kind == REDIS_CFLOW_STREAM_WAIT);
     check_equal(step.kind, REDIS_CFLOW_STREAM_ITEM);
     check_equal(step.item->type, REDIS_REPLY_BULK_STRING);
     check_equal(step.item->str, "value", 5u);
     redis_reply_free(step.item);
-    check_equal(redis_pool_stream_next(&command).kind,
-                REDIS_CFLOW_STREAM_DONE);
+    check_equal(redis_pool_stream_next(&command).kind, REDIS_CFLOW_STREAM_DONE);
     check_equal(redis_pool_stream_destroy(&command), TURBO_OK);
     check_equal(redis_cluster_close(&cluster), TURBO_OK);
     check_equal(redis_cluster_destroy(&cluster), TURBO_OK);

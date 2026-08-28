@@ -8,17 +8,17 @@
 #include <string.h>
 
 #if defined(_WIN32)
-#include <winsock2.h>
-#include <ws2tcpip.h>
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
 typedef SOCKET redis_sentinel_test_socket;
-#define REDIS_SENTINEL_TEST_INVALID INVALID_SOCKET
+  #define REDIS_SENTINEL_TEST_INVALID INVALID_SOCKET
 #else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+  #include <arpa/inet.h>
+  #include <netinet/in.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
 typedef int redis_sentinel_test_socket;
-#define REDIS_SENTINEL_TEST_INVALID (-1)
+  #define REDIS_SENTINEL_TEST_INVALID (-1)
 #endif
 
 typedef struct redis_sentinel_test_server {
@@ -49,10 +49,8 @@ static int redis_sentinel_test_listen(redis_sentinel_test_server *server) {
   memset(&address, 0, sizeof(address));
   address.sin_family = AF_INET;
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (bind(server->listener, (const struct sockaddr *)&address,
-           (int)sizeof(address)) != 0 ||
-      getsockname(server->listener, (struct sockaddr *)&address,
-                  &address_size) != 0 ||
+  if (bind(server->listener, (const struct sockaddr *)&address, (int)sizeof(address)) != 0 ||
+      getsockname(server->listener, (struct sockaddr *)&address, &address_size) != 0 ||
       listen(server->listener, 2) != 0)
     return -1;
   server->port = ntohs(address.sin_port);
@@ -63,11 +61,9 @@ static void redis_sentinel_test_server_main(void *argument) {
   redis_sentinel_test_server *server = (redis_sentinel_test_server *)argument;
   char discovery[128];
   char port_text[6];
-  int port_size = snprintf(port_text, sizeof(port_text), "%u",
-                           (unsigned)server->port);
+  int port_size = snprintf(port_text, sizeof(port_text), "%u", (unsigned)server->port);
   int discovery_size = snprintf(discovery, sizeof(discovery),
-                                "*2\r\n$9\r\n127.0.0.1\r\n$%d\r\n%s\r\n",
-                                port_size, port_text);
+                                "*2\r\n$9\r\n127.0.0.1\r\n$%d\r\n%s\r\n", port_size, port_text);
   while (server->connections < 2) {
     redis_sentinel_test_socket client = accept(server->listener, NULL, NULL);
     char command[256];
@@ -76,10 +72,8 @@ static void redis_sentinel_test_server_main(void *argument) {
     server->connections++;
     received = recv(client, command, (int)sizeof(command), 0);
     if (received > 0) {
-      if (server->connections == 1)
-        (void)send(client, discovery, discovery_size, 0);
-      else
-        (void)send(client, "+PONG\r\n", 7, 0);
+      if (server->connections == 1) (void)send(client, discovery, discovery_size, 0);
+      else (void)send(client, "+PONG\r\n", 7, 0);
     }
     if (server->connections == 1) {
       char extra;
@@ -109,8 +103,7 @@ suite("redis CFlow Sentinel") {
     uint16_t ports[1];
     redis_sentinel_test_server server = {0};
     redis_io_runtime runtime = {0};
-    redis_io_runtime_config runtime_config = {
-        redis_sentinel_test_backend(), 8u, 16u, 8u};
+    redis_io_runtime_config runtime_config = {redis_sentinel_test_backend(), 8u, 8u};
     redis_sentinel sentinel = {0};
     redis_sentinel_config config = REDIS_SENTINEL_CONFIG_INIT;
     redis_sentinel_connect_step connected;
@@ -122,8 +115,7 @@ suite("redis CFlow Sentinel") {
     check_equal(redis_io_runtime_init(&runtime, &runtime_config), TURBO_OK);
     check_equal(redis_sentinel_test_listen(&server), 0);
     ports[0] = server.port;
-    check_equal(turbo_thread_create(&server.thread,
-                                    redis_sentinel_test_server_main, &server),
+    check_equal(turbo_thread_create(&server.thread, redis_sentinel_test_server_main, &server),
                 TURBO_OK);
     config.runtime = &runtime;
     config.sentinel_hosts = hosts;
@@ -131,35 +123,27 @@ suite("redis CFlow Sentinel") {
     config.sentinel_count = 1u;
     config.service_name = "primary";
     config.connection_capacity = 1u;
-    config.base_lease_id = 400u;
     check_equal(redis_sentinel_init(&sentinel, &config), TURBO_OK);
-    do {
+    connected = redis_sentinel_connect_next(&sentinel);
+    while (connected.kind == REDIS_SENTINEL_CONNECT_WAIT) {
+      check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
       connected = redis_sentinel_connect_next(&sentinel);
-      if (connected.kind == REDIS_SENTINEL_CONNECT_WAIT)
-        check_equal(redis_io_runtime_wait_idle(&runtime,
-                                               UINT64_C(5000000000)),
-                    TURBO_OK);
-    } while (connected.kind == REDIS_SENTINEL_CONNECT_WAIT);
+    }
     check_equal(connected.kind, REDIS_SENTINEL_CONNECT_DONE);
     check_equal(connected.status, TURBO_OK);
     check_equal(redis_sentinel_get_master(&sentinel, &master), TURBO_OK);
     check_equal(master.host, "127.0.0.1");
     check_equal(master.port, server.port);
-    check_equal(redis_sentinel_command_open(&sentinel, 1, ping, NULL, 1024u,
-                                            &command),
-                TURBO_OK);
+    check_equal(redis_sentinel_command_open(&sentinel, 1, ping, NULL, 1024u, &command), TURBO_OK);
     do {
       step = redis_pool_stream_next(&command);
       if (step.kind == REDIS_CFLOW_STREAM_WAIT)
-        check_equal(redis_io_runtime_wait_idle(&runtime,
-                                               UINT64_C(5000000000)),
-                    TURBO_OK);
+        check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
     } while (step.kind == REDIS_CFLOW_STREAM_WAIT);
     check_equal(step.kind, REDIS_CFLOW_STREAM_ITEM);
     check_equal(step.item->str, "PONG", 4u);
     redis_reply_free(step.item);
-    check_equal(redis_pool_stream_next(&command).kind,
-                REDIS_CFLOW_STREAM_DONE);
+    check_equal(redis_pool_stream_next(&command).kind, REDIS_CFLOW_STREAM_DONE);
     check_equal(redis_pool_stream_destroy(&command), TURBO_OK);
     check_equal(redis_sentinel_close(&sentinel), TURBO_OK);
     check_equal(redis_sentinel_destroy(&sentinel), TURBO_OK);

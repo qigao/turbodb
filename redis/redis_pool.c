@@ -47,7 +47,6 @@ typedef struct redis_pool_impl {
   int database;
   int readonly;
   size_t capacity;
-  cflow_io_lease_id base_lease_id;
   size_t address_capacity;
   size_t max_command_bytes;
   size_t initial_buffer_bytes;
@@ -200,7 +199,7 @@ int redis_pool_init(redis_pool *pool, const redis_pool_config *config) {
   if (!pool || pool->impl || !config ||
       !redis_io_runtime_valid(config->runtime) || !config->host ||
       config->host[0] == '\0' || config->port == 0u ||
-      config->connection_capacity == 0u || config->base_lease_id == 0u ||
+      config->connection_capacity == 0u ||
       config->address_capacity == 0u || config->max_command_bytes == 0u ||
       config->initial_buffer_bytes == 0u ||
       config->max_buffer_bytes < config->initial_buffer_bytes ||
@@ -208,8 +207,6 @@ int redis_pool_init(redis_pool *pool, const redis_pool_config *config) {
       config->cancel_timeout_ns == 0u || config->database < 0 ||
       (config->username && config->username[0] != '\0' &&
        (!config->password || config->password[0] == '\0')) ||
-      config->connection_capacity - 1u >
-          UINT64_MAX - config->base_lease_id ||
       config->connection_capacity > SIZE_MAX / sizeof(redis_pool_slot))
     return TURBO_EINVAL;
   slots_bytes = config->connection_capacity * sizeof(redis_pool_slot);
@@ -234,7 +231,6 @@ int redis_pool_init(redis_pool *pool, const redis_pool_config *config) {
   impl->database = config->database;
   impl->readonly = config->readonly != 0;
   impl->capacity = config->connection_capacity;
-  impl->base_lease_id = config->base_lease_id;
   impl->address_capacity = config->address_capacity;
   impl->max_command_bytes = config->max_command_bytes;
   impl->initial_buffer_bytes = config->initial_buffer_bytes;
@@ -301,7 +297,6 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
           impl->runtime,
           impl->host,
           impl->port,
-          impl->base_lease_id + impl->connect_index,
           impl->address_capacity,
           impl->max_command_bytes,
           impl->initial_buffer_bytes,
