@@ -161,6 +161,12 @@ public:
     });
     return *this;
   }
+  query &where_key(const orm_key_part_t *parts, std::uint32_t count) {
+    call([&](orm_error_t *e) {
+      return orm_query_where_key(handle_, parts, count, e);
+    });
+    return *this;
+  }
   template <typename T> query &bind(T &&input) {
     const orm_value_t encoded = detail::value(std::forward<T>(input));
     call([&](orm_error_t *e) { return orm_query_bind(handle_, encoded, e); });

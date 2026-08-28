@@ -178,6 +178,10 @@ orm_status_t orm_plan_add_predicate(orm_query_plan *plan, vstr column,
                                     orm_value_t value,
                                     const orm_limits *limits,
                                     orm_error_t *error);
+orm_status_t orm_plan_add_key(orm_query_plan *plan,
+                              const orm_key_part_t *parts,
+                              uint32_t part_count, const orm_limits *limits,
+                              orm_error_t *error);
 orm_status_t orm_plan_add_bind(orm_query_plan *plan, orm_value_t value,
                                const orm_limits *limits,
                                orm_error_t *error);

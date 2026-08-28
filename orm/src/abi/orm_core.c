@@ -710,6 +710,18 @@ orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, vstr column,
                                 &query->connection->limits, error);
 }
 
+orm_status_t ORM_C_CALL orm_query_where_key(orm_query_t *query,
+                                            const orm_key_part_t *parts,
+                                            uint32_t part_count,
+                                            orm_error_t *error) {
+  if (query == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  return orm_plan_add_key(&query->plan, parts, part_count,
+                          &query->connection->limits, error);
+}
+
 orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t value,
                                       orm_error_t *error) {
   if (query == NULL) {

@@ -158,6 +158,11 @@ typedef struct orm_value {
   orm_value_data_t data;
 } orm_value_t;
 
+typedef struct orm_key_part {
+  orm_string_view_t column;
+  orm_value_t value;
+} orm_key_part_t;
+
 typedef struct orm_flow_config {
   uint32_t struct_size;
   uint32_t abi_version;
@@ -241,6 +246,9 @@ ORM_C_API orm_status_t ORM_C_CALL orm_query_set(
 ORM_C_API orm_status_t ORM_C_CALL orm_query_where(
     orm_query_t *query, orm_string_view_t column, orm_compare_t comparison,
     orm_value_t value, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_query_where_key(
+    orm_query_t *query, const orm_key_part_t *parts, uint32_t part_count,
+    orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_bind(
     orm_query_t *query, orm_value_t value, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_order_by(
@@ -362,6 +370,11 @@ static inline orm_value_t orm_blob_v(orm_blob_t input) {
 static inline orm_value_t orm_blob(const void *data, size_t size) {
   const orm_blob_t blob = {data, size};
   return orm_blob_v(blob);
+}
+static inline orm_key_part_t orm_key_part(orm_string_view_t column,
+                                          orm_value_t value) {
+  const orm_key_part_t part = {column, value};
+  return part;
 }
 
 #ifdef __cplusplus

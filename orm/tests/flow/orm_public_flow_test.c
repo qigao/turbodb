@@ -46,7 +46,178 @@ static const cmeta_data_desc orm_public_flow_row_data = {
     .storage_type = &orm_public_flow_row_type,
     .shape = &orm_public_flow_row_shape};
 
+static orm_connection_t *orm_public_flow_open_sqlite(
+    uint32_t max_predicates, orm_error_t *error) {
+  orm_config_t config;
+  orm_option_t filename;
+  orm_connection_t *connection = NULL;
+
+  orm_config(&config);
+  filename.keyword = orm_view("filename");
+  filename.value = orm_view(":memory:");
+  config.driver = orm_view("sqlite");
+  config.options = &filename;
+  config.option_count = 1u;
+  if (max_predicates != 0u)
+    config.max_predicates = max_predicates;
+  check_equal(orm_connect(&config, &connection, error), ORM_STATUS_OK);
+  check_not_null(connection);
+  return connection;
+}
+
+static void orm_public_flow_execute_sql(orm_connection_t *connection,
+                                        const char *sql,
+                                        orm_error_t *error) {
+  orm_query_t *query = NULL;
+  orm_result_t *result = NULL;
+
+  check_equal(orm_raw(connection, orm_view(sql), &query, error), ORM_STATUS_OK);
+  check_equal(orm_query_execute(query, &result, error), ORM_STATUS_OK);
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+}
+
+static orm_connection_t *orm_public_flow_composite_fixture(
+    uint32_t max_predicates, orm_error_t *error) {
+  orm_connection_t *connection =
+      orm_public_flow_open_sqlite(max_predicates, error);
+  orm_public_flow_execute_sql(
+      connection,
+      "create table memberships("
+      "domain_id text not null,user_id text not null,"
+      "group_id text not null,revision integer not null,"
+      "primary key(domain_id,user_id,group_id))",
+      error);
+  orm_public_flow_execute_sql(
+      connection,
+      "insert into memberships values"
+      "('domain-a','user-a','group-a',1),"
+      "('domain-a','user-b','group-a',2)",
+      error);
+  return connection;
+}
+
 spec("ORM public reactive flow") {
+  it("copies every composite key part before selecting one row") {
+    orm_error_t error;
+    orm_connection_t *connection;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    char domain[] = "domain-a";
+    char user[] = "user-a";
+    char group_name[] = "group-a";
+    orm_key_part_t key[] = {
+        {orm_view("domain_id"), orm_text(domain)},
+        {orm_view("user_id"), orm_text(user)},
+        {orm_view("group_id"), orm_text(group_name)}};
+    uint64_t rows = 0u;
+    int64_t revision = 0;
+
+    orm_error_init(&error);
+    connection = orm_public_flow_composite_fixture(0u, &error);
+    check_equal(orm_query_create(connection, orm_view("memberships"), &query,
+                                 &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_add_column(query, orm_view("revision"), &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_where_key(query, key, 3u, &error), ORM_STATUS_OK);
+    memset(domain, 'x', sizeof(domain) - 1u);
+    memset(user, 'x', sizeof(user) - 1u);
+    memset(group_name, 'x', sizeof(group_name) - 1u);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+    check_equal(rows, (uint64_t)1u);
+    check_equal(orm_result_get_int64(result, 0u, 0u, &revision, &error),
+                ORM_STATUS_OK);
+    check_equal(revision, (int64_t)1);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("rejects an invalid composite key without retaining an earlier part") {
+    orm_error_t error;
+    orm_connection_t *connection;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    const orm_key_part_t key[] = {
+        {orm_view("domain_id"), orm_text("domain-a")},
+        {orm_view("bad;column"), orm_text("user-a")}};
+    uint64_t rows = 0u;
+
+    orm_error_init(&error);
+    connection = orm_public_flow_composite_fixture(0u, &error);
+    check_equal(orm_query_create(connection, orm_view("memberships"), &query,
+                                 &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_select_all(query, &error), ORM_STATUS_OK);
+    check_equal(orm_query_where_key(query, key, 2u, &error),
+                ORM_STATUS_INVALID_ARGUMENT);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+    check_equal(rows, (uint64_t)2u);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("rejects duplicate composite key columns atomically") {
+    orm_error_t error;
+    orm_connection_t *connection;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    const orm_key_part_t key[] = {
+        {orm_view("domain_id"), orm_text("domain-a")},
+        {orm_view("domain_id"), orm_text("domain-b")}};
+    uint64_t rows = 0u;
+
+    orm_error_init(&error);
+    connection = orm_public_flow_composite_fixture(0u, &error);
+    check_equal(orm_query_create(connection, orm_view("memberships"), &query,
+                                 &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_select_all(query, &error), ORM_STATUS_OK);
+    check_equal(orm_query_where_key(query, key, 2u, &error),
+                ORM_STATUS_INVALID_ARGUMENT);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+    check_equal(rows, (uint64_t)2u);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
+  it("rejects a composite key above the predicate limit atomically") {
+    orm_error_t error;
+    orm_connection_t *connection;
+    orm_query_t *query = NULL;
+    orm_result_t *result = NULL;
+    const orm_key_part_t key[] = {
+        {orm_view("domain_id"), orm_text("domain-a")},
+        {orm_view("user_id"), orm_text("user-a")},
+        {orm_view("group_id"), orm_text("group-a")}};
+    uint64_t rows = 0u;
+
+    orm_error_init(&error);
+    connection = orm_public_flow_composite_fixture(2u, &error);
+    check_equal(orm_query_create(connection, orm_view("memberships"), &query,
+                                 &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_select_all(query, &error), ORM_STATUS_OK);
+    check_equal(orm_query_where_key(query, key, 3u, &error),
+                ORM_STATUS_LIMIT_EXCEEDED);
+    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+    check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+    check_equal(rows, (uint64_t)2u);
+
+    orm_result_destroy(result);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+  }
+
   it("rejects a query LIMIT above max_result_rows") {
     orm_error_t error;
     orm_config_t connection_config;
