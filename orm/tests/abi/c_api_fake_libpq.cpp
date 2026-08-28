@@ -276,6 +276,11 @@ char* PQresultErrorMessage(const PGresult* result)
     return const_cast<char*>(result->error.c_str());
 }
 
+char* PQresultErrorField(const PGresult*, int)
+{
+    return nullptr;
+}
+
 int PQntuples(const PGresult* result)
 {
     return result->scripted_dimensions

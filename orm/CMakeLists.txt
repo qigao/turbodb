@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(
@@ -19,6 +19,9 @@ endif()
 option(ORM_BUILD_TESTS "Build the Orm tests" ${ORM_BUILD_TESTS_DEFAULT})
 option(ORM_WARNINGS_AS_ERRORS "Treat ORM compiler warnings as errors"
        ${ORM_BUILD_TESTS_DEFAULT})
+option(ORM_BUILD_SHARED
+       "Build ORM as a shared library so backend clients stay behind TurboDB"
+       ON)
 
 # Keep the installed TurboDB::ORM contract identical whether ORM is built on
 # its own or as a TurboDB subdirectory. Optional backends remain opt-in so a
@@ -81,7 +84,7 @@ set(ORM_SQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
 set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
-set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_plan.c
+set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_plan.c src/abi/orm_result.c
                   src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_cbind_source.c
                      src/flow/orm_command_source.c
@@ -121,13 +124,19 @@ foreach(ORM_C_SOURCE IN LISTS ORM_C_SOURCES ORM_FLOW_SOURCES)
   endif()
 endforeach()
 
-add_library(orm_c ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+if(ORM_BUILD_SHARED)
+  add_library(orm_c SHARED ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+else()
+  add_library(orm_c STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+endif()
 add_library(orm_cpp INTERFACE)
 add_library(TurboDB::ORM ALIAS orm_c)
 target_compile_features(orm_c PRIVATE c_std_11)
 target_compile_definitions(orm_c PRIVATE ORM_C_BUILD)
 
-target_compile_definitions(orm_c PUBLIC ORM_C_STATIC)
+if(NOT ORM_BUILD_SHARED)
+  target_compile_definitions(orm_c PUBLIC ORM_C_STATIC)
+endif()
 
 target_include_directories(
   orm_c
@@ -164,10 +173,17 @@ if(ORM_WITH_MONGODB)
   target_link_libraries(orm_c PRIVATE mongo::mongoc_shared)
 endif()
 
+set(ORM_LINKER_LANGUAGE C)
+if(ORM_BUILD_SHARED)
+  # Backend archives may have a C API while using C++ internally (for example,
+  # BoringSSL pulled in by a static libpq build).  The shared ORM must close
+  # those runtime dependencies itself so a pure-C consumer can link with cc.
+  set(ORM_LINKER_LANGUAGE CXX)
+endif()
 set_target_properties(
   orm_c
   PROPERTIES C_STANDARD_REQUIRED ON
-             LINKER_LANGUAGE C
+             LINKER_LANGUAGE ${ORM_LINKER_LANGUAGE}
              C_VISIBILITY_PRESET hidden)
 target_compile_features(orm_cpp INTERFACE cxx_std_17)
 target_include_directories(
@@ -175,6 +191,11 @@ target_include_directories(
                     $<INSTALL_INTERFACE:include/shared/orm>)
 target_link_libraries(orm_cpp INTERFACE orm_c)
 
+set(ORM_RUNTIME_DEPENDENCY_ARGS)
+if(ORM_BUILD_SHARED)
+  list(APPEND ORM_RUNTIME_DEPENDENCY_ARGS
+       RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies)
+endif()
 cmake_config_target(
   orm_c
   ALIAS
@@ -185,6 +206,7 @@ cmake_config_target(
   OrmTargets
   FOLDER
   "orm"
+  ${ORM_RUNTIME_DEPENDENCY_ARGS}
   NO_VERSION)
 cmake_config_target(
   orm_cpp
@@ -197,6 +219,33 @@ cmake_config_target(
   FOLDER
   "orm"
   NO_VERSION)
+
+if(ORM_BUILD_SHARED)
+  set(ORM_RUNTIME_SEARCH_DIRECTORIES)
+  foreach(ORM_BACKEND_LIBRARY IN ITEMS "${SQLite3_LIBRARY}" "${PostgreSQL_LIBRARY}")
+    if(ORM_BACKEND_LIBRARY)
+      get_filename_component(ORM_BACKEND_LIBRARY_DIR "${ORM_BACKEND_LIBRARY}" DIRECTORY)
+      get_filename_component(ORM_BACKEND_PREFIX_DIR "${ORM_BACKEND_LIBRARY_DIR}" DIRECTORY)
+      list(APPEND ORM_RUNTIME_SEARCH_DIRECTORIES "${ORM_BACKEND_PREFIX_DIR}/bin")
+    endif()
+  endforeach()
+  if(WIN32)
+    install(
+      RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
+      DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
+      PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                          "clang_rt.asan_dynamic-.*" "turbo_utils\\.dll"
+      POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  else()
+    install(
+      RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
+      DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
+      PRE_EXCLUDE_REGEXES "libturbo_.*"
+      POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
+endif()
 
 if(MSVC)
   set(ORM_MSVC_WARNING_OPTIONS /W4 /permissive-)
@@ -221,12 +270,61 @@ endfunction()
 
 orm_enable_strict_warnings(orm_c)
 
+set(ORM_INTERNAL_TEST_LIBRARY orm_c)
+if(ORM_BUILD_SHARED AND ORM_BUILD_TESTS)
+  add_library(orm_c_test_static STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+  target_compile_features(orm_c_test_static PRIVATE c_std_11)
+  target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC)
+  target_include_directories(
+    orm_c_test_static
+    PUBLIC ${ORM_INCLUDE_DIR}
+    PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
+  target_link_libraries(
+    orm_c_test_static PUBLIC TurboUtils::Core
+    PRIVATE TurboUtils::CSerde TurboUtils::CBind TurboUtils::CFlow
+            TurboUtils::STL TurboUtils::Platform)
+  if(ORM_WITH_SQLITE)
+    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
+    target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
+  endif()
+  if(ORM_WITH_PGSQL)
+    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_PGSQL)
+    target_link_libraries(orm_c_test_static PRIVATE PostgreSQL::PostgreSQL)
+  endif()
+  if(ORM_WITH_REDIS)
+    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_REDIS)
+    target_link_libraries(orm_c_test_static PRIVATE TurboDB::Redis)
+  endif()
+  if(ORM_WITH_TIDESDB)
+    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_TIDESDB)
+    target_link_libraries(orm_c_test_static PRIVATE TidesDB::tidesdb)
+  endif()
+  if(ORM_WITH_MONGODB)
+    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_MONGO)
+    target_link_libraries(orm_c_test_static PRIVATE mongo::mongoc_shared)
+  endif()
+  set_target_properties(orm_c_test_static PROPERTIES C_STANDARD_REQUIRED ON)
+  orm_enable_strict_warnings(orm_c_test_static)
+  set(ORM_INTERNAL_TEST_LIBRARY orm_c_test_static)
+endif()
+
 if(ORM_BUILD_TESTS)
   enable_testing()
 endif()
 
 if(ORM_BUILD_TESTS)
 set(ORM_TEST_PRIVATE_LIBS TurboUtils::Core)
+
+function(orm_link_internal_test TARGET_NAME)
+  target_link_libraries(${TARGET_NAME} PRIVATE ${ORM_INTERNAL_TEST_LIBRARY}
+                                               ${ARGN})
+  if(ORM_BUILD_SHARED)
+    # The static test clone expands backend archives into the executable, so
+    # its final link must close the same C++ runtime dependencies as orm_c.
+    set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
+  endif()
+endfunction()
+
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_PRIVATE_LIBS SQLite::SQLite3 TurboUtils::CSerde
                                     TurboUtils::CFlow)
@@ -271,9 +369,8 @@ target_include_directories(
   orm_mongo_query_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
-target_link_libraries(orm_mongo_query_test PRIVATE orm_c
-                                                   TurboUtils::TinyTest
-                                                   mongo::bson_shared)
+orm_link_internal_test(orm_mongo_query_test TurboUtils::TinyTest
+                       mongo::bson_shared)
 set_target_properties(orm_mongo_query_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_mongo_query_test)
@@ -317,9 +414,8 @@ target_compile_definitions(orm_cbind_source_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_cbind_source_test PRIVATE ${ORM_INCLUDE_DIR}
                                  ${ORM_FLOW_SOURCE_DIR})
-target_link_libraries(
-  orm_cbind_source_test PRIVATE orm_c TurboUtils::CBind TurboUtils::CFlow
-                                 TurboUtils::TinyTest)
+orm_link_internal_test(orm_cbind_source_test TurboUtils::CBind
+                       TurboUtils::CFlow TurboUtils::TinyTest)
 set_target_properties(orm_cbind_source_test PROPERTIES C_STANDARD_REQUIRED ON
                                                         FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_cbind_source_test)
@@ -351,7 +447,7 @@ target_include_directories(
   orm_sql_render_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                               ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
-target_link_libraries(orm_sql_render_test PRIVATE orm_c TurboUtils::TinyTest)
+orm_link_internal_test(orm_sql_render_test TurboUtils::TinyTest)
 set_target_properties(orm_sql_render_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_sql_render_test)
@@ -372,9 +468,8 @@ target_compile_definitions(orm_postgres_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_postgres_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                                  ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/postgres)
-target_link_libraries(
-  orm_postgres_flow_test PRIVATE orm_c TurboUtils::CFlow
-                                 TurboUtils::TinyTest)
+orm_link_internal_test(orm_postgres_flow_test TurboUtils::CFlow
+                       TurboUtils::TinyTest)
 set_target_properties(orm_postgres_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_postgres_flow_test)
@@ -390,9 +485,8 @@ target_compile_definitions(orm_redis_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_redis_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/redis)
-target_link_libraries(orm_redis_flow_test PRIVATE orm_c TurboUtils::CBind
-                                                  TurboUtils::CFlow
-                                                  TurboUtils::TinyTest)
+orm_link_internal_test(orm_redis_flow_test TurboUtils::CBind
+                       TurboUtils::CFlow TurboUtils::TinyTest)
 set_target_properties(orm_redis_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_redis_flow_test)
@@ -408,9 +502,8 @@ target_compile_definitions(orm_mongo_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_mongo_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
-target_link_libraries(orm_mongo_flow_test PRIVATE orm_c TurboUtils::CBind
-                                                  TurboUtils::CFlow
-                                                  TurboUtils::TinyTest)
+orm_link_internal_test(orm_mongo_flow_test TurboUtils::CBind
+                       TurboUtils::CFlow TurboUtils::TinyTest)
 set_target_properties(orm_mongo_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_mongo_flow_test)
@@ -428,8 +521,7 @@ target_include_directories(
   orm_tidesdb_row_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                                 ${ORM_FLOW_SOURCE_DIR}
                                 ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/tidesdb)
-target_link_libraries(orm_tidesdb_row_test PRIVATE orm_c
-                                                   TurboUtils::TinyTest)
+orm_link_internal_test(orm_tidesdb_row_test TurboUtils::TinyTest)
 set_target_properties(orm_tidesdb_row_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_tidesdb_row_test)
@@ -445,9 +537,8 @@ target_compile_definitions(orm_tidesdb_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_tidesdb_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                                 ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/tidesdb)
-target_link_libraries(orm_tidesdb_flow_test PRIVATE orm_c TurboUtils::CBind
-                                                    TurboUtils::CFlow
-                                                    TurboUtils::TinyTest)
+orm_link_internal_test(orm_tidesdb_flow_test TurboUtils::CBind
+                       TurboUtils::CFlow TurboUtils::TinyTest)
 set_target_properties(orm_tidesdb_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_tidesdb_flow_test)
@@ -484,9 +575,8 @@ target_include_directories(
   orm_sqlite_flow_test PRIVATE ${ORM_INCLUDE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sqlite)
-target_link_libraries(
-  orm_sqlite_flow_test PRIVATE orm_c SQLite::SQLite3 TurboUtils::CBind
-                                TurboUtils::CFlow TurboUtils::TinyTest)
+orm_link_internal_test(orm_sqlite_flow_test SQLite::SQLite3 TurboUtils::CBind
+                       TurboUtils::CFlow TurboUtils::TinyTest)
 set_target_properties(orm_sqlite_flow_test PROPERTIES C_STANDARD_REQUIRED ON
                                                        FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_sqlite_flow_test)
@@ -534,7 +624,7 @@ target_include_directories(
   orm_redis_query_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/redis)
-target_link_libraries(orm_redis_query_test PRIVATE orm_c TurboUtils::TinyTest)
+orm_link_internal_test(orm_redis_query_test TurboUtils::TinyTest)
 orm_enable_strict_warnings(orm_redis_query_test)
 if(MSVC)
   target_compile_options(orm_redis_query_test
@@ -546,7 +636,7 @@ add_test(NAME orm_redis_query COMMAND orm_redis_query_test)
 add_executable(orm_redis_backend_contract_test
                tests/abi/redis_backend_contract_test.c)
 target_compile_features(orm_redis_backend_contract_test PRIVATE c_std_11)
-target_link_libraries(orm_redis_backend_contract_test PRIVATE orm_c)
+orm_link_internal_test(orm_redis_backend_contract_test)
 if(WIN32)
   target_link_libraries(orm_redis_backend_contract_test PRIVATE ws2_32)
 endif()

@@ -141,12 +141,12 @@ static void orm_flow_test_cursor_destroy(void *context) {
 static const orm_row_cursor_ops orm_flow_test_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "flow-test", orm_flow_test_cursor_next,
-    orm_flow_test_cursor_cancel, orm_flow_test_cursor_destroy, NULL};
+    orm_flow_test_cursor_cancel, orm_flow_test_cursor_destroy, NULL, NULL};
 
 static const orm_row_cursor_ops orm_flow_test_partial_cursor_ops = {
     sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
     "partial-flow-test", NULL, orm_flow_test_cursor_cancel,
-    orm_flow_test_cursor_destroy, NULL};
+    orm_flow_test_cursor_destroy, NULL, NULL};
 
 typedef struct orm_flow_test_sink_state {
   orm_flow_test_row row;

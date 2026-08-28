@@ -566,6 +566,7 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   const char **keyword_views = NULL;
   const char **value_views = NULL;
   size_t total_bytes = 0u;
+  int expand_dbname = 0;
   uint32_t index;
   orm_status_t status = ORM_STATUS_OK;
   (void)limits;
@@ -590,6 +591,8 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   for (index = 0u; index < config->option_count; ++index) {
     uint32_t previous;
     const orm_option_t *option = &config->options[index];
+    const int conninfo_option =
+        orm_view_equal_cstr(option->keyword, "conninfo");
     if (!orm_postgres_identifier(option->keyword) ||
         !orm_view_valid(option->value, true) ||
         option->value.len > ORM_POSTGRES_OPTION_VALUE_MAX ||
@@ -601,6 +604,18 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
                    ? ORM_STATUS_LIMIT_EXCEEDED
                    : ORM_STATUS_INVALID_ARGUMENT;
       orm_error_set(error, status, "invalid PostgreSQL connection option");
+      goto cleanup;
+    }
+    if (conninfo_option && index != 0u) {
+      status = ORM_STATUS_INVALID_ARGUMENT;
+      orm_error_set(error, status,
+                    "PostgreSQL conninfo must be the first connection option");
+      goto cleanup;
+    }
+    if (orm_view_equal_cstr(option->keyword, "dbname") && expand_dbname) {
+      status = ORM_STATUS_INVALID_ARGUMENT;
+      orm_error_set(error, status,
+                    "duplicate PostgreSQL conninfo/dbname option");
       goto cleanup;
     }
     for (previous = 0u; previous < index; ++previous) {
@@ -615,7 +630,8 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
       }
     }
     total_bytes += option->keyword.len + option->value.len;
-    keywords[index] = tstr_from_v(option->keyword);
+    keywords[index] = conninfo_option ? tstr_dup("dbname")
+                                     : tstr_from_v(option->keyword);
     values[index] = tstr_from_v(option->value);
     if (keywords[index] == NULL || values[index] == NULL) {
       status = ORM_STATUS_OUT_OF_MEMORY;
@@ -624,6 +640,7 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     }
     keyword_views[index] = keywords[index];
     value_views[index] = values[index];
+    if (conninfo_option) expand_dbname = 1;
   }
   state = (orm_postgres_backend_state *)calloc(1u, sizeof(*state));
   if (state == NULL) {
@@ -631,7 +648,8 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     orm_error_set(error, status, "allocate PostgreSQL backend");
     goto cleanup;
   }
-  state->connection = PQconnectdbParams(keyword_views, value_views, 0);
+  state->connection = PQconnectdbParams(keyword_views, value_views,
+                                        expand_dbname);
   if (state->connection == NULL) {
     status = ORM_STATUS_CONNECTION_ERROR;
     orm_error_set(error, status,

@@ -96,6 +96,10 @@ static const char *orm_postgres_libpq_result_error(const void *result) {
   return PQresultErrorMessage((const PGresult *)result);
 }
 
+static const char *orm_postgres_libpq_result_sqlstate(const void *result) {
+  return PQresultErrorField((const PGresult *)result, PG_DIAG_SQLSTATE);
+}
+
 static const orm_postgres_command_ops orm_postgres_libpq_command_ops = {
     sizeof(orm_postgres_command_ops), ORM_POSTGRES_COMMAND_OPS_ABI_VERSION,
     orm_postgres_libpq_send, orm_postgres_libpq_enable_single_row,
@@ -108,7 +112,8 @@ static const orm_postgres_result_ops orm_postgres_libpq_result_ops = {
     orm_postgres_libpq_columns, orm_postgres_libpq_column_name,
     orm_postgres_libpq_column_type, orm_postgres_libpq_is_null,
     orm_postgres_libpq_value, orm_postgres_libpq_length,
-    orm_postgres_libpq_command_tuples, orm_postgres_libpq_result_error};
+    orm_postgres_libpq_command_tuples, orm_postgres_libpq_result_error,
+    orm_postgres_libpq_result_sqlstate};
 
 orm_postgres_driver orm_postgres_libpq_driver(PGconn *connection) {
   orm_postgres_driver driver = {&orm_postgres_libpq_command_ops,

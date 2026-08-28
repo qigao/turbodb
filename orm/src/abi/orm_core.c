@@ -159,7 +159,55 @@ static bool orm_valid_isolation(orm_isolation_t isolation) {
          isolation <= ORM_ISOLATION_SERIALIZABLE;
 }
 
-static bool orm_raw_returns_rows(const orm_query_plan *plan) {
+static bool orm_sql_has_keyword(const unsigned char *sql, size_t size,
+                                const char *keyword) {
+  size_t index = 0u;
+  const size_t keyword_size = strlen(keyword);
+  while (index < size) {
+    if (sql[index] == '\'' || sql[index] == '"') {
+      const unsigned char quote = sql[index++];
+      while (index < size) {
+        if (sql[index++] != quote)
+          continue;
+        if (index < size && sql[index] == quote) {
+          ++index;
+          continue;
+        }
+        break;
+      }
+      continue;
+    }
+    if (index + 1u < size && sql[index] == '-' && sql[index + 1u] == '-') {
+      index += 2u;
+      while (index < size && sql[index] != '\n')
+        ++index;
+      continue;
+    }
+    if (index + 1u < size && sql[index] == '/' && sql[index + 1u] == '*') {
+      index += 2u;
+      while (index + 1u < size &&
+             !(sql[index] == '*' && sql[index + 1u] == '/'))
+        ++index;
+      index = index + 1u < size ? index + 2u : size;
+      continue;
+    }
+    if ((index == 0u || !(isalnum(sql[index - 1u]) || sql[index - 1u] == '_')) &&
+        index + keyword_size <= size) {
+      size_t offset = 0u;
+      while (offset < keyword_size &&
+             tolower(sql[index + offset]) == (unsigned char)keyword[offset])
+        ++offset;
+      if (offset == keyword_size &&
+          (index + offset == size ||
+           !(isalnum(sql[index + offset]) || sql[index + offset] == '_')))
+        return true;
+    }
+    ++index;
+  }
+  return false;
+}
+
+bool orm_query_returns_rows(const orm_query_plan *plan) {
   const unsigned char *cursor;
   size_t remaining;
   char keyword[8];
@@ -180,7 +228,9 @@ static bool orm_raw_returns_rows(const orm_query_plan *plan) {
   }
   keyword[size] = '\0';
   return strcmp(keyword, "select") == 0 || strcmp(keyword, "with") == 0 ||
-         strcmp(keyword, "pragma") == 0 || strcmp(keyword, "explain") == 0;
+         strcmp(keyword, "pragma") == 0 || strcmp(keyword, "explain") == 0 ||
+         orm_sql_has_keyword((const unsigned char *)plan->raw_sql,
+                             tstr_len(plan->raw_sql), "returning");
 }
 
 static orm_status_t orm_query_make(orm_connection_t *connection, vstr input,
@@ -270,7 +320,7 @@ static orm_status_t orm_open_command(orm_query_t *query,
       cflow_source_valid(out_source) ||
       (query->plan.kind == ORM_QUERY_SELECT ||
        (query->plan.kind == ORM_QUERY_RAW &&
-        orm_raw_returns_rows(&query->plan)))) {
+        orm_query_returns_rows(&query->plan)))) {
     orm_error_set(error, out_source != NULL && cflow_source_valid(out_source)
                              ? ORM_STATUS_INVALID_STATE
                              : ORM_STATUS_INVALID_ARGUMENT,
@@ -312,7 +362,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
       out_source == NULL || cflow_source_valid(out_source) ||
       (query->plan.kind != ORM_QUERY_SELECT &&
        !(query->plan.kind == ORM_QUERY_RAW &&
-         orm_raw_returns_rows(&query->plan)))) {
+         orm_query_returns_rows(&query->plan)))) {
     orm_error_set(error, out_source != NULL && cflow_source_valid(out_source)
                              ? ORM_STATUS_INVALID_STATE
                              : ORM_STATUS_INVALID_ARGUMENT,
