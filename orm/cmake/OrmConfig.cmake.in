@@ -1,9 +1,6 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-if(NOT @ORM_BUILD_SHARED@ AND @ORM_WITH_PGSQL@)
-  find_dependency(PostgreSQL)
-endif()
 if(NOT @ORM_BUILD_SHARED@ AND @ORM_WITH_SQLITE@)
   find_dependency(SQLite3)
 endif()

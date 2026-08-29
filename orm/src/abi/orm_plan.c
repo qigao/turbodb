@@ -47,19 +47,34 @@ static bool orm_identifier_valid(vstr input, bool qualified,
   return segment_size != 0u;
 }
 
+static orm_status_t orm_validate_identifier(vstr input, size_t max_bytes,
+                                            orm_error_t *error,
+                                            const char *role,
+                                            bool qualified) {
+  orm_status_t validation = ORM_STATUS_INVALID_ARGUMENT;
+  if (!orm_view_valid(input, false) || input.len > max_bytes ||
+      memchr(input.data, '\0', input.len) != NULL ||
+      !orm_identifier_valid(input, qualified, &validation)) {
+    const orm_status_t status = input.len > max_bytes
+                                    ? ORM_STATUS_LIMIT_EXCEEDED
+                                    : validation;
+    orm_error_set(error, status, role);
+    return status;
+  }
+  return ORM_STATUS_OK;
+}
+
 static orm_status_t orm_copy_identifier(vstr input, size_t max_bytes,
                                         tstr *output, orm_error_t *error,
                                         const char *role, bool qualified) {
-  orm_status_t validation = ORM_STATUS_INVALID_ARGUMENT;
-  if (output == NULL || !orm_view_valid(input, false) ||
-      input.len > max_bytes || memchr(input.data, '\0', input.len) != NULL ||
-      !orm_identifier_valid(input, qualified, &validation)) {
-    orm_error_set(error, input.len > max_bytes ? ORM_STATUS_LIMIT_EXCEEDED
-                                               : validation,
-                  role);
-    return input.len > max_bytes ? ORM_STATUS_LIMIT_EXCEEDED
-                                 : validation;
+  orm_status_t status;
+  if (output == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, role);
+    return ORM_STATUS_INVALID_ARGUMENT;
   }
+  status = orm_validate_identifier(input, max_bytes, error, role, qualified);
+  if (status != ORM_STATUS_OK)
+    return status;
   *output = tstr_dup_len(input.data, input.len);
   if (*output == NULL) {
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY, role);
@@ -358,6 +373,79 @@ orm_status_t orm_plan_add_predicate(orm_query_plan *plan, vstr column,
     tstr_free(predicate.column);
     orm_owned_value_destroy(&predicate.value);
     return orm_vec_status(pushed, error, "too many ORM predicates");
+  }
+  orm_error_set(error, ORM_STATUS_OK, NULL);
+  return ORM_STATUS_OK;
+}
+
+static void orm_plan_rollback_predicates(orm_query_plan *plan,
+                                         size_t predicate_count,
+                                         size_t parameter_bytes) {
+  while (vec_size(&plan->predicates) > predicate_count) {
+    orm_predicate predicate;
+    memset(&predicate, 0, sizeof(predicate));
+    if (vec_pop(&plan->predicates, &predicate) != STL_OK)
+      break;
+    tstr_free(predicate.column);
+    orm_owned_value_destroy(&predicate.value);
+  }
+  plan->parameter_bytes = parameter_bytes;
+}
+
+orm_status_t orm_plan_add_key(orm_query_plan *plan,
+                              const orm_key_part_t *parts,
+                              uint32_t part_count, const orm_limits *limits,
+                              orm_error_t *error) {
+  size_t index;
+  size_t other;
+  size_t predicate_count;
+  size_t parameter_bytes;
+  orm_status_t status;
+  if (plan == NULL || limits == NULL || plan->kind == ORM_QUERY_INSERT ||
+      plan->kind == ORM_QUERY_RAW) {
+    orm_error_set(error, ORM_STATUS_INVALID_STATE,
+                  "where_key requires SELECT, UPDATE, or DELETE");
+    return ORM_STATUS_INVALID_STATE;
+  }
+  if (parts == NULL || part_count == 0u) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                  "composite key must contain at least one part");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+
+  predicate_count = vec_size(&plan->predicates);
+  if (predicate_count > limits->max_predicates ||
+      (size_t)part_count > limits->max_predicates - predicate_count) {
+    orm_error_set(error, ORM_STATUS_LIMIT_EXCEEDED,
+                  "composite key exceeds configured predicate limit");
+    return ORM_STATUS_LIMIT_EXCEEDED;
+  }
+  for (index = 0u; index < (size_t)part_count; ++index) {
+    status = orm_validate_identifier(parts[index].column,
+                                     limits->max_query_bytes, error,
+                                     "invalid ORM key column", true);
+    if (status != ORM_STATUS_OK)
+      return status;
+    for (other = 0u; other < index; ++other) {
+      if (parts[index].column.len == parts[other].column.len &&
+          memcmp(parts[index].column.data, parts[other].column.data,
+                 parts[index].column.len) == 0) {
+        orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                      "composite key columns must be unique");
+        return ORM_STATUS_INVALID_ARGUMENT;
+      }
+    }
+  }
+
+  parameter_bytes = plan->parameter_bytes;
+  for (index = 0u; index < (size_t)part_count; ++index) {
+    status = orm_plan_add_predicate(plan, parts[index].column,
+                                    ORM_COMPARE_EQUAL, parts[index].value,
+                                    limits, error);
+    if (status != ORM_STATUS_OK) {
+      orm_plan_rollback_predicates(plan, predicate_count, parameter_bytes);
+      return status;
+    }
   }
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;

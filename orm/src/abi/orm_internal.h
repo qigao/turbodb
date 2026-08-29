@@ -152,14 +152,21 @@ struct orm_transaction {
   orm_transaction_state state;
 };
 
+typedef orm_status_t (*orm_backend_factory_v1)(
+    const orm_config_t *config, const orm_limits *limits,
+    orm_backend *out_backend, orm_error_t *error);
+
 bool orm_query_returns_rows(const orm_query_plan *plan);
 
-void orm_error_set(orm_error_t *error, orm_status_t status,
-                   const char *message);
-bool orm_view_valid(vstr value, bool allow_empty);
-bool orm_view_equal_cstr(vstr value, const char *text);
+ORM_C_API void orm_error_set(orm_error_t *error, orm_status_t status,
+                             const char *message);
+ORM_C_API bool orm_view_valid(vstr value, bool allow_empty);
+ORM_C_API bool orm_view_equal_cstr(vstr value, const char *text);
 const orm_option_t *orm_option_find(const orm_config_t *config,
                                     const char *keyword);
+ORM_C_API orm_status_t ORM_C_CALL orm_connect_with_factory_v1(
+    const orm_config_t *config, orm_backend_factory_v1 factory,
+    orm_connection_t **out_connection, orm_error_t *error);
 
 orm_status_t orm_plan_init(orm_query_plan *plan, orm_query_kind kind,
                            vstr input, const orm_limits *limits,
@@ -178,6 +185,10 @@ orm_status_t orm_plan_add_predicate(orm_query_plan *plan, vstr column,
                                     orm_value_t value,
                                     const orm_limits *limits,
                                     orm_error_t *error);
+orm_status_t orm_plan_add_key(orm_query_plan *plan,
+                              const orm_key_part_t *parts,
+                              uint32_t part_count, const orm_limits *limits,
+                              orm_error_t *error);
 orm_status_t orm_plan_add_bind(orm_query_plan *plan, orm_value_t value,
                                const orm_limits *limits,
                                orm_error_t *error);

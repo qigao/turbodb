@@ -270,21 +270,15 @@ static orm_status_t orm_postgres_open_impl(
   return status;
 }
 
-static orm_status_t orm_postgres_execute_impl(
-    orm_postgres_backend_state *state, const orm_query_plan *plan,
-    const orm_limits *limits, int allow_transaction,
-    uint64_t *affected_rows, orm_error_t *error) {
-  orm_row_cursor cursor = {0};
-  size_t columns = 0u;
-  uint64_t affected = 0u;
-  orm_status_t status = orm_postgres_open_impl(
-      state, plan, limits, allow_transaction, &columns, &affected, &cursor,
-      error);
-  if (status != ORM_STATUS_OK)
-    return status;
+static orm_status_t orm_postgres_drain_command(orm_row_cursor *cursor,
+                                               size_t columns,
+                                               uint64_t affected,
+                                               uint64_t *affected_rows,
+                                               orm_error_t *error) {
+  orm_status_t status = ORM_STATUS_OK;
   for (;;) {
     cserde_reader row = {0};
-    const orm_row_cursor_step step = cursor.ops->next(cursor.context, &row);
+    const orm_row_cursor_step step = cursor->ops->next(cursor->context, &row);
     if (step.kind == ORM_ROW_CURSOR_DONE)
       break;
     if (step.kind == ORM_ROW_CURSOR_ERROR) {
@@ -304,7 +298,7 @@ static orm_status_t orm_postgres_execute_impl(
                   "PostgreSQL cursor returned an invalid step");
     break;
   }
-  cursor.ops->destroy(cursor.context);
+  cursor->ops->destroy(cursor->context);
   if (status == ORM_STATUS_OK && columns != 0u) {
     status = ORM_STATUS_UNSUPPORTED;
     orm_error_set(error, status,
@@ -315,29 +309,47 @@ static orm_status_t orm_postgres_execute_impl(
   return status;
 }
 
+static orm_status_t orm_postgres_execute_impl(
+    orm_postgres_backend_state *state, const orm_query_plan *plan,
+    const orm_limits *limits, int allow_transaction,
+    uint64_t *affected_rows, orm_error_t *error) {
+  orm_row_cursor cursor = {0};
+  size_t columns = 0u;
+  uint64_t affected = 0u;
+  const orm_status_t status = orm_postgres_open_impl(
+      state, plan, limits, allow_transaction, &columns, &affected, &cursor,
+      error);
+  if (status != ORM_STATUS_OK)
+    return status;
+  return orm_postgres_drain_command(&cursor, columns, affected, affected_rows,
+                                    error);
+}
+
 static orm_status_t orm_postgres_control(orm_postgres_backend_state *state,
                                          const char *sql,
                                          orm_error_t *error) {
-  orm_query_plan plan;
-  orm_limits limits = {0};
+  orm_row_cursor cursor = {0};
+  orm_postgres_driver driver;
+  orm_postgres_query_request request;
+  orm_postgres_cursor_config cursor_config;
+  size_t columns = 0u;
   uint64_t affected = 0u;
   orm_status_t status;
-  limits.max_parameters = 1u;
-  limits.max_columns = 1u;
-  limits.max_predicates = 1u;
-  limits.max_assignments = 1u;
-  limits.max_query_bytes = 512u;
-  limits.max_parameter_bytes = 1u;
-  limits.max_result_rows = 1u;
-  limits.max_result_bytes = 1u;
-  status = orm_plan_init(&plan, ORM_QUERY_RAW, vstr_from_cstr(sql), &limits,
-                         error);
+  if (state == NULL || state->connection == NULL || sql == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                  "invalid PostgreSQL control request");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  driver = orm_postgres_libpq_driver(state->connection);
+  memset(&request, 0, sizeof(request));
+  request.sql = sql;
+  cursor_config = (orm_postgres_cursor_config)
+      ORM_POSTGRES_CURSOR_CONFIG_INIT(1u, 1u, 1u, &columns, &affected, NULL);
+  status = orm_postgres_cursor_start(&cursor, &driver, &request,
+                                     &cursor_config, error);
   if (status != ORM_STATUS_OK)
     return status;
-  status = orm_postgres_execute_impl(state, &plan, &limits, 1, &affected,
-                                     error);
-  orm_plan_destroy(&plan);
-  return status;
+  return orm_postgres_drain_command(&cursor, columns, affected, NULL, error);
 }
 
 static void orm_postgres_backend_destroy(void *context) {

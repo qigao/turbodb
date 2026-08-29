@@ -25,6 +25,7 @@
                 "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "VCPKG_MANIFEST_MODE": "ON",
+                "TIDESDB_BUILD_TESTS": "OFF",
                 "TIDESDB_WITH_SNAPPY": "OFF",
                 "TIDESDB_WITH_LZ4": "OFF"
             },
@@ -39,6 +40,7 @@
                 "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
                 "VCPKG_TARGET_TRIPLET": "x64-linux",
                 "VCPKG_MANIFEST_MODE": "ON",
+                "TIDESDB_BUILD_TESTS": "OFF",
                 "TIDESDB_WITH_SNAPPY": "OFF",
                 "TIDESDB_WITH_LZ4": "OFF"
             },
@@ -97,6 +99,22 @@
             "inherits": ["base-win-release-user", "win-paths"]
         },
         {
+            "name": "win-release-pg-live-user",
+            "displayName": "Release + PostgreSQL live tests (Windows)",
+            "inherits": "win-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Release-PG",
+            "cacheVariables": {
+                "ORM_WITH_PGSQL": "ON",
+                "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows"
+            },
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "PATH": "${sourceDir}/build/Msvc-Release-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
             "name": "linux-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
@@ -122,6 +140,22 @@
                 "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": ["release-linux-ninja", "linux-paths"]
+        },
+        {
+            "name": "linux-release-pg-live-user",
+            "displayName": "Release + PostgreSQL live tests (Linux)",
+            "inherits": "linux-release-user",
+            "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
+            "cacheVariables": {
+                "ORM_WITH_PGSQL": "ON",
+                "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux"
+            },
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{TURBOUTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            }
         },
         {
             "name": "android-dependencies-debug",
@@ -155,12 +189,16 @@
     "buildPresets": [
         { "name": "win-dev-user", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "configurePreset": "win-release-user" },
+        { "name": "win-release-pg-live-user", "configurePreset": "win-release-pg-live-user" },
         { "name": "linux-dev-user", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "configurePreset": "linux-release-user" },
+        { "name": "linux-release-pg-live-user", "configurePreset": "linux-release-pg-live-user" },
         { "name": "install-win-dev-user", "configurePreset": "win-dev-user", "targets": ["install"] },
         { "name": "install-win-release-user", "configurePreset": "win-release-user", "targets": ["install"] },
+        { "name": "install-win-release-pg-live-user", "configurePreset": "win-release-pg-live-user", "targets": ["install"] },
         { "name": "install-linux-dev-user", "configurePreset": "linux-dev-user", "targets": ["install"] },
         { "name": "install-linux-release-user", "configurePreset": "linux-release-user", "targets": ["install"] },
+        { "name": "install-linux-release-pg-live-user", "configurePreset": "linux-release-pg-live-user", "targets": ["install"] },
         { "name": "android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win" },
         { "name": "android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win" },
         { "name": "android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win" },
@@ -177,7 +215,9 @@
     "testPresets": [
         { "name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user" },
+        { "name": "win-release-pg-live-user", "inherits": "base-test", "configurePreset": "win-release-pg-live-user" },
         { "name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user" },
-        { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" }
+        { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" },
+        { "name": "linux-release-pg-live-user", "inherits": "base-test", "configurePreset": "linux-release-pg-live-user" }
     ]
 }

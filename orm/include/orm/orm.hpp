@@ -161,6 +161,12 @@ public:
     });
     return *this;
   }
+  query &where_key(const orm_key_part_t *parts, std::uint32_t count) {
+    call([&](orm_error_t *e) {
+      return orm_query_where_key(handle_, parts, count, e);
+    });
+    return *this;
+  }
   template <typename T> query &bind(T &&input) {
     const orm_value_t encoded = detail::value(std::forward<T>(input));
     call([&](orm_error_t *e) { return orm_query_bind(handle_, encoded, e); });
@@ -215,7 +221,12 @@ private:
 
 class connection final {
 public:
-  explicit connection(const config &configuration) {
+  using connector = orm_status_t(ORM_C_CALL *)(
+      const orm_config_t *, orm_connection_t **, orm_error_t *);
+
+  explicit connection(const config &configuration)
+      : connection(configuration, orm_connect) {}
+  connection(const config &configuration, connector connect) {
     std::vector<orm_option_t> options;
     options.reserve(configuration.options_.size());
     for (const auto &entry : configuration.options_)
@@ -226,7 +237,10 @@ public:
     native.option_count = static_cast<std::uint32_t>(options.size());
     orm_error_t error;
     orm_error_init(&error);
-    detail::check(orm_connect(&native, &handle_, &error), error);
+    if (connect == nullptr)
+      throw status_error(ORM_STATUS_INVALID_ARGUMENT,
+                         "connection connector is null");
+    detail::check(connect(&native, &handle_, &error), error);
   }
   connection(const connection &) = delete;
   connection &operator=(const connection &) = delete;
