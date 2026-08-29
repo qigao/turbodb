@@ -271,8 +271,8 @@ static orm_status_t orm_postgres_open_impl(
 }
 
 static orm_status_t orm_postgres_drain_command(orm_row_cursor *cursor,
-                                               size_t columns,
-                                               uint64_t affected,
+                                               const size_t *columns,
+                                               const uint64_t *affected,
                                                uint64_t *affected_rows,
                                                orm_error_t *error) {
   orm_status_t status = ORM_STATUS_OK;
@@ -299,13 +299,13 @@ static orm_status_t orm_postgres_drain_command(orm_row_cursor *cursor,
     break;
   }
   cursor->ops->destroy(cursor->context);
-  if (status == ORM_STATUS_OK && columns != 0u) {
+  if (status == ORM_STATUS_OK && *columns != 0u) {
     status = ORM_STATUS_UNSUPPORTED;
     orm_error_set(error, status,
                   "PostgreSQL row queries must be opened as a row Source");
   }
   if (status == ORM_STATUS_OK && affected_rows != NULL)
-    *affected_rows = affected;
+    *affected_rows = *affected;
   return status;
 }
 
@@ -321,7 +321,7 @@ static orm_status_t orm_postgres_execute_impl(
       error);
   if (status != ORM_STATUS_OK)
     return status;
-  return orm_postgres_drain_command(&cursor, columns, affected, affected_rows,
+  return orm_postgres_drain_command(&cursor, &columns, &affected, affected_rows,
                                     error);
 }
 
@@ -349,7 +349,7 @@ static orm_status_t orm_postgres_control(orm_postgres_backend_state *state,
                                      &cursor_config, error);
   if (status != ORM_STATUS_OK)
     return status;
-  return orm_postgres_drain_command(&cursor, columns, affected, NULL, error);
+  return orm_postgres_drain_command(&cursor, &columns, &affected, NULL, error);
 }
 
 static void orm_postgres_backend_destroy(void *context) {

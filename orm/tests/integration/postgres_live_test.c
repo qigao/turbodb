@@ -42,7 +42,7 @@ static orm_status_t orm_postgres_live_insert(
     orm_connection_t *connection, orm_transaction_t *transaction,
     const char *domain, const char *user, const char *group,
     const char *name, const unsigned char *payload, size_t payload_size,
-    int64_t revision, orm_error_t *error) {
+    int64_t revision, uint64_t *affected_rows, orm_error_t *error) {
   orm_query_t *query = NULL;
   orm_result_t *result = NULL;
   orm_status_t status =
@@ -66,6 +66,8 @@ static orm_status_t orm_postgres_live_insert(
                            error);
   if (status == ORM_STATUS_OK)
     status = orm_postgres_live_execute(query, transaction, &result, error);
+  if (status == ORM_STATUS_OK && affected_rows != NULL)
+    status = orm_result_affected_rows(result, affected_rows, error);
   orm_result_destroy(result);
   orm_query_destroy(query);
   return status;
@@ -116,6 +118,7 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
   orm_string_view_t text = {0};
   orm_blob_t blob = {0};
   uint64_t rows = 0u;
+  uint64_t affected_rows = 0u;
   int64_t revision = 0;
   orm_status_t status;
 
@@ -140,7 +143,10 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
     goto cleanup;
   status = orm_postgres_live_insert(
       connection, NULL, "domain-a", "user-a", "group-a", "Alice",
-      expected_payload, sizeof(expected_payload), 1, error);
+      expected_payload, sizeof(expected_payload), 1, &affected_rows, error);
+  if (status == ORM_STATUS_OK && affected_rows != 1u)
+    status = orm_postgres_live_fail(error,
+                                    "PostgreSQL insert affected-row mismatch");
   if (status != ORM_STATUS_OK)
     goto cleanup;
 
@@ -188,7 +194,7 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
 
   status = orm_postgres_live_insert(
       connection, NULL, "domain-a", "user-a", "group-a", "duplicate",
-      expected_payload, sizeof(expected_payload), 2, error);
+      expected_payload, sizeof(expected_payload), 2, NULL, error);
   if (status != ORM_STATUS_CONSTRAINT) {
     if (status == ORM_STATUS_OK)
       status = orm_postgres_live_fail(
@@ -203,7 +209,11 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
     goto cleanup;
   status = orm_postgres_live_insert(
       connection, transaction, "domain-a", "user-commit", "group-a",
-      "Committed", expected_payload, sizeof(expected_payload), 3, error);
+      "Committed", expected_payload, sizeof(expected_payload), 3,
+      &affected_rows, error);
+  if (status == ORM_STATUS_OK && affected_rows != 1u)
+    status = orm_postgres_live_fail(
+        error, "PostgreSQL transaction affected-row mismatch");
   if (status == ORM_STATUS_OK)
     status = orm_transaction_commit(transaction, error);
   orm_transaction_destroy(transaction);
@@ -217,7 +227,8 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
     goto cleanup;
   status = orm_postgres_live_insert(
       connection, transaction, "domain-a", "user-rollback", "group-a",
-      "Rolled back", expected_payload, sizeof(expected_payload), 4, error);
+      "Rolled back", expected_payload, sizeof(expected_payload), 4, NULL,
+      error);
   if (status == ORM_STATUS_OK)
     status = orm_transaction_rollback(transaction, error);
   orm_transaction_destroy(transaction);
