@@ -273,34 +273,7 @@ if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
     LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/turboutils/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
         "$shared_consumer_build/orm_postgresql_cpp_consumer"
 
-    static_root=/work/package-static
-    export TURBOUTILS_ROOT=/opt/turboutils/release
-    cmake --fresh \
-        -S /work/src/turbodb \
-        -B "$static_root/build" \
-        -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
-        -DVCPKG_INSTALLED_DIR=/work/src/turbodb/vcpkg_installed_pg \
-        -DCMAKE_PREFIX_PATH="/work/src/turbodb/vcpkg_installed_pg/x64-linux;/opt/turboutils/release" \
-        -DCMAKE_INSTALL_PREFIX="$static_root/install" \
-        -DORM_BUILD_SHARED=OFF \
-        -DORM_BUILD_TESTS=OFF \
-        -DORM_WITH_PGSQL=ON \
-        -DORM_WITH_REDIS=OFF \
-        -DORM_WITH_TIDESDB=OFF \
-        -DTIDESDB_BUILD_TESTS=OFF
-    cmake --build "$static_root/build" --target install
-    cmake --fresh \
-        -S /work/src/turbodb/orm/tests/package_consumer/postgresql \
-        -B "$static_root/consumer" \
-        -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="$static_root/install;/opt/turboutils/release;/work/src/turbodb/vcpkg_installed_pg/x64-linux"
-    cmake --build "$static_root/consumer"
-    "$static_root/consumer/orm_postgresql_c_consumer"
-    "$static_root/consumer/orm_postgresql_cpp_consumer"
-    echo "Installed package consumers verified: shared/static x C/C++"
+    echo "Installed package consumers verified: shared x C/C++"
 fi
 ' 2>&1 | tee "$run_root/artifacts/linux-build-test.log"
 
@@ -376,7 +349,7 @@ tar.exe -tf $localResult
 3. TurboDB 成功 configure/build，且独立 TidesDB engine tests 被关闭。
 4. CTest 实际发现至少一个测试，JUnit 的 failure、error 与 skipped 数均为零。
 5. Redis/CFlow 与 ORM contract tests 在同一次 run 内通过。
-6. live 模式使用专用 PostgreSQL preset，并通过 shared/static × C/C++ 安装包 consumer matrix。
+6. live 模式使用专用 PostgreSQL preset，并通过 shared × C/C++ 安装包 consumer matrix。
 7. 精确命名的构建容器和可选 PostgreSQL 容器已被删除，run 目录和证据文件仍保留。
 
 ## 8. 常见失败

@@ -64,8 +64,10 @@ C++ 只提供 header wrapper。`orm::connection` 增加接收 C connector functi
 - `ORM_WITH_PGSQL=OFF`：不调用 `find_package(PostgreSQL)`，不构建 `Orm::PostgreSQL`。
 - `ORM_WITH_PGSQL=ON`：构建纯 C `orm_postgresql` target 和 `Orm::PostgreSQL` alias；`Orm::C` 本身不链接 libpq。
 - shared core 的生产 target 和文件名统一为 `turbo_orm`。安装消费者始终使用稳定 target `Orm::C`，不依赖仓库内部 target 名或物理文件名。
-- 安装时生成独立 `OrmPostgreSQLConfig.cmake`。只有 `find_package(OrmPostgreSQL)` 才发现 PostgreSQL；普通 `find_package(Orm)` 不包含该依赖。
-- shared component 自己封闭 libpq 的 runtime dependencies；static component 的 package config 使用 `find_dependency(PostgreSQL)`。
+- `Orm` 是唯一的消费端 CMake package；启用 PostgreSQL 时，同一个
+  `OrmTargets.cmake` 额外导出 `Orm::PostgreSQL`，不生成独立 driver package。
+- core 和 component 只提供 shared SDK。component 自己封闭 libpq 的 runtime
+  dependencies，消费端不执行 `find_dependency(PostgreSQL)`。
 - CBind/CSerde/CFlow 继续来自 TurboUtils。ORM 不新增 TurboParser runtime 依赖，也不在运行时调用 `tbe_compiler`。
 
 ## DataBind/CBind 关系
@@ -101,7 +103,7 @@ live test 使用独立 connection 和 PostgreSQL temporary table，覆盖 text/b
 
 ## 兼容性和迁移
 
-`orm_query_where_key()` 是加法 API。PostgreSQL 构建从嵌入 `Orm::C` 改为 `Orm::PostgreSQL` 是依赖边界变化：启用 PostgreSQL 的 C 调用方需要包含 `orm_postgresql.h` 并调用 `orm_postgresql_connect()`；CMake 调用方链接 `Orm::PostgreSQL`。普通 SQLite/Redis/Mongo/TidesDB 调用不变。
+`orm_query_where_key()` 是加法 API。PostgreSQL 构建从嵌入 `Orm::C` 改为 `Orm::PostgreSQL` 是依赖边界变化：启用 PostgreSQL 的 C 调用方需要包含 `orm_postgresql.h` 并调用 `orm_postgresql_connect()`；CMake 调用方仍只 `find_package(Orm)`，并链接 `Orm::PostgreSQL`。普通 SQLite/Redis/Mongo/TidesDB 调用不变。
 
 回滚时可删除 component target/header/hook，并恢复 PostgreSQL sources 到 `ORM_C_SOURCES`；composite-key API 与 live test 没有必要随 component 回滚。
 

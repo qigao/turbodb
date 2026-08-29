@@ -38,16 +38,9 @@ as text.
 
 ## C API
 
-When consuming the top-level TurboDB package, include `orm.h` and link
-`TurboDB::ORM`. When consuming the standalone installed ORM package, use
-`find_package(Orm CONFIG REQUIRED)` and link `Orm::C`. Both names refer to the
-same C11 core, whose shared-library file is `turbo_orm` (`turbo_orm.dll` on
-Windows).
-
-```cmake
-find_package(TurboDB CONFIG REQUIRED COMPONENTS ORM)
-target_link_libraries(app PRIVATE TurboDB::ORM)
-```
+Load the installed Orm package, include `orm.h`, and link `Orm::C`. Consumers
+never find backend packages directly. The installed shared Orm closes backend
+linkage and runtime packaging inside the library boundary.
 
 ```cmake
 find_package(Orm CONFIG REQUIRED)
@@ -217,11 +210,11 @@ rejected instead of silently enabling a fallback.
 ### PostgreSQL component
 
 PostgreSQL is an explicit optional component rather than part of
-`turbo_orm`. Installed consumers discover and link it separately:
+`turbo_orm`. It is exported by the same Orm package, so consumers still find
+only Orm and link the component target when needed:
 
 ```cmake
 find_package(Orm CONFIG REQUIRED)
-find_package(OrmPostgreSQL CONFIG REQUIRED)
 target_link_libraries(app PRIVATE Orm::PostgreSQL)
 ```
 

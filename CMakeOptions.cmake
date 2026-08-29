@@ -21,8 +21,9 @@ option(ORM_BUILD_TESTS "Build ORM test suite" ${BUILD_TESTS})
 set(TIDESDB_WITH_SNAPPY OFF CACHE BOOL "build with Snappy compression support")
 set(TIDESDB_WITH_LZ4 OFF CACHE BOOL "build with LZ4 compression support")
 
-# ORM ships its SQL backends by default. Optional datastore adapters are
-# enabled explicitly so static consumers do not inherit unrelated libraries.
+# ORM ships its SQLite backend by default. Optional datastore adapters are
+# enabled explicitly to keep the shared runtime closure and deployment size
+# limited to the selected backends.
 set(ORM_WITH_SQLITE_DEFAULT ON)
 set(ORM_WITH_PGSQL_DEFAULT OFF)
 set(ORM_WITH_REDIS_DEFAULT OFF)

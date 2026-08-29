@@ -1,5 +1,11 @@
 # ORM Pure-C PostgreSQL Component Implementation Plan
 
+> **Superseded package contract:** This completed implementation plan records the
+> original split-package approach. The accepted final contract is defined by
+> [`orm-cmake-package-boundary.md`](../../architecture/orm-cmake-package-boundary.md):
+> Orm is shared-only, `Orm::PostgreSQL` is exported from the single `Orm` package,
+> and consumers never call `find_package(OrmPostgreSQL)`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在最新 pure-C ORM 上交付可选 PostgreSQL component、真实 PostgreSQL live gate，以及原子 composite-key query contract。

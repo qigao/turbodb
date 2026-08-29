@@ -1,20 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-if(NOT @ORM_BUILD_SHARED@ AND @ORM_WITH_SQLITE@)
-  find_dependency(SQLite3)
-endif()
 find_dependency(TurboUtils CONFIG)
-
-if(@ORM_WITH_REDIS@ AND NOT TARGET TurboDB::Redis)
-  find_dependency(TurboDB CONFIG)
-endif()
-if(@ORM_WITH_TIDESDB@)
-  find_dependency(TidesDB CONFIG)
-endif()
-if(@ORM_WITH_MONGODB@)
-  find_dependency(mongoc-1.0 CONFIG)
-endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/OrmTargets.cmake")
 check_required_components(Orm)

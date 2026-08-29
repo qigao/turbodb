@@ -127,7 +127,7 @@ fallback and no hidden eager result.
 
 ## Build and ABI consequences
 
-`turbo_orm` declares only C sources and `c_std_11`; its archive/shared link language
+`turbo_orm` declares only C sources and `c_std_11`; its shared-library link language
 must be C. `orm_cpp` remains an INTERFACE target exporting `orm.hpp` and C++17
 only to C++ consumers. C++ test executables may remain because they verify the
 header wrapper, but no C++ object may be linked into `turbo_orm`.

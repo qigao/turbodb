@@ -19,13 +19,10 @@ endif()
 option(ORM_BUILD_TESTS "Build the Orm tests" ${ORM_BUILD_TESTS_DEFAULT})
 option(ORM_WARNINGS_AS_ERRORS "Treat ORM compiler warnings as errors"
        ${ORM_BUILD_TESTS_DEFAULT})
-option(ORM_BUILD_SHARED
-       "Build ORM as a shared library so backend clients stay behind TurboDB"
-       ON)
 
-# Keep the installed TurboDB::ORM contract identical whether ORM is built on
-# its own or as a TurboDB subdirectory. Optional backends remain opt-in so a
-# static ORM consumer does not inherit unrelated backend libraries.
+# Keep the installed Orm::C contract identical whether ORM is built on its own
+# or as a TurboDB subdirectory. The public target is always shared so backend
+# development packages never enter the consumer's CMake package boundary.
 if(NOT DEFINED ORM_WITH_SQLITE_DEFAULT)
   set(ORM_WITH_SQLITE_DEFAULT ON)
 endif()
@@ -65,7 +62,7 @@ if(ORM_POSTGRES_LIVE_TESTS)
   endif()
 endif()
 
-if((ORM_BUILD_TESTS OR (ORM_BUILD_SHARED AND ORM_WITH_PGSQL)) AND
+if((ORM_BUILD_TESTS OR ORM_WITH_PGSQL) AND
    NOT CMAKE_CXX_COMPILER_LOADED)
   enable_language(CXX)
 endif()
@@ -137,20 +134,10 @@ foreach(ORM_C_SOURCE IN LISTS ORM_C_SOURCES ORM_FLOW_SOURCES)
   endif()
 endforeach()
 
-if(ORM_BUILD_SHARED)
-  add_library(turbo_orm SHARED ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
-else()
-  add_library(turbo_orm STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
-endif()
+add_library(turbo_orm SHARED ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
 add_library(orm_cpp INTERFACE)
-add_library(TurboDB::ORM ALIAS turbo_orm)
 target_compile_features(turbo_orm PRIVATE c_std_11)
 target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD)
-
-if(NOT ORM_BUILD_SHARED)
-  target_compile_definitions(turbo_orm PUBLIC ORM_C_STATIC)
-endif()
-
 target_include_directories(
   turbo_orm
   PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -192,11 +179,6 @@ target_include_directories(
                     $<INSTALL_INTERFACE:include/shared/orm>)
 target_link_libraries(orm_cpp INTERFACE turbo_orm)
 
-set(ORM_RUNTIME_DEPENDENCY_ARGS)
-if(ORM_BUILD_SHARED)
-  list(APPEND ORM_RUNTIME_DEPENDENCY_ARGS
-       RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies)
-endif()
 cmake_config_target(
   turbo_orm
   ALIAS
@@ -207,7 +189,8 @@ cmake_config_target(
   OrmTargets
   FOLDER
   "orm"
-  ${ORM_RUNTIME_DEPENDENCY_ARGS}
+  RUNTIME_DEPENDENCY_SET
+  OrmRuntimeDependencies
   NO_VERSION)
 cmake_config_target(
   orm_cpp
@@ -234,17 +217,10 @@ if(ORM_WITH_PGSQL)
               "orm_postgresql accepts only C implementation sources: ${ORM_POSTGRESQL_SOURCE}")
     endif()
   endforeach()
-  if(ORM_BUILD_SHARED)
-    add_library(orm_postgresql SHARED ${ORM_POSTGRESQL_SOURCES})
-  else()
-    add_library(orm_postgresql STATIC ${ORM_POSTGRESQL_SOURCES})
-  endif()
+  add_library(orm_postgresql SHARED ${ORM_POSTGRESQL_SOURCES})
   target_compile_features(orm_postgresql PRIVATE c_std_11)
   target_compile_definitions(orm_postgresql PRIVATE ORM_WITH_PGSQL
                                                      ORM_POSTGRESQL_BUILD)
-  if(NOT ORM_BUILD_SHARED)
-    target_compile_definitions(orm_postgresql PUBLIC ORM_POSTGRESQL_STATIC)
-  endif()
   target_include_directories(
     orm_postgresql
     PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -256,23 +232,14 @@ if(ORM_WITH_PGSQL)
     PUBLIC turbo_orm
     PRIVATE PostgreSQL::PostgreSQL TurboUtils::CSerde TurboUtils::CBind
             TurboUtils::CFlow TurboUtils::STL)
-  set(ORM_POSTGRESQL_LINKER_LANGUAGE C)
-  if(ORM_BUILD_SHARED)
-    # Some libpq packages close static BoringSSL archives through the C++
-    # runtime. This changes only final linkage; every implementation source
-    # in the component remains C11.
-    set(ORM_POSTGRESQL_LINKER_LANGUAGE CXX)
-  endif()
+  # Some libpq packages close static BoringSSL archives through the C++
+  # runtime. This changes only final linkage; every implementation source in
+  # the component remains C11.
   set_target_properties(
     orm_postgresql
     PROPERTIES C_STANDARD_REQUIRED ON
-               LINKER_LANGUAGE ${ORM_POSTGRESQL_LINKER_LANGUAGE}
+               LINKER_LANGUAGE CXX
                C_VISIBILITY_PRESET hidden)
-  set(ORM_POSTGRESQL_RUNTIME_DEPENDENCY_ARGS)
-  if(ORM_BUILD_SHARED)
-    list(APPEND ORM_POSTGRESQL_RUNTIME_DEPENDENCY_ARGS
-         RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies)
-  endif()
   cmake_config_target(
     orm_postgresql
     ALIAS
@@ -280,49 +247,145 @@ if(ORM_WITH_PGSQL)
     EXPORT_NAME
     PostgreSQL
     EXPORT_SET
-    OrmPostgreSQLTargets
+    OrmTargets
     FOLDER
     "orm"
-    ${ORM_POSTGRESQL_RUNTIME_DEPENDENCY_ARGS}
+    RUNTIME_DEPENDENCY_SET
+    OrmPostgreSQLRuntimeDependencies
     NO_VERSION)
 endif()
 
-if(ORM_BUILD_SHARED)
-  set(ORM_RUNTIME_SEARCH_DIRECTORIES)
-  foreach(ORM_BACKEND_LIBRARY IN ITEMS "${SQLite3_LIBRARY}")
-    if(ORM_BACKEND_LIBRARY)
-      get_filename_component(ORM_BACKEND_LIBRARY_DIR "${ORM_BACKEND_LIBRARY}" DIRECTORY)
-      get_filename_component(ORM_BACKEND_PREFIX_DIR "${ORM_BACKEND_LIBRARY_DIR}" DIRECTORY)
-      list(APPEND ORM_RUNTIME_SEARCH_DIRECTORIES "${ORM_BACKEND_PREFIX_DIR}/bin")
-    endif()
-  endforeach()
-  if(WIN32)
-    install(
-      RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
-      DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
-      PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
-                          "clang_rt.asan_dynamic-.*" "turbo_utils\\.dll"
-      POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
-      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-  else()
-    install(
-      RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
-      DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
-      PRE_EXCLUDE_REGEXES "libturbo_.*"
-      POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
-      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-  endif()
+set(ORM_RUNTIME_DEPENDENCY_TARGETS)
+if(ORM_WITH_SQLITE)
+  list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS SQLite::SQLite3)
+endif()
+if(ORM_WITH_REDIS)
+  list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS TurboDB::Redis)
+endif()
+if(ORM_WITH_TIDESDB)
+  list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS TidesDB::tidesdb)
+endif()
+if(ORM_WITH_MONGODB)
+  list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS mongo::mongoc_shared
+                                              mongo::bson_shared)
 endif()
 
-if(ORM_BUILD_SHARED AND ORM_WITH_PGSQL)
-  get_filename_component(ORM_POSTGRESQL_LIBRARY_DIR "${PostgreSQL_LIBRARY}"
-                         DIRECTORY)
-  get_filename_component(ORM_POSTGRESQL_PREFIX_DIR
-                         "${ORM_POSTGRESQL_LIBRARY_DIR}" DIRECTORY)
+# Runtime dependency scanning is independent from the consumer CMake contract.
+# Include enabled backend and codec target directories so standalone installs
+# can resolve their DLL/shared-library closure without development packages.
+foreach(ORM_OPTIONAL_RUNTIME_TARGET IN ITEMS zstd::libzstd_shared
+                                             Snappy::snappy
+                                             LZ4::lz4_shared)
+  if(TARGET ${ORM_OPTIONAL_RUNTIME_TARGET})
+    list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS
+         ${ORM_OPTIONAL_RUNTIME_TARGET})
+  endif()
+endforeach()
+
+function(orm_collect_runtime_search_directories TARGET_NAME OUTPUT_VARIABLE)
+  if(NOT TARGET ${TARGET_NAME})
+    message(FATAL_ERROR
+            "missing runtime dependency target: ${TARGET_NAME}")
+  endif()
+
+  set(ORM_COLLECTED_RUNTIME_DIRECTORIES "${${OUTPUT_VARIABLE}}")
+  list(APPEND ORM_COLLECTED_RUNTIME_DIRECTORIES
+       "$<TARGET_FILE_DIR:${TARGET_NAME}>")
+
+  get_target_property(ORM_RUNTIME_TARGET_IMPORTED ${TARGET_NAME} IMPORTED)
+  if(WIN32 AND ORM_RUNTIME_TARGET_IMPORTED)
+    set(ORM_RUNTIME_ARTIFACT_PROPERTIES IMPORTED_LOCATION IMPORTED_IMPLIB)
+    get_target_property(ORM_RUNTIME_TARGET_CONFIGURATIONS ${TARGET_NAME}
+                        IMPORTED_CONFIGURATIONS)
+    foreach(ORM_RUNTIME_TARGET_CONFIGURATION IN LISTS
+            ORM_RUNTIME_TARGET_CONFIGURATIONS)
+      string(TOUPPER "${ORM_RUNTIME_TARGET_CONFIGURATION}"
+             ORM_RUNTIME_TARGET_CONFIGURATION_UPPER)
+      list(APPEND ORM_RUNTIME_ARTIFACT_PROPERTIES
+           "IMPORTED_LOCATION_${ORM_RUNTIME_TARGET_CONFIGURATION_UPPER}"
+           "IMPORTED_IMPLIB_${ORM_RUNTIME_TARGET_CONFIGURATION_UPPER}")
+    endforeach()
+
+    foreach(ORM_RUNTIME_ARTIFACT_PROPERTY IN LISTS
+            ORM_RUNTIME_ARTIFACT_PROPERTIES)
+      get_target_property(ORM_RUNTIME_ARTIFACT ${TARGET_NAME}
+                          ${ORM_RUNTIME_ARTIFACT_PROPERTY})
+      if(ORM_RUNTIME_ARTIFACT AND
+         NOT ORM_RUNTIME_ARTIFACT MATCHES "-NOTFOUND$" AND
+         NOT ORM_RUNTIME_ARTIFACT MATCHES "\\$<")
+        get_filename_component(ORM_RUNTIME_ARTIFACT_DIRECTORY
+                               "${ORM_RUNTIME_ARTIFACT}" DIRECTORY)
+        get_filename_component(ORM_RUNTIME_ARTIFACT_PREFIX
+                               "${ORM_RUNTIME_ARTIFACT_DIRECTORY}" DIRECTORY)
+        list(APPEND ORM_COLLECTED_RUNTIME_DIRECTORIES
+             "${ORM_RUNTIME_ARTIFACT_DIRECTORY}"
+             "${ORM_RUNTIME_ARTIFACT_PREFIX}/bin")
+      endif()
+    endforeach()
+  endif()
+
+  list(REMOVE_DUPLICATES ORM_COLLECTED_RUNTIME_DIRECTORIES)
+  set(${OUTPUT_VARIABLE} "${ORM_COLLECTED_RUNTIME_DIRECTORIES}" PARENT_SCOPE)
+endfunction()
+
+set(ORM_RUNTIME_SEARCH_DIRECTORIES)
+foreach(ORM_RUNTIME_DEPENDENCY_TARGET IN LISTS ORM_RUNTIME_DEPENDENCY_TARGETS)
+  orm_collect_runtime_search_directories(
+    ${ORM_RUNTIME_DEPENDENCY_TARGET} ORM_RUNTIME_SEARCH_DIRECTORIES)
+endforeach()
+
+# Find modules may expose only an import-library path rather than the runtime
+# DLL location. Preserve the explicit SQL prefix-to-bin derivation as a
+# fallback for those targets.
+set(ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR)
+foreach(ORM_BACKEND_LIBRARY IN ITEMS "${SQLite3_LIBRARY}")
+  if(WIN32 AND ORM_BACKEND_LIBRARY)
+    get_filename_component(ORM_BACKEND_LIBRARY_DIR "${ORM_BACKEND_LIBRARY}"
+                           DIRECTORY)
+    get_filename_component(ORM_BACKEND_PREFIX_DIR "${ORM_BACKEND_LIBRARY_DIR}"
+                           DIRECTORY)
+    list(APPEND ORM_RUNTIME_SEARCH_DIRECTORIES "${ORM_BACKEND_PREFIX_DIR}/bin")
+    if("${ORM_BACKEND_LIBRARY}" STREQUAL "${SQLite3_LIBRARY}")
+      set(ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR
+          "${ORM_BACKEND_PREFIX_DIR}/bin")
+    endif()
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES ORM_RUNTIME_SEARCH_DIRECTORIES)
+if(WIN32)
+  install(
+    RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
+    DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
+    PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                        "clang_rt.asan_dynamic-.*" "turbo_utils\\.dll"
+    POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+  install(
+    RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
+    DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
+    PRE_EXCLUDE_REGEXES "libturbo_.*"
+    POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()
+
+if(ORM_WITH_PGSQL)
+  set(ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES)
+  orm_collect_runtime_search_directories(
+    PostgreSQL::PostgreSQL ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES)
+  if(WIN32 AND PostgreSQL_LIBRARY)
+    get_filename_component(ORM_POSTGRESQL_LIBRARY_DIR "${PostgreSQL_LIBRARY}"
+                           DIRECTORY)
+    get_filename_component(ORM_POSTGRESQL_PREFIX_DIR
+                           "${ORM_POSTGRESQL_LIBRARY_DIR}" DIRECTORY)
+    list(APPEND ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES
+         "${ORM_POSTGRESQL_PREFIX_DIR}/bin")
+  endif()
+  list(REMOVE_DUPLICATES ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES)
   if(WIN32)
     install(
       RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies
-      DIRECTORIES "${ORM_POSTGRESQL_PREFIX_DIR}/bin"
+      DIRECTORIES ${ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES}
       PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
                           "clang_rt.asan_dynamic-.*" "turbo_orm\\.dll"
                           "turbo_utils\\.dll"
@@ -331,7 +394,7 @@ if(ORM_BUILD_SHARED AND ORM_WITH_PGSQL)
   else()
     install(
       RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies
-      DIRECTORIES "${ORM_POSTGRESQL_PREFIX_DIR}/bin"
+      DIRECTORIES ${ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES}
       PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libturbo_.*"
       POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
@@ -365,7 +428,7 @@ if(ORM_WITH_PGSQL)
 endif()
 
 set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
-if(ORM_BUILD_SHARED AND ORM_BUILD_TESTS)
+if(ORM_BUILD_TESTS)
   add_library(orm_c_test_static STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
   target_compile_features(orm_c_test_static PRIVATE c_std_11)
   target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC)
@@ -405,14 +468,28 @@ endif()
 if(ORM_BUILD_TESTS)
 set(ORM_TEST_PRIVATE_LIBS TurboUtils::Core)
 
+add_test(
+  NAME orm_shared_package_contract
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DORM_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/package/shared"
+    "-DORM_PACKAGE_TEST_BINARY_ROOT=${CMAKE_CURRENT_BINARY_DIR}/tests/package"
+    "-DORM_PACKAGE_TEST_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DORM_PACKAGE_TEST_INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake"
+    "-DORM_PACKAGE_TEST_TURBOUTILS_DIR=${TurboUtils_DIR}"
+    "-DORM_PACKAGE_TEST_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
+    "-DORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR=${ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR}"
+    "-DORM_PACKAGE_TEST_CONFIG=$<CONFIG>"
+    "-DORM_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}"
+    "-DORM_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package/run_package_contract.cmake")
+
 function(orm_link_internal_test TARGET_NAME)
   target_link_libraries(${TARGET_NAME} PRIVATE ${ORM_INTERNAL_TEST_LIBRARY}
                                                ${ARGN})
-  if(ORM_BUILD_SHARED)
-    # The static test clone expands backend archives into the executable, so
-    # its final link must close the same C++ runtime dependencies as turbo_orm.
-    set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
-  endif()
+  # The static test clone expands backend archives into the executable, so its
+  # final link must close the same C++ runtime dependencies as turbo_orm.
+  set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
 endfunction()
 
 if(ORM_WITH_SQLITE)
@@ -839,7 +916,3 @@ if(ORM_WITH_PGSQL)
 endif()
 
 cmake_config_package(PACKAGE Orm VERSION "${ORM_VERSION}")
-if(ORM_WITH_PGSQL)
-  cmake_config_package(PACKAGE OrmPostgreSQL NAMESPACE Orm::
-                       VERSION "${ORM_VERSION}")
-endif()

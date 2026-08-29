@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.21)
 project(OrmPostgreSQLPackageConsumer LANGUAGES C CXX)
 
 find_package(Orm CONFIG REQUIRED)
-find_package(OrmPostgreSQL CONFIG REQUIRED)
 
 add_executable(orm_postgresql_c_consumer main.c)
 target_compile_features(orm_postgresql_c_consumer PRIVATE c_std_11)
