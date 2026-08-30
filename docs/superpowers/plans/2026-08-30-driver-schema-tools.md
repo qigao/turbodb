@@ -163,27 +163,27 @@ git commit -m "feat(dbtools): add atomic SQLite schema apply"
 - Produces: `turbodb-postgresql schema apply --file ... [--conninfo-env NAME]`.
 - Secret boundary: conninfo is read at invocation time and never copied into status/output text.
 
-- [ ] **Step 1: Write failing libpq contract tests**
+- [x] **Step 1: Write failing libpq contract tests**
 
 The test-only fake returns multiple literal `PGresult` states. Verify the driver calls simple-query send once, drains/releases every result, rejects an intermediate fatal result, handles a null result plus connection error, rejects row-producing results for schema apply, and never includes fake password text in errors.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Build/run `dbtool_postgresql_test`; expected missing driver symbols.
 
-- [ ] **Step 3: Implement libpq driver**
+- [x] **Step 3: Implement libpq driver**
 
 Connect with `PQconnectdb`, validate `PQstatus`, send the full script using `PQsendQuery`, and loop `PQgetResult` to exhaustion. Accept command/empty results only, preserve the first error while still draining, clear each result exactly once, and close `PGconn` exactly once.
 
-- [ ] **Step 4: Add CLI and fail-fast live gate**
+- [x] **Step 4: Add CLI and fail-fast live gate**
 
 Read a caller-named environment variable or let libpq use its standard defaults. Add a live test only when build tests, PG tool and non-empty `TURBODB_DBTOOLS_PG_TEST_CONNINFO` are all present; otherwise explicit live enable fails configure rather than runtime-skip.
 
-- [ ] **Step 5: Run GREEN against fake and isolated server**
+- [x] **Step 5: Run GREEN against fake and isolated server**
 
 Run the fake test, then use a uniquely named PostgreSQL container. Apply a generated multi-table DDL, inspect `pg_catalog`, test a constraint, and remove only the exact container in cleanup.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```text
 git add dbtools/src/postgresql dbtools/tests/fake_libpq.* dbtools/tests/dbtool_postgresql_test.c dbtools/tests/postgresql_live_test.c dbtools/CMakeLists.txt CMakeUserPresets.json

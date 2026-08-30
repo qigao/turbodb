@@ -22,6 +22,10 @@ if(TURBODB_DBTOOLS_WITH_SQLITE)
   find_package(SQLite3 REQUIRED)
 endif()
 
+if(TURBODB_DBTOOLS_WITH_PGSQL)
+  find_package(PostgreSQL REQUIRED)
+endif()
+
 add_library(
   turbodb_dbtool_core STATIC
   src/dbtool_error.c
@@ -60,6 +64,12 @@ function(dbtool_stage_runtime_dependencies TARGET_NAME)
   endif()
 endfunction()
 
+function(dbtool_enable_postgresql_linker TARGET_NAME)
+  # Static libpq packages may close BoringSSL archives through the C++
+  # runtime. This affects only final linkage; every dbtools source remains C11.
+  set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
+endfunction()
+
 if(TURBODB_DBTOOLS_WITH_SQLITE)
   add_library(turbodb_dbtool_sqlite STATIC src/sqlite/dbtool_sqlite.c)
   target_compile_features(turbodb_dbtool_sqlite PUBLIC c_std_11)
@@ -77,6 +87,28 @@ if(TURBODB_DBTOOLS_WITH_SQLITE)
   dbtool_enable_strict_warnings(turbodb-sqlite)
   dbtool_stage_runtime_dependencies(turbodb-sqlite)
   install(TARGETS turbodb-sqlite RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+if(TURBODB_DBTOOLS_WITH_PGSQL)
+  add_library(turbodb_dbtool_postgresql STATIC
+              src/postgresql/dbtool_postgresql.c)
+  target_compile_features(turbodb_dbtool_postgresql PUBLIC c_std_11)
+  target_include_directories(turbodb_dbtool_postgresql
+                             PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(turbodb_dbtool_postgresql
+                        PUBLIC turbodb_dbtool_core PostgreSQL::PostgreSQL)
+  cmake_config_target(turbodb_dbtool_postgresql NO_INSTALL FOLDER "dbtools")
+  dbtool_enable_strict_warnings(turbodb_dbtool_postgresql)
+
+  add_executable(turbodb-postgresql src/postgresql/main.c)
+  target_compile_features(turbodb-postgresql PRIVATE c_std_11)
+  target_link_libraries(turbodb-postgresql PRIVATE turbodb_dbtool_postgresql)
+  set_target_properties(turbodb-postgresql PROPERTIES FOLDER "dbtools")
+  dbtool_enable_strict_warnings(turbodb-postgresql)
+  dbtool_enable_postgresql_linker(turbodb-postgresql)
+  dbtool_stage_runtime_dependencies(turbodb-postgresql)
+  install(TARGETS turbodb-postgresql
+          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 if(BUILD_TESTS)
@@ -100,5 +132,26 @@ if(BUILD_TESTS)
       INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
       FOLDER "dbtools/tests")
     dbtool_enable_strict_warnings(dbtool_sqlite_test)
+  endif()
+  if(TURBODB_DBTOOLS_WITH_PGSQL)
+    cmake_add_test(
+      NAME dbtool_postgresql_test
+      SOURCES tests/dbtool_postgresql_test.c tests/fake_libpq.c
+      LIBS turbodb_dbtool_postgresql TurboUtils::TinyTest
+      INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
+               ${CMAKE_CURRENT_SOURCE_DIR}/tests
+      FOLDER "dbtools/tests")
+    dbtool_enable_strict_warnings(dbtool_postgresql_test)
+    dbtool_enable_postgresql_linker(dbtool_postgresql_test)
+    if(TURBODB_DBTOOLS_PG_LIVE_TESTS)
+      cmake_add_test(
+        NAME dbtool_postgresql_live_test
+        SOURCES tests/postgresql_live_test.c
+        LIBS turbodb_dbtool_postgresql TurboUtils::TinyTest
+        INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
+        FOLDER "dbtools/tests")
+      dbtool_enable_strict_warnings(dbtool_postgresql_live_test)
+      dbtool_enable_postgresql_linker(dbtool_postgresql_live_test)
+    endif()
   endif()
 endif()
