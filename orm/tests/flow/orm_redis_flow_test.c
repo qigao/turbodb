@@ -1,4 +1,4 @@
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 #include "orm_redis_cursor.h"
 
 #include <cmeta/struct.h>
@@ -315,9 +315,9 @@ spec("ORM Redis CFlow cursor") {
         ORM_REDIS_CURSOR_CONFIG_INIT(4u, 32u, UINT64_C(5000000000));
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_redis_test_row_data, 1u, 1u, 5u, 1u);
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_redis_test_row first = {0};
     orm_redis_test_row second = {0};
     cflow_step step;
@@ -336,28 +336,28 @@ spec("ORM Redis CFlow cursor") {
                 ORM_STATUS_OK);
     check_null(driver.context);
     check_equal(cursor.wait_timeout_ns, UINT64_C(5000000000));
-    check_equal(orm_cbind_source_init(&source, &cursor, &source_config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config, &error),
                 ORM_STATUS_OK);
     check_equal(cursor.wait_timeout_ns, 0u);
 
-    step = cflow_source_resume(&source, NULL, &first);
+    step = cflow_publisher_resume(&source, NULL, &first);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(first.id, 7);
     check_equal(first.score, 19L);
     check_true(first.enabled);
     check_equal(first.count, (size_t)42u);
     check_equal(first.ratio, 1.25);
-    step = cflow_source_resume(&source, NULL, &second);
+    step = cflow_publisher_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(second.id, 11);
     check_equal(second.score, 29L);
     check_false(second.enabled);
     check_equal(second.count, (size_t)84u);
     check_equal(second.ratio, 2.5);
-    step = cflow_source_resume(&source, NULL, &second);
+    step = cflow_publisher_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_DONE);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     mock_orm_redis_test_release_verify();
     mock_orm_redis_test_destroy_verify();
   }
@@ -422,9 +422,9 @@ spec("ORM Redis CFlow cursor") {
         ORM_REDIS_CURSOR_CONFIG_INIT(1u, 1u, UINT64_C(5000000000));
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_redis_test_row_data, 1u, 1u, 2u, 1u);
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_redis_test_row row = {0};
     cflow_step step;
 
@@ -436,10 +436,10 @@ spec("ORM Redis CFlow cursor") {
     check_equal(orm_redis_cursor_start(&cursor, &driver, NULL, 0u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &source_config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_WAIT);
     check_true(cflow_waitable_valid(&step.waitable));
     check_true(cflow_waitable_arm(&step.waitable, (cflow_waker){0}));
@@ -447,9 +447,9 @@ spec("ORM Redis CFlow cursor") {
     check_equal(waitable.arm_count, 1u);
     check_equal(waitable.cancel_count, 1u);
 
-    cflow_source_cancel(&source);
+    cflow_publisher_cancel(&source);
     check_equal(driver_context.cancel_count, 1u);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     mock_orm_redis_test_destroy_verify();
   }
 }

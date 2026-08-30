@@ -101,8 +101,8 @@ set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
 set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_plan.c src/abi/orm_result.c
                   src/dbs/sql/orm_sql_render.c)
-set(ORM_FLOW_SOURCES src/flow/orm_cbind_source.c
-                     src/flow/orm_command_source.c
+set(ORM_FLOW_SOURCES src/flow/orm_cbind_publisher.c
+                     src/flow/orm_command_publisher.c
                      src/flow/orm_text_token.c
                      src/dbs/redis/orm_redis_cursor.c
                      src/dbs/mongo/orm_mongo_cursor.c
@@ -596,22 +596,22 @@ endif()
 
 endif()
 
-add_executable(orm_cbind_source_test tests/flow/orm_cbind_source_test.c)
-target_compile_features(orm_cbind_source_test PRIVATE c_std_11)
-target_compile_definitions(orm_cbind_source_test PRIVATE ORM_C_STATIC)
+add_executable(orm_cbind_publisher_test tests/flow/orm_cbind_publisher_test.c)
+target_compile_features(orm_cbind_publisher_test PRIVATE c_std_11)
+target_compile_definitions(orm_cbind_publisher_test PRIVATE ORM_C_STATIC)
 target_include_directories(
-  orm_cbind_source_test PRIVATE ${ORM_INCLUDE_DIR}
+  orm_cbind_publisher_test PRIVATE ${ORM_INCLUDE_DIR}
                                  ${ORM_FLOW_SOURCE_DIR})
-orm_link_internal_test(orm_cbind_source_test TurboUtils::CBind
+orm_link_internal_test(orm_cbind_publisher_test TurboUtils::CBind
                        TurboUtils::CFlow TurboUtils::TinyTest)
-set_target_properties(orm_cbind_source_test PROPERTIES C_STANDARD_REQUIRED ON
+set_target_properties(orm_cbind_publisher_test PROPERTIES C_STANDARD_REQUIRED ON
                                                         FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_cbind_source_test)
+orm_enable_strict_warnings(orm_cbind_publisher_test)
 if(MSVC)
-  target_compile_options(orm_cbind_source_test
+  target_compile_options(orm_cbind_publisher_test
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
-add_test(NAME orm_cbind_source COMMAND orm_cbind_source_test)
+add_test(NAME orm_cbind_publisher COMMAND orm_cbind_publisher_test)
 
 add_executable(orm_pure_c_build_test tests/flow/orm_pure_c_build_test.c)
 target_compile_features(orm_pure_c_build_test PRIVATE c_std_11)
@@ -843,7 +843,7 @@ if(WIN32)
   set(ORM_TEST_RUNTIME_PATH
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboUtils::Core>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
-                        orm_cbind_source orm_pure_c_build orm_sql_render
+                        orm_cbind_publisher orm_pure_c_build orm_sql_render
                         orm_postgres_flow)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH

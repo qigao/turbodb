@@ -1,7 +1,7 @@
 #ifndef ORM_INTERNAL_H
 #define ORM_INTERNAL_H
 
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 
 #include <orm.h>
 #include <turbostl/vec.h>

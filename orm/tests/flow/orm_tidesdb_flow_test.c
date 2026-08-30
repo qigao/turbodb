@@ -1,4 +1,4 @@
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 #include "orm_tidesdb_cursor.h"
 
 #include <cmeta/struct.h>
@@ -82,9 +82,9 @@ spec("ORM TidesDB CFlow cursor") {
         ORM_TIDESDB_CURSOR_CONFIG_INIT(4u, 256u, 8u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_tides_test_row_data, 1u, 1u, 2u, 1u);
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_tides_test_row row = {0};
     cflow_step step;
 
@@ -97,15 +97,15 @@ spec("ORM TidesDB CFlow cursor") {
     check_equal(orm_tidesdb_cursor_start(&cursor, &driver, &cursor_config,
                                          &error), ORM_STATUS_OK);
     check_null(driver.ops);
-    check_equal(orm_cbind_source_init(&source, &cursor, &source_config,
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config,
                                       &error), ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(row.id, 7);
     check_equal(row.score, 19L);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_DONE);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     mock_orm_tides_test_release_call_verify();
     mock_orm_tides_test_destroy_verify();
   }
@@ -120,9 +120,9 @@ spec("ORM TidesDB CFlow cursor") {
         ORM_TIDESDB_CURSOR_CONFIG_INIT(4u, 256u, 8u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_tides_test_row_data, 1u, 1u, 2u, 1u);
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_tides_test_row row = {0};
     cflow_step step;
 
@@ -134,12 +134,12 @@ spec("ORM TidesDB CFlow cursor") {
     mock_orm_tides_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_tidesdb_cursor_start(&cursor, &driver, &cursor_config,
                                          &error), ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &source_config,
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config,
                                       &error), ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     mock_orm_tides_test_release_call_verify();
     mock_orm_tides_test_destroy_verify();
   }

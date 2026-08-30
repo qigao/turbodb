@@ -1,4 +1,4 @@
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 #include "orm_sqlite_cursor.h"
 
 #include <cmeta/struct.h>
@@ -239,19 +239,19 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     cflow_graph surface = {0};
     cflow_graph normalized = {0};
     cflow_scheduler scheduler = {0};
-    cflow_run run = {0};
+    cflow_subscription run = {0};
     orm_sqlite_test_sink_state sink_state = {0};
-    cflow_sink_callbacks callbacks = {
+    cflow_subscriber_callbacks callbacks = {
         orm_sqlite_test_sink_value, orm_sqlite_test_sink_error,
         orm_sqlite_test_sink_done, &sink_state};
-    cflow_sink sink = cflow_sink_from_callbacks(&callbacks);
+    cflow_subscriber sink = cflow_subscriber_from_callbacks(&callbacks);
 
     normalized.root = CMETA_INVALID_ID;
     orm_error_init(&error);
@@ -263,19 +263,19 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     cflow_graph_init(&surface, &orm_sqlite_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
     check_true(cflow_scheduler_test_init(&scheduler));
-    check_true(cflow_run_open(&run, &normalized, &source, &scheduler, &sink));
-    check_true(cflow_run_request(&run, 1u));
+    check_true(cflow_subscribe(&run, &normalized, &source, &scheduler, &sink));
+    check_true(cflow_subscription_request(&run, 1u));
     (void)cflow_scheduler_run_until_idle(&scheduler, 0u);
     check_equal(sink_state.values, (size_t)0u);
     check_equal(sink_state.dones, (size_t)1u);
     check_null(sink_state.error);
 
-    cflow_run_close(&run);
+    cflow_subscription_close(&run);
     cflow_scheduler_destroy(&scheduler);
     cflow_graph_destroy(&normalized);
     cflow_graph_destroy(&surface);
@@ -294,19 +294,19 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     cflow_graph surface = {0};
     cflow_graph normalized = {0};
     cflow_scheduler scheduler = {0};
-    cflow_run run = {0};
+    cflow_subscription run = {0};
     orm_sqlite_parity_sink_state sink_state = {0};
-    cflow_sink_callbacks callbacks = {
+    cflow_subscriber_callbacks callbacks = {
         orm_sqlite_parity_sink_value, orm_sqlite_parity_sink_error,
         orm_sqlite_parity_sink_done, &sink_state};
-    cflow_sink sink = cflow_sink_from_callbacks(&callbacks);
+    cflow_subscriber sink = cflow_subscriber_from_callbacks(&callbacks);
 
     check_not_null(path);
     normalized.root = CMETA_INVALID_ID;
@@ -318,13 +318,13 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &source_config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config, &error),
                 ORM_STATUS_OK);
     cflow_graph_init(&surface, &orm_sqlite_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
     check_true(cflow_scheduler_test_init(&scheduler));
-    check_true(cflow_run_open(&run, &normalized, &source, &scheduler, &sink));
-    check_true(cflow_run_request(&run, 3u));
+    check_true(cflow_subscribe(&run, &normalized, &source, &scheduler, &sink));
+    check_true(cflow_subscription_request(&run, 3u));
     (void)cflow_scheduler_run_until_idle(&scheduler, 0u);
     check_equal(sink_state.values, (size_t)2u);
     check_equal(sink_state.dones, (size_t)1u);
@@ -335,7 +335,7 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(sink_state.rows[1].id, 11);
     check_equal(sink_state.rows[1].score, 29L);
 
-    cflow_run_close(&run);
+    cflow_subscription_close(&run);
     cflow_scheduler_destroy(&scheduler);
     cflow_graph_destroy(&normalized);
     cflow_graph_destroy(&surface);
@@ -350,19 +350,19 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     cflow_graph surface = {0};
     cflow_graph normalized = {0};
     cflow_scheduler scheduler = {0};
-    cflow_run run = {0};
+    cflow_subscription run = {0};
     orm_sqlite_test_sink_state sink_state = {0};
-    cflow_sink_callbacks callbacks = {
+    cflow_subscriber_callbacks callbacks = {
         orm_sqlite_test_sink_value, orm_sqlite_test_sink_error,
         orm_sqlite_test_sink_done, &sink_state};
-    cflow_sink sink = cflow_sink_from_callbacks(&callbacks);
+    cflow_subscriber sink = cflow_subscriber_from_callbacks(&callbacks);
 
     normalized.root = CMETA_INVALID_ID;
     orm_error_init(&error);
@@ -373,34 +373,34 @@ spec("ORM SQLite CFlow cursor") {
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_null(statement);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     cflow_graph_init(&surface, &orm_sqlite_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
     check_true(cflow_scheduler_test_init(&scheduler));
-    check_true(cflow_run_open(&run, &normalized, &source, &scheduler, &sink));
+    check_true(cflow_subscribe(&run, &normalized, &source, &scheduler, &sink));
     check_equal(sink_state.values, (size_t)0u);
 
-    check_true(cflow_run_request(&run, 1u));
+    check_true(cflow_subscription_request(&run, 1u));
     (void)cflow_scheduler_run_until_idle(&scheduler, 0u);
     check_equal(sink_state.values, (size_t)1u);
     check_equal(sink_state.last.id, 7);
     check_equal(sink_state.last.score, 19L);
     check_equal(sink_state.dones, (size_t)0u);
 
-    check_true(cflow_run_request(&run, 1u));
+    check_true(cflow_subscription_request(&run, 1u));
     (void)cflow_scheduler_run_until_idle(&scheduler, 0u);
     check_equal(sink_state.values, (size_t)2u);
     check_equal(sink_state.last.id, 11);
     check_equal(sink_state.last.score, 29L);
     check_equal(sink_state.dones, (size_t)0u);
 
-    check_true(cflow_run_request(&run, 1u));
+    check_true(cflow_subscription_request(&run, 1u));
     (void)cflow_scheduler_run_until_idle(&scheduler, 0u);
     check_equal(sink_state.dones, (size_t)1u);
     check_null(sink_state.error);
 
-    cflow_run_close(&run);
+    cflow_subscription_close(&run);
     check_null(sqlite3_next_stmt(database, NULL));
     cflow_scheduler_destroy(&scheduler);
     cflow_graph_destroy(&normalized);
@@ -414,10 +414,10 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_text_row_data, 1u, 1u, 2u, 16u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_sqlite_test_text_row first = {0};
     orm_sqlite_test_text_row second = {0};
     cflow_step step;
@@ -429,14 +429,14 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &first);
+    step = cflow_publisher_resume(&source, NULL, &first);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(first.id, 1);
     check_equal(first.name, "Alice");
-    step = cflow_source_resume(&source, NULL, &second);
+    step = cflow_publisher_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(second.id, 2);
     check_equal(second.name, "Bob");
@@ -444,7 +444,7 @@ spec("ORM SQLite CFlow cursor") {
 
     orm_sqlite_test_text_row_destroy(&second);
     orm_sqlite_test_text_row_destroy(&first);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_null(sqlite3_next_stmt(database, NULL));
     check_equal(sqlite3_close(database), SQLITE_OK);
   }
@@ -453,10 +453,10 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_text_row_data, 1u, 1u, 2u, 4u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_sqlite_test_text_row row = {0};
     cflow_step step;
 
@@ -469,16 +469,16 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
     check_equal(row.id, 0);
     check_null(row.name);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_null(sqlite3_next_stmt(database, NULL));
     check_equal(sqlite3_close(database), SQLITE_OK);
   }
@@ -490,10 +490,10 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_blob_row_data, 1u, 1u, 2u, 16u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_sqlite_test_text_row first = {0};
     orm_sqlite_test_text_row second = {0};
     cflow_step step;
@@ -505,14 +505,14 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &first);
+    step = cflow_publisher_resume(&source, NULL, &first);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(tstr_len(first.name), sizeof(expected));
     check_equal(first.name, expected, sizeof(expected));
-    step = cflow_source_resume(&source, NULL, &second);
+    step = cflow_publisher_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(tstr_len(second.name), (size_t)2u);
     check_equal(second.name, "CD", (size_t)2u);
@@ -520,7 +520,7 @@ spec("ORM SQLite CFlow cursor") {
 
     orm_sqlite_test_text_row_destroy(&second);
     orm_sqlite_test_text_row_destroy(&first);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_null(sqlite3_next_stmt(database, NULL));
     check_equal(sqlite3_close(database), SQLITE_OK);
   }
@@ -529,10 +529,10 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     const char *terminal_error = "not cleared";
 
     orm_error_init(&error);
@@ -544,14 +544,14 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
-    cflow_source_cancel(&source);
-    check_equal(cflow_source_poll_terminal(&source, &terminal_error),
-                CFLOW_SOURCE_DONE);
+    cflow_publisher_cancel(&source);
+    check_equal(cflow_publisher_poll_terminal(&source, &terminal_error),
+                CFLOW_PUBLISHER_DONE);
     check_null(terminal_error);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_null(sqlite3_next_stmt(database, NULL));
     check_equal(sqlite3_close(database), SQLITE_OK);
   }

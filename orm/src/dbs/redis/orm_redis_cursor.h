@@ -1,7 +1,7 @@
 #ifndef ORM_REDIS_CURSOR_H
 #define ORM_REDIS_CURSOR_H
 
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 
 #include <stddef.h>
 #include <stdint.h>

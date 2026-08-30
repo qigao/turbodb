@@ -3,7 +3,7 @@
 
 #include "redis_io.h"
 
-#include <cflow/io_source.h>
+#include <cflow/io_publisher.h>
 
 typedef struct redis_io_flow {
   void *impl;

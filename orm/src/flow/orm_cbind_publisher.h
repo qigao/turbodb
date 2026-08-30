@@ -1,5 +1,5 @@
-#ifndef ORM_CBIND_SOURCE_H
-#define ORM_CBIND_SOURCE_H
+#ifndef ORM_CBIND_PUBLISHER_H
+#define ORM_CBIND_PUBLISHER_H
 
 #include <cbind/cbind.h>
 #include <cflow/cflow.h>
@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 enum { ORM_ROW_CURSOR_OPS_ABI_VERSION = 3u };
-enum { ORM_CBIND_SOURCE_CONFIG_ABI_VERSION = 1u };
+enum { ORM_CBIND_PUBLISHER_CONFIG_ABI_VERSION = 1u };
 
 typedef enum orm_row_cursor_step_kind {
   ORM_ROW_CURSOR_ROW = 0,
@@ -74,7 +74,7 @@ typedef struct orm_row_cursor {
 int orm_row_cursor_valid(const orm_row_cursor *cursor);
 void orm_row_cursor_dispose(orm_row_cursor *cursor);
 
-typedef struct orm_cbind_source_config {
+typedef struct orm_cbind_publisher_config {
   size_t struct_size;
   uint32_t abi_version;
   const cmeta_data_desc *row_shape;
@@ -82,29 +82,29 @@ typedef struct orm_cbind_source_config {
   size_t max_depth;
   size_t max_container_items;
   size_t max_buffer_bytes;
-} orm_cbind_source_config;
+} orm_cbind_publisher_config;
 
-#define ORM_CBIND_SOURCE_CONFIG_INIT(row_shape_, scratch_bytes_, max_depth_, \
+#define ORM_CBIND_PUBLISHER_CONFIG_INIT(row_shape_, scratch_bytes_, max_depth_, \
                                      max_container_items_, max_buffer_bytes_) \
-  { sizeof(orm_cbind_source_config), ORM_CBIND_SOURCE_CONFIG_ABI_VERSION,     \
+  { sizeof(orm_cbind_publisher_config), ORM_CBIND_PUBLISHER_CONFIG_ABI_VERSION,     \
     (row_shape_), (scratch_bytes_), (max_depth_), (max_container_items_),    \
     (max_buffer_bytes_) }
 
 /*
- * On success, moves cursor into out_source and clears cursor. On failure,
- * out_source stays zero and cursor remains caller-owned. The Source owns its
+ * On success, moves cursor into out_publisher and clears cursor. On failure,
+ * out_publisher stays zero and cursor remains caller-owned. The Publisher owns its
  * CBind scratch storage and destroys the moved cursor exactly once.
  *
  * next() initializes out_row only for ROW/ROW_AND_DONE. The reader, its
- * context, and transient token slices remain valid until the enclosing Source
+ * context, and transient token slices remain valid until the enclosing Publisher
  * resume() returns; decoding happens synchronously after next() returns. A
  * WAIT result must contain a valid waitable whose backing state remains live
  * until CFlow arms/cancels it or the cursor is cancelled. row_shape and all
- * metadata reachable from it are borrowed through Source destruction.
+ * metadata reachable from it are borrowed through Publisher destruction.
  */
-orm_status_t orm_cbind_source_init(cflow_source *out_source,
+orm_status_t orm_cbind_publisher_init(cflow_publisher *out_publisher,
                                    orm_row_cursor *cursor,
-                                   const orm_cbind_source_config *config,
+                                   const orm_cbind_publisher_config *config,
                                    orm_error_t *error);
 
 #ifdef __cplusplus

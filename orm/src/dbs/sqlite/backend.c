@@ -269,7 +269,7 @@ static orm_status_t orm_sqlite_execute_impl(
   if (sqlite3_column_count(statement) != 0) {
     (void)sqlite3_finalize(statement);
     orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                  "SQLite row query must use a row Source");
+                  "SQLite row query must use a row Publisher");
     return ORM_STATUS_UNSUPPORTED;
   }
   before = sqlite3_total_changes64(state->database);

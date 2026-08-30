@@ -717,7 +717,7 @@ static orm_status_t orm_tidesdb_execute_native(
                                           affected, error);
     case ORM_QUERY_SELECT:
       return orm_tidesdb_fail(error, ORM_STATUS_UNSUPPORTED,
-                              "TidesDB SELECT must be opened as a row Source");
+                              "TidesDB SELECT must be opened as a row Publisher");
     case ORM_QUERY_RAW:
       return orm_tidesdb_fail(error, ORM_STATUS_UNSUPPORTED,
                               "TidesDB does not support raw SQL");
@@ -945,7 +945,7 @@ static orm_status_t orm_tidesdb_open_native(
                             "invalid TidesDB cursor request");
   if (plan->kind != ORM_QUERY_SELECT)
     return orm_tidesdb_fail(error, ORM_STATUS_UNSUPPORTED,
-                            "TidesDB commands are not row Sources");
+                            "TidesDB commands are not row Publishers");
   if (plan->select_all || vec_size(&plan->columns) == 0u)
     return orm_tidesdb_fail(error, ORM_STATUS_UNSUPPORTED,
                             "TidesDB SELECT requires an explicit projection");
@@ -1088,7 +1088,7 @@ static orm_status_t orm_tidesdb_transaction_finish(
                             "TidesDB transaction is not active");
   if (transaction->cursors != 0u)
     return orm_tidesdb_fail(error, ORM_STATUS_BUSY,
-                            "close TidesDB row Sources before transaction finish");
+                            "close TidesDB row Publishers before transaction finish");
   native_status = commit ? orm_tidesdb_txn_commit(transaction->native)
                          : orm_tidesdb_txn_rollback(transaction->native);
   if (native_status != ORM_TDB_SUCCESS)

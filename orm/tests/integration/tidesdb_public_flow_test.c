@@ -41,7 +41,7 @@ spec("TidesDB public reactive C facade") {
     orm_connection_t *connection = NULL;
     orm_query_t *query = NULL;
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_command_result_t command = ORM_COMMAND_RESULT_INIT;
     orm_flow_config_t flow_config;
     orm_tides_public_row row = {0};
@@ -72,11 +72,11 @@ spec("TidesDB public reactive C facade") {
                 ORM_STATUS_OK);
     check_equal(orm_query_open_command_flow(query, &source, &error),
                 ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &command);
+    step = cflow_publisher_resume(&source, NULL, &command);
     check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(command.affected_rows, (uint64_t)1u);
-    cflow_source_destroy(&source);
-    source = (cflow_source){0};
+    cflow_publisher_destroy(&source);
+    source = (cflow_publisher){0};
     orm_query_destroy(query);
     query = NULL;
 
@@ -93,14 +93,14 @@ spec("TidesDB public reactive C facade") {
     orm_flow_config(&flow_config, &orm_tides_public_row_data);
     check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
                 ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(row.id, 7L);
     check_equal(row.score, 19L);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_DONE);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     orm_query_destroy(query);
     orm_disconnect(connection);
     check_equal(tt_remove_tree(path), 0);
@@ -115,7 +115,7 @@ spec("TidesDB public reactive C facade") {
     orm_transaction_t *transaction = NULL;
     orm_query_t *query = NULL;
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_command_result_t command = ORM_COMMAND_RESULT_INIT;
     orm_flow_config_t flow_config;
     orm_tides_public_row row = {0};
@@ -143,11 +143,11 @@ spec("TidesDB public reactive C facade") {
                 ORM_STATUS_OK);
     check_equal(orm_query_open_command_flow_in_transaction(
                     query, transaction, &source, &error), ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &command);
+    step = cflow_publisher_resume(&source, NULL, &command);
     check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(command.affected_rows, (uint64_t)1u);
-    cflow_source_destroy(&source);
-    source = (cflow_source){0};
+    cflow_publisher_destroy(&source);
+    source = (cflow_publisher){0};
     orm_query_destroy(query);
     query = NULL;
 
@@ -164,11 +164,11 @@ spec("TidesDB public reactive C facade") {
                     query, transaction, &flow_config, &source, &error),
                 ORM_STATUS_OK);
     check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_BUSY);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(row.score, 10L);
-    cflow_source_destroy(&source);
-    source = (cflow_source){0};
+    cflow_publisher_destroy(&source);
+    source = (cflow_publisher){0};
     orm_query_destroy(query);
     query = NULL;
     check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
@@ -184,11 +184,11 @@ spec("TidesDB public reactive C facade") {
     check_equal(orm_query_open_command_flow(query, &source, &error),
                 ORM_STATUS_OK);
     command = (orm_command_result_t)ORM_COMMAND_RESULT_INIT;
-    step = cflow_source_resume(&source, NULL, &command);
+    step = cflow_publisher_resume(&source, NULL, &command);
     check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(command.affected_rows, (uint64_t)1u);
-    cflow_source_destroy(&source);
-    source = (cflow_source){0};
+    cflow_publisher_destroy(&source);
+    source = (cflow_publisher){0};
     orm_query_destroy(query);
     query = NULL;
 
@@ -203,11 +203,11 @@ spec("TidesDB public reactive C facade") {
     orm_flow_config(&flow_config, &orm_tides_public_row_data);
     check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
                 ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(row.score, 20L);
-    cflow_source_destroy(&source);
-    source = (cflow_source){0};
+    cflow_publisher_destroy(&source);
+    source = (cflow_publisher){0};
     orm_query_destroy(query);
     query = NULL;
 
@@ -220,11 +220,11 @@ spec("TidesDB public reactive C facade") {
     check_equal(orm_query_open_command_flow(query, &source, &error),
                 ORM_STATUS_OK);
     command = (orm_command_result_t)ORM_COMMAND_RESULT_INIT;
-    step = cflow_source_resume(&source, NULL, &command);
+    step = cflow_publisher_resume(&source, NULL, &command);
     check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(command.affected_rows, (uint64_t)1u);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     orm_query_destroy(query);
     orm_disconnect(connection);
     check_equal(tt_remove_tree(path), 0);

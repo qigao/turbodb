@@ -7,7 +7,7 @@ their application.
 
 ## Public layers
 
-- `redis_io.h`: shared native CFlow backend and per-Source admission runtime.
+- `redis_io.h`: shared native CFlow backend and per-Publisher admission runtime.
 - `redis_cflow.h`: one connection plus single-reply or top-level array streams.
 - `redis_pool.h`: fixed-capacity scheduler-affine connection pool.
 - `redis_cluster.h`: `CLUSTER SLOTS` discovery and CRC16 slot routing.
@@ -20,11 +20,11 @@ hostname resolver and `redis_io_runtime_wait_idle()` are synchronous
 control-plane helpers; do not call them on a latency-sensitive scheduler
 thread.
 
-Each connection owns one sequential `cflow_source_from_io_actor()` adapter.
+Each connection owns one sequential `cflow_publisher_from_io_actor()` adapter.
 Its downstream demand is one native CONNECT/SEND/RECV completion at a time;
 the runtime owns a bounded bridge Actor and serial Executor in front of the
 shared native backend, assigns backend-wide request identities, and bounds
-attached Sources.
+attached Publishers.
 
 ## Standalone command
 

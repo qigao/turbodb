@@ -1,5 +1,5 @@
-#ifndef ORM_COMMAND_SOURCE_H
-#define ORM_COMMAND_SOURCE_H
+#ifndef ORM_COMMAND_PUBLISHER_H
+#define ORM_COMMAND_PUBLISHER_H
 
 #include "orm.h"
 
@@ -30,7 +30,7 @@ typedef struct orm_command_driver {
 } orm_command_driver;
 
 /* Success moves and clears driver. */
-orm_status_t orm_command_source_init(cflow_source *out_source,
+orm_status_t orm_command_publisher_init(cflow_publisher *out_publisher,
                                      orm_command_driver *driver,
                                      orm_error_t *error);
 

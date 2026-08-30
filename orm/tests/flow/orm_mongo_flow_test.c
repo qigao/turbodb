@@ -1,4 +1,4 @@
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 #include "orm_mongo_cursor.h"
 
 #include <cmeta/struct.h>
@@ -179,9 +179,9 @@ spec("ORM MongoDB CFlow cursor") {
         ORM_MONGO_CURSOR_CONFIG_INIT(4u, UINT64_MAX, 32u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_mongo_test_row_data, 1u, 1u, 2u, 1u);
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_mongo_test_row first = {0};
     orm_mongo_test_row second = {0};
     cflow_step step;
@@ -193,22 +193,22 @@ spec("ORM MongoDB CFlow cursor") {
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
     check_null(driver.ops);
-    check_equal(orm_cbind_source_init(&source, &cursor, &source_config,
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config,
                                       &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &first);
+    step = cflow_publisher_resume(&source, NULL, &first);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(first.id, 7);
     check_equal(first.score, 19L);
-    step = cflow_source_resume(&source, NULL, &second);
+    step = cflow_publisher_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(second.id, 11);
     check_equal(second.score, 29L);
-    step = cflow_source_resume(&source, NULL, &second);
+    step = cflow_publisher_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_DONE);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     mock_orm_mongo_test_destroy_verify();
   }
 
@@ -222,9 +222,9 @@ spec("ORM MongoDB CFlow cursor") {
         ORM_MONGO_CURSOR_CONFIG_INIT(4u, UINT64_MAX, 32u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_source_config source_config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_mongo_test_row_data, 1u, 1u, 2u, 1u);
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_mongo_test_row row = {0};
     cflow_step step;
 
@@ -234,12 +234,12 @@ spec("ORM MongoDB CFlow cursor") {
     check_equal(orm_mongo_cursor_start(&cursor, &driver, &field, 1u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_source_init(&source, &cursor, &source_config,
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config,
                                       &error), ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     mock_orm_mongo_test_destroy_verify();
   }
 }

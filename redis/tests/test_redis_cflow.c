@@ -346,7 +346,7 @@ suite("redis CFlow RESP stream") {
     check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
   }
 
-  it("keeps cancellation pending when a wake callback cannot close its Source owner") {
+  it("keeps cancellation pending when a wake callback cannot close its Publisher owner") {
     static const char *arguments[] = {"PING"};
     redis_io_runtime runtime = {0};
     redis_io_runtime_config runtime_config = {redis_cflow_test_backend(), 1u, 1u};
@@ -455,7 +455,7 @@ suite("redis CFlow RESP stream") {
     check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
   }
 
-  it("applies Source capacity when connections attach") {
+  it("applies Publisher capacity when connections attach") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config runtime_config = {redis_cflow_test_backend(), 1u, 1u};
     redis_cflow_test_socket first_sockets[2];

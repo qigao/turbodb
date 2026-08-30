@@ -4,9 +4,9 @@
 
 Accepted as an intentionally incompatible replacement on 2026-08-27.
 
-The supported execution contract is a typed CFlow Source decoded through
+The supported execution contract is a typed CFlow Publisher decoded through
 CSerde and CBind. The eager `orm_result_t` API, the schema-less materialized-row
-Source, the header-only C chain/JPA/model facades, and their C++ result wrapper
+Publisher, the header-only C chain/JPA/model facades, and their C++ result wrapper
 are migration artifacts and are removed rather than deprecated. The public C++
 API is allowed only as a thin owner/error wrapper over the public C reactive
 API; it must not contain a second query or result implementation. Private
@@ -31,10 +31,10 @@ The execution path is split into four one-way layers:
 ```text
 immutable C query plan
     -> driver cursor
-    -> CFlow Source (demand / WAIT / cancellation)
+    -> CFlow Publisher (demand / WAIT / cancellation)
     -> row-local CSerde reader
          -> typed: CBind + CMeta owning value
-    -> CFlow Graph -> Sink
+    -> CFlow Graph -> Subscriber
 ```
 
 Database filtering, joins, grouping, ordering, aggregation, limit, and offset
@@ -43,10 +43,10 @@ their semantics. CFlow operators transform the returned row stream; a CFlow
 request count is downstream-output demand and is never rewritten as SQL LIMIT.
 
 The public execution entry accepts a versioned CBind row configuration and
-moves a driver cursor into a `cflow_source`. Successful open transfers Source
+moves a driver cursor into a `cflow_publisher`. Successful open transfers Publisher
 ownership to the caller; failed open leaves the output zero. Query, connection,
 transaction, row descriptor, and execution-info storage are borrowed through
-Source destruction.
+Publisher destruction.
 
 `CSerde` is required at the driver boundary: it is the format-neutral row token
 protocol. `CBind` is required by every row-producing execution because an
@@ -70,16 +70,16 @@ changes cannot alter database token semantics.
 - Data unit: one owning `cmeta_data_desc::storage_type` object.
 - Fact source: the active driver cursor. No materialized result is authoritative
   while a cursor execution is active.
-- Ownership: successful source initialization moves the cursor into the Source;
-  failed initialization leaves it caller-owned. CFlow moves the Source into a
-  Run. Source destruction destroys the cursor exactly once.
+- Ownership: successful source initialization moves the cursor into the Publisher;
+  failed initialization leaves it caller-owned. CFlow moves the Publisher into a
+  Subscription. Publisher destruction destroys the cursor exactly once.
 - Row lifetime: a cursor-produced `cserde_reader` and every transient token view
   are borrowed only through the synchronous decode/materialize call. They
   cannot be retained across `resume`, `WAIT`, callbacks, cancellation, or
   cursor advance.
 - Output lifetime: successful decode constructs an owning CMeta value in CFlow's
   output storage. CFlow applies the storage type's copy/move/destroy traits.
-- Topology: one producer and one CFlow Run in the connection's existing
+- Topology: one producer and one CFlow Subscription in the connection's existing
   single-thread domain. Drivers with coroutine affinity keep polling, waking,
   cancellation, and destruction on their bound executor/event loop.
 - Capacity: typed scratch bytes, nesting depth, container item count, and
@@ -88,21 +88,21 @@ changes cannot alter database token semantics.
   cursor ownership moves.
 - Backpressure: CFlow downstream demand controls cursor polling. `WAIT` returns
   the driver's waitable; there is no unbounded queue and no silent buffering.
-- Failure: malformed rows and binding failures terminate the Source, cancel the
+- Failure: malformed rows and binding failures terminate the Publisher, cancel the
   cursor, restore the output to semantic zero, and surface one stable error.
 - Type ownership: the backend owns native-to-CSerde token selection. The row
   descriptor remains borrowed and immutable; an optional internal cursor
   configuration hook receives it before cursor ownership moves. The common
-  Source and CBind layers do not coerce backend strings.
-- Shutdown: stop new demand, cancel the Run, close the Run, then destroy the
+  Publisher and CBind layers do not coerce backend strings.
+- Shutdown: stop new demand, cancel the Subscription, close the Subscription, then destroy the
   scheduler/driver executor and borrowed graph state.
 
 ## API replacement and migration
 
 There is no compatibility promise. `orm_query_execute`, `orm_result_*`,
-`orm_chain`, JPA/model/repository helpers, and the materialized-row Source are
+`orm_chain`, JPA/model/repository helpers, and the materialized-row Publisher are
 deleted from both headers and implementation. Existing consumers must move to
-the typed Source API and run it with an explicit CFlow Graph, Scheduler, Sink,
+the typed Publisher API and run it with an explicit CFlow Graph, Scheduler, Subscriber,
 and downstream demand.
 
 PostgreSQL uses a pure C Adapter around libpq's async command API. Each
@@ -117,12 +117,12 @@ MongoDB maps its native cursor to demand directly. Redis owns one bounded reply
 tree returned by its client and exposes rows incrementally without copying a
 second result matrix. Redis bulk-string scalar conversion is driven by the
 projected CMeta field; its accepted boolean and numeric grammars are strict and
-malformed data terminates the Source. TidesDB streams plans that preserve scan
+malformed data terminates the Publisher. TidesDB streams plans that preserve scan
 order; ordering, grouping, and aggregate plans are rejected until they can be
 represented by bounded CFlow stateful operators without restoring an eager
 result object.
 
-Commands are also Sources. The first demand invokes the backend exactly once
+Commands are also Publishers. The first demand invokes the backend exactly once
 and emits one `orm_command_result_t` with `VALUE_AND_DONE`; cancellation before
 demand prevents execution. PostgreSQL command completion is derived from its
 cursor terminal result, while SQLite, MongoDB, TidesDB, and Redis use direct

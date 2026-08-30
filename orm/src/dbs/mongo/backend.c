@@ -294,7 +294,7 @@ static orm_status_t orm_mongo_open_select(
   void *owned_cursor;
   if (plan->kind != ORM_QUERY_SELECT) {
     orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                  "MongoDB row Source requires SELECT");
+                  "MongoDB row Publisher requires SELECT");
     return ORM_STATUS_UNSUPPORTED;
   }
   collection = orm_mongo_collection(state, plan->table, error);
@@ -368,7 +368,7 @@ static orm_status_t orm_mongo_execute(
   uint64_t affected = 0u;
   if (plan->kind == ORM_QUERY_SELECT) {
     orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                  "MongoDB SELECT must be opened as a row Source");
+                  "MongoDB SELECT must be opened as a row Publisher");
     return ORM_STATUS_UNSUPPORTED;
   }
   if (plan->kind == ORM_QUERY_RAW) {
@@ -495,7 +495,7 @@ static orm_status_t orm_mongo_transaction_open(
   (void)limits;
   (void)out_cursor;
   orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                "MongoDB row Sources inside transactions are unsupported");
+                "MongoDB row Publishers inside transactions are unsupported");
   return ORM_STATUS_UNSUPPORTED;
 }
 

@@ -1,5 +1,5 @@
 #include "orm_internal.h"
-#include "orm_command_source.h"
+#include "orm_command_publisher.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -296,21 +296,21 @@ static const orm_command_driver_ops orm_lazy_command_ops = {
 static orm_status_t orm_open_command(orm_query_t *query,
                                      orm_backend *database,
                                      orm_transaction_backend *transaction,
-                                     cflow_source *out_source,
+                                     cflow_publisher *out_publisher,
                                      orm_error_t *error) {
   orm_lazy_command_state *state;
   orm_command_driver driver;
   orm_status_t status;
-  if (query == NULL || query->connection == NULL || out_source == NULL ||
-      cflow_source_valid(out_source) ||
+  if (query == NULL || query->connection == NULL || out_publisher == NULL ||
+      cflow_publisher_valid(out_publisher) ||
       (query->plan.kind == ORM_QUERY_SELECT ||
        (query->plan.kind == ORM_QUERY_RAW &&
         orm_query_returns_rows(&query->plan)))) {
-    orm_error_set(error, out_source != NULL && cflow_source_valid(out_source)
+    orm_error_set(error, out_publisher != NULL && cflow_publisher_valid(out_publisher)
                              ? ORM_STATUS_INVALID_STATE
                              : ORM_STATUS_INVALID_ARGUMENT,
-                  "invalid ORM command Source open");
-    return out_source != NULL && cflow_source_valid(out_source)
+                  "invalid ORM command Publisher open");
+    return out_publisher != NULL && cflow_publisher_valid(out_publisher)
                ? ORM_STATUS_INVALID_STATE
                : ORM_STATUS_INVALID_ARGUMENT;
   }
@@ -325,7 +325,7 @@ static orm_status_t orm_open_command(orm_query_t *query,
   state->transaction = transaction;
   driver.ops = &orm_lazy_command_ops;
   driver.context = state;
-  status = orm_command_source_init(out_source, &driver, error);
+  status = orm_command_publisher_init(out_publisher, &driver, error);
   if (status != ORM_STATUS_OK)
     free(state);
   return status;
@@ -334,25 +334,25 @@ static orm_status_t orm_open_command(orm_query_t *query,
 static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                                   orm_transaction_backend *transaction,
                                   const orm_flow_config_t *config,
-                                  cflow_source *out_source,
+                                  cflow_publisher *out_publisher,
                                   orm_error_t *error) {
   orm_row_cursor cursor = {0};
-  orm_cbind_source_config source_config;
-  cflow_source timed_source = {0};
+  orm_cbind_publisher_config publisher_config;
+  cflow_publisher timed_publisher = {0};
   uint64_t wait_timeout_ns;
   orm_status_t status;
   if (query == NULL || query->connection == NULL || config == NULL ||
       config->struct_size != sizeof(*config) ||
       config->abi_version != ORM_C_ABI_VERSION || config->row_shape == NULL ||
-      out_source == NULL || cflow_source_valid(out_source) ||
+      out_publisher == NULL || cflow_publisher_valid(out_publisher) ||
       (query->plan.kind != ORM_QUERY_SELECT &&
        !(query->plan.kind == ORM_QUERY_RAW &&
          orm_query_returns_rows(&query->plan)))) {
-    orm_error_set(error, out_source != NULL && cflow_source_valid(out_source)
+    orm_error_set(error, out_publisher != NULL && cflow_publisher_valid(out_publisher)
                              ? ORM_STATUS_INVALID_STATE
                              : ORM_STATUS_INVALID_ARGUMENT,
-                  "invalid ORM row Source open");
-    return out_source != NULL && cflow_source_valid(out_source)
+                  "invalid ORM row Publisher open");
+    return out_publisher != NULL && cflow_publisher_valid(out_publisher)
                ? ORM_STATUS_INVALID_STATE
                : ORM_STATUS_INVALID_ARGUMENT;
   }
@@ -371,24 +371,24 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                   "ORM backend returned an invalid cursor");
     return ORM_STATUS_INTERNAL_ERROR;
   }
-  source_config = (orm_cbind_source_config)ORM_CBIND_SOURCE_CONFIG_INIT(
+  publisher_config = (orm_cbind_publisher_config)ORM_CBIND_PUBLISHER_CONFIG_INIT(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
   wait_timeout_ns = cursor.wait_timeout_ns;
-  status = orm_cbind_source_init(out_source, &cursor, &source_config, error);
+  status = orm_cbind_publisher_init(out_publisher, &cursor, &publisher_config, error);
   if (status != ORM_STATUS_OK) {
     orm_row_cursor_dispose(&cursor);
     return status;
   }
   if (wait_timeout_ns != 0u &&
-      !cflow_source_timeout(&timed_source, out_source,
+      !cflow_publisher_timeout(&timed_publisher, out_publisher,
                             cflow_duration_from_ns(wait_timeout_ns))) {
-    cflow_source_destroy(out_source);
+    cflow_publisher_destroy(out_publisher);
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
                   "allocate ORM row WAIT timeout source");
     return ORM_STATUS_OUT_OF_MEMORY;
   }
-  if (cflow_source_valid(&timed_source)) *out_source = timed_source;
+  if (cflow_publisher_valid(&timed_publisher)) *out_publisher = timed_publisher;
   return status;
 }
 
@@ -778,15 +778,15 @@ orm_status_t ORM_C_CALL orm_query_set_offset(orm_query_t *query,
 
 orm_status_t ORM_C_CALL orm_query_open_flow(
     orm_query_t *query, const orm_flow_config_t *config,
-    cflow_source *out_source, orm_error_t *error) {
+    cflow_publisher *out_publisher, orm_error_t *error) {
   return orm_open_rows(query,
                        query != NULL ? &query->connection->backend : NULL,
-                       NULL, config, out_source, error);
+                       NULL, config, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
     orm_query_t *query, orm_transaction_t *transaction,
-    const orm_flow_config_t *config, cflow_source *out_source,
+    const orm_flow_config_t *config, cflow_publisher *out_publisher,
     orm_error_t *error) {
   if (query == NULL || transaction == NULL ||
       transaction->state != ORM_TRANSACTION_ACTIVE ||
@@ -795,20 +795,20 @@ orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_rows(query, NULL, &transaction->backend, config, out_source,
+  return orm_open_rows(query, NULL, &transaction->backend, config, out_publisher,
                        error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_command_flow(
-    orm_query_t *query, cflow_source *out_source, orm_error_t *error) {
+    orm_query_t *query, cflow_publisher *out_publisher, orm_error_t *error) {
   return orm_open_command(query,
                           query != NULL ? &query->connection->backend : NULL,
-                          NULL, out_source, error);
+                          NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_command_flow_in_transaction(
     orm_query_t *query, orm_transaction_t *transaction,
-    cflow_source *out_source, orm_error_t *error) {
+    cflow_publisher *out_publisher, orm_error_t *error) {
   if (query == NULL || transaction == NULL ||
       transaction->state != ORM_TRANSACTION_ACTIVE ||
       query->connection != transaction->connection) {
@@ -816,6 +816,6 @@ orm_status_t ORM_C_CALL orm_query_open_command_flow_in_transaction(
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_command(query, NULL, &transaction->backend, out_source,
+  return orm_open_command(query, NULL, &transaction->backend, out_publisher,
                           error);
 }

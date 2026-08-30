@@ -4,7 +4,7 @@
 #include "redis_io.h"
 #include "redis_reply.h"
 
-#include <cflow/runtime.h>
+#include <cflow/reactive.h>
 
 #include <stddef.h>
 #include <stdint.h>

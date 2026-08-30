@@ -81,44 +81,44 @@ private:
 
 class transaction;
 
-template <typename Row> class source final {
+template <typename Row> class publisher final {
 public:
-  source(const source &) = delete;
-  source &operator=(const source &) = delete;
-  source(source &&other) noexcept
+  publisher(const publisher &) = delete;
+  publisher &operator=(const publisher &) = delete;
+  publisher(publisher &&other) noexcept
       : query_(std::exchange(other.query_, nullptr)),
-        source_(std::exchange(other.source_, cflow_source{})) {}
-  source &operator=(source &&other) noexcept {
+        publisher_(std::exchange(other.publisher_, cflow_publisher{})) {}
+  publisher &operator=(publisher &&other) noexcept {
     if (this != &other) {
       reset();
       query_ = std::exchange(other.query_, nullptr);
-      source_ = std::exchange(other.source_, cflow_source{});
+      publisher_ = std::exchange(other.publisher_, cflow_publisher{});
     }
     return *this;
   }
-  ~source() { reset(); }
+  ~publisher() { reset(); }
   [[nodiscard]] cflow_step next(Row &row) {
-    return cflow_source_resume(&source_, nullptr, &row);
+    return cflow_publisher_resume(&publisher_, nullptr, &row);
   }
-  [[nodiscard]] cflow_step next(Row &row, cflow_resume_ctx &context) {
-    return cflow_source_resume(&source_, &context, &row);
+  [[nodiscard]] cflow_step next(Row &row, cflow_publish_context &context) {
+    return cflow_publisher_resume(&publisher_, &context, &row);
   }
   void cancel() noexcept {
-    if (cflow_source_valid(&source_)) cflow_source_cancel(&source_);
+    if (cflow_publisher_valid(&publisher_)) cflow_publisher_cancel(&publisher_);
   }
-  [[nodiscard]] cflow_source *native_handle() noexcept { return &source_; }
+  [[nodiscard]] cflow_publisher *native_handle() noexcept { return &publisher_; }
 private:
   friend class query;
-  source(orm_query_t *query, cflow_source native) noexcept
-      : query_(query), source_(native) {}
+  publisher(orm_query_t *query, cflow_publisher native) noexcept
+      : query_(query), publisher_(native) {}
   void reset() noexcept {
-    if (cflow_source_valid(&source_)) cflow_source_destroy(&source_);
-    source_ = {};
+    if (cflow_publisher_valid(&publisher_)) cflow_publisher_destroy(&publisher_);
+    publisher_ = {};
     orm_query_destroy(query_);
     query_ = nullptr;
   }
   orm_query_t *query_ = nullptr;
-  cflow_source source_{};
+  cflow_publisher publisher_{};
 };
 
 class query final {
@@ -187,26 +187,26 @@ public:
     return *this;
   }
   template <typename Row>
-  [[nodiscard]] source<Row> open(const cmeta_data_desc &row_shape) && {
+  [[nodiscard]] publisher<Row> open(const cmeta_data_desc &row_shape) && {
     orm_flow_config_t config;
     orm_flow_config(&config, &row_shape);
-    cflow_source native{};
+    cflow_publisher native{};
     orm_error_t error;
     orm_error_init(&error);
     detail::check(orm_query_open_flow(handle_, &config, &native, &error), error);
-    return source<Row>(std::exchange(handle_, nullptr), native);
+    return publisher<Row>(std::exchange(handle_, nullptr), native);
   }
-  [[nodiscard]] source<orm_command_result_t> execute() && {
-    cflow_source native{};
+  [[nodiscard]] publisher<orm_command_result_t> execute() && {
+    cflow_publisher native{};
     orm_error_t error;
     orm_error_init(&error);
     detail::check(orm_query_open_command_flow(handle_, &native, &error), error);
-    return source<orm_command_result_t>(std::exchange(handle_, nullptr), native);
+    return publisher<orm_command_result_t>(std::exchange(handle_, nullptr), native);
   }
   template <typename Row>
-  [[nodiscard]] source<Row> open(transaction &owner,
+  [[nodiscard]] publisher<Row> open(transaction &owner,
                                  const cmeta_data_desc &row_shape) &&;
-  [[nodiscard]] source<orm_command_result_t> execute(transaction &owner) &&;
+  [[nodiscard]] publisher<orm_command_result_t> execute(transaction &owner) &&;
   [[nodiscard]] orm_query_t *native_handle() noexcept { return handle_; }
 private:
   friend class connection;
@@ -321,25 +321,25 @@ inline transaction connection::begin(orm_isolation_t isolation) {
 }
 
 template <typename Row>
-source<Row> query::open(transaction &owner,
+publisher<Row> query::open(transaction &owner,
                         const cmeta_data_desc &row_shape) && {
   orm_flow_config_t config;
   orm_flow_config(&config, &row_shape);
-  cflow_source native{};
+  cflow_publisher native{};
   orm_error_t error;
   orm_error_init(&error);
   detail::check(orm_query_open_flow_in_transaction(
                     handle_, owner.handle_, &config, &native, &error), error);
-  return source<Row>(std::exchange(handle_, nullptr), native);
+  return publisher<Row>(std::exchange(handle_, nullptr), native);
 }
 
-inline source<orm_command_result_t> query::execute(transaction &owner) && {
-  cflow_source native{};
+inline publisher<orm_command_result_t> query::execute(transaction &owner) && {
+  cflow_publisher native{};
   orm_error_t error;
   orm_error_init(&error);
   detail::check(orm_query_open_command_flow_in_transaction(
                     handle_, owner.handle_, &native, &error), error);
-  return source<orm_command_result_t>(std::exchange(handle_, nullptr), native);
+  return publisher<orm_command_result_t>(std::exchange(handle_, nullptr), native);
 }
 
 } // namespace orm
