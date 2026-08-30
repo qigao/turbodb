@@ -199,19 +199,19 @@ git commit -m "feat(dbtools): add PostgreSQL schema apply"
 - Create: `dbtools/tests/package/run_dbtools_package_contract.cmake`
 - Modify: `dbtools/CMakeLists.txt`
 
-- [ ] **Step 1: Add installed-binary behavior test**
+- [x] **Step 1: Add installed-binary behavior test**
 
 Install through preset, locate each enabled binary below install `bin`, run `--help`, and apply a real SQLite script. The test checks exit status/effects, not source text.
 
-- [ ] **Step 2: Document exact commands and failure semantics**
+- [x] **Step 2: Document exact commands and failure semantics**
 
 Document driver-specific transaction behavior, hard limits, connection secret handling, lack of ORM/TurboParser dependency, and that schema apply is bootstrap execution rather than migration management.
 
-- [ ] **Step 3: Extend EU runbook**
+- [x] **Step 3: Extend EU runbook**
 
 Add SQLite and optional PostgreSQL live phases with run-scoped paths/container names, JUnit output, SHA-256 evidence and precise cleanup.
 
-- [ ] **Step 4: Verify full first-stage slice**
+- [x] **Step 4: Verify full first-stage slice**
 
 ```text
 cmake --fresh --preset win-release-user
@@ -223,7 +223,7 @@ git diff --check
 
 Repeat PG live through its preset and EU Docker runbook. Confirm `turbodb-sqlite`/`turbodb-postgresql` do not link `turbo_orm`, CFlow or TurboParser and contain no production `.cpp` sources.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```text
 git add README.md docs dbtools

@@ -144,6 +144,20 @@ turbodb-postgresql schema apply --file <bootstrap.sql>
 显式调低或调高到实现定义的最大值。schema apply 不读 stdin，避免无上限输入和不可
 重放失败。
 
+稳定进程退出码如下；native code 和失败阶段另写入单条 stderr 诊断：
+
+| 退出码 | 语义 |
+|---:|---|
+| 0 | 成功或 `--help` |
+| 2 | 参数/调用契约错误 |
+| 3 | 文件读取错误 |
+| 4 | 连接/传输错误 |
+| 5 | SQL 执行错误 |
+| 6 | hard limit 超限 |
+| 7 | 当前命令/结果类型不支持 |
+| 8 | 内存不足 |
+| 70 | 内部契约错误 |
+
 第二阶段 generated executable：
 
 ```text
@@ -204,6 +218,9 @@ count、单 cell bytes 和 output bytes。默认 import 是单 transaction、全
 - 第二阶段 generated target 才精确从 `TURBOPARSER_ROOT` 查找
   `TurboParser::DataBind` 和 installed `tbe_compiler`；普通构建不要求 `TURBOPARSER_ROOT`。
 - executables 安装到 `CMAKE_INSTALL_BINDIR`，不作为可链接 imported library targets 导出。
+- `dbtools` install component 从最终 executable 扫描运行依赖；Windows 将 DLL 放入 `bin`，
+  Unix 将 shared libraries 放入 `lib`，工具使用 `$ORIGIN/../lib`。安装后使用 executable
+  不要求调用方 `find_package(TurboDB)`。
 
 ## 风险、兼容性与回滚
 

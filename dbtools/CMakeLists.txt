@@ -61,7 +61,45 @@ function(dbtool_stage_runtime_dependencies TARGET_NAME)
         ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_RUNTIME_DLLS:${TARGET_NAME}> $<TARGET_FILE_DIR:${TARGET_NAME}>
       COMMAND_EXPAND_LISTS)
+  else()
+    set_property(TARGET ${TARGET_NAME} PROPERTY INSTALL_RPATH "$ORIGIN/../lib")
   endif()
+endfunction()
+
+function(dbtool_collect_runtime_directories TARGET_NAME OUTPUT_VARIABLE)
+  if(NOT TARGET ${TARGET_NAME})
+    message(FATAL_ERROR "missing dbtools runtime target: ${TARGET_NAME}")
+  endif()
+  set(collected_directories "${${OUTPUT_VARIABLE}}")
+  list(APPEND collected_directories "$<TARGET_FILE_DIR:${TARGET_NAME}>")
+  get_target_property(runtime_target_imported ${TARGET_NAME} IMPORTED)
+  if(runtime_target_imported)
+    set(runtime_artifact_properties IMPORTED_LOCATION IMPORTED_IMPLIB)
+    get_target_property(runtime_target_configurations ${TARGET_NAME}
+                        IMPORTED_CONFIGURATIONS)
+    foreach(runtime_target_configuration IN LISTS runtime_target_configurations)
+      string(TOUPPER "${runtime_target_configuration}"
+             runtime_target_configuration_upper)
+      list(APPEND runtime_artifact_properties
+           "IMPORTED_LOCATION_${runtime_target_configuration_upper}"
+           "IMPORTED_IMPLIB_${runtime_target_configuration_upper}")
+    endforeach()
+    foreach(runtime_artifact_property IN LISTS runtime_artifact_properties)
+      get_target_property(runtime_artifact ${TARGET_NAME}
+                          ${runtime_artifact_property})
+      if(runtime_artifact AND NOT runtime_artifact MATCHES "-NOTFOUND$" AND
+         NOT runtime_artifact MATCHES "\\$<")
+        get_filename_component(runtime_artifact_directory "${runtime_artifact}"
+                               DIRECTORY)
+        get_filename_component(runtime_artifact_prefix
+                               "${runtime_artifact_directory}" DIRECTORY)
+        list(APPEND collected_directories "${runtime_artifact_directory}"
+             "${runtime_artifact_prefix}/bin")
+      endif()
+    endforeach()
+  endif()
+  list(REMOVE_DUPLICATES collected_directories)
+  set(${OUTPUT_VARIABLE} "${collected_directories}" PARENT_SCOPE)
 endfunction()
 
 function(dbtool_enable_postgresql_linker TARGET_NAME)
@@ -86,7 +124,10 @@ if(TURBODB_DBTOOLS_WITH_SQLITE)
   set_target_properties(turbodb-sqlite PROPERTIES FOLDER "dbtools")
   dbtool_enable_strict_warnings(turbodb-sqlite)
   dbtool_stage_runtime_dependencies(turbodb-sqlite)
-  install(TARGETS turbodb-sqlite RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  install(
+    TARGETS turbodb-sqlite
+    RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools)
 endif()
 
 if(TURBODB_DBTOOLS_WITH_PGSQL)
@@ -107,11 +148,56 @@ if(TURBODB_DBTOOLS_WITH_PGSQL)
   dbtool_enable_strict_warnings(turbodb-postgresql)
   dbtool_enable_postgresql_linker(turbodb-postgresql)
   dbtool_stage_runtime_dependencies(turbodb-postgresql)
-  install(TARGETS turbodb-postgresql
-          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  install(
+    TARGETS turbodb-postgresql
+    RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools)
+endif()
+
+set(dbtools_runtime_targets TurboUtils::Core)
+if(TURBODB_DBTOOLS_WITH_SQLITE)
+  list(APPEND dbtools_runtime_targets SQLite::SQLite3)
+endif()
+if(TURBODB_DBTOOLS_WITH_PGSQL)
+  list(APPEND dbtools_runtime_targets PostgreSQL::PostgreSQL)
+endif()
+set(dbtools_runtime_directories)
+foreach(dbtools_runtime_target IN LISTS dbtools_runtime_targets)
+  dbtool_collect_runtime_directories(${dbtools_runtime_target}
+                                     dbtools_runtime_directories)
+endforeach()
+if(WIN32)
+  install(
+    RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
+    DIRECTORIES ${dbtools_runtime_directories}
+    PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                        "clang_rt.asan_dynamic-.*"
+    POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools)
+else()
+  install(
+    RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
+    DIRECTORIES ${dbtools_runtime_directories}
+    PRE_EXCLUDE_REGEXES "ld-linux-.*" "libc\\.so.*" "libdl\\.so.*"
+                        "libgcc_s\\.so.*" "libm\\.so.*"
+                        "libpthread\\.so.*" "libstdc\\+\\+\\.so.*"
+    POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dbtools)
 endif()
 
 if(BUILD_TESTS)
+  if(TURBODB_DBTOOLS_WITH_SQLITE)
+    add_test(
+      NAME dbtools_package_contract
+      COMMAND
+        ${CMAKE_COMMAND}
+        -DDBTOOLS_PACKAGE_TEST_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DDBTOOLS_PACKAGE_TEST_CONFIG=${CMAKE_BUILD_TYPE}
+        -DDBTOOLS_PACKAGE_TEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sqlite_schema.sql
+        -DDBTOOLS_PACKAGE_TEST_WITH_PGSQL=$<BOOL:${TURBODB_DBTOOLS_WITH_PGSQL}>
+        -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/package/run_dbtools_package_contract.cmake)
+  endif()
   cmake_add_test(
     NAME dbtool_file_test
     SOURCES tests/dbtool_file_test.c
