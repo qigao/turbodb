@@ -17,3 +17,35 @@ endif()
 if(NOT TURBODB_BUILD_DBTOOLS)
   return()
 endif()
+
+add_library(
+  turbodb_dbtool_core STATIC
+  src/dbtool_error.c
+  src/dbtool_file.c
+  src/dbtool_cli.c)
+target_compile_features(turbodb_dbtool_core PUBLIC c_std_11)
+target_include_directories(turbodb_dbtool_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(turbodb_dbtool_core PUBLIC TurboUtils::Core)
+cmake_config_target(turbodb_dbtool_core NO_INSTALL FOLDER "dbtools")
+
+if(MSVC)
+  target_compile_options(turbodb_dbtool_core PRIVATE /W4 /WX /std:c11)
+else()
+  target_compile_options(turbodb_dbtool_core PRIVATE -Wall -Wextra -Wpedantic
+                                                       -Werror)
+endif()
+
+if(BUILD_TESTS)
+  cmake_add_test(
+    NAME dbtool_file_test
+    SOURCES tests/dbtool_file_test.c
+    LIBS turbodb_dbtool_core TurboUtils::TinyTest
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
+    FOLDER "dbtools/tests")
+  cmake_add_test(
+    NAME dbtool_cli_test
+    SOURCES tests/dbtool_cli_test.c
+    LIBS turbodb_dbtool_core TurboUtils::TinyTest
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
+    FOLDER "dbtools/tests")
+endif()

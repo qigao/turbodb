@@ -79,23 +79,23 @@ git commit -m "build(dbtools): add independent driver tool gates"
 - Consumes: argv, `turbo_fs`, statically supplied `dbtool_schema_driver_ops`.
 - Produces: one `schema apply` invocation and a stable process exit mapping.
 
-- [ ] **Step 1: Write failing CLI behavior tests**
+- [x] **Step 1: Write failing CLI behavior tests**
 
 Use a complete fake schema driver and literal argv arrays. Cover exact success forwarding, unknown/duplicate/missing options, driver-specific required config, invalid decimal/zero/overflow limits, driver open failure, apply failure, and exactly-once close. Assert no SQL or connection secret appears in formatted errors.
 
-- [ ] **Step 2: Write failing bounded-file tests**
+- [x] **Step 2: Write failing bounded-file tests**
 
 Use TinyTest temp helpers. Cover empty file rejection, one byte, exactly limit, limit+1, unreadable path, and `size + 1` overflow guard through a narrow injected stat/read seam. Expectations are literal status/stage values, not mirror helper output.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 Build `dbtool_cli_test` and `dbtool_file_test`; expected compile failure because the core is absent.
 
-- [ ] **Step 4: Implement minimal core**
+- [x] **Step 4: Implement minimal core**
 
 Define one internal status enum and `dbtool_error { status, native_code, stage, message }`. Parse without fallback. File load performs `turbo_fs_stat` and checked bound validation before `turbo_fs_read_file`; invocation owns the buffer until `apply()` returns and releases it on one cleanup path.
 
-- [ ] **Step 5: Run GREEN and mutation checks**
+- [x] **Step 5: Run GREEN and mutation checks**
 
 Run both tests. Mentally/locally mutate required-option handling, limit comparison, close call and secret formatting; at least one named test must fail for each mutation.
 
