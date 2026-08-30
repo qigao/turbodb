@@ -95,15 +95,14 @@ PostgreSQL 密码不作为普通 CLI 参数接收。连接信息来自 `--connin
 
 ## Driver 执行语义
 
-SQLite 使用官方 [`sqlite3_exec`](https://sqlite.org/c3ref/exec.html) 执行完整文件。工具在
-外层 transaction 中执行，并通过 authorizer 拒绝输入文件自己的 transaction/savepoint
-control；任何 statement 失败即 rollback，不留下已创建的前半部分 schema。
+SQLite 使用官方 [`sqlite3_exec`](https://sqlite.org/c3ref/exec.html) 直接执行完整文件。
+工具不解析 transaction/savepoint control，也不补写或嵌套外层事务；`CREATE`、`DROP`
+及其他 DDL 的提交与回滚边界由文件中的标准 `BEGIN; ... COMMIT;` 定义。
 
 PostgreSQL 使用 libpq simple-query 发送完整文件，并按
 [`PQsendQuery`](https://www.postgresql.org/docs/current/libpq-async.html) 契约通过
-`PQgetResult()` drain 每个结果。服务端对不含显式 transaction control 的多 statement
-simple query 使用 implicit transaction。若输入文件包含显式 transaction control，则文件
-本身定义 transaction 语义；工具不承诺撤销文件已经显式提交的副作用。
+`PQgetResult()` drain 每个结果。工具与 SQLite driver 一样直接执行文件，不增加外层事务；
+文件中的 `BEGIN; ... COMMIT;` 是唯一事务事实源。
 
 ## 数据、所有权与关闭
 
@@ -113,7 +112,7 @@ simple query 使用 implicit transaction。若输入文件包含显式 transacti
 | 事实源 | 文件读取后由 invocation 独占的 buffer |
 | 所有权 | CLI core 创建并释放；driver 只在 `apply()` 内借用 |
 | 容量 | stat/read 前检查 `max_script_bytes` 和 `size + 1` overflow |
-| 失败 | 立即返回 stage/native code；SQLite rollback，PostgreSQL drain results |
+| 失败 | 立即返回 stage/native code；未提交的文件事务随连接关闭回滚，PostgreSQL drain results |
 | 关闭 | apply 返回后释放 buffer 并关闭 connection；错误也走同一 cleanup |
 | 线程模型 | 每个 invocation 单线程；context 不允许并发调用 |
 
@@ -141,16 +140,16 @@ driver、operation 和 statement count，不输出密码、连接串或 SQL 全�
 - **HIGH / 事实**：复用 ORM raw query path 会使 SQLite 拒绝第二条 statement，并把
   PostgreSQL 的参数化单 statement 语义错误扩张为脚本语义。独立 native driver 是该问题的
   最小修复。
-- **MED / 事实**：PostgreSQL 文件中的显式 `COMMIT` 会改变 implicit transaction 语义。
-  工具限定输入为 trusted DDL，并逐个检查和 drain result，但不伪造全局回滚保证。
+- **MED / 事实**：DBTools 不为缺少 `BEGIN; ... COMMIT;` 的文件伪造原子性。工具限定输入为
+  trusted DDL，并逐个检查和 drain result；生成器负责输出标准文件级事务。
 - **LOW / 事实**：新增 executable 和 CMake options 是加法行为；ORM public ABI、query、
   result 和 CFlow 行为不变。
 
 验证范围：
 
 1. CLI parser、文件上限、错误阶段和 cleanup 的 fake-driver TinyTest。
-2. 真实 SQLite 临时数据库：多 statement 成功、第二条失败回滚、transaction control
-   拒绝、重复 apply 和 hard limit。
+2. 真实 SQLite 临时数据库：标准事务内 `CREATE`/`DROP`、第二条失败回滚、重复 apply 和
+   hard limit。
 3. libpq test double：simple query、所有 results drain、intermediate error、connection
    error 和 secret redaction。
 4. 显式 PostgreSQL live gate：执行 DDL 文件，再查询 catalog 和约束。

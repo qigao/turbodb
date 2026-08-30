@@ -70,7 +70,7 @@ execute_process(
   RESULT_VARIABLE apply_result
   OUTPUT_VARIABLE apply_stdout
   ERROR_VARIABLE apply_stderr)
-if(NOT apply_result EQUAL 0 OR NOT apply_stdout MATCHES "statements=2")
+if(NOT apply_result EQUAL 0 OR NOT apply_stdout MATCHES "statements=4")
   message(FATAL_ERROR
           "installed SQLite apply failed (${apply_result})\n"
           "stdout:\n${apply_stdout}\nstderr:\n${apply_stderr}")

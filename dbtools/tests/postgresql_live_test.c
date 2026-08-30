@@ -30,11 +30,13 @@ static void clear_result(PGresult **result) {
 spec("PostgreSQL standalone schema driver live") {
   it("applies two tables, exposes them in pg_catalog, and enforces a foreign key") {
     static const char schema_sql[] =
+        "begin;"
         "create table dbtool_pg_live_parent("
         "id integer primary key);"
         "create table dbtool_pg_live_child("
         "id integer primary key, parent_id integer not null references "
-        "dbtool_pg_live_parent(id));";
+        "dbtool_pg_live_parent(id));"
+        "commit;";
     static const char inspect_sql[] =
         "select count(*) from pg_catalog.pg_class "
         "where relkind='r' and relname in "
@@ -42,7 +44,9 @@ spec("PostgreSQL standalone schema driver live") {
     static const char constraint_sql[] =
         "insert into dbtool_pg_live_child(id,parent_id) values(1,999)";
     static const char cleanup_sql[] =
-        "drop table if exists dbtool_pg_live_child, dbtool_pg_live_parent";
+        "begin;"
+        "drop table if exists dbtool_pg_live_child, dbtool_pg_live_parent;"
+        "commit;";
     const char *conninfo = getenv("TURBODB_DBTOOLS_PG_TEST_CONNINFO");
     dbtool_apply_result apply_result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
@@ -70,7 +74,7 @@ spec("PostgreSQL standalone schema driver live") {
 
     check_equal(live_apply(conninfo, schema_sql, &apply_result, &error),
                 DBTOOL_STATUS_OK);
-    check_equal(apply_result.statements, (uint64_t)2u);
+    check_equal(apply_result.statements, (uint64_t)4u);
 
     native_result = PQexec(connection, inspect_sql);
     check_not_null(native_result);

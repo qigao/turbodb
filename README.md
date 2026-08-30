@@ -40,10 +40,10 @@ turbodb-postgresql schema apply `
 `--busy-timeout-ms`，默认 5000 ms。输入文件必须非空、可完整读取且不含嵌入 NUL；工具
 不读 stdin、不重试、不切换 driver。
 
-SQLite 在外层 transaction 中执行，并拒绝输入脚本中的 transaction/savepoint control；
-任一 statement 失败都会 rollback。PostgreSQL 使用一次 libpq simple query 并释放所有
-`PGresult`；不含显式 transaction control 的多 statement 脚本使用服务端 implicit
-transaction，若脚本自行提交，则脚本自身定义事务边界。
+DDL 文件负责定义标准事务边界，例如 `BEGIN; ... COMMIT;`。SQLite 与 PostgreSQL 工具都
+直接执行文件，不解析、补写或嵌套外层事务。SQLite 使用一次 `sqlite3_exec()`；PostgreSQL
+使用一次 libpq simple query 并释放所有 `PGresult`。`CREATE` 与 `DROP` 的原子性完全由
+文件中的事务定义。
 
 退出码：`0` 成功/帮助，`2` 参数错误，`3` 文件错误，`4` 连接错误，`5` SQL 错误，
 `6` 超限，`7` 不支持，`8` 内存不足，`70` 内部错误。
