@@ -10,11 +10,12 @@ typedef struct dbtool_postgresql_state {
   PGconn *connection;
 } dbtool_postgresql_state;
 
-dbtool_status dbtool_postgresql_error(dbtool_status status, const char *stage,
-                                      int native_code,
-                                      const char *operation,
-                                      const char *detail,
-                                      dbtool_error *error) {
+static dbtool_status dbtool_postgresql_error(dbtool_status status,
+                                             const char *stage,
+                                             int native_code,
+                                             const char *operation,
+                                             const char *detail,
+                                             dbtool_error *error) {
   char message[DBTOOL_ERROR_MESSAGE_CAPACITY];
   const char *reason =
       detail != NULL && detail[0] != '\0' ? detail : "PostgreSQL failure";
@@ -138,9 +139,4 @@ static const dbtool_schema_driver_ops dbtool_postgresql_ops = {
 
 const dbtool_schema_driver_ops *dbtool_postgresql_schema_driver(void) {
   return &dbtool_postgresql_ops;
-}
-
-PGconn *dbtool_postgresql_native_connection(void *context) {
-  dbtool_postgresql_state *state = (dbtool_postgresql_state *)context;
-  return state != NULL ? state->connection : NULL;
 }

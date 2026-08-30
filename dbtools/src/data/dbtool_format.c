@@ -1,7 +1,5 @@
 #include <turbodb/dbtool_format.h>
 
-#include "data/dbtool_model_internal.h"
-
 #include "data_bind.h"
 #include "turbo_parser_json.h"
 #include "turbo_uuid.h"
@@ -93,6 +91,58 @@ static int dbtool_format_limits_valid(const dbtool_transfer_limits *limits) {
          limits->max_record_bytes != 0u && limits->max_output_bytes != 0u;
 }
 
+static int dbtool_format_scalar_valid(dbtool_scalar_kind kind) {
+  return kind >= DBTOOL_SCALAR_INT64 && kind <= DBTOOL_SCALAR_UUID;
+}
+
+static int dbtool_format_storage_matches(const dbtool_column_v1 *column) {
+  switch (column->scalar_kind) {
+    case DBTOOL_SCALAR_INT64:
+      return column->storage_kind >= DBTOOL_STORAGE_INTEGER16 &&
+             column->storage_kind <= DBTOOL_STORAGE_INTEGER64;
+    case DBTOOL_SCALAR_UINT64:
+      return (column->storage_kind >= DBTOOL_STORAGE_INTEGER16 &&
+              column->storage_kind <= DBTOOL_STORAGE_INTEGER64) ||
+             column->storage_kind == DBTOOL_STORAGE_UINT64_DECIMAL;
+    case DBTOOL_SCALAR_DOUBLE:
+      return column->storage_kind == DBTOOL_STORAGE_FLOAT32 ||
+             column->storage_kind == DBTOOL_STORAGE_FLOAT64;
+    case DBTOOL_SCALAR_BOOLEAN:
+      return column->storage_kind == DBTOOL_STORAGE_BOOLEAN;
+    case DBTOOL_SCALAR_TEXT:
+      return column->storage_kind == DBTOOL_STORAGE_TEXT;
+    case DBTOOL_SCALAR_BYTES:
+      return column->storage_kind == DBTOOL_STORAGE_BYTES;
+    case DBTOOL_SCALAR_UUID:
+      return column->storage_kind == DBTOOL_STORAGE_UUID;
+    default:
+      return 0;
+  }
+}
+
+static int dbtool_format_columns_valid(const dbtool_table_v1 *table) {
+  static const uint32_t known_flags =
+      DBTOOL_COLUMN_OPTIONAL | DBTOOL_COLUMN_HAS_DEFAULT |
+      DBTOOL_COLUMN_GENERATED;
+  size_t index;
+  for (index = 0u; index < table->column_count; ++index) {
+    const dbtool_column_v1 *column = &table->columns[index];
+    if (column->struct_size < sizeof(*column) ||
+        column->abi_version != DBTOOL_MODEL_ABI_VERSION ||
+        column->index != index || column->name == NULL ||
+        column->name[0] == '\0' || column->database_name == NULL ||
+        column->database_name[0] == '\0' ||
+        !dbtool_format_scalar_valid(column->scalar_kind) ||
+        !dbtool_format_storage_matches(column) ||
+        (column->flags & ~known_flags) != 0u ||
+        ((column->flags & DBTOOL_COLUMN_GENERATED) != 0u &&
+         (column->flags &
+          (DBTOOL_COLUMN_OPTIONAL | DBTOOL_COLUMN_HAS_DEFAULT)) != 0u))
+      return 0;
+  }
+  return 1;
+}
+
 static const dbtool_table_v1 *dbtool_format_validate_model(
     const void *opaque_context, size_t table_index,
     const dbtool_transfer_limits *limits, dbtool_error *error) {
@@ -118,7 +168,7 @@ static const dbtool_table_v1 *dbtool_format_validate_model(
       table->column_count == 0u || table->column_count > limits->max_columns ||
       table->column_count > SIZE_MAX / sizeof(dbtool_cell) ||
       table->column_count > SIZE_MAX / TURBO_UUID_SIZE ||
-      !dbtool_table_metadata_valid(table, table_index)) {
+      !dbtool_format_columns_valid(table)) {
     dbtool_format_fail(error, DBTOOL_STATUS_INVALID_ARGUMENT, "open-format", 0,
                        "generated table metadata is invalid or exceeds limits");
     return NULL;
