@@ -10,7 +10,9 @@ if(ORM_WITH_MONGODB)
 endif()
 
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend" OFF)
-if(ORM_WITH_PGSQL)
+option(TURBODB_DBTOOLS_WITH_PGSQL
+       "Enable PostgreSQL standalone database tools" OFF)
+if(ORM_WITH_PGSQL OR TURBODB_DBTOOLS_WITH_PGSQL)
   list(APPEND VCPKG_MANIFEST_FEATURES postgresql)
 endif()
 
@@ -77,6 +79,7 @@ if(CMAKE_CROSSCOMPILING)
 else()
   add_subdirectory(tools)
 endif()
+add_subdirectory(dbtools)
 include(FindTools)
 add_subdirectory(redis) 
 

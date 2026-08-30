@@ -2,7 +2,7 @@
 
 本文用于把 Windows 当前工作树作为唯一源码事实源，上传到 `root@eu`，在一次性 Ubuntu 24.04 Docker 容器内构建 TurboUtils 与 TurboDB，并保存可复验的构建、测试和校验结果。
 
-该流程默认测试纯 C ORM、Redis/CFlow、Mongo、PostgreSQL 适配层及仓库内 mock/contract tests。它关闭独立 TidesDB engine tests，但仍保留 TurboDB 自身的 TidesDB adapter/mock tests。除非另有测试任务，本流程不会连接或修改远端现有数据库服务。
+该流程默认测试纯 C ORM、standalone schema tools、Redis/CFlow、Mongo、PostgreSQL 适配层及仓库内 mock/contract tests。它关闭独立 TidesDB engine tests，但仍保留 TurboDB 自身的 TidesDB adapter/mock tests。除非另有测试任务，本流程不会连接或修改远端现有数据库服务。
 
 ## 1. 测试契约
 
@@ -99,7 +99,7 @@ ssh -t root@eu 'tmux new-session -A -s turbodb-eu'
 进入远端后执行以下 Bash 脚本。默认不连接真实 PostgreSQL；需要把
 PostgreSQL live test 纳入同一次全量 CTest 时，先执行
 `export TURBODB_EU_POSTGRES_LIVE=1`。该模式只创建本次 run 专属的
-`postgres:16-alpine` 容器和 temporary table，不访问已有数据库：
+`postgres:17.6-alpine3.22` 容器和隔离测试表，不访问已有数据库：
 
 ```bash
 set -Eeuo pipefail
@@ -145,15 +145,16 @@ docker image inspect --format '{{.Id}}' ubuntu:24.04 > "$run_root/artifacts/cont
 
 postgres_conninfo=""
 if [ "$enable_postgres_live" = 1 ]; then
-    docker pull postgres:16-alpine
-    docker image inspect --format '{{.Id}}' postgres:16-alpine \
+    docker pull postgres:17.6-alpine3.22
+    docker image inspect --format '{{.Id}}' postgres:17.6-alpine3.22 \
         >> "$run_root/artifacts/container-image.txt"
     docker run -d --name "$postgres_name" \
+        --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid \
         -e POSTGRES_USER=turbodb \
         -e POSTGRES_PASSWORD=turbodb \
         -e POSTGRES_DB=turbodb \
         -p 127.0.0.1::5432 \
-        postgres:16-alpine >/dev/null
+        postgres:17.6-alpine3.22 >/dev/null
     for attempt in $(seq 1 60); do
         if docker exec "$postgres_name" \
             pg_isready -U turbodb -d turbodb >/dev/null 2>&1; then
@@ -181,6 +182,7 @@ docker run --name "$container_name" \
     -e DEBIAN_FRONTEND=noninteractive \
     -e TURBODB_EU_POSTGRES_LIVE="$enable_postgres_live" \
     -e TURBODB_ORM_PGSQL_TEST_CONNINFO="$postgres_conninfo" \
+    -e TURBODB_DBTOOLS_PG_TEST_CONNINFO="$postgres_conninfo" \
     ubuntu:24.04 bash -lc '
 set -Eeuo pipefail
 
@@ -228,6 +230,8 @@ cmake --fresh --preset "$orm_preset" \
     -DTIDESDB_BUILD_TESTS=OFF \
     -DORM_WITH_TIDESDB=OFF \
     -DORM_WITH_REDIS=ON \
+    -DTURBODB_BUILD_DBTOOLS=ON \
+    -DTURBODB_DBTOOLS_WITH_SQLITE=ON \
     -DENABLE_TESTS=ON \
     -DBUILD_TESTING=ON
 cmake --build --preset "$orm_preset"
@@ -259,6 +263,17 @@ PY
 
 cmake --build --preset "$orm_install_preset"
 
+/opt/turbodb/release/bin/turbodb-sqlite --help
+if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
+    /opt/turbodb/release/bin/turbodb-postgresql --help
+fi
+sha256sum /opt/turbodb/release/bin/turbodb-sqlite \
+    > /work/artifacts/dbtools-binaries.sha256
+if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
+    sha256sum /opt/turbodb/release/bin/turbodb-postgresql \
+        >> /work/artifacts/dbtools-binaries.sha256
+fi
+
 if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
     shared_consumer_build=/work/package-consumer-shared
     cmake --fresh \
@@ -284,6 +299,7 @@ sha256sum \
     "$run_root/artifacts/source.revisions.txt" \
     "$run_root/artifacts/container-image.txt" \
     "$run_root/artifacts/environment.txt" \
+    "$run_root/artifacts/dbtools-binaries.sha256" \
     "$run_root/artifacts/linux-build-test.log" \
     "$run_root/artifacts/turbodb-linux-release.xml" \
     > "$run_root/artifacts/SHA256SUMS"
@@ -337,6 +353,7 @@ tar.exe -tf $localResult
 - `source.revisions.txt` 记录了两个仓库的 commit 与 dirty file 数量。
 - `environment.txt` 中包含实际 GCC、CMake、Ninja、re2c 与 vcpkg 版本。
 - `linux-build-test.log` 最终包含 CTest 全部通过摘要和 `JUnit verified`。
+- `dbtools-binaries.sha256` 记录本次安装的 SQLite 及可选 PostgreSQL 工具摘要。
 - `turbodb-linux-release.xml` 中测试数大于零，且 `failures`、`errors`、`skipped` 都为零。
 - `SHA256SUMS` 能复验全部证据文件。
 
@@ -349,8 +366,10 @@ tar.exe -tf $localResult
 3. TurboDB 成功 configure/build，且独立 TidesDB engine tests 被关闭。
 4. CTest 实际发现至少一个测试，JUnit 的 failure、error 与 skipped 数均为零。
 5. Redis/CFlow 与 ORM contract tests 在同一次 run 内通过。
-6. live 模式使用专用 PostgreSQL preset，并通过 shared × C/C++ 安装包 consumer matrix。
-7. 精确命名的构建容器和可选 PostgreSQL 容器已被删除，run 目录和证据文件仍保留。
+6. standalone SQLite package contract 通过；live 模式还必须通过 PostgreSQL driver/live test，
+   并生成已安装工具的 SHA-256。
+7. live 模式使用专用 PostgreSQL preset，并通过 shared × C/C++ 安装包 consumer matrix。
+8. 精确命名的构建容器和可选 PostgreSQL 容器已被删除，run 目录和证据文件仍保留。
 
 ## 8. 常见失败
 

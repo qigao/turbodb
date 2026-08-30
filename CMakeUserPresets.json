@@ -76,6 +76,9 @@
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
@@ -89,6 +92,9 @@
             "name": "win-release-user",
             "cacheVariables": {
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
@@ -99,18 +105,32 @@
             "inherits": ["base-win-release-user", "win-paths"]
         },
         {
-            "name": "win-release-pg-live-user",
-            "displayName": "Release + PostgreSQL live tests (Windows)",
+            "name": "win-release-dbtools-pg-user",
+            "displayName": "Release + PostgreSQL dbtools (Windows)",
             "inherits": "win-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Release-PG",
+            "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG",
             "cacheVariables": {
-                "ORM_WITH_PGSQL": "ON",
-                "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows"
             },
             "environment": {
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "PATH": "${sourceDir}/build/Msvc-Release-DbTools-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
+            "name": "win-release-pg-live-user",
+            "displayName": "Release + PostgreSQL live tests (Windows)",
+            "inherits": "win-release-dbtools-pg-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Release-PG",
+            "cacheVariables": {
+                "ORM_WITH_PGSQL": "ON",
+                "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "TURBODB_DBTOOLS_PG_LIVE_TESTS": "ON"
+            },
+            "environment": {
                 "PATH": "${sourceDir}/build/Msvc-Release-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{TURBOUTILS_ROOT}/bin${pathListSep}$penv{PATH}"
             }
         },
@@ -119,6 +139,9 @@
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
@@ -132,6 +155,9 @@
             "name": "linux-release-user",
             "cacheVariables": {
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
@@ -149,6 +175,7 @@
             "cacheVariables": {
                 "ORM_WITH_PGSQL": "ON",
                 "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux"
             },
@@ -189,12 +216,14 @@
     "buildPresets": [
         { "name": "win-dev-user", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "configurePreset": "win-release-user" },
+        { "name": "win-release-dbtools-pg-user", "configurePreset": "win-release-dbtools-pg-user" },
         { "name": "win-release-pg-live-user", "configurePreset": "win-release-pg-live-user" },
         { "name": "linux-dev-user", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "configurePreset": "linux-release-user" },
         { "name": "linux-release-pg-live-user", "configurePreset": "linux-release-pg-live-user" },
         { "name": "install-win-dev-user", "configurePreset": "win-dev-user", "targets": ["install"] },
         { "name": "install-win-release-user", "configurePreset": "win-release-user", "targets": ["install"] },
+        { "name": "install-win-release-dbtools-pg-user", "configurePreset": "win-release-dbtools-pg-user", "targets": ["install"] },
         { "name": "install-win-release-pg-live-user", "configurePreset": "win-release-pg-live-user", "targets": ["install"] },
         { "name": "install-linux-dev-user", "configurePreset": "linux-dev-user", "targets": ["install"] },
         { "name": "install-linux-release-user", "configurePreset": "linux-release-user", "targets": ["install"] },
@@ -215,6 +244,7 @@
     "testPresets": [
         { "name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user" },
+        { "name": "win-release-dbtools-pg-user", "inherits": "base-test", "configurePreset": "win-release-dbtools-pg-user" },
         { "name": "win-release-pg-live-user", "inherits": "base-test", "configurePreset": "win-release-pg-live-user" },
         { "name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" },
