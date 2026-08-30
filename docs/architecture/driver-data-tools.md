@@ -114,7 +114,7 @@ simple query 使用 implicit transaction。若输入文件包含显式 transacti
 | 所有权 | CLI core 创建并释放；driver 只在 `apply()` 内借用 |
 | 容量 | stat/read 前检查 `max_script_bytes` 和 `size + 1` overflow |
 | 失败 | 立即返回 stage/native code；SQLite rollback，PostgreSQL drain results |
-| 关闭 | apply 返回后释放 buffer并关闭 connection；错误也走同一 cleanup |
+| 关闭 | apply 返回后释放 buffer 并关闭 connection；错误也走同一 cleanup |
 | 线程模型 | 每个 invocation 单线程；context 不允许并发调用 |
 
 ## 错误语义与可观测性
