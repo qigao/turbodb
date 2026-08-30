@@ -25,6 +25,8 @@ option(TURBODB_BUILD_DBTOOLS "Build standalone database tools"
 option(TURBODB_DBTOOLS_WITH_SQLITE "Enable SQLite standalone database tools" ON)
 option(TURBODB_DBTOOLS_WITH_PGSQL
        "Enable PostgreSQL standalone database tools" OFF)
+option(TURBODB_DBTOOLS_WITH_DATA
+       "Enable schema-generated DataBind import/export tools" OFF)
 option(TURBODB_DBTOOLS_PG_LIVE_TESTS
        "Run standalone database tools against a live PostgreSQL server" OFF)
 
