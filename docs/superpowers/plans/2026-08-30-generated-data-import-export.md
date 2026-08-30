@@ -150,19 +150,19 @@ git commit -m "feat(tbe): generate database data-tool adapters"
 - Create: `dbtools/tests/dbtool_sqlite_records_test.c`
 - Modify: `dbtools/CMakeLists.txt`
 
-- [ ] **Step 1: Write failing real-SQLite round-trip tests**
+- [x] **Step 1: Write failing real-SQLite round-trip tests**
 
 Cover each supported scalar, NULL, generated/default fields, canonical `uint64` max, bytes with NUL, constraint failure, malformed decimal text, sink rollback after a later bad row, and cursor cell invalidation on next step.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Expected missing record driver symbols.
 
-- [ ] **Step 3: Implement prepared/bound writes and cursor reads**
+- [x] **Step 3: Implement prepared/bound writes and cursor reads**
 
 Quote only generated/validated identifiers. Prepare insert/select once per table operation, bind using generated scalar kinds, step row-by-row, and finalize exactly once. One import transaction owns all writes until commit/rollback.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```text
 git add dbtools/src/sqlite/dbtool_sqlite_records.* dbtools/tests/dbtool_sqlite_records_test.c dbtools/CMakeLists.txt

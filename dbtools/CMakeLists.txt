@@ -123,12 +123,14 @@ if(TURBODB_DBTOOLS_WITH_DATA)
 endif()
 
 if(TURBODB_DBTOOLS_WITH_SQLITE)
-  add_library(turbodb_dbtool_sqlite STATIC src/sqlite/dbtool_sqlite.c)
+  add_library(turbodb_dbtool_sqlite STATIC src/sqlite/dbtool_sqlite.c
+                                           src/sqlite/dbtool_sqlite_records.c)
   target_compile_features(turbodb_dbtool_sqlite PUBLIC c_std_11)
   target_include_directories(turbodb_dbtool_sqlite
                              PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(turbodb_dbtool_sqlite PUBLIC turbodb_dbtool_core
-                                                     SQLite::SQLite3)
+                                                     SQLite::SQLite3
+                                                     TurboUtils::sds)
   cmake_config_target(turbodb_dbtool_sqlite NO_INSTALL FOLDER "dbtools")
   dbtool_enable_strict_warnings(turbodb_dbtool_sqlite)
 
@@ -250,6 +252,14 @@ if(BUILD_TESTS)
     dbtool_stage_runtime_dependencies(dbtool_format_test)
   endif()
   if(TURBODB_DBTOOLS_WITH_SQLITE)
+    cmake_add_test(
+      NAME dbtool_sqlite_records_test
+      SOURCES tests/dbtool_sqlite_records_test.c
+      LIBS turbodb_dbtool_sqlite TurboUtils::TinyTest
+      INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include
+               ${CMAKE_CURRENT_SOURCE_DIR}/src
+      FOLDER "dbtools/tests")
+    dbtool_enable_strict_warnings(dbtool_sqlite_records_test)
     cmake_add_test(
       NAME dbtool_sqlite_test
       SOURCES tests/dbtool_sqlite_test.c

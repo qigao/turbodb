@@ -53,9 +53,10 @@ static fake_transfer_state fake_state;
 
 static const dbtool_column_v1 fake_columns[] = {
     {sizeof(dbtool_column_v1), DBTOOL_MODEL_ABI_VERSION, 0u, 0u,
-     DBTOOL_SCALAR_TEXT, "value", "value"},
+     DBTOOL_SCALAR_TEXT, DBTOOL_STORAGE_TEXT, "value", "value"},
     {sizeof(dbtool_column_v1), DBTOOL_MODEL_ABI_VERSION, 1u,
-     DBTOOL_COLUMN_OPTIONAL, DBTOOL_SCALAR_TEXT, "note", "note"}};
+     DBTOOL_COLUMN_OPTIONAL, DBTOOL_SCALAR_TEXT, DBTOOL_STORAGE_TEXT, "note",
+     "note"}};
 static const dbtool_table_v1 fake_table = {
     sizeof(dbtool_table_v1), DBTOOL_MODEL_ABI_VERSION, 0u,
     "Record",               "records",                fake_columns,
