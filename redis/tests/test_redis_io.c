@@ -21,7 +21,7 @@ static cflow_io_native_backend_kind redis_test_backend_kind(void) {
 static void redis_test_drive(void *user) { (void)user; }
 
 suite("redis cflow io runtime") {
-  it("rejects zero Source capacity without publishing a runtime") {
+  it("rejects zero Publisher capacity without publishing a runtime") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 0u, 1u};
 
@@ -29,50 +29,50 @@ suite("redis cflow io runtime") {
     check_false(redis_io_runtime_valid(&runtime));
   }
 
-  it("applies capacity when per-connection Sources attach") {
+  it("applies capacity when per-connection Publishers attach") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 1u, 1u};
-    redis_io_runtime_source source = {0};
+    redis_io_runtime_publisher publisher = {0};
     cflow_io_backend_ops backend = {0};
     void *backend_user = NULL;
 
     check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
-    check_equal(redis_io_runtime_attach_source(&runtime, &source, redis_test_drive, NULL, &backend,
+    check_equal(redis_io_runtime_attach_publisher(&runtime, &publisher, redis_test_drive, NULL, &backend,
                                                &backend_user),
                 TURBO_OK);
     check_not_null(backend_user);
     {
-      redis_io_runtime_source rejected = {0};
-      check_equal(redis_io_runtime_attach_source(&runtime, &rejected, redis_test_drive, NULL,
+      redis_io_runtime_publisher rejected = {0};
+      check_equal(redis_io_runtime_attach_publisher(&runtime, &rejected, redis_test_drive, NULL,
                                                  &backend, &backend_user),
                   TURBO_ENOBUFS);
     }
     check_equal(redis_io_runtime_close(&runtime), TURBO_EBUSY);
 
-    check_equal(redis_io_runtime_detach_source(&source), TURBO_OK);
+    check_equal(redis_io_runtime_detach_publisher(&publisher), TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
     check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
     check_false(redis_io_runtime_valid(&runtime));
   }
 
-  it("tracks one active operation for each admitted Source") {
+  it("tracks one active operation for each admitted Publisher") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 1u, 1u};
-    redis_io_runtime_source source = {0};
+    redis_io_runtime_publisher publisher = {0};
     cflow_io_backend_ops backend = {0};
     void *backend_user = NULL;
 
     check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
-    check_equal(redis_io_runtime_attach_source(&runtime, &source, redis_test_drive, NULL, &backend,
+    check_equal(redis_io_runtime_attach_publisher(&runtime, &publisher, redis_test_drive, NULL, &backend,
                                                &backend_user),
                 TURBO_OK);
-    check_equal(redis_io_runtime_source_started(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_source_started(&runtime), TURBO_ENOBUFS);
+    check_equal(redis_io_runtime_publisher_started(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_publisher_started(&runtime), TURBO_ENOBUFS);
     check_equal(redis_io_runtime_close(&runtime), TURBO_EBUSY);
 
-    redis_io_runtime_source_finished(&runtime);
+    redis_io_runtime_publisher_finished(&runtime);
     check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(1000000000)), TURBO_OK);
-    check_equal(redis_io_runtime_detach_source(&source), TURBO_OK);
+    check_equal(redis_io_runtime_detach_publisher(&publisher), TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
     check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
   }
@@ -98,7 +98,7 @@ suite("redis cflow io runtime") {
     static const uintptr_t socket_identity = (uintptr_t)1234u;
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 1u, 1u};
-    redis_io_runtime_source source = {0};
+    redis_io_runtime_publisher publisher = {0};
     cflow_io_backend_ops backend = {0};
     cflow_io_actor actor = {0};
     void *backend_user = NULL;
@@ -108,13 +108,13 @@ suite("redis cflow io runtime") {
                                            .length = 1u};
 
     check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
-    check_equal(redis_io_runtime_attach_source(&runtime, &source, redis_test_drive, NULL, &backend,
+    check_equal(redis_io_runtime_attach_publisher(&runtime, &publisher, redis_test_drive, NULL, &backend,
                                                &backend_user),
                 TURBO_OK);
     check_equal(redis_io_runtime_retire_socket(&runtime, socket_identity), TURBO_OK);
     check_equal(backend.submit(backend_user, &actor, 1u, 1u, &operation), TURBO_EBUSY);
     check_equal(redis_io_runtime_forget_socket(&runtime, socket_identity), TURBO_OK);
-    check_equal(redis_io_runtime_detach_source(&source), TURBO_OK);
+    check_equal(redis_io_runtime_detach_publisher(&publisher), TURBO_OK);
     check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
     check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
   }

@@ -1,7 +1,7 @@
 #ifndef ORM_H
 #define ORM_H
 
-/* Typed, demand-driven ORM facade. Query execution yields CFlow Sources. */
+/* Typed, demand-driven ORM facade. Query execution yields CFlow Publishers. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -303,23 +303,23 @@ ORM_C_API orm_status_t ORM_C_CALL orm_result_get_boolean(
     uint8_t *out_value, orm_error_t *error);
 
 /*
- * On success the Source owns its driver cursor. The query, connection,
- * row_shape, and reachable metadata must outlive the Source. A Source opened
- * in a transaction also requires that transaction to outlive the Source.
- * out_source must be zero-initialized and must not already own a Source.
+ * On success the Publisher owns its driver cursor. The query, connection,
+ * row_shape, and reachable metadata must outlive the Publisher. A Publisher opened
+ * in a transaction also requires that transaction to outlive the Publisher.
+ * out_publisher must be zero-initialized and must not already own a Publisher.
  */
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_flow(
     orm_query_t *query, const orm_flow_config_t *config,
-    cflow_source *out_source, orm_error_t *error);
+    cflow_publisher *out_publisher, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
     orm_query_t *query, orm_transaction_t *transaction,
-    const orm_flow_config_t *config, cflow_source *out_source,
+    const orm_flow_config_t *config, cflow_publisher *out_publisher,
     orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_command_flow(
-    orm_query_t *query, cflow_source *out_source, orm_error_t *error);
+    orm_query_t *query, cflow_publisher *out_publisher, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_command_flow_in_transaction(
     orm_query_t *query, orm_transaction_t *transaction,
-    cflow_source *out_source, orm_error_t *error);
+    cflow_publisher *out_publisher, orm_error_t *error);
 
 static inline orm_string_view_t orm_view(const char *text) {
   return vstr_from_cstr(text);

@@ -24,16 +24,16 @@ _Static_assert(offsetof(redis_io_flow_operation, native) == 0u,
 
 struct redis_io_flow_impl {
   redis_io_runtime *runtime;
-  cflow_source source;
-  cflow_io_source_owner owner;
-  redis_io_runtime_source runtime_source;
+  cflow_publisher publisher;
+  cflow_io_publisher_owner owner;
+  redis_io_runtime_publisher runtime_publisher;
   redis_io_flow_operation operation;
   cflow_waitable waitable;
   uint64_t close_timeout_ns;
   bool pending_valid;
   bool operation_owned;
   bool active;
-  bool source_live;
+  bool publisher_live;
   bool owner_live;
   bool attached;
   bool runtime_pending;
@@ -73,27 +73,27 @@ static void redis_io_flow_finish_runtime_pending(redis_io_flow_impl *impl, bool 
     finish = true;
   }
   turbo_mutex_unlock(&impl->gate);
-  if (finish) redis_io_runtime_source_finished(impl->runtime);
+  if (finish) redis_io_runtime_publisher_finished(impl->runtime);
 }
 
-static cflow_io_source_prepare_status
+static cflow_io_publisher_prepare_status
 redis_io_flow_prepare(void *user, cflow_io_operation *operation, const char **error) {
   redis_io_flow_impl *impl = (redis_io_flow_impl *)user;
   if (impl == NULL || operation == NULL) {
-    if (error != NULL) *error = "Redis I/O Source has no pending operation";
-    return CFLOW_IO_SOURCE_PREPARE_ERROR;
+    if (error != NULL) *error = "Redis I/O Publisher has no pending operation";
+    return CFLOW_IO_PUBLISHER_PREPARE_ERROR;
   }
   turbo_mutex_lock(&impl->gate);
   if (!impl->pending_valid || impl->operation_owned) {
     turbo_mutex_unlock(&impl->gate);
-    if (error != NULL) *error = "Redis I/O Source has no available operation";
-    return CFLOW_IO_SOURCE_PREPARE_ERROR;
+    if (error != NULL) *error = "Redis I/O Publisher has no available operation";
+    return CFLOW_IO_PUBLISHER_PREPARE_ERROR;
   }
   impl->pending_valid = false;
   impl->operation_owned = true;
   *operation = (cflow_io_operation){&impl->operation, redis_io_flow_operation_release};
   turbo_mutex_unlock(&impl->gate);
-  return CFLOW_IO_SOURCE_PREPARE_OPERATION;
+  return CFLOW_IO_PUBLISHER_PREPARE_OPERATION;
 }
 
 static cflow_read_status redis_io_flow_encode(void *user, cflow_io_request_id request_id,
@@ -105,7 +105,7 @@ static cflow_read_status redis_io_flow_encode(void *user, cflow_io_request_id re
   (void)lease_id;
   (void)operation_user;
   if (user == NULL || completion == NULL || out_value == NULL) {
-    if (error != NULL) *error = "Redis I/O Source received an invalid completion";
+    if (error != NULL) *error = "Redis I/O Publisher received an invalid completion";
     return CFLOW_READ_ERROR;
   }
   *(cflow_io_completion *)out_value = *completion;
@@ -122,7 +122,7 @@ static void redis_io_flow_run_scheduled(void *user) {
   if (impl == NULL || !impl->owner_live) return;
   do {
     progressed = 0u;
-    status = cflow_io_source_owner_run_ready(&impl->owner, REDIS_IO_FLOW_DRIVE_STEPS, &progressed);
+    status = cflow_io_publisher_owner_run_ready(&impl->owner, REDIS_IO_FLOW_DRIVE_STEPS, &progressed);
   } while (status == TURBO_OK && progressed == REDIS_IO_FLOW_DRIVE_STEPS);
   if (status != TURBO_OK && status != TURBO_EBUSY) {
     turbo_mutex_lock(&impl->gate);
@@ -136,7 +136,7 @@ static void redis_io_flow_wake(void *user) {
   redis_io_flow_impl *impl = (redis_io_flow_impl *)user;
   int status;
   if (impl == NULL) return;
-  status = redis_io_runtime_schedule_source(&impl->runtime_source);
+  status = redis_io_runtime_schedule_publisher(&impl->runtime_publisher);
   if (status != TURBO_OK) {
     turbo_mutex_lock(&impl->gate);
     if (impl->driver_error == TURBO_OK) impl->driver_error = status;
@@ -151,17 +151,17 @@ static int redis_io_flow_close_owner(redis_io_flow_impl *impl) {
   started = turbo_hrtime();
   for (;;) {
     uint64_t now;
-    int status = redis_io_runtime_schedule_source(&impl->runtime_source);
+    int status = redis_io_runtime_schedule_publisher(&impl->runtime_publisher);
     if (status != TURBO_OK) return status;
     now = turbo_hrtime();
     if (now - started >= impl->close_timeout_ns) return TURBO_ETIMEDOUT;
-    status = redis_io_runtime_wait_source_idle(&impl->runtime_source,
+    status = redis_io_runtime_wait_publisher_idle(&impl->runtime_publisher,
                                                impl->close_timeout_ns - (now - started));
     if (status != TURBO_OK) return status;
-    if (cflow_io_source_owner_is_quiescent(&impl->owner)) break;
+    if (cflow_io_publisher_owner_is_quiescent(&impl->owner)) break;
   }
   {
-    int status = cflow_io_source_owner_close(&impl->owner);
+    int status = cflow_io_publisher_owner_close(&impl->owner);
     if (status != TURBO_OK) return status;
   }
   impl->owner_live = false;
@@ -170,7 +170,7 @@ static int redis_io_flow_close_owner(redis_io_flow_impl *impl) {
 
 int redis_io_flow_init(redis_io_flow *flow, redis_io_runtime *runtime, uint64_t close_timeout_ns) {
   redis_io_flow_impl *impl;
-  cflow_io_source_config config = {0};
+  cflow_io_publisher_config config = {0};
   int status;
   if (flow == NULL || flow->impl != NULL || runtime == NULL || close_timeout_ns == 0u)
     return TURBO_EINVAL;
@@ -181,7 +181,7 @@ int redis_io_flow_init(redis_io_flow *flow, redis_io_runtime *runtime, uint64_t 
   impl->operation.owner = impl;
   impl->close_timeout_ns = close_timeout_ns;
   status =
-      redis_io_runtime_attach_source(runtime, &impl->runtime_source, redis_io_flow_run_scheduled,
+      redis_io_runtime_attach_publisher(runtime, &impl->runtime_publisher, redis_io_flow_run_scheduled,
                                      impl, &config.backend, &config.backend_user);
   if (status != TURBO_OK) goto failed;
   impl->attached = true;
@@ -192,15 +192,15 @@ int redis_io_flow_init(redis_io_flow *flow, redis_io_runtime *runtime, uint64_t 
   config.user = impl;
   config.drive = redis_io_flow_wake;
   config.drive_user = impl;
-  status = cflow_source_from_io_actor(&impl->source, &impl->owner, &config);
+  status = cflow_publisher_from_io_actor(&impl->publisher, &impl->owner, &config);
   if (status != TURBO_OK) goto failed;
-  impl->source_live = true;
+  impl->publisher_live = true;
   impl->owner_live = true;
   flow->impl = impl;
   return TURBO_OK;
 
 failed:
-  if (impl->attached) (void)redis_io_runtime_detach_source(&impl->runtime_source);
+  if (impl->attached) (void)redis_io_runtime_detach_publisher(&impl->runtime_publisher);
   turbo_mutex_destroy(&impl->gate);
   free(impl);
   return status;
@@ -208,11 +208,11 @@ failed:
 
 int redis_io_flow_submit(redis_io_flow *flow, const cflow_io_native_operation *operation) {
   redis_io_flow_impl *impl = flow != NULL ? (redis_io_flow_impl *)flow->impl : NULL;
-  cflow_resume_ctx context = {0};
+  cflow_publish_context context = {0};
   cflow_io_completion ignored = {0};
   cflow_step step;
   int status;
-  if (impl == NULL || operation == NULL || !impl->source_live || impl->active ||
+  if (impl == NULL || operation == NULL || !impl->publisher_live || impl->active ||
       impl->pending_valid)
     return TURBO_EINVAL;
   turbo_mutex_lock(&impl->gate);
@@ -223,7 +223,7 @@ int redis_io_flow_submit(redis_io_flow *flow, const cflow_io_native_operation *o
   impl->operation.native = *operation;
   impl->pending_valid = true;
   turbo_mutex_unlock(&impl->gate);
-  status = redis_io_runtime_source_started(impl->runtime);
+  status = redis_io_runtime_publisher_started(impl->runtime);
   if (status != TURBO_OK) {
     turbo_mutex_lock(&impl->gate);
     impl->pending_valid = false;
@@ -235,7 +235,7 @@ int redis_io_flow_submit(redis_io_flow *flow, const cflow_io_native_operation *o
   impl->driver_error = TURBO_OK;
   turbo_mutex_unlock(&impl->gate);
   context.downstream_demand = 1u;
-  step = cflow_source_resume(&impl->source, &context, &ignored);
+  step = cflow_publisher_resume(&impl->publisher, &context, &ignored);
   if (step.kind != CFLOW_STEP_WAIT) {
     impl->pending_valid = false;
     redis_io_flow_finish_runtime_pending(impl, true);
@@ -250,10 +250,10 @@ redis_io_flow_step redis_io_flow_next(redis_io_flow *flow) {
   redis_io_flow_impl *impl = flow != NULL ? (redis_io_flow_impl *)flow->impl : NULL;
   redis_io_flow_step out = {REDIS_IO_FLOW_ERROR, {0}, {0}, TURBO_EINVAL};
   cflow_io_completion completion = {0};
-  cflow_resume_ctx context = {0};
+  cflow_publish_context context = {0};
   cflow_step step;
   int status;
-  if (impl == NULL || !impl->active || !impl->source_live) return out;
+  if (impl == NULL || !impl->active || !impl->publisher_live) return out;
   turbo_mutex_lock(&impl->gate);
   status = impl->driver_error;
   turbo_mutex_unlock(&impl->gate);
@@ -262,7 +262,7 @@ redis_io_flow_step redis_io_flow_next(redis_io_flow *flow) {
     return out;
   }
   context.downstream_demand = 1u;
-  step = cflow_source_resume(&impl->source, &context, &completion);
+  step = cflow_publisher_resume(&impl->publisher, &context, &completion);
   if (step.kind == CFLOW_STEP_WAIT) {
     impl->waitable = step.waitable;
     out.kind = REDIS_IO_FLOW_WAIT;
@@ -291,9 +291,9 @@ int redis_io_flow_cancel(redis_io_flow *flow) {
   redis_io_flow_impl *impl = flow != NULL ? (redis_io_flow_impl *)flow->impl : NULL;
   int status;
   if (impl == NULL) return TURBO_EINVAL;
-  if (impl->source_live) {
-    cflow_source_destroy(&impl->source);
-    impl->source_live = false;
+  if (impl->publisher_live) {
+    cflow_publisher_destroy(&impl->publisher);
+    impl->publisher_live = false;
   }
   status = redis_io_flow_close_owner(impl);
   if (status != TURBO_OK) return status;
@@ -310,7 +310,7 @@ int redis_io_flow_destroy(redis_io_flow *flow) {
   status = redis_io_flow_cancel(flow);
   if (status != TURBO_OK) return status;
   if (impl->attached) {
-    status = redis_io_runtime_detach_source(&impl->runtime_source);
+    status = redis_io_runtime_detach_publisher(&impl->runtime_publisher);
     if (status != TURBO_OK) return status;
     impl->attached = false;
   }

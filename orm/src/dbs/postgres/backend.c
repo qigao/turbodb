@@ -290,7 +290,7 @@ static orm_status_t orm_postgres_drain_command(orm_row_cursor *cursor,
     if (step.kind == ORM_ROW_CURSOR_ROW) {
       status = ORM_STATUS_UNSUPPORTED;
       orm_error_set(error, status,
-                    "PostgreSQL row queries must be opened as a row Source");
+                    "PostgreSQL row queries must be opened as a row Publisher");
       break;
     }
     status = ORM_STATUS_INTERNAL_ERROR;
@@ -302,7 +302,7 @@ static orm_status_t orm_postgres_drain_command(orm_row_cursor *cursor,
   if (status == ORM_STATUS_OK && *columns != 0u) {
     status = ORM_STATUS_UNSUPPORTED;
     orm_error_set(error, status,
-                  "PostgreSQL row queries must be opened as a row Source");
+                  "PostgreSQL row queries must be opened as a row Publisher");
   }
   if (status == ORM_STATUS_OK && affected_rows != NULL)
     *affected_rows = *affected;

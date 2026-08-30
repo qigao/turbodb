@@ -1,7 +1,7 @@
 #ifndef ORM_SQLITE_CURSOR_H
 #define ORM_SQLITE_CURSOR_H
 
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 
 #include <sqlite3.h>
 

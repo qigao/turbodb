@@ -38,12 +38,12 @@ static const cmeta_data_desc orm_cpp_flow_row_data = {
     nullptr, nullptr, nullptr};
 
 spec("ORM thin C++ CFlow facade") {
-  it("only owns C handles and forwards typed Source demand") {
+  it("only owns C handles and forwards typed Publisher demand") {
     orm::connection connection(orm::config("sqlite").option("filename", ":memory:"));
-    auto rows = std::move(connection.raw(
+    orm::publisher<orm_cpp_flow_row> rows = std::move(connection.raw(
         "select 7 as id, 19 as score union all select 11, 29 order by id"))
                     .open<orm_cpp_flow_row>(orm_cpp_flow_row_data);
-    cflow_resume_ctx context{};
+    cflow_publish_context context{};
     orm_cpp_flow_row first{};
     orm_cpp_flow_row second{};
     check_equal(rows.next(first, context).kind, CFLOW_STEP_VALUE);
@@ -55,9 +55,9 @@ spec("ORM thin C++ CFlow facade") {
     check_equal(rows.next(second).kind, CFLOW_STEP_DONE);
   }
 
-  it("forwards command demand and affected rows through the C Source") {
+  it("forwards command demand and affected rows through the C Publisher") {
     orm::connection connection(orm::config("sqlite").option("filename", ":memory:"));
-    auto create = std::move(connection.raw(
+    orm::publisher<orm_command_result_t> create = std::move(connection.raw(
         "create table cpp_flow_command(id integer, score integer)"))
                       .execute();
     orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
@@ -71,7 +71,7 @@ spec("ORM thin C++ CFlow facade") {
     check_equal(insert.next(result).kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(result.affected_rows, uint64_t{1});
 
-    auto rows = std::move(connection.raw(
+    orm::publisher<orm_cpp_flow_row> rows = std::move(connection.raw(
         "select id, score from cpp_flow_command"))
                     .open<orm_cpp_flow_row>(orm_cpp_flow_row_data);
     orm_cpp_flow_row row{};

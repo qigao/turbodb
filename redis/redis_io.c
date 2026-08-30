@@ -12,11 +12,11 @@
 #include <stdlib.h>
 
 typedef struct redis_io_runtime_impl redis_io_runtime_impl;
-typedef struct redis_io_source_slot redis_io_source_slot;
+typedef struct redis_io_publisher_slot redis_io_publisher_slot;
 
 typedef struct redis_io_bridge_operation {
   cflow_io_native_operation native;
-  redis_io_source_slot *source;
+  redis_io_publisher_slot *publisher;
 } redis_io_bridge_operation;
 
 _Static_assert(offsetof(redis_io_bridge_operation, native) == 0u,
@@ -27,7 +27,7 @@ typedef struct redis_io_retiring_socket {
   bool active;
 } redis_io_retiring_socket;
 
-struct redis_io_source_slot {
+struct redis_io_publisher_slot {
   redis_io_runtime_impl *runtime;
   uint64_t generation;
   cflow_io_lease_id bridge_lease_id;
@@ -50,11 +50,11 @@ struct redis_io_runtime_impl {
   cflow_io_native_backend backend;
   cflow_executor driver;
   cflow_io_actor bridge;
-  redis_io_source_slot *sources;
+  redis_io_publisher_slot *publishers;
   redis_io_retiring_socket *retiring_sockets;
-  size_t source_capacity;
-  size_t attached_sources;
-  size_t active_source_operations;
+  size_t publisher_capacity;
+  size_t attached_publishers;
+  size_t active_publisher_operations;
   int bridge_error;
   turbo_mutex_t gate;
   turbo_cond_t changed;
@@ -75,8 +75,8 @@ enum {
 
 static TURBO_THREAD_LOCAL unsigned redis_io_callback_depth;
 
-static void redis_io_source_driver_task(void *user);
-static void redis_io_source_driver_cancel(void *user);
+static void redis_io_publisher_driver_task(void *user);
+static void redis_io_publisher_driver_cancel(void *user);
 static void redis_io_bridge_driver_task(void *user);
 static void redis_io_bridge_driver_cancel(void *user);
 
@@ -100,18 +100,18 @@ static const redis_io_runtime_impl *redis_io_const_impl(const redis_io_runtime *
   return runtime != NULL ? (const redis_io_runtime_impl *)runtime->impl : NULL;
 }
 
-static bool redis_io_source_matches(const redis_io_runtime_source *source,
-                                    const redis_io_source_slot *slot) {
-  return source != NULL && slot != NULL && source->slot == slot && source->generation != 0u &&
-         source->generation == slot->generation && slot->attached;
+static bool redis_io_publisher_matches(const redis_io_runtime_publisher *publisher,
+                                    const redis_io_publisher_slot *slot) {
+  return publisher != NULL && slot != NULL && publisher->slot == slot && publisher->generation != 0u &&
+         publisher->generation == slot->generation && slot->attached;
 }
 
 static bool redis_io_runtime_idle_locked(const redis_io_runtime_impl *impl) {
   size_t index;
-  if (impl->active_source_operations != 0u || impl->bridge_scheduled || impl->bridge_running)
+  if (impl->active_publisher_operations != 0u || impl->bridge_scheduled || impl->bridge_running)
     return false;
-  for (index = 0u; index < impl->source_capacity; ++index) {
-    const redis_io_source_slot *slot = &impl->sources[index];
+  for (index = 0u; index < impl->publisher_capacity; ++index) {
+    const redis_io_publisher_slot *slot = &impl->publishers[index];
     if (slot->scheduled || slot->running || slot->operation_owned || slot->acknowledge_pending)
       return false;
   }
@@ -132,8 +132,8 @@ static int redis_io_admission_error(cflow_admission_status status) {
   }
 }
 
-static int redis_io_post_source(redis_io_source_slot *slot) {
-  const cflow_executor_task task = {redis_io_source_driver_task, redis_io_source_driver_cancel,
+static int redis_io_post_publisher(redis_io_publisher_slot *slot) {
+  const cflow_executor_task task = {redis_io_publisher_driver_task, redis_io_publisher_driver_cancel,
                                     NULL, slot};
   cflow_admission_status admission;
   if (slot == NULL || slot->runtime == NULL) return TURBO_EINVAL;
@@ -182,7 +182,7 @@ static void redis_io_bridge_wake(void *user) {
 
 static void redis_io_bridge_operation_release(void *user) {
   redis_io_bridge_operation *operation = (redis_io_bridge_operation *)user;
-  redis_io_source_slot *slot = operation != NULL ? operation->source : NULL;
+  redis_io_publisher_slot *slot = operation != NULL ? operation->publisher : NULL;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   if (impl == NULL) return;
   turbo_mutex_lock(&impl->gate);
@@ -200,7 +200,7 @@ static void redis_io_bridge_completion(void *user, cflow_io_request_id request_i
                                        const cflow_io_completion *completion) {
   redis_io_runtime_impl *impl = (redis_io_runtime_impl *)user;
   redis_io_bridge_operation *operation = (redis_io_bridge_operation *)operation_user;
-  redis_io_source_slot *slot = operation != NULL ? operation->source : NULL;
+  redis_io_publisher_slot *slot = operation != NULL ? operation->publisher : NULL;
   (void)lease_id;
   if (impl == NULL || slot == NULL || completion == NULL) return;
   turbo_mutex_lock(&impl->gate);
@@ -216,7 +216,7 @@ static void redis_io_bridge_completion(void *user, cflow_io_request_id request_i
 static int redis_io_bridge_submit(void *backend_user, cflow_io_actor *actor,
                                   cflow_io_request_id request_id, cflow_io_lease_id lease_id,
                                   void *operation_user) {
-  redis_io_source_slot *slot = (redis_io_source_slot *)backend_user;
+  redis_io_publisher_slot *slot = (redis_io_publisher_slot *)backend_user;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   cflow_io_native_operation *native = (cflow_io_native_operation *)operation_user;
   cflow_io_operation operation;
@@ -230,7 +230,7 @@ static int redis_io_bridge_submit(void *backend_user, cflow_io_actor *actor,
     turbo_mutex_unlock(&impl->gate);
     return status;
   }
-  for (index = 0u; index < impl->source_capacity; ++index) {
+  for (index = 0u; index < impl->publisher_capacity; ++index) {
     if (impl->retiring_sockets[index].active &&
         impl->retiring_sockets[index].identity == native->socket) {
       turbo_mutex_unlock(&impl->gate);
@@ -238,7 +238,7 @@ static int redis_io_bridge_submit(void *backend_user, cflow_io_actor *actor,
     }
   }
   slot->operation.native = *native;
-  slot->operation.source = slot;
+  slot->operation.publisher = slot;
   slot->target_actor = actor;
   slot->target_request_id = request_id;
   slot->bridge_request_id = 0u;
@@ -270,7 +270,7 @@ static int redis_io_bridge_submit(void *backend_user, cflow_io_actor *actor,
 }
 
 static int redis_io_bridge_cancel(void *backend_user, cflow_io_request_id request_id) {
-  redis_io_source_slot *slot = (redis_io_source_slot *)backend_user;
+  redis_io_publisher_slot *slot = (redis_io_publisher_slot *)backend_user;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   cflow_io_request_id bridge_request_id;
   cflow_io_cancel_status cancelled;
@@ -308,25 +308,25 @@ static void redis_io_bridge_driver_task(void *user) {
   impl->bridge_running = true;
   turbo_mutex_unlock(&impl->gate);
   redis_io_runtime_enter_callback();
-  for (index = 0u; index < impl->source_capacity; ++index) {
+  for (index = 0u; index < impl->publisher_capacity; ++index) {
     cflow_io_request_id request_id = 0u;
     cflow_io_request_id target_request_id = 0u;
     cflow_io_actor *target_actor = NULL;
     cflow_io_completion target_completion = {0};
     turbo_mutex_lock(&impl->gate);
-    if (impl->sources[index].acknowledge_pending) {
-      request_id = impl->sources[index].bridge_request_id;
-      target_request_id = impl->sources[index].target_request_id;
-      target_actor = impl->sources[index].target_actor;
-      target_completion = impl->sources[index].target_completion;
-      impl->sources[index].acknowledge_pending = false;
+    if (impl->publishers[index].acknowledge_pending) {
+      request_id = impl->publishers[index].bridge_request_id;
+      target_request_id = impl->publishers[index].target_request_id;
+      target_actor = impl->publishers[index].target_actor;
+      target_completion = impl->publishers[index].target_completion;
+      impl->publishers[index].acknowledge_pending = false;
     }
     turbo_mutex_unlock(&impl->gate);
     if (request_id != 0u) {
       cflow_io_ack_status acknowledged = cflow_io_actor_acknowledge(&impl->bridge, request_id);
       if (acknowledged == CFLOW_IO_ACK_BUSY) {
         turbo_mutex_lock(&impl->gate);
-        impl->sources[index].acknowledge_pending = true;
+        impl->publishers[index].acknowledge_pending = true;
         impl->bridge_scheduled = true;
         turbo_mutex_unlock(&impl->gate);
       } else if (acknowledged == CFLOW_IO_ACK_RELEASED) {
@@ -377,8 +377,8 @@ static void redis_io_bridge_driver_cancel(void *user) {
   turbo_mutex_unlock(&impl->gate);
 }
 
-static void redis_io_source_driver_task(void *user) {
-  redis_io_source_slot *slot = (redis_io_source_slot *)user;
+static void redis_io_publisher_driver_task(void *user) {
+  redis_io_publisher_slot *slot = (redis_io_publisher_slot *)user;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   redis_io_runtime_drive_fn drive = NULL;
   void *drive_user = NULL;
@@ -403,7 +403,7 @@ static void redis_io_source_driver_task(void *user) {
   turbo_cond_broadcast(&impl->changed);
   turbo_mutex_unlock(&impl->gate);
   if (repost) {
-    int status = redis_io_post_source(slot);
+    int status = redis_io_post_publisher(slot);
     if (status != TURBO_OK) {
       turbo_mutex_lock(&impl->gate);
       slot->scheduled = false;
@@ -414,8 +414,8 @@ static void redis_io_source_driver_task(void *user) {
   }
 }
 
-static void redis_io_source_driver_cancel(void *user) {
-  redis_io_source_slot *slot = (redis_io_source_slot *)user;
+static void redis_io_publisher_driver_cancel(void *user) {
+  redis_io_publisher_slot *slot = (redis_io_publisher_slot *)user;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   if (impl == NULL) return;
   turbo_mutex_lock(&impl->gate);
@@ -432,27 +432,27 @@ int redis_io_runtime_init(redis_io_runtime *runtime, const redis_io_runtime_conf
   cflow_io_actor_config bridge_config = {0};
   size_t driver_capacity;
   int status;
-  if (runtime == NULL || runtime->impl != NULL || config == NULL || config->source_capacity == 0u ||
+  if (runtime == NULL || runtime->impl != NULL || config == NULL || config->publisher_capacity == 0u ||
       config->completion_batch_capacity == 0u ||
-      config->source_capacity > SIZE_MAX / sizeof(redis_io_source_slot) ||
-      config->source_capacity > SIZE_MAX / sizeof(redis_io_retiring_socket) ||
-      config->source_capacity >
+      config->publisher_capacity > SIZE_MAX / sizeof(redis_io_publisher_slot) ||
+      config->publisher_capacity > SIZE_MAX / sizeof(redis_io_retiring_socket) ||
+      config->publisher_capacity >
           (SIZE_MAX - REDIS_IO_DRIVER_CAPACITY_RESERVE) / REDIS_IO_DRIVER_CAPACITY_FACTOR)
     return TURBO_EINVAL;
   driver_capacity =
-      config->source_capacity * REDIS_IO_DRIVER_CAPACITY_FACTOR + REDIS_IO_DRIVER_CAPACITY_RESERVE;
+      config->publisher_capacity * REDIS_IO_DRIVER_CAPACITY_FACTOR + REDIS_IO_DRIVER_CAPACITY_RESERVE;
   impl = (redis_io_runtime_impl *)calloc(1u, sizeof(*impl));
   if (impl == NULL) return TURBO_ENOMEM;
-  impl->sources = (redis_io_source_slot *)calloc(config->source_capacity, sizeof(*impl->sources));
+  impl->publishers = (redis_io_publisher_slot *)calloc(config->publisher_capacity, sizeof(*impl->publishers));
   impl->retiring_sockets =
-      (redis_io_retiring_socket *)calloc(config->source_capacity, sizeof(*impl->retiring_sockets));
-  if (impl->sources == NULL || impl->retiring_sockets == NULL) {
+      (redis_io_retiring_socket *)calloc(config->publisher_capacity, sizeof(*impl->retiring_sockets));
+  if (impl->publishers == NULL || impl->retiring_sockets == NULL) {
     free(impl->retiring_sockets);
-    free(impl->sources);
+    free(impl->publishers);
     free(impl);
     return TURBO_ENOMEM;
   }
-  impl->source_capacity = config->source_capacity;
+  impl->publisher_capacity = config->publisher_capacity;
   turbo_mutex_init(&impl->gate);
   turbo_cond_init(&impl->changed);
   if (!cflow_executor_serial_init_with_capacity(&impl->driver, driver_capacity)) {
@@ -460,13 +460,13 @@ int redis_io_runtime_init(redis_io_runtime *runtime, const redis_io_runtime_conf
     goto failed;
   }
   impl->driver_live = true;
-  backend_config = (cflow_io_native_backend_config){config->backend_kind, config->source_capacity,
+  backend_config = (cflow_io_native_backend_config){config->backend_kind, config->publisher_capacity,
                                                     config->completion_batch_capacity};
   status = cflow_io_native_backend_init(&impl->backend, &backend_config);
   if (status != TURBO_OK) goto failed;
   impl->backend_live = true;
-  bridge_config.request_capacity = config->source_capacity;
-  bridge_config.command_capacity = config->source_capacity;
+  bridge_config.request_capacity = config->publisher_capacity;
+  bridge_config.command_capacity = config->publisher_capacity;
   bridge_config.executor = &impl->driver;
   bridge_config.backend = cflow_io_native_backend_actor_ops();
   bridge_config.backend_user = &impl->backend;
@@ -491,7 +491,7 @@ failed:
   turbo_cond_destroy(&impl->changed);
   turbo_mutex_destroy(&impl->gate);
   free(impl->retiring_sockets);
-  free(impl->sources);
+  free(impl->publishers);
   free(impl);
   return status;
 }
@@ -500,12 +500,12 @@ int redis_io_runtime_valid(const redis_io_runtime *runtime) {
   return redis_io_const_impl(runtime) != NULL;
 }
 
-int redis_io_runtime_attach_source(redis_io_runtime *runtime, redis_io_runtime_source *source,
+int redis_io_runtime_attach_publisher(redis_io_runtime *runtime, redis_io_runtime_publisher *publisher,
                                    redis_io_runtime_drive_fn drive, void *drive_user,
                                    cflow_io_backend_ops *backend, void **backend_user) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   size_t index;
-  if (impl == NULL || source == NULL || source->slot != NULL || source->generation != 0u ||
+  if (impl == NULL || publisher == NULL || publisher->slot != NULL || publisher->generation != 0u ||
       drive == NULL || backend == NULL || backend_user == NULL)
     return TURBO_EINVAL;
   turbo_mutex_lock(&impl->gate);
@@ -513,14 +513,14 @@ int redis_io_runtime_attach_source(redis_io_runtime *runtime, redis_io_runtime_s
     turbo_mutex_unlock(&impl->gate);
     return TURBO_ECANCELED;
   }
-  for (index = 0u; index < impl->source_capacity; ++index)
-    if (!impl->sources[index].attached) break;
-  if (index == impl->source_capacity) {
+  for (index = 0u; index < impl->publisher_capacity; ++index)
+    if (!impl->publishers[index].attached) break;
+  if (index == impl->publisher_capacity) {
     turbo_mutex_unlock(&impl->gate);
     return TURBO_ENOBUFS;
   }
   {
-    redis_io_source_slot *slot = &impl->sources[index];
+    redis_io_publisher_slot *slot = &impl->publishers[index];
     if (slot->generation == UINT64_MAX) slot->generation = 1u;
     else ++slot->generation;
     if (slot->generation == 0u) slot->generation = 1u;
@@ -530,9 +530,9 @@ int redis_io_runtime_attach_source(redis_io_runtime *runtime, redis_io_runtime_s
     slot->drive_user = drive_user;
     slot->schedule_error = TURBO_OK;
     slot->attached = true;
-    ++impl->attached_sources;
-    source->slot = slot;
-    source->generation = slot->generation;
+    ++impl->attached_publishers;
+    publisher->slot = slot;
+    publisher->generation = slot->generation;
     *backend = (cflow_io_backend_ops){redis_io_bridge_submit, redis_io_bridge_cancel};
     *backend_user = slot;
   }
@@ -540,14 +540,14 @@ int redis_io_runtime_attach_source(redis_io_runtime *runtime, redis_io_runtime_s
   return TURBO_OK;
 }
 
-int redis_io_runtime_schedule_source(redis_io_runtime_source *source) {
-  redis_io_source_slot *slot = source != NULL ? (redis_io_source_slot *)source->slot : NULL;
+int redis_io_runtime_schedule_publisher(redis_io_runtime_publisher *publisher) {
+  redis_io_publisher_slot *slot = publisher != NULL ? (redis_io_publisher_slot *)publisher->slot : NULL;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   bool post = false;
   int status;
   if (impl == NULL) return TURBO_EINVAL;
   turbo_mutex_lock(&impl->gate);
-  if (!redis_io_source_matches(source, slot) || impl->closing || impl->destroying) {
+  if (!redis_io_publisher_matches(publisher, slot) || impl->closing || impl->destroying) {
     turbo_mutex_unlock(&impl->gate);
     return TURBO_ECANCELED;
   }
@@ -557,7 +557,7 @@ int redis_io_runtime_schedule_source(redis_io_runtime_source *source) {
   }
   turbo_mutex_unlock(&impl->gate);
   if (!post) return TURBO_OK;
-  status = redis_io_post_source(slot);
+  status = redis_io_post_publisher(slot);
   if (status == TURBO_OK) return TURBO_OK;
   turbo_mutex_lock(&impl->gate);
   slot->scheduled = false;
@@ -567,15 +567,15 @@ int redis_io_runtime_schedule_source(redis_io_runtime_source *source) {
   return status;
 }
 
-int redis_io_runtime_wait_source_idle(redis_io_runtime_source *source, uint64_t timeout_ns) {
-  redis_io_source_slot *slot = source != NULL ? (redis_io_source_slot *)source->slot : NULL;
+int redis_io_runtime_wait_publisher_idle(redis_io_runtime_publisher *publisher, uint64_t timeout_ns) {
+  redis_io_publisher_slot *slot = publisher != NULL ? (redis_io_publisher_slot *)publisher->slot : NULL;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   uint64_t started;
   if (impl == NULL || timeout_ns == 0u) return TURBO_EINVAL;
   if (redis_io_runtime_in_callback()) return TURBO_EBUSY;
   started = turbo_hrtime();
   turbo_mutex_lock(&impl->gate);
-  while (redis_io_source_matches(source, slot) && (slot->scheduled || slot->running)) {
+  while (redis_io_publisher_matches(publisher, slot) && (slot->scheduled || slot->running)) {
     uint64_t now = turbo_hrtime();
     if (now - started >= timeout_ns) {
       turbo_mutex_unlock(&impl->gate);
@@ -583,7 +583,7 @@ int redis_io_runtime_wait_source_idle(redis_io_runtime_source *source, uint64_t 
     }
     (void)turbo_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - (now - started));
   }
-  if (!redis_io_source_matches(source, slot)) {
+  if (!redis_io_publisher_matches(publisher, slot)) {
     turbo_mutex_unlock(&impl->gate);
     return TURBO_EINVAL;
   }
@@ -594,12 +594,12 @@ int redis_io_runtime_wait_source_idle(redis_io_runtime_source *source, uint64_t 
   }
 }
 
-int redis_io_runtime_detach_source(redis_io_runtime_source *source) {
-  redis_io_source_slot *slot = source != NULL ? (redis_io_source_slot *)source->slot : NULL;
+int redis_io_runtime_detach_publisher(redis_io_runtime_publisher *publisher) {
+  redis_io_publisher_slot *slot = publisher != NULL ? (redis_io_publisher_slot *)publisher->slot : NULL;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   if (impl == NULL) return TURBO_EINVAL;
   turbo_mutex_lock(&impl->gate);
-  if (!redis_io_source_matches(source, slot)) {
+  if (!redis_io_publisher_matches(publisher, slot)) {
     turbo_mutex_unlock(&impl->gate);
     return TURBO_EINVAL;
   }
@@ -611,35 +611,35 @@ int redis_io_runtime_detach_source(redis_io_runtime_source *source) {
   slot->drive = NULL;
   slot->drive_user = NULL;
   slot->schedule_error = TURBO_OK;
-  if (impl->attached_sources != 0u) --impl->attached_sources;
-  source->slot = NULL;
-  source->generation = 0u;
+  if (impl->attached_publishers != 0u) --impl->attached_publishers;
+  publisher->slot = NULL;
+  publisher->generation = 0u;
   turbo_cond_broadcast(&impl->changed);
   turbo_mutex_unlock(&impl->gate);
   return TURBO_OK;
 }
 
-int redis_io_runtime_source_started(redis_io_runtime *runtime) {
+int redis_io_runtime_publisher_started(redis_io_runtime *runtime) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   int status;
   if (impl == NULL) return TURBO_EINVAL;
   turbo_mutex_lock(&impl->gate);
-  if (impl->closing || impl->active_source_operations == impl->source_capacity) {
+  if (impl->closing || impl->active_publisher_operations == impl->publisher_capacity) {
     status =
-        impl->active_source_operations == impl->source_capacity ? TURBO_ENOBUFS : TURBO_ECANCELED;
+        impl->active_publisher_operations == impl->publisher_capacity ? TURBO_ENOBUFS : TURBO_ECANCELED;
     turbo_mutex_unlock(&impl->gate);
     return status;
   }
-  ++impl->active_source_operations;
+  ++impl->active_publisher_operations;
   turbo_mutex_unlock(&impl->gate);
   return TURBO_OK;
 }
 
-void redis_io_runtime_source_finished(redis_io_runtime *runtime) {
+void redis_io_runtime_publisher_finished(redis_io_runtime *runtime) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   if (impl == NULL) return;
   turbo_mutex_lock(&impl->gate);
-  if (impl->active_source_operations != 0u) --impl->active_source_operations;
+  if (impl->active_publisher_operations != 0u) --impl->active_publisher_operations;
   turbo_cond_broadcast(&impl->changed);
   turbo_mutex_unlock(&impl->gate);
 }
@@ -687,7 +687,7 @@ int redis_io_runtime_forget_socket(redis_io_runtime *runtime, uintptr_t closed_s
   status = cflow_io_native_backend_forget_socket(&impl->backend, closed_socket);
   if (status != TURBO_OK && status != TURBO_ENOENT) return status;
   turbo_mutex_lock(&impl->gate);
-  for (index = 0u; index < impl->source_capacity; ++index) {
+  for (index = 0u; index < impl->publisher_capacity; ++index) {
     if (impl->retiring_sockets[index].active &&
         impl->retiring_sockets[index].identity == closed_socket) {
       impl->retiring_sockets[index].active = false;
@@ -704,9 +704,9 @@ int redis_io_runtime_retire_socket(redis_io_runtime *runtime, uintptr_t socket_i
   size_t index;
   if (impl == NULL) return TURBO_EINVAL;
   turbo_mutex_lock(&impl->gate);
-  for (index = 0u; index < impl->source_capacity; ++index) {
-    if (impl->sources[index].operation_owned &&
-        impl->sources[index].operation.native.socket == socket_identity) {
+  for (index = 0u; index < impl->publisher_capacity; ++index) {
+    if (impl->publishers[index].operation_owned &&
+        impl->publishers[index].operation.native.socket == socket_identity) {
       turbo_mutex_unlock(&impl->gate);
       return TURBO_EBUSY;
     }
@@ -747,7 +747,7 @@ int redis_io_runtime_close(redis_io_runtime *runtime) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   if (impl == NULL) return TURBO_EINVAL;
   turbo_mutex_lock(&impl->gate);
-  if (impl->attached_sources != 0u || impl->active_source_operations != 0u) {
+  if (impl->attached_publishers != 0u || impl->active_publisher_operations != 0u) {
     turbo_mutex_unlock(&impl->gate);
     return TURBO_EBUSY;
   }
@@ -762,8 +762,8 @@ int redis_io_runtime_destroy(redis_io_runtime *runtime) {
   if (impl == NULL) return TURBO_EINVAL;
   if (redis_io_runtime_in_callback()) return TURBO_EBUSY;
   turbo_mutex_lock(&impl->gate);
-  if (!impl->closing || impl->destroying || impl->attached_sources != 0u ||
-      impl->active_source_operations != 0u) {
+  if (!impl->closing || impl->destroying || impl->attached_publishers != 0u ||
+      impl->active_publisher_operations != 0u) {
     turbo_mutex_unlock(&impl->gate);
     return TURBO_EBUSY;
   }
@@ -803,7 +803,7 @@ int redis_io_runtime_destroy(redis_io_runtime *runtime) {
   turbo_cond_destroy(&impl->changed);
   turbo_mutex_destroy(&impl->gate);
   free(impl->retiring_sockets);
-  free(impl->sources);
+  free(impl->publishers);
   free(impl);
   runtime->impl = NULL;
   return TURBO_OK;

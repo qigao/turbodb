@@ -287,7 +287,7 @@ spec("ORM public reactive flow") {
     orm_connection_t *connection = NULL;
     orm_query_t *query = NULL;
     orm_flow_config_t flow_config;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_public_flow_row row = {0};
     cflow_step step;
 
@@ -310,13 +310,13 @@ spec("ORM public reactive flow") {
     check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     orm_query_destroy(query);
     orm_disconnect(connection);
   }
@@ -328,7 +328,7 @@ spec("ORM public reactive flow") {
     orm_connection_t *connection = NULL;
     orm_query_t *query = NULL;
     orm_flow_config_t flow_config;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_public_flow_row row = {0};
     cflow_step step;
 
@@ -349,11 +349,11 @@ spec("ORM public reactive flow") {
     check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     orm_query_destroy(query);
     orm_disconnect(connection);
   }
@@ -365,7 +365,7 @@ spec("ORM public reactive flow") {
     orm_connection_t *connection = NULL;
     orm_query_t *query = NULL;
     orm_flow_config_t flow_config;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_public_flow_row row = {0};
     cflow_step step;
 
@@ -386,26 +386,26 @@ spec("ORM public reactive flow") {
     check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(row.id, 7);
     check_equal(row.score, 19L);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_DONE);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     orm_query_destroy(query);
     orm_disconnect(connection);
   }
 
-  it("opens a typed SQLite Source that advances one row per resume") {
+  it("opens a typed SQLite Publisher that advances one row per resume") {
     orm_error_t error;
     orm_config_t connection_config;
     orm_option_t filename;
     orm_connection_t *connection = NULL;
     orm_query_t *query = NULL;
     orm_flow_config_t flow_config;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_public_flow_row first = {0};
     orm_public_flow_row second = {0};
     orm_public_flow_row terminal = {0};
@@ -430,25 +430,25 @@ spec("ORM public reactive flow") {
     orm_flow_config(&flow_config, &orm_public_flow_row_data);
     check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
                 ORM_STATUS_OK);
-    check_true(cflow_source_valid(&source));
+    check_true(cflow_publisher_valid(&source));
     check_equal(orm_query_open_flow(query, &flow_config, &source, &error),
                 ORM_STATUS_INVALID_STATE);
-    check_true(cflow_source_valid(&source));
+    check_true(cflow_publisher_valid(&source));
 
-    step = cflow_source_resume(&source, NULL, &first);
+    step = cflow_publisher_resume(&source, NULL, &first);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(first.id, 7);
     check_equal(first.score, 19L);
 
-    step = cflow_source_resume(&source, NULL, &second);
+    step = cflow_publisher_resume(&source, NULL, &second);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(second.id, 11);
     check_equal(second.score, 29L);
 
-    step = cflow_source_resume(&source, NULL, &terminal);
+    step = cflow_publisher_resume(&source, NULL, &terminal);
     check_equal(step.kind, CFLOW_STEP_DONE);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     orm_query_destroy(query);
     orm_disconnect(connection);
   }
@@ -461,8 +461,8 @@ spec("ORM public reactive flow") {
     orm_query_t *command = NULL;
     orm_query_t *probe = NULL;
     orm_flow_config_t row_config;
-    cflow_source command_source = {0};
-    cflow_source row_source = {0};
+    cflow_publisher command_publisher = {0};
+    cflow_publisher row_source = {0};
     orm_command_result_t command_result = ORM_COMMAND_RESULT_INIT;
     orm_public_flow_row row = {0};
     cflow_step step;
@@ -481,7 +481,7 @@ spec("ORM public reactive flow") {
                         orm_view("create table flow_command(id integer, "
                                  "score integer)"),
                         &command, &error), ORM_STATUS_OK);
-    check_equal(orm_query_open_command_flow(command, &command_source, &error),
+    check_equal(orm_query_open_command_flow(command, &command_publisher, &error),
                 ORM_STATUS_OK);
     check_equal(orm_raw(connection,
                         orm_view("select id, score from flow_command"),
@@ -489,27 +489,27 @@ spec("ORM public reactive flow") {
     orm_flow_config(&row_config, &orm_public_flow_row_data);
     check_equal(orm_query_open_flow(probe, &row_config, &row_source, &error),
                 ORM_STATUS_SQL_ERROR);
-    check_false(cflow_source_valid(&row_source));
+    check_false(cflow_publisher_valid(&row_source));
     orm_query_destroy(probe);
     probe = NULL;
 
-    step = cflow_source_resume(&command_source, NULL, &command_result);
+    step = cflow_publisher_resume(&command_publisher, NULL, &command_result);
     check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(command_result.affected_rows, (uint64_t)0u);
-    cflow_source_destroy(&command_source);
-    command_source = (cflow_source){0};
+    cflow_publisher_destroy(&command_publisher);
+    command_publisher = (cflow_publisher){0};
     orm_query_destroy(command);
     command = NULL;
 
     check_equal(orm_raw(connection,
                         orm_view("insert into flow_command values(7, 19)"),
                         &command, &error), ORM_STATUS_OK);
-    check_equal(orm_query_open_command_flow(command, &command_source, &error),
+    check_equal(orm_query_open_command_flow(command, &command_publisher, &error),
                 ORM_STATUS_OK);
-    step = cflow_source_resume(&command_source, NULL, &command_result);
+    step = cflow_publisher_resume(&command_publisher, NULL, &command_result);
     check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(command_result.affected_rows, (uint64_t)1u);
-    cflow_source_destroy(&command_source);
+    cflow_publisher_destroy(&command_publisher);
     orm_query_destroy(command);
 
     check_equal(orm_raw(connection,
@@ -517,11 +517,11 @@ spec("ORM public reactive flow") {
                         &probe, &error), ORM_STATUS_OK);
     check_equal(orm_query_open_flow(probe, &row_config, &row_source, &error),
                 ORM_STATUS_OK);
-    step = cflow_source_resume(&row_source, NULL, &row);
+    step = cflow_publisher_resume(&row_source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
     check_equal(row.id, 7);
     check_equal(row.score, 19L);
-    cflow_source_destroy(&row_source);
+    cflow_publisher_destroy(&row_source);
     orm_query_destroy(probe);
     orm_disconnect(connection);
   }

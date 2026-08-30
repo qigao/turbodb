@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 ORM 核心已经迁移为 C11，并通过 CFlow Source 暴露有界 reactive row stream。历史分支 `feat/orm-pg-control` 仍然修改 `orm_c.cpp`、`backend.cpp` 和已经删除的 C++ schema generator；将它整体合入当前主线会重新引入生产 C++ 实现，并产生多处 modify/delete 冲突。
+当前 ORM 核心已经迁移为 C11，并通过 CFlow Publisher 暴露有界 reactive row stream。历史分支 `feat/orm-pg-control` 仍然修改 `orm_c.cpp`、`backend.cpp` 和已经删除的 C++ schema generator；将它整体合入当前主线会重新引入生产 C++ 实现，并产生多处 modify/delete 冲突。
 
 仍需保留的需求有三项：
 
@@ -14,7 +14,7 @@
 
 ### 方案 A：rebase 历史分支
 
-放弃。历史分支以 C++ core、全局 driver registration 和仓库内 C++ schema generator 为基础，与当前 C11 core、header-only C++ wrapper 和 CFlow Source 所有权契约冲突。解决冲突后得到的代码也不是当前目标架构。
+放弃。历史分支以 C++ core、全局 driver registration 和仓库内 C++ schema generator 为基础，与当前 C11 core、header-only C++ wrapper 和 CFlow Publisher 所有权契约冲突。解决冲突后得到的代码也不是当前目标架构。
 
 ### 方案 B：进程级 PostgreSQL 注册表
 
@@ -49,13 +49,13 @@ ORM_POSTGRESQL_API orm_status_t ORM_C_CALL orm_postgresql_connect(
     orm_error_t *error);
 ```
 
-该函数只接受 `postgres` 或 `postgresql` driver token。成功后 connection 拥有 `PGconn`；`orm_disconnect()` 仍是唯一释放入口。PostgreSQL query Source 的现有契约不变：成功 open 后 Source 拥有 cursor，query、connection、row descriptor 和 scheduler 相关对象必须存活到 Source close。
+该函数只接受 `postgres` 或 `postgresql` driver token。成功后 connection 拥有 `PGconn`；`orm_disconnect()` 仍是唯一释放入口。PostgreSQL query Publisher 的现有契约不变：成功 open 后 Publisher 拥有 cursor，query、connection、row descriptor 和 scheduler 相关对象必须存活到 Publisher close。
 
 C++ 只提供 header wrapper。`orm::connection` 增加接收 C connector function pointer 的构造函数，`orm_postgresql.hpp` 以内联函数调用 `orm_postgresql_connect()`；没有 `.cpp` 生产源。
 
 ## 内部组件边界
 
-`Orm::C` 继续拥有 connection、query plan、materialized result、transaction façade 和通用 CFlow Source 协议。`Orm::PostgreSQL` 拥有 libpq connection、parameter encoding、SQLSTATE mapping 和 PostgreSQL cursor adapter。
+`Orm::C` 继续拥有 connection、query plan、materialized result、transaction façade 和通用 CFlow Publisher 协议。`Orm::PostgreSQL` 拥有 libpq connection、parameter encoding、SQLSTATE mapping 和 PostgreSQL cursor adapter。
 
 两者由同版本 SDK 一起构建。core 向 component 暴露一个只在私有头声明的 versioned connector hook，以及 PostgreSQL backend 当前需要的通用错误/view/SQL-render services。这些符号不安装为 driver-author API，不承诺跨 TurboDB 版本兼容；公开 ABI 仍只有 `orm.h` 和 `orm_postgresql.h`。
 

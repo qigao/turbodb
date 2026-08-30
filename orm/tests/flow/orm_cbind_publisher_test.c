@@ -1,4 +1,4 @@
-#include "orm_cbind_source.h"
+#include "orm_cbind_publisher.h"
 
 #include <cmeta/struct.h>
 #include "tinytest.h"
@@ -176,7 +176,7 @@ static void orm_flow_test_sink_done(void *context) {
   ++state->done_count;
 }
 
-spec("ORM CBind CFlow source") {
+spec("ORM CBind CFlow publisher") {
   it("disposes a partially initialized cursor from a failed backend contract") {
     orm_flow_test_cursor_state state = {0};
     orm_row_cursor cursor = {.ops = &orm_flow_test_partial_cursor_ops,
@@ -211,27 +211,27 @@ spec("ORM CBind CFlow source") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_flow_test_row row = {0};
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     check_equal(error.status, ORM_STATUS_OK);
     check_equal(error.message[0], '\0');
     check_null(cursor.ops);
     check_null(cursor.context);
 
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(row.id, 7);
     check_equal(row.score, 19L);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_equal(state.cancel_count, (size_t)0u);
     check_equal(state.destroy_count, (size_t)1u);
   }
@@ -245,22 +245,22 @@ spec("ORM CBind CFlow source") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_flow_test_row row = {0};
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_equal(state.cancel_count, (size_t)1u);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_equal(state.cancel_count, (size_t)1u);
     check_equal(state.destroy_count, (size_t)1u);
   }
@@ -276,30 +276,30 @@ spec("ORM CBind CFlow source") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_flow_test_row row = {0};
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_WAIT);
     check_true(cflow_waitable_valid(&step.waitable));
     check_equal(state.cancel_count, (size_t)0u);
     check_equal(state.destroy_count, (size_t)0u);
 
     cflow_waitable_cancel(&step.waitable);
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_equal(wait_state.cancel_count, (size_t)1u);
     check_equal(state.cancel_count, (size_t)1u);
     check_equal(state.destroy_count, (size_t)1u);
   }
 
-  it("keeps cursor ownership when source configuration is rejected") {
+  it("keeps cursor ownership when publisher configuration is rejected") {
     orm_flow_test_cursor_state state = {
         .reader_state = {NULL, 0u, 0u},
         .next_kind = ORM_ROW_CURSOR_DONE,
@@ -308,13 +308,13 @@ spec("ORM CBind CFlow source") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 0u, 64u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
 
     orm_error_init(&error);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_INVALID_ARGUMENT);
     check_not_null(cursor.ops);
     check_not_null(cursor.context);
@@ -342,24 +342,24 @@ spec("ORM CBind CFlow source") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     orm_flow_test_row row = {.id = 91, .score = 92};
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
     check_equal(row.id, 0);
     check_equal(row.score, 0L);
     check_equal(state.cancel_count, (size_t)1u);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_equal(state.cancel_count, (size_t)1u);
     check_equal(state.destroy_count, (size_t)1u);
   }
@@ -373,28 +373,28 @@ spec("ORM CBind CFlow source") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
-    cflow_source source = {0};
+    cflow_publisher source = {0};
     const char *terminal_error = "not cleared";
     orm_flow_test_row row = {0};
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
-    cflow_source_cancel(&source);
-    cflow_source_cancel(&source);
+    cflow_publisher_cancel(&source);
+    cflow_publisher_cancel(&source);
     check_equal(state.cancel_count, (size_t)1u);
-    check_equal(cflow_source_poll_terminal(&source, &terminal_error),
-                CFLOW_SOURCE_DONE);
+    check_equal(cflow_publisher_poll_terminal(&source, &terminal_error),
+                CFLOW_PUBLISHER_DONE);
     check_null(terminal_error);
-    step = cflow_source_resume(&source, NULL, &row);
+    step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_DONE);
     check_equal(state.next_count, (size_t)0u);
 
-    cflow_source_destroy(&source);
+    cflow_publisher_destroy(&source);
     check_equal(state.cancel_count, (size_t)1u);
     check_equal(state.destroy_count, (size_t)1u);
   }
@@ -418,32 +418,32 @@ spec("ORM CBind CFlow source") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &cursor_state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_source_config config = ORM_CBIND_SOURCE_CONFIG_INIT(
+    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_flow_test_sink_state sink_state = {0};
-    cflow_sink_callbacks callbacks = {
+    cflow_subscriber_callbacks callbacks = {
         orm_flow_test_sink_value, orm_flow_test_sink_error,
         orm_flow_test_sink_done, &sink_state};
-    cflow_sink sink = cflow_sink_from_callbacks(&callbacks);
+    cflow_subscriber sink = cflow_subscriber_from_callbacks(&callbacks);
     orm_error_t error;
     cflow_graph surface = {0};
     cflow_graph normalized = {0};
     cflow_scheduler scheduler = {0};
-    cflow_source source = {0};
-    cflow_run run = {0};
+    cflow_publisher source = {0};
+    cflow_subscription run = {0};
 
     normalized.root = CMETA_INVALID_ID;
     orm_error_init(&error);
     cflow_graph_init(&surface, &orm_flow_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
     check_true(cflow_scheduler_test_init(&scheduler));
-    check_equal(orm_cbind_source_init(&source, &cursor, &config, &error),
+    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
-    check_true(cflow_run_open(&run, &normalized, &source, &scheduler, &sink));
+    check_true(cflow_subscribe(&run, &normalized, &source, &scheduler, &sink));
     check_null(source.self);
     check_equal(cursor_state.next_count, (size_t)0u);
 
-    check_true(cflow_run_request(&run, 1u));
+    check_true(cflow_subscription_request(&run, 1u));
     (void)cflow_scheduler_run_until_idle(&scheduler, 0u);
     check_equal(cursor_state.next_count, (size_t)1u);
     check_equal(sink_state.value_count, (size_t)1u);
@@ -452,7 +452,7 @@ spec("ORM CBind CFlow source") {
     check_equal(sink_state.done_count, (size_t)1u);
     check_null(sink_state.error);
 
-    cflow_run_close(&run);
+    cflow_subscription_close(&run);
     check_equal(cursor_state.destroy_count, (size_t)1u);
     cflow_scheduler_destroy(&scheduler);
     cflow_graph_destroy(&normalized);

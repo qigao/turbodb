@@ -11,9 +11,9 @@ The public library remains pure C. C++ consumers use header-only wrappers.
 ## Boundaries
 
 `redis_io_runtime` owns one explicitly selected native CFlow backend, one
-bounded bridge Actor, one serial Executor, Source admission accounting, and
+bounded bridge Actor, one serial Executor, Publisher admission accounting, and
 retiring socket identities. Each `redis_cflow_connection` owns one sequential
-`cflow_source_from_io_actor()` adapter, including its CFlow-owned Actor, typed
+`cflow_publisher_from_io_actor()` adapter, including its CFlow-owned Actor, typed
 completion slot, and socket/RESP reassembly state. Per-connection Actors submit
 through fixed runtime slots to the bridge Actor, which assigns request IDs that
 are unique across the shared native backend. `redis_pool` owns a fixed array of
@@ -21,9 +21,9 @@ those connections. RESP parsing remains protocol code and does not depend on
 native socket APIs.
 
 ```text
-Redis command Source
+Redis command Publisher
   -> RESP command encoder / incremental parser
-  -> per-connection CFlow I/O Source owner
+  -> per-connection CFlow I/O Publisher owner
   -> capacity-one cflow_io_actor
   -> runtime bridge cflow_io_actor
   -> cflow_io_native_backend
@@ -40,14 +40,14 @@ latency-sensitive scheduler thread when hostname lookup may block.
 | Item | Contract |
 |---|---|
 | Data unit | One bounded SEND/RECV/CONNECT operation and one decoded top-level RESP item |
-| Fact source | The per-connection CFlow I/O Source owns native completion state; the RESP reader owns protocol progress |
-| Command bytes | Owned by the command Source until all partial SEND operations complete |
+| Fact source | The per-connection CFlow I/O Publisher owns native completion state; the RESP reader owns protocol progress |
+| Command bytes | Owned by the command Publisher until all partial SEND operations complete |
 | Receive bytes | Written exclusively into a fixed-capacity connection buffer while RECV is pending; copied into the bounded parser buffer before the next operation |
 | Decoded item | Owned by the consumer after an ITEM result and released with `redis_reply_free()` |
-| Thread topology | Scheduler-affine connection/Source resume; native completion may arrive from a backend worker; one runtime serial Executor orders bridge and Source-owner driver tasks |
+| Thread topology | Scheduler-affine connection/Publisher resume; native completion may arrive from a backend worker; one runtime serial Executor orders bridge and Publisher-owner driver tasks |
 | Ordering | Exactly one native operation is active per connection; Redis command replies remain FIFO |
-| Capacity | Attached Sources, pool connections, command bytes, receive bytes, decoded bytes, and top-level item count are hard limits |
-| Backpressure | Full Source admission/pool capacity returns `TURBO_ENOBUFS`; no unbounded allocation or silent fallback |
+| Capacity | Attached Publishers, pool connections, command bytes, receive bytes, decoded bytes, and top-level item count are hard limits |
+| Backpressure | Full Publisher admission/pool capacity returns `TURBO_ENOBUFS`; no unbounded allocation or silent fallback |
 
 ## Connection Pool Lease Protocol
 
@@ -76,15 +76,15 @@ new admission and returns `TURBO_EBUSY` while leases remain. `destroy()` is only
 valid after quiescence. Pool statistics expose idle, borrowed, invalid, rejected,
 completed, and failed counts.
 
-One connection-level I/O Source owns a move-only native operation from
+One connection-level I/O Publisher owns a move-only native operation from
 preparation through completion encoding and Actor acknowledgement. Positive
 downstream demand reserves exactly one completion; no second CONNECT, SEND, or
 RECV is prepared until the first completion has been delivered. The returned
-waitable is borrowed from that Source and remains valid until Source
+waitable is borrowed from that Publisher and remains valid until Publisher
 cancellation/destruction. CFlow owner quiescence is authoritative for driver,
 waker, callback, delivery, and acknowledgement completion.
 
-## Command Source State Machine
+## Command Publisher State Machine
 
 ```text
 NEW
@@ -100,10 +100,10 @@ Any protocol/transport/limit failure -> ERROR
 the RESP parser, submits at most the next required native operation with
 downstream demand one, and returns `CFLOW_STEP_WAIT` while completion is
 outstanding. Backend drive notifications only schedule coalesced runtime tasks;
-they never synchronously re-enter `cflow_io_source_owner_run_ready()`.
-Completion encoding and the currently armed Source waker run outside owner
+they never synchronously re-enter `cflow_io_publisher_owner_run_ready()`.
+Completion encoding and the currently armed Publisher waker run outside owner
 locks. A waker schedules a later resume and must not recursively resume the
-same Source from the completion callback stack.
+same Publisher from the completion callback stack.
 
 The RESP reader retains its byte offset, top-level header scan cursor,
 nested-array frame stack, and partial bulk header across RECV fragments.
@@ -118,23 +118,23 @@ is submitted merely to read ahead after a value has been emitted.
 
 Cancellation follows this order:
 
-1. Destroy/cancel the connection I/O Source and stop new operation admission.
+1. Destroy/cancel the connection I/O Publisher and stop new operation admission.
 2. Drive its owner until Actor commands, native completion, delivery, and
    acknowledgement are quiescent.
 3. If any command bytes were sent and the reply is incomplete, mark the
    connection non-reusable and close it after native completion settles.
-4. Close the Source owner, then release the connection lease and Source state.
+4. Close the Publisher owner, then release the connection lease and Publisher state.
 
-Runtime shutdown stops pool admission, destroys connection Sources, closes and
-forgets their socket identities, verifies that no Source remains attached,
+Runtime shutdown stops pool admission, destroys connection Publishers, closes and
+forgets their socket identities, verifies that no Publisher remains attached,
 closes the bridge Actor, and then shuts down the native backend and serial
-Executor. Each Source owner destroys its own Actor and typed completion slot
+Executor. Each Publisher owner destroys its own Actor and typed completion slot
 before it detaches from the runtime.
 
 ## Error Semantics
 
 - Invalid configuration and arithmetic overflow fail before resource creation.
-- Source admission full, pool full, timeout, cancellation, EOF, protocol error,
+- Publisher admission full, pool full, timeout, cancellation, EOF, protocol error,
   and server RESP error remain distinguishable.
 - A partial SEND reports an uncertain command outcome.
 - EOF before a complete reply reports an unknown reply outcome and makes the
@@ -146,7 +146,7 @@ before it detaches from the runtime.
 The Redis row driver adds `WAIT` plus a `cflow_waitable`. The generic ORM row
 cursor already understands `ORM_ROW_CURSOR_WAIT`, so the Redis adapter passes
 the native command waitable through rather than suspending a CoroNet
-coroutine. Cursor cancellation immediately cancels the Redis command Source.
+coroutine. Cursor cancellation immediately cancels the Redis command Publisher.
 `command_timeout_ms` supplies the CFlow timeout wrapper for row WAIT states;
 synchronous AUTH/SELECT/control commands use one absolute monotonic deadline
 across all of their network fragments.
@@ -165,7 +165,7 @@ not supported.
 
 ## Verification
 
-- Unit: Source admission, partial SEND, fragmented RECV, WAIT/wake,
+- Unit: Publisher admission, partial SEND, fragmented RECV, WAIT/wake,
   cancellation, limits, EOF, and owner quiescence.
 - Integration: local TCP fragmented RESP, AUTH/SELECT preparation, connection
   reuse, cancellation disconnect, pool saturation and recovery, static
@@ -173,7 +173,7 @@ not supported.
 - Build: Redis and ORM targets link without TurboNet; installed package can be
   consumed with `TurboUtils::CFlow` only.
 - Safety: deterministic tests cover single-transfer reply ownership,
-  capacity-one completion sequencing, Source admission recovery, reentrant
+  capacity-one completion sequencing, Publisher admission recovery, reentrant
   blocking-call rejection, callback-quiescent cancellation, and
   byte-fragmented top-level and nested parsing; sanitizer profiles remain an
   additional CI validation layer.

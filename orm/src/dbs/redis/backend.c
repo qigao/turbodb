@@ -766,10 +766,10 @@ static orm_status_t orm_redis_backend_open(void *context, const orm_query_plan *
     return orm_redis_fail(error, ORM_STATUS_INVALID_ARGUMENT, "invalid Redis cursor request");
   native_status = orm_redis_cleanup_deferred_stream(state);
   if (native_status != TURBO_OK)
-    return orm_redis_fail(error, ORM_STATUS_BUSY, "Redis row Source cleanup is still pending");
+    return orm_redis_fail(error, ORM_STATUS_BUSY, "Redis row Publisher cleanup is still pending");
   if (state->cursor_active)
     return orm_redis_fail(error, ORM_STATUS_BUSY,
-                          "Redis connection already has an active row Source");
+                          "Redis connection already has an active row Publisher");
   if (limits->max_result_rows > (uint64_t)((SIZE_MAX - 1u) / 2u) ||
       limits->max_result_bytes > (uint64_t)SIZE_MAX)
     return orm_redis_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
@@ -838,11 +838,11 @@ static orm_status_t orm_redis_backend_execute(void *context, const orm_query_pla
   {
     int cleanup_status = orm_redis_cleanup_deferred_stream(state);
     if (cleanup_status != TURBO_OK)
-      return orm_redis_fail(error, ORM_STATUS_BUSY, "Redis row Source cleanup is still pending");
+      return orm_redis_fail(error, ORM_STATUS_BUSY, "Redis row Publisher cleanup is still pending");
   }
   if (state->cursor_active)
     return orm_redis_fail(error, ORM_STATUS_BUSY,
-                          "close the active Redis row Source before a command");
+                          "close the active Redis row Publisher before a command");
   switch (plan->kind) {
   case ORM_QUERY_INSERT:
     return orm_redis_execute_insert(state, plan, affected, error);
@@ -852,7 +852,7 @@ static orm_status_t orm_redis_backend_execute(void *context, const orm_query_pla
     return orm_redis_execute_delete(state, plan, affected, error);
   case ORM_QUERY_SELECT:
     return orm_redis_fail(error, ORM_STATUS_UNSUPPORTED,
-                          "Redis SELECT must be opened as a row Source");
+                          "Redis SELECT must be opened as a row Publisher");
   case ORM_QUERY_RAW:
     return orm_redis_fail(error, ORM_STATUS_UNSUPPORTED, "raw SQL is not supported by Redis");
   default:

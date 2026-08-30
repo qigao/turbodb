@@ -18,8 +18,8 @@ typedef struct redis_io_runtime {
 
 typedef struct redis_io_runtime_config {
   cflow_io_native_backend_kind backend_kind;
-  /** Maximum number of attached per-connection CFlow I/O Sources. */
-  size_t source_capacity;
+  /** Maximum number of attached per-connection CFlow I/O Publishers. */
+  size_t publisher_capacity;
   /** Maximum native completions collected by one backend poll. */
   size_t completion_batch_capacity;
 } redis_io_runtime_config;

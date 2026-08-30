@@ -36,15 +36,15 @@ public opaque C handles
     -> bounded owning C query plan
     -> versioned backend ops + opaque backend context
     -> driver row cursor / command result
-    -> CBind Source / command Source
+    -> CBind Publisher / command Publisher
 ```
 
 `orm_connection_t` owns one backend handle and immutable limits.
 `orm_query_t` borrows its connection and owns copied table/SQL/column,
 assignment, predicate, bind, and ordering data. `orm_transaction_t` borrows the
 connection and owns an optional backend transaction handle. A successfully
-opened Source owns its cursor, while the query, connection, and transaction (if
-used) remain borrowed until Source destruction, matching the public contract.
+opened Publisher owns its cursor, while the query, connection, and transaction (if
+used) remain borrowed until Publisher destruction, matching the public contract.
 
 Backends implement a versioned C ops table. SQL backends share one C renderer;
 native backends consume the immutable C plan directly. Backend-specific public
@@ -58,7 +58,7 @@ library types never enter the core plan.
 - Flat AND predicates using the public comparison enum.
 - One column ordering, limit, and offset.
 - Raw SQL plus positional binds for SQL backends.
-- Typed row Source and lazy command Source, including transaction variants.
+- Typed row Publisher and lazy command Publisher, including transaction variants.
 
 Unsupported plan shapes fail at the API boundary; there is no compatibility
 fallback and no hidden eager result.
@@ -68,7 +68,7 @@ fallback and no hidden eager result.
 - Data unit: one copied string/value in a plan, one CSerde row reader from a
   cursor, or one `orm_command_result_t`.
 - Fact source: the query plan before execution and the active driver cursor
-  after Source open.
+  after Publisher open.
 - Ownership: strings and blobs are copied into plan-owned `tstr` values;
   `turbo_vec_t` owns fixed-size plan records whose nested `tstr` values are
   released by the query destructor.
@@ -79,7 +79,7 @@ fallback and no hidden eager result.
 - Backpressure: row cursor advancement occurs only under CFlow demand.
 - Failure: the first status and bounded error text propagate to the public
   boundary; partially initialized owners follow one cleanup path.
-- Shutdown: cancel/destroy Sources, destroy queries/transactions, then disconnect
+- Shutdown: cancel/destroy Publishers, destroy queries/transactions, then disconnect
   the connection. Backend destroy occurs exactly once.
 
 ### TidesDB adapter protocol
@@ -97,9 +97,9 @@ fallback and no hidden eager result.
   `max_scan_bytes`, `max_result_rows`, `max_result_bytes`, field count, and row
   bytes are independent hard limits; reaching one returns
   `ORM_STATUS_LIMIT_EXCEEDED` without eager continuation.
-- Explicit transaction state retains the native transaction while a row Source
+- Explicit transaction state retains the native transaction while a row Publisher
   is open. Commit and rollback return `ORM_STATUS_BUSY` until all transaction
-  Sources close; destruction requests a deferred rollback rather than freeing
+  Publishers close; destruction requests a deferred rollback rather than freeing
   a native transaction still referenced by an iterator.
 
 ### Redis adapter protocol
