@@ -118,9 +118,9 @@ DataBind 的 record API 是只读的，因此 model adapter 必须由 TBE 的数
 不能由 TurboDB 在运行时猜测。adapter 只包含 `db_table` message 的持久化字段，记录：
 
 - TBE message/field 名与 native table/column 名；
-- logical scalar kind、dialect-specific storage kind、optional/default/generated 属性；
-- storage kind 由生成 DDL 的同一次 type-map 判定产生，区分 SQLite canonical decimal
-  `uint64`、PostgreSQL 参数宽度、BLOB/bytea 和 UUID；driver 不比较 SQL type 字符串；
+- scalar kind、optional/default/generated 属性；
+- dialect-specific value conversion（特别是 SQLite canonical decimal `uint64`、PostgreSQL
+  `numeric(20,0)`、BLOB/bytea 和 UUID）；
 - 导入 record -> bound cells 与 cursor cells -> 导出 record 的 generated callbacks。
 
 生成代码依赖一个 versioned pure-C `dbtool_model_v1` contract，并链接
@@ -194,13 +194,6 @@ cell 只在下一次 cursor step 前有效，encoder 必须在 step 前消费。
 count、单 cell bytes 和 output bytes。默认 import 是单 transaction、全成功后 commit；
 任一 parse/convert/bind/write 失败 rollback。若以后增加 batch commit，必须作为显式不同
 模式并报告已提交 row count，不能静默把 all-or-nothing 改成 partial success。
-
-SQLite sink 在首行按 ABSENT presence 生成并 prepare 一条 INSERT；同一 transaction 的后续
-行必须保持相同 presence shape，避免 default/generated 字段被静默绑定成不同语义。sink
-用 `BEGIN IMMEDIATE` 获取事务所有权，失败状态只能 rollback/close，close 对仍活动事务执行
-rollback。SQLite source prepare 一条按 model column 顺序的 SELECT，并复用 cell/UUID scratch；
-TEXT/BLOB view 及 cell array 都只借用到下一次 `next()` 或 `close()`。SQLite data path 是
-single-threaded，调用方不得并发使用同一个 driver connection/context。
 
 导出到文件时先写同目录临时文件，成功 flush/close 后原子替换；失败删除精确临时文件，
 既有目标保持不变。第二阶段不先提供 stdout，避免无法回滚的半个文档。

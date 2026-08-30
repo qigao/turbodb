@@ -95,31 +95,6 @@ static int dbtool_format_scalar_valid(dbtool_scalar_kind kind) {
   return kind >= DBTOOL_SCALAR_INT64 && kind <= DBTOOL_SCALAR_UUID;
 }
 
-static int dbtool_format_storage_matches(const dbtool_column_v1 *column) {
-  switch (column->scalar_kind) {
-    case DBTOOL_SCALAR_INT64:
-      return column->storage_kind >= DBTOOL_STORAGE_INTEGER16 &&
-             column->storage_kind <= DBTOOL_STORAGE_INTEGER64;
-    case DBTOOL_SCALAR_UINT64:
-      return (column->storage_kind >= DBTOOL_STORAGE_INTEGER16 &&
-              column->storage_kind <= DBTOOL_STORAGE_INTEGER64) ||
-             column->storage_kind == DBTOOL_STORAGE_UINT64_DECIMAL;
-    case DBTOOL_SCALAR_DOUBLE:
-      return column->storage_kind == DBTOOL_STORAGE_FLOAT32 ||
-             column->storage_kind == DBTOOL_STORAGE_FLOAT64;
-    case DBTOOL_SCALAR_BOOLEAN:
-      return column->storage_kind == DBTOOL_STORAGE_BOOLEAN;
-    case DBTOOL_SCALAR_TEXT:
-      return column->storage_kind == DBTOOL_STORAGE_TEXT;
-    case DBTOOL_SCALAR_BYTES:
-      return column->storage_kind == DBTOOL_STORAGE_BYTES;
-    case DBTOOL_SCALAR_UUID:
-      return column->storage_kind == DBTOOL_STORAGE_UUID;
-    default:
-      return 0;
-  }
-}
-
 static int dbtool_format_columns_valid(const dbtool_table_v1 *table) {
   static const uint32_t known_flags =
       DBTOOL_COLUMN_OPTIONAL | DBTOOL_COLUMN_HAS_DEFAULT |
@@ -133,7 +108,6 @@ static int dbtool_format_columns_valid(const dbtool_table_v1 *table) {
         column->name[0] == '\0' || column->database_name == NULL ||
         column->database_name[0] == '\0' ||
         !dbtool_format_scalar_valid(column->scalar_kind) ||
-        !dbtool_format_storage_matches(column) ||
         (column->flags & ~known_flags) != 0u ||
         ((column->flags & DBTOOL_COLUMN_GENERATED) != 0u &&
          (column->flags &

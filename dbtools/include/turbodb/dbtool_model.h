@@ -22,19 +22,6 @@ typedef enum dbtool_scalar_kind {
   DBTOOL_SCALAR_UUID
 } dbtool_scalar_kind;
 
-typedef enum dbtool_storage_kind {
-  DBTOOL_STORAGE_INTEGER16 = 1,
-  DBTOOL_STORAGE_INTEGER32,
-  DBTOOL_STORAGE_INTEGER64,
-  DBTOOL_STORAGE_UINT64_DECIMAL,
-  DBTOOL_STORAGE_FLOAT32,
-  DBTOOL_STORAGE_FLOAT64,
-  DBTOOL_STORAGE_BOOLEAN,
-  DBTOOL_STORAGE_TEXT,
-  DBTOOL_STORAGE_BYTES,
-  DBTOOL_STORAGE_UUID
-} dbtool_storage_kind;
-
 typedef enum dbtool_column_flags {
   DBTOOL_COLUMN_OPTIONAL = 1u << 0u,
   DBTOOL_COLUMN_HAS_DEFAULT = 1u << 1u,
@@ -77,10 +64,7 @@ typedef struct dbtool_cell {
   } data;
 } dbtool_cell;
 
-/*
- * Cell byte views are borrowed. Decoder-emitted views expire when the callback
- * returns; source views expire on the next source next() call or source close().
- */
+/* Cell byte views are borrowed only until the consuming callback returns. */
 typedef struct dbtool_record_view {
   const dbtool_cell *cells;
   size_t cell_count;
@@ -92,7 +76,6 @@ typedef struct dbtool_column_v1 {
   size_t index;
   uint32_t flags;
   dbtool_scalar_kind scalar_kind;
-  dbtool_storage_kind storage_kind;
   const char *name;
   const char *database_name;
 } dbtool_column_v1;

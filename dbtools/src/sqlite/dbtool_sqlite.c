@@ -17,9 +17,12 @@ typedef struct dbtool_sqlite_apply_guard {
   int denied_transaction_control;
 } dbtool_sqlite_apply_guard;
 
-dbtool_status dbtool_sqlite_error(sqlite3 *database, dbtool_status status,
-                                  const char *stage, const char *operation,
-                                  const char *detail, dbtool_error *error) {
+static dbtool_status dbtool_sqlite_error(sqlite3 *database,
+                                         dbtool_status status,
+                                         const char *stage,
+                                         const char *operation,
+                                         const char *detail,
+                                         dbtool_error *error) {
   char message[DBTOOL_ERROR_MESSAGE_CAPACITY];
   const char *native_detail = detail;
   int native_code = 0;
@@ -216,9 +219,4 @@ static const dbtool_schema_driver_ops dbtool_sqlite_ops = {
 
 const dbtool_schema_driver_ops *dbtool_sqlite_schema_driver(void) {
   return &dbtool_sqlite_ops;
-}
-
-sqlite3 *dbtool_sqlite_native_database(void *context) {
-  dbtool_sqlite_state *state = (dbtool_sqlite_state *)context;
-  return state != NULL ? state->database : NULL;
 }
