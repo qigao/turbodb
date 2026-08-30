@@ -14,7 +14,6 @@ typedef struct dbtool_sqlite_state {
 
 typedef struct dbtool_sqlite_apply_guard {
   uint64_t statements;
-  int denied_transaction_control;
 } dbtool_sqlite_apply_guard;
 
 static dbtool_status dbtool_sqlite_error(sqlite3 *database,
@@ -37,24 +36,6 @@ static dbtool_status dbtool_sqlite_error(sqlite3 *database,
   return status;
 }
 
-static int dbtool_sqlite_authorize(void *context, int action,
-                                   const char *argument1,
-                                   const char *argument2,
-                                   const char *database_name,
-                                   const char *trigger_name) {
-  dbtool_sqlite_apply_guard *guard =
-      (dbtool_sqlite_apply_guard *)context;
-  (void)argument1;
-  (void)argument2;
-  (void)database_name;
-  (void)trigger_name;
-  if (action == SQLITE_TRANSACTION || action == SQLITE_SAVEPOINT) {
-    guard->denied_transaction_control = 1;
-    return SQLITE_DENY;
-  }
-  return SQLITE_OK;
-}
-
 static int dbtool_sqlite_trace(unsigned trace_type, void *context,
                                void *statement, void *expanded_sql) {
   dbtool_sqlite_apply_guard *guard =
@@ -64,11 +45,6 @@ static int dbtool_sqlite_trace(unsigned trace_type, void *context,
   if (trace_type == SQLITE_TRACE_STMT && guard->statements != UINT64_MAX)
     ++guard->statements;
   return 0;
-}
-
-static int dbtool_sqlite_control(sqlite3 *database, const char *sql,
-                                 char **detail) {
-  return sqlite3_exec(database, sql, NULL, NULL, detail);
 }
 
 static dbtool_status dbtool_sqlite_open(
@@ -124,11 +100,9 @@ static dbtool_status dbtool_sqlite_apply(void *context, const char *sql,
                                          dbtool_apply_result *result,
                                          dbtool_error *error) {
   dbtool_sqlite_state *state = (dbtool_sqlite_state *)context;
-  dbtool_sqlite_apply_guard guard = {0u, 0};
+  dbtool_sqlite_apply_guard guard = {0u};
   char *detail = NULL;
-  dbtool_status status = DBTOOL_STATUS_OK;
   int code;
-  int transaction_active = 0;
   if (result != NULL)
     *result = (dbtool_apply_result)DBTOOL_APPLY_RESULT_INIT;
   dbtool_error_init(error);
@@ -144,64 +118,19 @@ static dbtool_status dbtool_sqlite_apply(void *context, const char *sql,
     return DBTOOL_STATUS_INVALID_ARGUMENT;
   }
 
-  code = dbtool_sqlite_control(state->database, "BEGIN IMMEDIATE", &detail);
+  (void)sqlite3_trace_v2(state->database, SQLITE_TRACE_STMT,
+                         dbtool_sqlite_trace, &guard);
+  code = sqlite3_exec(state->database, sql, NULL, NULL, &detail);
+  (void)sqlite3_trace_v2(state->database, 0u, NULL, NULL);
   if (code != SQLITE_OK) {
-    status = dbtool_sqlite_error(state->database, DBTOOL_STATUS_SQL_ERROR,
-                                 "begin-schema", "begin SQLite schema apply",
-                                 detail, error);
+    dbtool_status status = dbtool_sqlite_error(
+        state->database, DBTOOL_STATUS_SQL_ERROR, "apply-schema",
+        "execute SQLite schema", detail, error);
     sqlite3_free(detail);
     return status;
   }
-  transaction_active = 1;
-  (void)sqlite3_trace_v2(state->database, SQLITE_TRACE_STMT,
-                         dbtool_sqlite_trace, &guard);
-  code = sqlite3_set_authorizer(state->database, dbtool_sqlite_authorize,
-                                &guard);
-  if (code != SQLITE_OK) {
-    status = dbtool_sqlite_error(
-        state->database, DBTOOL_STATUS_SQL_ERROR, "apply-schema",
-        "install SQLite schema authorizer", NULL, error);
-    goto cleanup;
-  }
-  code = sqlite3_exec(state->database, sql, NULL, NULL, &detail);
-  (void)sqlite3_set_authorizer(state->database, NULL, NULL);
-  (void)sqlite3_trace_v2(state->database, 0u, NULL, NULL);
-  if (code != SQLITE_OK) {
-    status = dbtool_sqlite_error(
-        state->database,
-        guard.denied_transaction_control ? DBTOOL_STATUS_UNSUPPORTED
-                                         : DBTOOL_STATUS_SQL_ERROR,
-        "apply-schema",
-        guard.denied_transaction_control
-            ? "SQLite schema transaction control is unsupported"
-            : "execute SQLite schema",
-        detail, error);
-    sqlite3_free(detail);
-    detail = NULL;
-    goto cleanup;
-  }
-  code = dbtool_sqlite_control(state->database, "COMMIT", &detail);
-  if (code != SQLITE_OK) {
-    status = dbtool_sqlite_error(state->database, DBTOOL_STATUS_SQL_ERROR,
-                                 "commit-schema",
-                                 "commit SQLite schema apply", detail, error);
-    sqlite3_free(detail);
-    detail = NULL;
-    goto cleanup;
-  }
-  transaction_active = 0;
   result->statements = guard.statements;
   return DBTOOL_STATUS_OK;
-
-cleanup:
-  (void)sqlite3_set_authorizer(state->database, NULL, NULL);
-  (void)sqlite3_trace_v2(state->database, 0u, NULL, NULL);
-  if (transaction_active) {
-    char *rollback_detail = NULL;
-    (void)dbtool_sqlite_control(state->database, "ROLLBACK", &rollback_detail);
-    sqlite3_free(rollback_detail);
-  }
-  return status;
 }
 
 static void dbtool_sqlite_close(void *context) {

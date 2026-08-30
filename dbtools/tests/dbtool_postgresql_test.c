@@ -23,34 +23,37 @@ static dbtool_status apply_sql(const char *conninfo, const char *sql,
 spec("PostgreSQL standalone schema driver") {
   before_each() { fake_libpq_reset(); }
 
-  it("sends one simple query and drains every command result") {
-    static const char sql[] = "create table alpha(id int); create table beta(id int);";
-    static const ExecStatusType statuses[] = {PGRES_COMMAND_OK,
-                                               PGRES_EMPTY_QUERY,
-                                               PGRES_COMMAND_OK};
+  it("sends one standard create and drop DDL transaction and drains every result") {
+    static const char sql[] =
+        "begin; create table alpha(id int); create table beta(id int); "
+        "drop table beta; commit;";
+    static const ExecStatusType statuses[] = {
+        PGRES_COMMAND_OK, PGRES_COMMAND_OK, PGRES_COMMAND_OK,
+        PGRES_COMMAND_OK, PGRES_COMMAND_OK};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
     const fake_libpq_metrics *metrics;
 
-    fake_libpq_set_results(statuses, NULL, 3u);
+    fake_libpq_set_results(statuses, NULL, 5u);
     check_equal(apply_sql("host=fake", sql, sizeof(sql) - 1u, &result, &error),
                 DBTOOL_STATUS_OK);
     metrics = fake_libpq_get_metrics();
     check_equal(metrics->connect_calls, 1);
     check_equal(metrics->send_calls, 1);
-    check_equal(metrics->get_result_calls, 4);
-    check_equal(metrics->clear_calls, 3);
+    check_equal(metrics->get_result_calls, 6);
+    check_equal(metrics->clear_calls, 5);
     check_equal(metrics->finish_calls, 1);
     check_equal(metrics->sql, sql);
-    check_equal(result.statements, (uint64_t)2u);
+    check_equal(result.statements, (uint64_t)5u);
     check_true(fake_libpq_all_results_cleared());
   }
 
   it("preserves an intermediate SQL error while draining later results") {
     static const ExecStatusType statuses[] = {
-        PGRES_COMMAND_OK, PGRES_FATAL_ERROR, PGRES_COMMAND_OK};
-    static const char *const messages[] = {"", "forced SQL failure", ""};
-    static const char sql[] = "create table alpha(id int); broken; select 1;";
+        PGRES_COMMAND_OK, PGRES_COMMAND_OK, PGRES_FATAL_ERROR};
+    static const char *const messages[] = {"", "", "forced SQL failure"};
+    static const char sql[] =
+        "begin; create table alpha(id int); broken; commit;";
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
     const fake_libpq_metrics *metrics;

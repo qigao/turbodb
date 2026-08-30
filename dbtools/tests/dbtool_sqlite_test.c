@@ -47,10 +47,13 @@ cleanup:
 }
 
 spec("SQLite standalone schema driver") {
-  it("applies every statement in one bootstrap script") {
+  it("applies create and drop statements from one standard DDL transaction") {
     static const char sql[] =
+        "begin;"
         "create table alpha(id integer primary key);"
-        "create table beta(id integer primary key);";
+        "create table beta(id integer primary key);"
+        "drop table beta;"
+        "commit;";
     char *database = tt_make_temp_file("dbtool-sqlite-success", ".db");
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
@@ -59,8 +62,8 @@ spec("SQLite standalone schema driver") {
     check_equal(apply_sql(database, sql, sizeof(sql) - 1u, &result, &error),
                 DBTOOL_STATUS_OK);
     check_true(table_exists(database, "alpha"));
-    check_true(table_exists(database, "beta"));
-    check_equal(result.statements, (uint64_t)2u);
+    check_false(table_exists(database, "beta"));
+    check_equal(result.statements, (uint64_t)5u);
 
     check_equal(tt_remove_file(database), 0);
     free(database);
@@ -68,8 +71,10 @@ spec("SQLite standalone schema driver") {
 
   it("rolls back the first statement when a later statement fails") {
     static const char sql[] =
+        "begin;"
         "create table first_table(id integer);"
-        "create table broken_table(";
+        "create table broken_table("
+        "commit;";
     char *database = tt_make_temp_file("dbtool-sqlite-rollback", ".db");
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
@@ -82,29 +87,6 @@ spec("SQLite standalone schema driver") {
 
     check_equal(tt_remove_file(database), 0);
     free(database);
-  }
-
-  it("rejects transaction and savepoint control inside the input") {
-    static const char *const scripts[] = {
-        "begin; create table tx_table(id integer); commit;",
-        "savepoint user_sp; create table sp_table(id integer);"};
-    static const char *const tables[] = {"tx_table", "sp_table"};
-    size_t index;
-    for (index = 0u; index < 2u; ++index) {
-      char *database = tt_make_temp_file("dbtool-sqlite-control", ".db");
-      dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
-      dbtool_error error = DBTOOL_ERROR_INIT;
-
-      check_not_null(database);
-      check_equal(apply_sql(database, scripts[index], strlen(scripts[index]),
-                            &result, &error),
-                  DBTOOL_STATUS_UNSUPPORTED);
-      check_false(table_exists(database, tables[index]));
-      check_contains(error.message, "transaction control");
-
-      check_equal(tt_remove_file(database), 0);
-      free(database);
-    }
   }
 
   it("rejects embedded NUL instead of executing a prefix") {

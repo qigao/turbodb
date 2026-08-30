@@ -24,7 +24,7 @@ option(TURBODB_BUILD_DBTOOLS "Build standalone database tools"
        ${TURBODB_BUILD_DBTOOLS_DEFAULT})
 option(TURBODB_DBTOOLS_WITH_SQLITE "Enable SQLite standalone database tools" ON)
 option(TURBODB_DBTOOLS_WITH_PGSQL
-       "Enable PostgreSQL standalone database tools" OFF)
+       "Enable PostgreSQL standalone database tools" ON)
 option(TURBODB_DBTOOLS_PG_LIVE_TESTS
        "Run standalone database tools against a live PostgreSQL server" OFF)
 
@@ -34,11 +34,10 @@ option(TURBODB_DBTOOLS_PG_LIVE_TESTS
 set(TIDESDB_WITH_SNAPPY OFF CACHE BOOL "build with Snappy compression support")
 set(TIDESDB_WITH_LZ4 OFF CACHE BOOL "build with LZ4 compression support")
 
-# ORM ships its SQLite backend by default. Optional datastore adapters are
-# enabled explicitly to keep the shared runtime closure and deployment size
-# limited to the selected backends.
+# ORM ships its SQLite and PostgreSQL backends by default. Native driver
+# dependencies remain private to their backend components.
 set(ORM_WITH_SQLITE_DEFAULT ON)
-set(ORM_WITH_PGSQL_DEFAULT OFF)
+set(ORM_WITH_PGSQL_DEFAULT ON)
 set(ORM_WITH_REDIS_DEFAULT OFF)
 set(ORM_WITH_MONGODB_DEFAULT OFF)
 set(ORM_WITH_TIDESDB_DEFAULT OFF)

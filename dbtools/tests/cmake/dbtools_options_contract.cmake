@@ -2,6 +2,15 @@ if(NOT DEFINED TURBODB_SOURCE_DIR OR TURBODB_SOURCE_DIR STREQUAL "")
   message(FATAL_ERROR "TURBODB_SOURCE_DIR is required")
 endif()
 
+include("${TURBODB_SOURCE_DIR}/CMakeOptions.cmake")
+if(NOT ORM_WITH_PGSQL)
+  message(FATAL_ERROR "ORM_WITH_PGSQL must default to ON for host builds")
+endif()
+if(NOT TURBODB_DBTOOLS_WITH_PGSQL)
+  message(FATAL_ERROR
+          "TURBODB_DBTOOLS_WITH_PGSQL must default to ON for host builds")
+endif()
+
 include("${TURBODB_SOURCE_DIR}/dbtools/cmake/DbToolsOptions.cmake")
 
 function(assert_validation EXPECTED)
