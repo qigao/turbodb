@@ -30,12 +30,9 @@ add_library(
   turbodb_dbtool_core STATIC
   src/dbtool_error.c
   src/dbtool_file.c
-  src/dbtool_cli.c
-  src/data/dbtool_transfer.c)
+  src/dbtool_cli.c)
 target_compile_features(turbodb_dbtool_core PUBLIC c_std_11)
-target_include_directories(
-  turbodb_dbtool_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
-                             ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(turbodb_dbtool_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(turbodb_dbtool_core PUBLIC TurboUtils::Core)
 cmake_config_target(turbodb_dbtool_core NO_INSTALL FOLDER "dbtools")
 
@@ -213,14 +210,6 @@ if(BUILD_TESTS)
     LIBS turbodb_dbtool_core TurboUtils::TinyTest
     INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
     FOLDER "dbtools/tests")
-  cmake_add_test(
-    NAME dbtool_transfer_test
-    SOURCES tests/dbtool_transfer_test.c
-    LIBS turbodb_dbtool_core TurboUtils::TinyTest
-    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include
-             ${CMAKE_CURRENT_SOURCE_DIR}/src
-    FOLDER "dbtools/tests")
-  dbtool_enable_strict_warnings(dbtool_transfer_test)
   if(TURBODB_DBTOOLS_WITH_SQLITE)
     cmake_add_test(
       NAME dbtool_sqlite_test

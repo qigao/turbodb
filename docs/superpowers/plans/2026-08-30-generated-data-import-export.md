@@ -35,23 +35,23 @@
 - `dbtool_record_sink_ops`: begin/write/commit/rollback/close.
 - `dbtool_record_source_ops`: open/next/close with borrowed cells.
 
-- [x] **Step 1: Write failing fake model/source/sink tests**
+- [ ] **Step 1: Write failing fake model/source/sink tests**
 
 Test one transaction success, parse failure before first row, sink failure after one row, commit failure, rollback failure preserving the primary error, source failure, and exactly-once close. Assert borrowed input/cells are consumed before callback/next returns.
 
-- [x] **Step 2: Write capacity tests**
+- [ ] **Step 2: Write capacity tests**
 
 Cover 0/1/exact/+1/max for chunk, rows, columns, cell bytes, record bytes and output bytes, including checked multiplication/addition. No test computes expected limits through production helpers.
 
-- [x] **Step 3: Run RED**
+- [ ] **Step 3: Run RED**
 
 Expected compile failure because the contracts do not exist.
 
-- [x] **Step 4: Implement the single-threaded state machines**
+- [ ] **Step 4: Implement the single-threaded state machines**
 
 Document and enforce `NEW -> OPEN -> ACTIVE -> COMMITTED|ROLLED_BACK -> CLOSED`. A successful begin reaches exactly one commit/rollback. The core never retains model callback views or driver cursor cells across their validity boundary.
 
-- [x] **Step 5: Run GREEN and commit**
+- [ ] **Step 5: Run GREEN and commit**
 
 ```text
 git add dbtools/include dbtools/src/data dbtools/tests/dbtool_transfer_test.c dbtools/CMakeLists.txt
@@ -277,3 +277,4 @@ Build/install both exact revisions, generate two tools, run SQLite locally and P
 - [ ] **Step 4: Dependency/source audit**
 
 Confirm ordinary TurboDB and schema-only executables do not find/link TurboParser; only generated data executables link DataBind. Confirm every production target contains no `.cpp`, no ORM/CFlow link, no runtime driver registry and no unbounded input/output path.
+
