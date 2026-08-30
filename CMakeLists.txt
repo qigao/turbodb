@@ -9,9 +9,9 @@ if(ORM_WITH_MONGODB)
   list(APPEND VCPKG_MANIFEST_FEATURES mongodb)
 endif()
 
-option(ORM_WITH_PGSQL "Enable PostgreSQL backend" OFF)
+option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ON)
 option(TURBODB_DBTOOLS_WITH_PGSQL
-       "Enable PostgreSQL standalone database tools" OFF)
+       "Enable PostgreSQL standalone database tools" ON)
 if(ORM_WITH_PGSQL OR TURBODB_DBTOOLS_WITH_PGSQL)
   list(APPEND VCPKG_MANIFEST_FEATURES postgresql)
 endif()

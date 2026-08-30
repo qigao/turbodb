@@ -255,8 +255,8 @@ unchanged.
 ## Build and test
 
 Backend CMake options are `ORM_WITH_SQLITE`, `ORM_WITH_PGSQL`,
-`ORM_WITH_REDIS`, `ORM_WITH_MONGODB`, and `ORM_WITH_TIDESDB`. Optional backends
-remain opt-in.
+`ORM_WITH_REDIS`, `ORM_WITH_MONGODB`, and `ORM_WITH_TIDESDB`. SQLite and
+PostgreSQL are enabled by default; Redis, MongoDB, and TidesDB remain opt-in.
 
 ```sh
 cmake --preset win-dev-user

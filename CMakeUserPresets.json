@@ -75,10 +75,10 @@
             "name": "win-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "ORM_WITH_PGSQL": "OFF",
+                "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
@@ -91,10 +91,10 @@
         {
             "name": "win-release-user",
             "cacheVariables": {
-                "ORM_WITH_PGSQL": "OFF",
+                "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
@@ -110,7 +110,7 @@
             "inherits": "win-release-user",
             "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG",
             "cacheVariables": {
-                "ORM_WITH_PGSQL": "OFF",
+                "ORM_WITH_PGSQL": "ON",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows"
@@ -138,10 +138,10 @@
             "name": "linux-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "ORM_WITH_PGSQL": "OFF",
+                "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
@@ -154,10 +154,10 @@
         {
             "name": "linux-release-user",
             "cacheVariables": {
-                "ORM_WITH_PGSQL": "OFF",
+                "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
@@ -192,7 +192,9 @@
             },
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/debug",
-                "ORM_WITH_PGSQL": "OFF"
+                "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "OFF",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF"
             }
         },
         {
@@ -203,7 +205,9 @@
             },
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release",
-                "ORM_WITH_PGSQL": "OFF"
+                "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "OFF",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF"
             }
         },
         { "name": "android-arm64-v8a-debug-win", "inherits": ["android-arm64-v8a-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"] },

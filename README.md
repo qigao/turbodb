@@ -5,25 +5,17 @@ ORM、Redis、TidesDB 与 standalone tools 分别由 CMake 选项控制。
 
 ## Standalone DDL SQL tools
 
-`turbodb-sqlite` 与可选的 `turbodb-postgresql` 可批量执行数据库初始化 SQL，且不经过
+`turbodb-sqlite` 与 `turbodb-postgresql` 可批量执行数据库初始化 SQL，且不经过
 ORM。二者只通过 driver 执行 DDL SQL 文件，命令为 `schema apply`；它们不是 migration
 diff/history 管理器，也不会
 加载运行时 driver plugin。
 
-Windows 默认 Release 配置构建 SQLite 工具：
+Windows 默认 Release 配置构建 SQLite 与 PostgreSQL 工具：
 
 ```powershell
 cmake --fresh --preset win-release-user
-cmake --build --preset win-release-user --target turbodb-sqlite
+cmake --build --preset win-release-user --target turbodb-sqlite turbodb-postgresql
 cmake --build --preset install-win-release-user
-```
-
-需要 PostgreSQL/libpq 时使用独立 preset；普通构建不要求 PostgreSQL：
-
-```powershell
-cmake --fresh --preset win-release-dbtools-pg-user
-cmake --build --preset win-release-dbtools-pg-user --target turbodb-postgresql
-cmake --build --preset install-win-release-dbtools-pg-user
 ```
 
 执行 SQLite bootstrap：
@@ -56,7 +48,9 @@ transaction，若脚本自行提交，则脚本自身定义事务边界。
 退出码：`0` 成功/帮助，`2` 参数错误，`3` 文件错误，`4` 连接错误，`5` SQL 错误，
 `6` 超限，`7` 不支持，`8` 内存不足，`70` 内部错误。
 
-安装只暴露 executable，不要求使用方 `find_package(TurboDB)`。`dbtools` install component
+PostgreSQL ORM backend 与 PostgreSQL dbtool 默认构建；libpq 只作为对应实现 target 的
+private/runtime 依赖，不进入使用方的编译或链接接口。安装只暴露 dbtools executable，
+不要求使用方 `find_package(TurboDB)`。`dbtools` install component
 会携带运行所需的动态库闭包；DDL SQL tools 不链接 `turbo_orm`、CFlow、CBind、CSerde 或
 TurboParser。详细设计与验证边界见
 [driver-data-tools.md](docs/architecture/driver-data-tools.md)，EU Docker 验证见

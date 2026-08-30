@@ -128,7 +128,8 @@ driver、operation 和 statement count，不输出密码、连接串或 SQL 全�
 ## 构建与依赖
 
 - `TURBODB_BUILD_DBTOOLS` 控制 standalone tools；cross-compiling 默认关闭。
-- `TURBODB_DBTOOLS_WITH_SQLITE` 和 `TURBODB_DBTOOLS_WITH_PGSQL` 独立于 ORM options。
+- `TURBODB_DBTOOLS_WITH_SQLITE` 和 `TURBODB_DBTOOLS_WITH_PGSQL` 在 host build 默认开启，
+  且独立于 ORM options；cross preset 显式关闭 dbtools 及其 PostgreSQL feature。
 - 只有启用 PostgreSQL dbtool 时才加入 vcpkg PostgreSQL feature 并查找 libpq。
 - targets 只链接 `TurboUtils::Core` 与对应 native driver。
 - executable 安装到 `CMAKE_INSTALL_BINDIR`，不导出为可链接 library target。
