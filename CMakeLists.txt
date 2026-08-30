@@ -69,20 +69,6 @@ endforeach()
 
 find_package(TurboUtils CONFIG REQUIRED
              PATHS "$ENV{TURBOUTILS_ROOT}" NO_DEFAULT_PATH)
-if(TURBODB_DBTOOLS_WITH_DATA)
-  if(NOT DEFINED ENV{TURBOPARSER_ROOT} OR
-     "$ENV{TURBOPARSER_ROOT}" STREQUAL "" OR
-     NOT IS_DIRECTORY "$ENV{TURBOPARSER_ROOT}")
-    message(FATAL_ERROR
-            "TURBODB_DBTOOLS_WITH_DATA requires TURBOPARSER_ROOT to name a TurboParser package root")
-  endif()
-  find_package(TurboParser CONFIG REQUIRED
-               PATHS "$ENV{TURBOPARSER_ROOT}" NO_DEFAULT_PATH)
-  if(NOT TARGET TurboParser::DataBind)
-    message(FATAL_ERROR
-            "TURBODB_DBTOOLS_WITH_DATA requires TurboParser::DataBind")
-  endif()
-endif()
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(zstd CONFIG REQUIRED)

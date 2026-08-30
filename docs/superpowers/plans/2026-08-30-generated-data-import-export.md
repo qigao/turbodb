@@ -72,23 +72,23 @@ git commit -m "feat(dbtools): add generated model transfer contracts"
 - Adds stable model metadata beside existing SQL fragments: message/field name, raw table/column name, normalized scalar kind, optional/default/generated flags and deterministic indexes.
 - Preserves existing built-in/custom DDL template output byte-for-byte.
 
-- [x] **Step 1: Add failing IR contract tests**
+- [ ] **Step 1: Add failing IR contract tests**
 
 Use a literal schema covering signed/unsigned widths, bool, float/double, string, bytes, UUID, enum, optional/default/generated and `db_ignore`. Assert exact IR values and that ignored/non-table fields are absent.
 
-- [x] **Step 2: Run RED**
+- [ ] **Step 2: Run RED**
 
 Run only `test_tbe_compiler`; expected missing IR fields.
 
-- [x] **Step 3: Populate normalized metadata once**
+- [ ] **Step 3: Populate normalized metadata once**
 
 Reuse the same validated field/type decisions that produce DDL. Do not reparse annotation strings in templates or maintain a second type-mapping table. Keep SQL names and logical names distinct.
 
-- [x] **Step 4: Prove DDL compatibility**
+- [ ] **Step 4: Prove DDL compatibility**
 
 Run every existing SQLite/PostgreSQL golden test and compare outputs byte-for-byte. Custom template stable fields remain valid.
 
-- [x] **Step 5: Commit in TurboParser**
+- [ ] **Step 5: Commit in TurboParser**
 
 ```text
 git add tbe/tbe_compiler docs/architecture/tbe-database-ddl-generation.md
@@ -113,27 +113,27 @@ git commit -m "feat(tbe): expose database projection metadata"
 - Adds `--db-tool-source <file>` valid only with `--lang sqlite|postgresql|postgres` and `--output`.
 - Generated file exports exactly one `dbtool_generated_model_v1()` symbol and includes installed `turbodb/dbtool_model.h` plus DataBind typed APIs.
 
-- [x] **Step 1: Write failing CLI/golden tests**
+- [ ] **Step 1: Write failing CLI/golden tests**
 
 Cover missing `--output`, non-database language, duplicate output paths, unknown dialect, deterministic generated C, escaped identifiers/default strings and no-table schema. Invalid combinations must not leave partial output files.
 
-- [x] **Step 2: Run RED**
+- [ ] **Step 2: Run RED**
 
 Expected CLI rejection because `--db-tool-source` is unknown.
 
-- [x] **Step 3: Generate projection structs/descriptors and callbacks**
+- [ ] **Step 3: Generate projection structs/descriptors and callbacks**
 
 Emit one projection type per `db_table`, containing only persisted scalar fields plus explicit presence state. Import callbacks use DataBind streaming/typed conversion; export callbacks serialize a projection filled from database cells. Generate dialect conversions for SQLite canonical decimal `uint64`, PostgreSQL numeric, BLOB/bytea, bool and UUID. Unsupported kinds were already rejected by database IR and receive no fallback branch.
 
-- [x] **Step 4: Enforce atomic output and production-source rules**
+- [ ] **Step 4: Enforce atomic output and production-source rules**
 
 Use the compiler's existing same-directory temp + replace path. Generated output is complete C11 with no unresolved placeholder/TODO and compiles under strict warnings.
 
-- [x] **Step 5: Run generated-code compile/round-trip tests**
+- [ ] **Step 5: Run generated-code compile/round-trip tests**
 
 Compile generated source against installed TurboDB/TurboParser headers. Round-trip literal min/max/null/bytes/UUID values through every generated callback without a database.
 
-- [x] **Step 6: Commit in TurboParser**
+- [ ] **Step 6: Commit in TurboParser**
 
 ```text
 git add tbe/tbe_compiler docs/architecture/tbe-database-ddl-generation.md

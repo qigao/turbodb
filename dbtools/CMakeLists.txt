@@ -111,17 +111,6 @@ function(dbtool_enable_postgresql_linker TARGET_NAME)
   set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
 endfunction()
 
-if(TURBODB_DBTOOLS_WITH_DATA)
-  add_library(turbodb_dbtool_format STATIC src/data/dbtool_format.c)
-  target_compile_features(turbodb_dbtool_format PUBLIC c_std_11)
-  target_include_directories(
-    turbodb_dbtool_format PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries(turbodb_dbtool_format
-                        PUBLIC turbodb_dbtool_core TurboParser::DataBind)
-  cmake_config_target(turbodb_dbtool_format NO_INSTALL FOLDER "dbtools")
-  dbtool_enable_strict_warnings(turbodb_dbtool_format)
-endif()
-
 if(TURBODB_DBTOOLS_WITH_SQLITE)
   add_library(turbodb_dbtool_sqlite STATIC src/sqlite/dbtool_sqlite.c)
   target_compile_features(turbodb_dbtool_sqlite PUBLIC c_std_11)
@@ -199,13 +188,6 @@ else()
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dbtools)
 endif()
 
-install(
-  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/turbodb
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  COMPONENT dbtools
-  FILES_MATCHING
-  PATTERN "*.h")
-
 if(BUILD_TESTS)
   if(TURBODB_DBTOOLS_WITH_SQLITE)
     add_test(
@@ -239,16 +221,6 @@ if(BUILD_TESTS)
              ${CMAKE_CURRENT_SOURCE_DIR}/src
     FOLDER "dbtools/tests")
   dbtool_enable_strict_warnings(dbtool_transfer_test)
-  if(TURBODB_DBTOOLS_WITH_DATA)
-    cmake_add_test(
-      NAME dbtool_format_test
-      SOURCES tests/dbtool_format_test.c
-      LIBS turbodb_dbtool_format TurboUtils::TinyTest
-      INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include
-      FOLDER "dbtools/tests")
-    dbtool_enable_strict_warnings(dbtool_format_test)
-    dbtool_stage_runtime_dependencies(dbtool_format_test)
-  endif()
   if(TURBODB_DBTOOLS_WITH_SQLITE)
     cmake_add_test(
       NAME dbtool_sqlite_test
