@@ -15,6 +15,19 @@ option(BUILD_EXAMPLES "Build example programs" ON)
 option(BUILD_TESTS "Build test suite" ${ENABLE_TESTS})
 option(ORM_BUILD_TESTS "Build ORM test suite" ${BUILD_TESTS})
 
+if(CMAKE_CROSSCOMPILING)
+  set(TURBODB_BUILD_DBTOOLS_DEFAULT OFF)
+else()
+  set(TURBODB_BUILD_DBTOOLS_DEFAULT ON)
+endif()
+option(TURBODB_BUILD_DBTOOLS "Build standalone database tools"
+       ${TURBODB_BUILD_DBTOOLS_DEFAULT})
+option(TURBODB_DBTOOLS_WITH_SQLITE "Enable SQLite standalone database tools" ON)
+option(TURBODB_DBTOOLS_WITH_PGSQL
+       "Enable PostgreSQL standalone database tools" OFF)
+option(TURBODB_DBTOOLS_PG_LIVE_TESTS
+       "Run standalone database tools against a live PostgreSQL server" OFF)
+
 # tidesdb compression backends -- only Zstd by default; Snappy and LZ4 are
 # opt-in. Override per build with -DTIDESDB_WITH_SNAPPY=ON /
 # -DTIDESDB_WITH_LZ4=ON or a preset cacheVariable.

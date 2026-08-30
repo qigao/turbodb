@@ -76,6 +76,9 @@
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
@@ -89,6 +92,9 @@
             "name": "win-release-user",
             "cacheVariables": {
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
@@ -106,6 +112,7 @@
             "cacheVariables": {
                 "ORM_WITH_PGSQL": "ON",
                 "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows"
             },
@@ -119,6 +126,9 @@
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
@@ -132,6 +142,9 @@
             "name": "linux-release-user",
             "cacheVariables": {
                 "ORM_WITH_PGSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
@@ -149,6 +162,7 @@
             "cacheVariables": {
                 "ORM_WITH_PGSQL": "ON",
                 "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux"
             },
