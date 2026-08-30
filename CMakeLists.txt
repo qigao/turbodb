@@ -88,16 +88,18 @@ endif()
 add_subdirectory(tidesdb)
 add_subdirectory(orm)
 
-cmake_config_package(
-  PACKAGE
-  TurboDB
-  EXPORT_SET
-  TurboDBTargets
-  NAMESPACE
-  TurboDB::
-  CONFIG_TEMPLATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TurboDBConfig.cmake.in"
-  VERSION
-  "${PROJECT_VERSION}"
-  COMPATIBILITY
-  SameMajorVersion)
+if(TURBODB_BUILD_REDIS)
+  cmake_config_package(
+    PACKAGE
+    TurboDB
+    EXPORT_SET
+    TurboDBTargets
+    NAMESPACE
+    TurboDB::
+    CONFIG_TEMPLATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TurboDBConfig.cmake.in"
+    VERSION
+    "${PROJECT_VERSION}"
+    COMPATIBILITY
+    SameMajorVersion)
+endif()
