@@ -271,7 +271,7 @@ spec("SQLite generated record driver") {
     check_equal(sink->begin(database_context, &sink_context, &model, 0u, &error),
                 DBTOOL_STATUS_INVALID_ARGUMENT);
     check_null(sink_context);
-    check_contains(error.message, "column metadata");
+    check_contains(error.message, "generated database model");
     check_equal(sqlite3_get_autocommit(native), 1);
 
     schema_driver->close(database_context);

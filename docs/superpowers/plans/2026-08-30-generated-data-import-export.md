@@ -177,23 +177,23 @@ git commit -m "feat(dbtools): add SQLite record transfer driver"
 - Create: `dbtools/src/postgresql/dbtool_postgresql_records.c`
 - Create: `dbtools/src/postgresql/dbtool_postgresql_records.h`
 - Create: `dbtools/tests/dbtool_postgresql_records_test.c`
-- Create: `dbtools/tests/postgresql_data_live_test.c`
+- Modify: `dbtools/tests/postgresql_live_test.c`
 - Modify: `dbtools/tests/fake_libpq.c`
 - Modify: `dbtools/CMakeLists.txt`
 
-- [ ] **Step 1: Write failing fake/live tests**
+- [x] **Step 1: Write failing fake/live tests**
 
 Fake tests cover parameter OIDs/formats, NULL, bytea binary, numeric `uint64`, single-row mode, result drain and rollback. Live test covers exact scalar round trips and a later-row constraint failure leaving zero imported rows.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Expected missing record driver symbols.
 
-- [ ] **Step 3: Implement parameterized sink and single-row source**
+- [x] **Step 3: Implement parameterized sink and single-row source**
 
 Use one prepared parameterized insert per table and libpq single-row mode for export. Do not store `PQgetvalue` views after clearing the owning result. Drain terminal/error results before returning.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```text
 git add dbtools/src/postgresql dbtools/tests dbtools/CMakeLists.txt

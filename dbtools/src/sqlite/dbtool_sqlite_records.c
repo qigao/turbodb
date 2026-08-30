@@ -1,5 +1,6 @@
 #include "sqlite/dbtool_sqlite_records.h"
 
+#include "data/dbtool_model_internal.h"
 #include "sqlite/dbtool_sqlite.h"
 
 #include <sds.h>
@@ -39,63 +40,25 @@ static dbtool_status dbtool_sqlite_record_fail(dbtool_error *error, dbtool_statu
   return status;
 }
 
-static int dbtool_sqlite_column_storage_matches(const dbtool_column_v1 *column) {
-  switch (column->scalar_kind) {
-  case DBTOOL_SCALAR_INT64:
-    return column->storage_kind >= DBTOOL_STORAGE_INTEGER16 &&
-           column->storage_kind <= DBTOOL_STORAGE_INTEGER64;
-  case DBTOOL_SCALAR_UINT64:
-    return (column->storage_kind >= DBTOOL_STORAGE_INTEGER16 &&
-            column->storage_kind <= DBTOOL_STORAGE_INTEGER64) ||
-           column->storage_kind == DBTOOL_STORAGE_UINT64_DECIMAL;
-  case DBTOOL_SCALAR_DOUBLE:
-    return column->storage_kind == DBTOOL_STORAGE_FLOAT64;
-  case DBTOOL_SCALAR_BOOLEAN:
-    return column->storage_kind == DBTOOL_STORAGE_BOOLEAN;
-  case DBTOOL_SCALAR_TEXT:
-    return column->storage_kind == DBTOOL_STORAGE_TEXT;
-  case DBTOOL_SCALAR_BYTES:
-    return column->storage_kind == DBTOOL_STORAGE_BYTES;
-  case DBTOOL_SCALAR_UUID:
-    return column->storage_kind == DBTOOL_STORAGE_UUID;
-  default:
-    return 0;
-  }
-}
-
 static const dbtool_table_v1 *dbtool_sqlite_record_table(const dbtool_model_v1 *model,
                                                          size_t table_index, dbtool_error *error,
                                                          const char *stage) {
-  static const uint32_t known_flags =
-      DBTOOL_COLUMN_OPTIONAL | DBTOOL_COLUMN_HAS_DEFAULT | DBTOOL_COLUMN_GENERATED;
-  const dbtool_table_v1 *table;
+  const dbtool_table_v1 *table = dbtool_model_table_valid(model, table_index);
   size_t index;
-  if (model == NULL || model->struct_size < sizeof(*model) ||
-      model->abi_version != DBTOOL_MODEL_ABI_VERSION || model->tables == NULL ||
-      table_index >= model->table_count) {
+  if (table == NULL) {
     dbtool_sqlite_record_fail(error, DBTOOL_STATUS_INVALID_ARGUMENT, stage,
                               "invalid generated database model");
     return NULL;
   }
-  table = &model->tables[table_index];
-  if (table->struct_size < sizeof(*table) || table->abi_version != DBTOOL_MODEL_ABI_VERSION ||
-      table->index != table_index || table->name == NULL || table->name[0] == '\0' ||
-      table->database_name == NULL || table->database_name[0] == '\0' || table->columns == NULL ||
-      table->column_count == 0u || table->column_count > SIZE_MAX / sizeof(dbtool_cell) ||
-      table->column_count > SIZE_MAX / TURBO_UUID_SIZE) {
+  if (table->column_count > SIZE_MAX / TURBO_UUID_SIZE) {
     dbtool_sqlite_record_fail(error, DBTOOL_STATUS_INVALID_ARGUMENT, stage,
                               "invalid generated table metadata");
     return NULL;
   }
   for (index = 0u; index < table->column_count; ++index) {
     const dbtool_column_v1 *column = &table->columns[index];
-    if (column->struct_size < sizeof(*column) || column->abi_version != DBTOOL_MODEL_ABI_VERSION ||
-        column->index != index || column->name == NULL || column->name[0] == '\0' ||
-        column->database_name == NULL || column->database_name[0] == '\0' ||
-        (column->flags & ~known_flags) != 0u ||
-        ((column->flags & DBTOOL_COLUMN_GENERATED) != 0u &&
-         (column->flags & (DBTOOL_COLUMN_OPTIONAL | DBTOOL_COLUMN_HAS_DEFAULT)) != 0u) ||
-        !dbtool_sqlite_column_storage_matches(column)) {
+    if (column->scalar_kind == DBTOOL_SCALAR_DOUBLE &&
+        column->storage_kind != DBTOOL_STORAGE_FLOAT64) {
       dbtool_sqlite_record_fail(error, DBTOOL_STATUS_INVALID_ARGUMENT, stage,
                                 "invalid generated column metadata");
       return NULL;

@@ -202,6 +202,15 @@ rollback。SQLite source prepare 一条按 model column 顺序的 SELECT，并�
 TEXT/BLOB view 及 cell array 都只借用到下一次 `next()` 或 `close()`。SQLite data path 是
 single-threaded，调用方不得并发使用同一个 driver connection/context。
 
+PostgreSQL sink 使用一个 transaction 和每表一条 unnamed prepared INSERT；参数 OID 与格式由
+generated storage kind 决定，整数宽度、`numeric(20,0)` uint64、binary `bytea`、UUID 和 NULL
+均不经过 SQL 字符串 fallback。首行确定的 presence shape 对整个 sink context 固定；任一 prepare、
+bind 或 execute 失败后 context 进入 terminal failure，只允许 rollback/close。source 发送一条
+参数化 SELECT，并在发送后立即启用 libpq single-row mode；每次 `next()` 只持有一个
+`PGRES_SINGLE_TUPLE`。`PQgetvalue()` view、解码后的 bytea 和 UUID scratch 均在下一次
+`next()`/`close()` 时失效。正常结束、转换失败、服务端错误和提前 close 都会 drain 查询的
+terminal/error results，避免同一 connection 残留未消费结果。该 data path 同样是 single-threaded。
+
 导出到文件时先写同目录临时文件，成功 flush/close 后原子替换；失败删除精确临时文件，
 既有目标保持不变。第二阶段不先提供 stdout，避免无法回滚的半个文档。
 
@@ -252,9 +261,11 @@ single-threaded，调用方不得并发使用同一个 driver connection/context
 1. CLI parser、文件上限、错误阶段和 cleanup 的 fake-driver TinyTest。
 2. 真实 SQLite 临时数据库：多 statement 成功、第二条失败全回滚、transaction control 拒绝、
    重复 apply 错误和 hard limit。
-3. libpq test double：simple query 发送、所有 results drain、intermediate error、connection
-   error 和 secret redaction。
-4. 显式 PostgreSQL live gate：TBE 生成 DDL 应用到一次性 container，再查 catalog/约束。
+3. libpq test double：simple query 发送、prepared record 参数 OID/格式、single-row mode、所有
+   results drain、intermediate error、rollback、connection error 和 secret redaction。
+4. 显式 PostgreSQL live gate：TBE 生成 DDL 应用到一次性 container，再查 catalog/约束；record
+   路径 round-trip uint64 最大值、含 NUL 与零长度 bytea、UUID 与 NULL，并验证后续唯一约束失败后
+   rollback 不留下任何已导入行。
 5. Windows Release configure/build/CTest/install/package smoke；EU Linux Docker 同等验证。
 6. generated data tools 后续覆盖每种 scalar/NULL/最大值、format round trip、输入中途失败
    rollback、输出临时文件原子替换和所有容量边界。

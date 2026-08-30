@@ -31,6 +31,7 @@ add_library(
   src/dbtool_error.c
   src/dbtool_file.c
   src/dbtool_cli.c
+  src/data/dbtool_model_internal.c
   src/data/dbtool_transfer.c)
 target_compile_features(turbodb_dbtool_core PUBLIC c_std_11)
 target_include_directories(
@@ -148,12 +149,14 @@ endif()
 
 if(TURBODB_DBTOOLS_WITH_PGSQL)
   add_library(turbodb_dbtool_postgresql STATIC
-              src/postgresql/dbtool_postgresql.c)
+              src/postgresql/dbtool_postgresql.c
+              src/postgresql/dbtool_postgresql_records.c)
   target_compile_features(turbodb_dbtool_postgresql PUBLIC c_std_11)
   target_include_directories(turbodb_dbtool_postgresql
                              PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(turbodb_dbtool_postgresql
-                        PUBLIC turbodb_dbtool_core PostgreSQL::PostgreSQL)
+                        PUBLIC turbodb_dbtool_core PostgreSQL::PostgreSQL
+                               TurboUtils::sds)
   cmake_config_target(turbodb_dbtool_postgresql NO_INSTALL FOLDER "dbtools")
   dbtool_enable_strict_warnings(turbodb_dbtool_postgresql)
 
@@ -278,6 +281,15 @@ if(BUILD_TESTS)
       FOLDER "dbtools/tests")
     dbtool_enable_strict_warnings(dbtool_postgresql_test)
     dbtool_enable_postgresql_linker(dbtool_postgresql_test)
+    cmake_add_test(
+      NAME dbtool_postgresql_records_test
+      SOURCES tests/dbtool_postgresql_records_test.c tests/fake_libpq.c
+      LIBS turbodb_dbtool_postgresql TurboUtils::TinyTest
+      INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
+               ${CMAKE_CURRENT_SOURCE_DIR}/tests
+      FOLDER "dbtools/tests")
+    dbtool_enable_strict_warnings(dbtool_postgresql_records_test)
+    dbtool_enable_postgresql_linker(dbtool_postgresql_records_test)
     if(TURBODB_DBTOOLS_PG_LIVE_TESTS)
       cmake_add_test(
         NAME dbtool_postgresql_live_test

@@ -1,5 +1,7 @@
 #include "data/dbtool_transfer.h"
 
+#include "data/dbtool_model_internal.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,18 +50,8 @@ static int dbtool_limits_valid(const dbtool_transfer_limits *limits) {
 
 static int dbtool_model_valid(const dbtool_model_v1 *model,
                               size_t table_index) {
-  const dbtool_table_v1 *table;
-  if (model == NULL || model->struct_size < sizeof(*model) ||
-      model->abi_version != DBTOOL_MODEL_ABI_VERSION || model->tables == NULL ||
-      model->table_count == 0u || table_index >= model->table_count ||
-      model->open_decoder == NULL || model->open_encoder == NULL)
-    return 0;
-  table = &model->tables[table_index];
-  return table->struct_size >= sizeof(*table) &&
-         table->abi_version == DBTOOL_MODEL_ABI_VERSION &&
-         table->index == table_index && table->name != NULL &&
-         table->database_name != NULL && table->columns != NULL &&
-         table->column_count != 0u;
+  return dbtool_model_table_valid(model, table_index) != NULL &&
+         model->open_decoder != NULL && model->open_encoder != NULL;
 }
 
 static int dbtool_decoder_valid(const dbtool_decoder *decoder) {
