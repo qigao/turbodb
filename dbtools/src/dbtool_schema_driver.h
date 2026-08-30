@@ -36,6 +36,7 @@ typedef struct dbtool_schema_driver_ops {
   dbtool_status (*open)(void **out_context,
                         const dbtool_connection_config *config,
                         dbtool_error *error);
+  /* sql is borrowed for this call and sql[sql_size] is guaranteed to be NUL. */
   dbtool_status (*apply)(void *context, const char *sql, size_t sql_size,
                          dbtool_apply_result *result, dbtool_error *error);
   void (*close)(void *context);

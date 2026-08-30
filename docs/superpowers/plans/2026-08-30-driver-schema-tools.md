@@ -119,27 +119,27 @@ git commit -m "feat(dbtools): add bounded schema tool core"
 - Produces: `turbodb-sqlite schema apply --database ... --file ...`.
 - Ownership: driver context owns one `sqlite3*`; apply borrows SQL only for the call.
 
-- [ ] **Step 1: Write failing real-SQLite tests**
+- [x] **Step 1: Write failing real-SQLite tests**
 
 Use a TinyTest temp database. Verify two CREATE statements succeed and catalog contains both tables; a valid first statement plus invalid second statement leaves neither table; explicit `BEGIN`, `COMMIT` and `SAVEPOINT` in input are rejected and leave no table; exact/over script limit is enforced before open; busy timeout validates range.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Build/run `dbtool_sqlite_test`; expected missing driver symbols.
 
-- [ ] **Step 3: Implement open/apply/close**
+- [x] **Step 3: Implement open/apply/close**
 
 Open with explicit SQLite flags and busy timeout. Begin outer transaction, install an authorizer that denies transaction/savepoint opcodes only while executing the borrowed input, call `sqlite3_exec`, remove the authorizer, and commit or rollback. Copy native detail before `sqlite3_free`. Preserve the first useful error if rollback also fails.
 
-- [ ] **Step 4: Add the real executable**
+- [x] **Step 4: Add the real executable**
 
 `main.c` passes the SQLite ops directly to common CLI. Build only when the SQLite tool gate is ON. Install to `CMAKE_INSTALL_BINDIR` without exporting it as a link target.
 
-- [ ] **Step 5: Run GREEN and CLI smoke**
+- [x] **Step 5: Run GREEN and CLI smoke**
 
 Run the unit test and execute the built binary against a temp DB with a two-table TBE-shaped DDL file; inspect catalog from the test helper, not by grepping output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```text
 git add dbtools/src/sqlite dbtools/tests/dbtool_sqlite_test.c dbtools/CMakeLists.txt
