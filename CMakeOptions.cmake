@@ -27,6 +27,7 @@ option(TURBODB_DBTOOLS_WITH_PGSQL
        "Enable PostgreSQL standalone database tools" ON)
 option(TURBODB_DBTOOLS_PG_LIVE_TESTS
        "Run standalone database tools against a live PostgreSQL server" OFF)
+option(TURBODB_BUILD_REDIS "Build the Redis client library" ON)
 
 # tidesdb compression backends -- only Zstd by default; Snappy and LZ4 are
 # opt-in. Override per build with -DTIDESDB_WITH_SNAPPY=ON /

@@ -6,6 +6,6 @@ find_dependency(Threads)
 find_dependency(TurboUtils CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/TurboDBTargets.cmake")
-set(TurboDB_Redis_FOUND TRUE)
+set(TurboDB_Redis_FOUND @TURBODB_BUILD_REDIS@)
 
 check_required_components(TurboDB)
