@@ -13,7 +13,9 @@
 
 本文件保留核心约束与原则。详细技术规范已迁移为全局 Codex skills，按需激活：
 
-- **`turboutils`** - TurboUtils 共享 API 参考（错误、字符串、容器、文件、内存映射、平台安全、线程、协程、链接）
+- **`cstl` / `cmeta`** - Salts 容器、类型元数据与泛型接口
+- **`cflow` / `reactive` / `actor` / `executor`** - Salts 流、背压、Actor 与执行器协议
+- **`cbind`** - Salts CBind schema/binding 边界；若本机 skill 未安装，以 Salts 公共头文件和契约测试为准
 - **`memory-design-protocols`** - 内存、buffer、ring、Disruptor、queue、pool 与零拷贝 API/设计协议（所有权、容量、背压、关闭、验证）
 - **`cmake-presets`** - CMake Presets 构建测试指南（configure/build/test preset、target 构建、build tree 恢复）
 - **`c-design-patterns`** - C 语言设计模式实现指南（12 种模式、SOLID 原则、反模式警告）
@@ -22,7 +24,7 @@
 - **`plugin-system`** - 插件系统开发规范（架构设计、隔离机制、热重载、安全）
 - **`tinytest`** - TinyTest 测试框架指南（C/C++ 测试结构、断言、fixture、JUnit/TAP、benchmark）
 
-激活方式：在任务中涉及对应主题时使用相应全局 skill；需要显式指定时使用 `$turboutils`、`$memory-design-protocols`、`$cmake-presets`、`$c-design-patterns`、`$performance-optimization`、`$logging-guide`、`$plugin-system` 或 `$tinytest`。
+激活方式：在任务中涉及对应主题时使用相应全局 skill；需要显式指定时使用 `$cstl`、`$cmeta`、`$cflow`、`$reactive`、`$actor`、`$executor`、`$memory-design-protocols`、`$cmake-presets`、`$c-design-patterns`、`$performance-optimization`、`$logging-guide`、`$plugin-system` 或 `$tinytest`。
 
 ---
 
@@ -205,36 +207,36 @@
 
 ### 标准库与成熟算法优先
 
-> **共享 API 参见**: 全局 skill `turboutils`；内存、buffer、queue 与 pool 的 API、选择和协议参见 `memory-design-protocols`
+> **共享 API 参见**: 全局 skills `cstl`、`cmeta`、`cflow`、`reactive`、`actor`、`executor`；内存、buffer、queue 与 pool 的 API、选择和协议参见 `memory-design-protocols`
 
 #### 库优先级顺序（从高到低）
 
-1. **TurboUtils**（仓库 `utils/` 模块；构建时优先通过 CMake target `TurboUtils::Core` 使用）— 最优先
+1. **Salts**（独立 `salts` 仓库；构建时通过细粒度 `Salts::*` CMake targets 使用）— 最优先
 2. **项目内模块**（`exprtk/`、`plugins/` 等）
 3. **vendor/ 库**（sds、croar、mir、monocypher、sha2、miniblas）
 4. **vcpkg 依赖**（xxhash、sqlite3、zstd、boringssl、c-ares、aklomp-base64、simde）
 5. **C 标准库**（libc：`string.h`、`stdlib.h`、`stdio.h`）
-6. **底层系统 API**（仅允许封装在 TurboUtils 平台/协程适配层或项目适配层之后使用）
+6. **底层系统 API**（仅允许封装在 Salts 平台/协程适配层或项目适配层之后使用）
 
 #### 手写实现触发条件（严格约束）
 
 允许手写实现的前提：
-1. **TurboUtils/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
+1. **Salts/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
 2. 若是为了替换现有库或优化成熟通用能力，必须有 profiling 证明现有路径是瓶颈（≥20% 总耗时）
 3. 若是因为特殊约束（嵌入式、实时性、代码体积 <50KB），必须说明约束来源
 4. 高风险基础设施必须提供 Benchmark 对比、测试覆盖率目标和文档化理由
 
 #### 避免重复造轮子（强制规则）
 
-- ❌ **禁止手写**：动态数组 → 用 `turbo_vec_t` / `TURBO_VEC_DEFINE`；统一生命周期的临时数组按协议选 `MemoryPool` 或 `mem_pool_t`
-- ❌ **禁止手写**：字符串拼接 → 用 `tstr`（TurboUtils）或 `sds`（vendor）
-- ❌ **禁止手写**：哈希表/集合 → 用 `turbo_hash_map_t` / `TURBO_HASH_MAP_DEFINE` 或 `turbo_set_t` / `TURBO_SET_DEFINE`
-- ❌ **禁止手写**：双端队列 → 用 `turbo_deque_t` / `TURBO_DEQUE_DEFINE`
-- ❌ **禁止手写**：文件读写 → 用 `turbo_fs`（TurboUtils）
-- ❌ **禁止手写**：日志系统 → 使用 TurboUtils `tlog`，API、数量、交付与生产协议参见 `logging-guide`
-- ❌ **禁止手写**：线程池 → 用 `turbo_threadpool`（TurboUtils）
-- ❌ **禁止手写**：并发 ring/queue → 按拓扑与消费语义选择 `ring_buffer_spsc`、`disruptor`、`turbo_threadpool` 或 bucket priority queue（TurboUtils）
-- ❌ **禁止手写**：arena/slab/object pool → 按生命周期选择 `MemoryPool`、`mem_pool_t`、`mem_buffer_t` / `mem_slice_t` 或 `object_pool_t`（TurboUtils）
+- ❌ **禁止手写**：动态数组 → 用 CSTL `vec_t` 或 `<cstl/typed.h>` typed facade；统一生命周期的临时数组按协议选 `MemoryPool` 或 `mem_pool_t`
+- ❌ **禁止手写**：字符串拼接 → 用 `tstr`（Salts）或 `sds`（vendor）
+- ❌ **禁止手写**：哈希表/集合 → 用 CSTL `hash_map_t`、`hash_set_t`、`map_t` 或 `set_t`
+- ❌ **禁止手写**：双端队列 → 用 CSTL `deque_t`
+- ❌ **禁止手写**：文件读写 → 用 `salts_fs`
+- ❌ **禁止手写**：日志系统 → 使用 Salts `tlog`，API、数量、交付与生产协议参见 `logging-guide`
+- ❌ **禁止手写**：线程池 → 用 Salts Executor
+- ❌ **禁止手写**：并发 ring/queue → 按拓扑与消费语义选择 `ring_buffer_spsc`、`disruptor`、Executor 或 bucket priority queue（Salts）
+- ❌ **禁止手写**：arena/slab/object pool → 按生命周期选择 `MemoryPool`、`mem_pool_t`、`mem_buffer_t` / `mem_slice_t` 或 `object_pool_t`（Salts）
 
 ### 依赖管理与接口设计
 
@@ -294,7 +296,7 @@
 
 ## 内存、Buffer 与 Queue 设计协议
 
-> **内存与数据路径 API/设计协议参见**: 全局 skill `memory-design-protocols`；共享错误、线程与链接 API 参见 `turboutils`；性能收益验证参见 `performance-optimization`
+> **内存与数据路径 API/设计协议参见**: 全局 skill `memory-design-protocols`；共享错误、线程与链接 API 按模块参见 `cstl`、`cmeta`、`cflow`、`reactive`、`actor`、`executor`；性能收益验证参见 `performance-optimization`
 
 - 新增或修改跨模块、跨线程、零拷贝、池化或有界数据路径前，必须写明：数据单元、事实源、所有权、生命周期、线程拓扑、顺序、容量、背压、失败、关闭与观测协议
 - 零拷贝是生命周期协议，不是禁止复制；若复制能隔离所有权、限制大 buffer 滞留或消除危险借用，应选择有界复制并用 benchmark 验证成本
@@ -321,7 +323,7 @@
   - 可重入锁仅用于递归调用且无法重构时；普通 mutex 为默认
 - 无锁数据结构适用边界：
   - 只在 profiling 证明锁竞争是瓶颈，或既有架构明确要求对应 SPSC/MPMC 拓扑时考虑
-  - 优先复用 TurboUtils 已有实现；性能验证以现有实现或简单带锁实现为基线
+  - 优先复用 Salts 已有实现；性能验证以现有实现或简单带锁实现为基线
   - 只有算法实际存在地址复用与并发回收时，才设计 hazard pointer、epoch reclamation 或引用计数等 ABA/回收协议；固定槽位 ring 不机械套用
   - 线程角色、memory ordering、容量、背压、claim/publish/release 和 shutdown 以 `memory-design-protocols` 为准
   - 复杂共享状态机仍优先用锁或单 owner 消息传递
@@ -376,7 +378,7 @@
 - 内存安全：
   - 避免 use-after-free：明确所有权、文档化生命周期、AddressSanitizer 检测
   - 避免 double-free：每个指针只有一个释放点、NULL 检查后释放、释放后置 NULL
-  - 避免缓冲区溢出：使用 `strncpy`、`snprintf`、边界检查、`turbo_buffer` 动态数组
+  - 避免缓冲区溢出：使用 `strncpy`、`snprintf`、边界检查、`salts_buffer` 动态数组
   - 避免悬空指针：指针生命周期不超过被指向对象、返回值文档化所有权转移
 - 权限与隔离：
   - 最小权限原则：进程、线程、插件只拥有必要权限

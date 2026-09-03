@@ -1,13 +1,13 @@
 # TurboDB EU Linux Docker 远程测试 Runbook
 
-本文用于把 Windows 当前工作树作为唯一源码事实源，上传到 `root@eu`，在一次性 Ubuntu 24.04 Docker 容器内构建 TurboUtils 与 TurboDB，并保存可复验的构建、测试和校验结果。
+本文用于把 Windows 当前工作树作为唯一源码事实源，上传到 `root@eu`，在一次性 Ubuntu 24.04 Docker 容器内构建 Salts 与 TurboDB，并保存可复验的构建、测试和校验结果。
 
 该流程默认测试纯 C ORM、standalone schema tools、Redis/CFlow、Mongo、PostgreSQL 适配层及仓库内 mock/contract tests。它关闭独立 TidesDB engine tests，但仍保留 TurboDB 自身的 TidesDB adapter/mock tests。除非另有测试任务，本流程不会连接或修改远端现有数据库服务。
 
 ## 1. 测试契约
 
 - 源码事实源是本机 `C:\projects\cpp\turbonet` 下的当前工作树，包括尚未提交的改动。
-- 归档只包含 `turbo-utils` 与 `turbodb`；排除 Git 元数据、构建目录、依赖安装目录、CodeGraph 索引、日志与 `.env` 文件。
+- 归档只包含 `salts` 与 `turbodb`；排除 Git 元数据、构建目录、依赖安装目录、CodeGraph 索引、日志与 `.env` 文件。
 - 每次执行使用独立的 `/root/dev/runs/<run-id>` 和同名 Docker 容器。
 - 容器使用 `--network host`，但测试默认仅启动仓库内测试进程，不管理远端已有容器或数据库。
 - 所有步骤 fail fast；不得在 epoll 初始化失败时自动改用其他 CFlow I/O backend。
@@ -21,10 +21,10 @@
 
 ```powershell
 $sourceRoot = 'C:\projects\cpp\turbonet'
-$turboUtilsRoot = Join-Path $sourceRoot 'turbo-utils'
+$SaltsRoot = Join-Path $sourceRoot 'salts'
 $turboDbRoot = Join-Path $sourceRoot 'turbodb'
 
-Test-Path (Join-Path $turboUtilsRoot 'CMakeUserPresets.json')
+Test-Path (Join-Path $SaltsRoot 'CMakeUserPresets.json')
 Test-Path (Join-Path $turboDbRoot 'CMakeUserPresets.json')
 ssh root@eu 'set -eu; docker version --format "{{.Server.Version}}"; test -x /opt/vcpkg/vcpkg; mkdir -p /root/dev/incoming /root/dev/runs /var/cache/vcpkg'
 ```
@@ -49,8 +49,8 @@ New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 
 @(
     "created_utc=$([DateTime]::UtcNow.ToString('o'))"
-    "turbo-utils_commit=$(git -C (Join-Path $sourceRoot 'turbo-utils') rev-parse HEAD)"
-    "turbo-utils_dirty=$((git -C (Join-Path $sourceRoot 'turbo-utils') status --porcelain | Measure-Object).Count)"
+    "salts_commit=$(git -C (Join-Path $sourceRoot 'salts') rev-parse HEAD)"
+    "salts_dirty=$((git -C (Join-Path $sourceRoot 'salts') status --porcelain | Measure-Object).Count)"
     "turbodb_commit=$(git -C (Join-Path $sourceRoot 'turbodb') rev-parse HEAD)"
     "turbodb_dirty=$((git -C (Join-Path $sourceRoot 'turbodb') status --porcelain | Measure-Object).Count)"
 ) | Set-Content -Encoding ascii -LiteralPath $manifestPath
@@ -65,7 +65,7 @@ tar.exe -a -cf $bundlePath `
     --exclude='.env' `
     --exclude='.env.*' `
     --exclude='*.log' `
-    -C $sourceRoot turbo-utils turbodb `
+    -C $sourceRoot salts turbodb `
     -C $artifactRoot $manifestName
 
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $bundlePath).Hash.ToLowerInvariant()
@@ -129,7 +129,7 @@ cp "$incoming/$bundle_name.sha256" "$run_root/artifacts/source.sha256"
 cp "$incoming/$bundle_name.revisions.txt" "$run_root/artifacts/source.revisions.txt"
 printf '%s\n' "$run_root" > "$incoming/latest-turbodb-run"
 
-test -f "$run_root/src/turbo-utils/CMakeUserPresets.json"
+test -f "$run_root/src/salts/CMakeUserPresets.json"
 test -f "$run_root/src/turbodb/CMakeUserPresets.json"
 test -x /opt/vcpkg/vcpkg
 
@@ -209,10 +209,10 @@ done
     /opt/vcpkg/vcpkg version
 } | tee /work/artifacts/environment.txt
 
-cd /work/src/turbo-utils
+cd /work/src/salts
 cmake --fresh --preset linux-release-user \
-    -DCMAKE_INSTALL_PREFIX=/opt/turboutils/release \
-    -DTURBO_ENABLE_EPOLL_READINESS=ON \
+    -DCMAKE_INSTALL_PREFIX=/opt/salts/release \
+    -DSALTS_ENABLE_EPOLL_READINESS=ON \
     -DENABLE_TESTS=OFF \
     -DBUILD_TESTS=OFF \
     -DBUILD_TESTING=OFF
@@ -281,11 +281,11 @@ if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
         -B "$shared_consumer_build" \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="/opt/turbodb/release;/opt/turboutils/release;/work/src/turbodb/vcpkg_installed_pg/x64-linux"
+        -DCMAKE_PREFIX_PATH="/opt/turbodb/release;/opt/salts/release;/work/src/turbodb/vcpkg_installed_pg/x64-linux"
     cmake --build "$shared_consumer_build"
-    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/turboutils/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
+    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/salts/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
         "$shared_consumer_build/orm_postgresql_c_consumer"
-    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/turboutils/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
+    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/salts/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
         "$shared_consumer_build/orm_postgresql_cpp_consumer"
 
     echo "Installed package consumers verified: shared x C/C++"
@@ -362,7 +362,7 @@ tar.exe -tf $localResult
 只有同时满足以下条件，才能声明本次 EU 远程测试通过：
 
 1. 上传前与远端解压前的源码包 SHA-256 校验均通过。
-2. TurboUtils 以 `TURBO_ENABLE_EPOLL_READINESS=ON` 成功构建并安装。
+2. Salts 以 `SALTS_ENABLE_EPOLL_READINESS=ON` 成功构建并安装。
 3. TurboDB 成功 configure/build，且独立 TidesDB engine tests 被关闭。
 4. CTest 实际发现至少一个测试，JUnit 的 failure、error 与 skipped 数均为零。
 5. Redis/CFlow 与 ORM contract tests 在同一次 run 内通过。
@@ -375,7 +375,7 @@ tar.exe -tf $localResult
 
 ### `re2c` 不存在
 
-TurboUtils 的生成步骤需要 `re2c`。确认 Ubuntu 容器安装命令包含 `re2c`，然后创建新的 run；不要复用已经部分配置的 build tree。
+Salts 的生成步骤需要 `re2c`。确认 Ubuntu 容器安装命令包含 `re2c`，然后创建新的 run；不要复用已经部分配置的 build tree。
 
 ### BoringSSL 构建报告 `Could not find nasm`
 
@@ -397,15 +397,15 @@ configure 前逐一执行 `command -v`；preflight 失败时先修正 builder �
 该模块。不要跳过 JUnit 结构校验，因为 CTest 的控制台摘要不能替代持久化的
 tests/failures/errors/skipped 证据。
 
-### Redis runtime 返回 `TURBO_ENOTSUP (-4039)`
+### Redis runtime 返回 `SALTS_ENOTSUP (-4039)`
 
-这通常表示 TurboUtils 未启用 Linux epoll readiness。确认 TurboUtils configure 命令含有：
+这通常表示 Salts 未启用 Linux epoll readiness。确认 Salts configure 命令含有：
 
 ```text
--DTURBO_ENABLE_EPOLL_READINESS=ON
+-DSALTS_ENABLE_EPOLL_READINESS=ON
 ```
 
-随后以新的 run 重新构建 TurboUtils 和 TurboDB。不得在 TurboDB 内加入静默 backend fallback，因为这会改变 CFlow backend 选择和错误语义。
+随后以新的 run 重新构建 Salts 和 TurboDB。不得在 TurboDB 内加入静默 backend fallback，因为这会改变 CFlow backend 选择和错误语义。
 
 ### Redis contract test 等待超时
 

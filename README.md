@@ -52,6 +52,6 @@ PostgreSQL ORM backend 与 PostgreSQL dbtool 默认构建；libpq 只作为对�
 private/runtime 依赖，不进入使用方的编译或链接接口。安装只暴露 dbtools executable，
 不要求使用方 `find_package(TurboDB)`。`dbtools` install component
 会携带运行所需的动态库闭包；DDL SQL tools 不链接 `turbo_orm`、CFlow、CBind、CSerde 或
-TurboParser。详细设计与验证边界见
+Salts parser targets。详细设计与验证边界见
 [driver-data-tools.md](docs/architecture/driver-data-tools.md)，EU Docker 验证见
 [TURBODB_LINUX_REMOTE_TEST_RUNBOOK.md](docs/TURBODB_LINUX_REMOTE_TEST_RUNBOOK.md)。

@@ -12,7 +12,7 @@
 
 **Architecture:** `Orm::C` 保持数据库无关的 connection/query/result/CFlow core；`Orm::PostgreSQL` 是显式 connector 和 libpq 薄适配器，不使用全局 registry。复合键是一次性复制进 query plan 的有界 key-part batch，typed/generated adapters 位于 ORM 边界之外。
 
-**Tech Stack:** C11、CFlow、CSerde/CBind、TurboSTL vec、libpq、CMake Presets、TinyTest、header-only C++17 wrapper。
+**Tech Stack:** C11、CFlow、CSerde/CBind、CSTL vec、libpq、CMake Presets、TinyTest、header-only C++17 wrapper。
 
 **Spec:** `docs/architecture/orm-postgresql-pure-c-component.md`
 
@@ -264,7 +264,7 @@ Run fresh PG-enabled configure/build, focused component/unit/package consumers a
 
 - [x] **Step 3: EU Ubuntu/PostgreSQL live profile**
 
-Package the exact worktree using the runbook, verify its SHA-256 remotely, build TurboUtils with epoll readiness, build TurboDB with TidesDB engine tests off, run the full TurboDB CTest plus PostgreSQL live test, and save log/JUnit/SHA-256 evidence.
+Package the exact worktree using the runbook, verify its SHA-256 remotely, build Salts with epoll readiness, build TurboDB with TidesDB engine tests off, run the full TurboDB CTest plus PostgreSQL live test, and save log/JUnit/SHA-256 evidence.
 
 - [x] **Step 4: Final repository checks**
 

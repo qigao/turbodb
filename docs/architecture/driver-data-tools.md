@@ -15,7 +15,7 @@ SQLite query 路径会拒绝第二条 statement；PostgreSQL query 路径使用
 - 生产实现保持 C11；C++ 不进入工具 target 的 production sources。
 - 提供独立的 `turbodb-sqlite` 和 `turbodb-postgresql` executable。
 - 每个 executable 静态绑定一个 native driver，不使用运行时 registry 或 service locator。
-- 直接链接 SQLite/libpq，不链接 `turbo_orm`、CFlow、TurboParser、DataBind、CBind 或 CSerde。
+- 直接链接 SQLite/libpq，不链接 `turbo_orm`、CFlow、Salts parser targets、CBind 或 CSerde。
 - 对文件、配置、事务和 native error 实施 fail-fast、有界、可复验的契约。
 
 非目标包括 schema-to-SQL 编译、migration diff、`ALTER TABLE` 规划、migration history、
@@ -130,7 +130,7 @@ driver、operation 和 statement count，不输出密码、连接串或 SQL 全�
 - `TURBODB_DBTOOLS_WITH_SQLITE` 和 `TURBODB_DBTOOLS_WITH_PGSQL` 在 host build 默认开启，
   且独立于 ORM options；cross preset 显式关闭 dbtools 及其 PostgreSQL feature。
 - 只有启用 PostgreSQL dbtool 时才加入 vcpkg PostgreSQL feature 并查找 libpq。
-- targets 只链接 `TurboUtils::Core` 与对应 native driver。
+- targets 只链接 `Salts::Core` 与对应 native driver。
 - executable 安装到 `CMAKE_INSTALL_BINDIR`，不导出为可链接 library target。
 - `dbtools` install component 从最终 executable 扫描运行依赖；Windows 安装 DLL 到 `bin`，
   Unix 安装 shared library 到 `lib` 并使用 `$ORIGIN/../lib`。

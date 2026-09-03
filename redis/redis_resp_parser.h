@@ -6,7 +6,7 @@
 #ifndef REDIS_RESP_PARSER_H
 #define REDIS_RESP_PARSER_H
 
-#include "turbo_vstr.h"
+#include "salts_vstr.h"
 
 #include <stddef.h>
 #include <stdint.h>

@@ -5,7 +5,7 @@
 
 #include <stddef.h>
 
-#include "turbo_fs.h"
+#include "salts_fs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,10 +20,10 @@ typedef struct dbtool_file {
   { NULL, 0u }
 
 typedef struct dbtool_file_ops {
-  int (*stat)(void *context, const char *path, turbo_fs_stat_t *out);
-  turbo_file_t (*open)(void *context, const char *path, int flags, int mode);
-  int (*read)(void *context, turbo_file_t file, char *data, size_t size);
-  int (*close)(void *context, turbo_file_t file);
+  int (*stat)(void *context, const char *path, salts_fs_stat_t *out);
+  salts_file_t (*open)(void *context, const char *path, int flags, int mode);
+  int (*read)(void *context, salts_file_t file, char *data, size_t size);
+  int (*close)(void *context, salts_file_t file);
 } dbtool_file_ops;
 
 dbtool_status dbtool_file_read(const char *path, size_t max_bytes,

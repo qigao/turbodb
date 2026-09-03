@@ -71,7 +71,7 @@ if (orm_connect(&config, &connection, &error) != ORM_STATUS_OK) {
 ### Typed row Publisher
 
 Row execution requires a `cmeta_data_desc`. Generate production descriptors
-with TurboParser TBE `--cbind-output`; small tests may define a descriptor
+with the Salts TBE compiler's `--cbind-output`; small tests may define a descriptor
 directly with CMeta. The descriptor field names are matched against driver row
 keys.
 

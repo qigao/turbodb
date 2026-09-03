@@ -4,7 +4,7 @@ foreach(required_variable IN ITEMS ORM_PACKAGE_TEST_SOURCE_DIR
                                    ORM_PACKAGE_TEST_BINARY_ROOT
                                    ORM_PACKAGE_TEST_BUILD_DIR
                                    ORM_PACKAGE_TEST_INSTALL_SCRIPT
-                                   ORM_PACKAGE_TEST_TURBOUTILS_DIR)
+                                   ORM_PACKAGE_TEST_SALTS_ROOT)
   if(NOT DEFINED ${required_variable} OR "${${required_variable}}" STREQUAL "")
     message(FATAL_ERROR "${required_variable} is required")
   endif()
@@ -96,10 +96,12 @@ endif()
 
 set(configure_command
     "${CMAKE_COMMAND}"
+    -E env
+    "SALTS_ROOT=${ORM_PACKAGE_TEST_SALTS_ROOT}"
+    "${CMAKE_COMMAND}"
     -S "${ORM_PACKAGE_TEST_SOURCE_DIR}"
     -B "${consumer_build_dir}"
     "-DOrm_DIR=${package_dir}"
-    "-DTurboUtils_DIR=${ORM_PACKAGE_TEST_TURBOUTILS_DIR}"
     -DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE
     -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE)
 

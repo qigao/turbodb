@@ -1,7 +1,7 @@
 #include "redis_pool.h"
 
-#include "turbo_error.h"
-#include "turbo_str.h"
+#include "salts_error.h"
+#include "salts_str.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -144,7 +144,7 @@ static int redis_pool_open_prepare(redis_pool_impl *impl,
   } else if (impl->prepare_stage == REDIS_POOL_PREPARE_SELECT) {
     int written = snprintf(database, sizeof(database), "%d", impl->database);
     if (written <= 0 || (size_t)written >= sizeof(database))
-      return TURBO_EINVAL;
+      return SALTS_EINVAL;
     arguments[0] = "SELECT";
     lengths[0] = 6u;
     arguments[1] = database;
@@ -155,7 +155,7 @@ static int redis_pool_open_prepare(redis_pool_impl *impl,
     lengths[0] = 8u;
     count = 1;
   } else {
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   }
   return redis_cflow_command_open(&slot->connection, count, arguments, lengths,
                                   impl->prepare_reply_bytes,
@@ -166,10 +166,10 @@ static int redis_pool_destroy_slot(redis_pool_slot *slot) {
   int status;
   if (!slot || !slot->connection.impl) {
     if (slot) slot->state = REDIS_POOL_SLOT_CLOSED;
-    return TURBO_OK;
+    return SALTS_OK;
   }
   status = redis_cflow_connection_destroy(&slot->connection);
-  if (status == TURBO_OK) slot->state = REDIS_POOL_SLOT_CLOSED;
+  if (status == SALTS_OK) slot->state = REDIS_POOL_SLOT_CLOSED;
   return status;
 }
 
@@ -208,10 +208,10 @@ int redis_pool_init(redis_pool *pool, const redis_pool_config *config) {
       (config->username && config->username[0] != '\0' &&
        (!config->password || config->password[0] == '\0')) ||
       config->connection_capacity > SIZE_MAX / sizeof(redis_pool_slot))
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   slots_bytes = config->connection_capacity * sizeof(redis_pool_slot);
   impl = (redis_pool_impl *)calloc(1, sizeof(*impl));
-  if (!impl) return TURBO_ENOMEM;
+  if (!impl) return SALTS_ENOMEM;
   impl->slots = (redis_pool_slot *)calloc(1, slots_bytes);
   impl->host = redis_pool_copy_string(config->host);
   impl->username = redis_pool_copy_string(config->username);
@@ -224,7 +224,7 @@ int redis_pool_init(redis_pool *pool, const redis_pool_config *config) {
     tstr_free(impl->host);
     free(impl->slots);
     free(impl);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   impl->runtime = config->runtime;
   impl->port = config->port;
@@ -241,7 +241,7 @@ int redis_pool_init(redis_pool *pool, const redis_pool_config *config) {
   impl->phase = REDIS_POOL_PHASE_CONNECTING;
   impl->stats.connection_capacity = impl->capacity;
   pool->impl = impl;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
@@ -250,14 +250,14 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
   memset(&empty_waitable, 0, sizeof(empty_waitable));
   if (!impl)
     return redis_pool_connect_result(NULL, REDIS_POOL_CONNECT_ERROR,
-                                     TURBO_EINVAL, empty_waitable);
+                                     SALTS_EINVAL, empty_waitable);
   if (impl->phase == REDIS_POOL_PHASE_READY) {
     size_t index;
     for (index = 0u; index < impl->capacity; ++index) {
       if (impl->slots[index].state == REDIS_POOL_SLOT_INVALID) {
         if (impl->slots[index].stream_refs != 0u)
           return redis_pool_connect_result(
-              impl, REDIS_POOL_CONNECT_ERROR, TURBO_EBUSY, empty_waitable);
+              impl, REDIS_POOL_CONNECT_ERROR, SALTS_EBUSY, empty_waitable);
         impl->phase = REDIS_POOL_PHASE_CONNECTING;
         impl->connect_index = index;
         impl->repairing = 1;
@@ -266,11 +266,11 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
     }
     if (impl->phase == REDIS_POOL_PHASE_READY)
       return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_DONE,
-                                       TURBO_OK, empty_waitable);
+                                       SALTS_OK, empty_waitable);
   }
   if (impl->phase != REDIS_POOL_PHASE_CONNECTING)
     return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
-                                     TURBO_ESHUTDOWN, empty_waitable);
+                                     SALTS_ESHUTDOWN, empty_waitable);
 
   while (impl->connect_index < impl->capacity) {
     redis_pool_slot *slot = &impl->slots[impl->connect_index];
@@ -283,9 +283,9 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
       int status;
       if (slot->stream_refs != 0u)
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
-                                         TURBO_EBUSY, empty_waitable);
+                                         SALTS_EBUSY, empty_waitable);
       status = redis_pool_destroy_slot(slot);
-      if (status != TURBO_OK) {
+      if (status != SALTS_OK) {
         impl->phase = impl->repairing ? REDIS_POOL_PHASE_READY
                                       : REDIS_POOL_PHASE_FAILED;
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
@@ -304,7 +304,7 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
           impl->receive_chunk_bytes,
           impl->cancel_timeout_ns};
       int status = redis_cflow_connection_open(&slot->connection, &open_config);
-      if (status != TURBO_OK) {
+      if (status != SALTS_OK) {
         redis_pool_mark_connect_failure(impl, slot);
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
                                          status, empty_waitable);
@@ -316,11 +316,11 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
           redis_cflow_connection_connect_next(&slot->connection);
       if (connected.kind == REDIS_CFLOW_CONNECT_WAIT)
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_WAIT,
-                                         TURBO_OK, connected.waitable);
+                                         SALTS_OK, connected.waitable);
       if (connected.kind == REDIS_CFLOW_CONNECT_ERROR) {
-        if (connected.status == TURBO_EBUSY)
+        if (connected.status == SALTS_EBUSY)
           return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
-                                           TURBO_EBUSY, empty_waitable);
+                                           SALTS_EBUSY, empty_waitable);
         redis_pool_mark_connect_failure(impl, slot);
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
                                          connected.status, empty_waitable);
@@ -337,7 +337,7 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
       }
       if (!impl->prepare_stream.impl) {
         int status = redis_pool_open_prepare(impl, slot);
-        if (status != TURBO_OK) {
+        if (status != SALTS_OK) {
           redis_pool_mark_connect_failure(impl, slot);
           return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
                                            status, empty_waitable);
@@ -347,7 +347,7 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
       prepared = redis_cflow_stream_next(&impl->prepare_stream);
       if (prepared.kind == REDIS_CFLOW_STREAM_WAIT)
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_WAIT,
-                                         TURBO_OK, prepared.waitable);
+                                         SALTS_OK, prepared.waitable);
       if (prepared.kind == REDIS_CFLOW_STREAM_ITEM) {
         impl->prepare_item_seen = 1;
         redis_reply_free(prepared.item);
@@ -365,12 +365,12 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
         (void)redis_cflow_stream_destroy(&impl->prepare_stream);
         redis_pool_mark_connect_failure(impl, slot);
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
-                                         TURBO_EPROTO, empty_waitable);
+                                         SALTS_EPROTO, empty_waitable);
       }
-      if (redis_cflow_stream_destroy(&impl->prepare_stream) != TURBO_OK) {
+      if (redis_cflow_stream_destroy(&impl->prepare_stream) != SALTS_OK) {
         redis_pool_mark_connect_failure(impl, slot);
         return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_ERROR,
-                                         TURBO_EBUSY, empty_waitable);
+                                         SALTS_EBUSY, empty_waitable);
       }
       impl->prepare_stage =
           redis_pool_next_prepare(impl, impl->prepare_stage);
@@ -378,7 +378,7 @@ redis_pool_connect_step redis_pool_connect_next(redis_pool *pool) {
   }
   impl->repairing = 0;
   impl->phase = REDIS_POOL_PHASE_READY;
-  return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_DONE, TURBO_OK,
+  return redis_pool_connect_result(impl, REDIS_POOL_CONNECT_DONE, SALTS_OK,
                                    empty_waitable);
 }
 
@@ -397,8 +397,8 @@ int redis_pool_command_open(redis_pool *pool, int argc, const char **argv,
   int status;
   if (!impl || impl->phase != REDIS_POOL_PHASE_READY || argc <= 0 || !argv ||
       max_reply_bytes == 0u || !out_stream || out_stream->impl)
-    return impl && impl->phase != REDIS_POOL_PHASE_READY ? TURBO_ESHUTDOWN
-                                                         : TURBO_EINVAL;
+    return impl && impl->phase != REDIS_POOL_PHASE_READY ? SALTS_ESHUTDOWN
+                                                         : SALTS_EINVAL;
   for (index = 0; index < impl->capacity; ++index) {
     if (impl->slots[index].state == REDIS_POOL_SLOT_IDLE) {
       slot = &impl->slots[index];
@@ -407,16 +407,16 @@ int redis_pool_command_open(redis_pool *pool, int argc, const char **argv,
   }
   if (!slot) {
     impl->stats.rejected_commands++;
-    return TURBO_ENOBUFS;
+    return SALTS_ENOBUFS;
   }
   stream = (redis_pool_stream_impl *)calloc(1, sizeof(*stream));
-  if (!stream) return TURBO_ENOMEM;
+  if (!stream) return SALTS_ENOMEM;
   slot->state = REDIS_POOL_SLOT_BORROWED;
   stream->pool = impl;
   stream->slot = slot;
   status = redis_cflow_command_open(&slot->connection, argc, argv, argvlen,
                                     max_reply_bytes, &stream->inner);
-  if (status != TURBO_OK) {
+  if (status != SALTS_OK) {
     slot->state = redis_cflow_connection_usable(&slot->connection)
                       ? REDIS_POOL_SLOT_IDLE
                       : REDIS_POOL_SLOT_INVALID;
@@ -426,7 +426,7 @@ int redis_pool_command_open(redis_pool *pool, int argc, const char **argv,
   impl->stats.admitted_commands++;
   slot->stream_refs++;
   out_stream->impl = stream;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 redis_cflow_stream_step redis_pool_stream_next(redis_pool_stream *stream_) {
@@ -434,7 +434,7 @@ redis_cflow_stream_step redis_pool_stream_next(redis_pool_stream *stream_) {
   redis_cflow_stream_step step = REDIS_CFLOW_STREAM_STEP_INIT;
   if (!stream) {
     step.kind = REDIS_CFLOW_STREAM_ERROR;
-    step.status = TURBO_EINVAL;
+    step.status = SALTS_EINVAL;
     return step;
   }
   step = redis_cflow_stream_next(&stream->inner);
@@ -451,10 +451,10 @@ redis_cflow_stream_step redis_pool_stream_next(redis_pool_stream *stream_) {
 int redis_pool_stream_cancel(redis_pool_stream *stream_) {
   redis_pool_stream_impl *stream = redis_pool_stream_get(stream_);
   int status;
-  if (!stream) return TURBO_EINVAL;
-  if (stream->terminal) return TURBO_OK;
+  if (!stream) return SALTS_EINVAL;
+  if (stream->terminal) return SALTS_OK;
   status = redis_cflow_stream_cancel(&stream->inner);
-  if (status == TURBO_OK) {
+  if (status == SALTS_OK) {
     stream->terminal = 1;
     stream->pool->stats.cancelled_commands++;
     redis_pool_release_stream(stream, 1);
@@ -465,58 +465,58 @@ int redis_pool_stream_cancel(redis_pool_stream *stream_) {
 int redis_pool_stream_destroy(redis_pool_stream *stream_) {
   redis_pool_stream_impl *stream = redis_pool_stream_get(stream_);
   int status;
-  if (!stream) return TURBO_EINVAL;
+  if (!stream) return SALTS_EINVAL;
   if (!stream->terminal) {
     status = redis_pool_stream_cancel(stream_);
-    if (status != TURBO_OK) return status;
+    if (status != SALTS_OK) return status;
   }
   status = redis_cflow_stream_destroy(&stream->inner);
-  if (status != TURBO_OK) return status;
-  if (stream->slot->stream_refs == 0u) return TURBO_EINVAL;
+  if (status != SALTS_OK) return status;
+  if (stream->slot->stream_refs == 0u) return SALTS_EINVAL;
   stream->slot->stream_refs--;
   redis_pool_release_stream(stream, 0);
   free(stream);
   stream_->impl = NULL;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int redis_pool_close(redis_pool *pool) {
   redis_pool_impl *impl = redis_pool_get(pool);
   size_t index;
-  int result = TURBO_OK;
-  if (!impl) return TURBO_EINVAL;
-  if (impl->phase == REDIS_POOL_PHASE_CLOSED) return TURBO_OK;
+  int result = SALTS_OK;
+  if (!impl) return SALTS_EINVAL;
+  if (impl->phase == REDIS_POOL_PHASE_CLOSED) return SALTS_OK;
   for (index = 0; index < impl->capacity; ++index) {
     if (impl->slots[index].state == REDIS_POOL_SLOT_BORROWED ||
         impl->slots[index].stream_refs != 0u)
-      return TURBO_EBUSY;
+      return SALTS_EBUSY;
   }
   impl->phase = REDIS_POOL_PHASE_CLOSING;
   if (impl->prepare_stream.impl) {
     result = redis_cflow_stream_destroy(&impl->prepare_stream);
-    if (result != TURBO_OK) return result;
+    if (result != SALTS_OK) return result;
   }
   for (index = 0; index < impl->capacity; ++index) {
     int status = redis_pool_destroy_slot(&impl->slots[index]);
-    if (status != TURBO_OK && result == TURBO_OK) result = status;
+    if (status != SALTS_OK && result == SALTS_OK) result = status;
   }
-  if (result == TURBO_OK) impl->phase = REDIS_POOL_PHASE_CLOSED;
+  if (result == SALTS_OK) impl->phase = REDIS_POOL_PHASE_CLOSED;
   return result;
 }
 
 int redis_pool_destroy(redis_pool *pool) {
   redis_pool_impl *impl = redis_pool_get(pool);
   int status;
-  if (!impl) return TURBO_EINVAL;
+  if (!impl) return SALTS_EINVAL;
   status = redis_pool_close(pool);
-  if (status != TURBO_OK) return status;
+  if (status != SALTS_OK) return status;
   tstr_free(impl->password);
   tstr_free(impl->username);
   tstr_free(impl->host);
   free(impl->slots);
   free(impl);
   pool->impl = NULL;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 void redis_pool_get_stats(const redis_pool *pool, redis_pool_stats *stats) {

@@ -2,7 +2,7 @@
 #include "../redis_io_internal.h"
 
 #include "tinytest.h"
-#include "turbo_error.h"
+#include "salts_error.h"
 
 #include <stdint.h>
 
@@ -25,7 +25,7 @@ suite("redis cflow io runtime") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 0u, 1u};
 
-    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_EINVAL);
+    check_equal(redis_io_runtime_init(&runtime, &config), SALTS_EINVAL);
     check_false(redis_io_runtime_valid(&runtime));
   }
 
@@ -36,22 +36,22 @@ suite("redis cflow io runtime") {
     cflow_io_backend_ops backend = {0};
     void *backend_user = NULL;
 
-    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
+    check_equal(redis_io_runtime_init(&runtime, &config), SALTS_OK);
     check_equal(redis_io_runtime_attach_publisher(&runtime, &publisher, redis_test_drive, NULL, &backend,
                                                &backend_user),
-                TURBO_OK);
+                SALTS_OK);
     check_not_null(backend_user);
     {
       redis_io_runtime_publisher rejected = {0};
       check_equal(redis_io_runtime_attach_publisher(&runtime, &rejected, redis_test_drive, NULL,
                                                  &backend, &backend_user),
-                  TURBO_ENOBUFS);
+                  SALTS_ENOBUFS);
     }
-    check_equal(redis_io_runtime_close(&runtime), TURBO_EBUSY);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_EBUSY);
 
-    check_equal(redis_io_runtime_detach_publisher(&publisher), TURBO_OK);
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_detach_publisher(&publisher), SALTS_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
     check_false(redis_io_runtime_valid(&runtime));
   }
 
@@ -62,19 +62,19 @@ suite("redis cflow io runtime") {
     cflow_io_backend_ops backend = {0};
     void *backend_user = NULL;
 
-    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
+    check_equal(redis_io_runtime_init(&runtime, &config), SALTS_OK);
     check_equal(redis_io_runtime_attach_publisher(&runtime, &publisher, redis_test_drive, NULL, &backend,
                                                &backend_user),
-                TURBO_OK);
-    check_equal(redis_io_runtime_publisher_started(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_publisher_started(&runtime), TURBO_ENOBUFS);
-    check_equal(redis_io_runtime_close(&runtime), TURBO_EBUSY);
+                SALTS_OK);
+    check_equal(redis_io_runtime_publisher_started(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_publisher_started(&runtime), SALTS_ENOBUFS);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_EBUSY);
 
     redis_io_runtime_publisher_finished(&runtime);
-    check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(1000000000)), TURBO_OK);
-    check_equal(redis_io_runtime_detach_publisher(&publisher), TURBO_OK);
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(1000000000)), SALTS_OK);
+    check_equal(redis_io_runtime_detach_publisher(&publisher), SALTS_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
   }
 
   it("bounds retiring socket identities until the backend forgets them") {
@@ -83,15 +83,15 @@ suite("redis cflow io runtime") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 1u, 1u};
 
-    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
-    check_equal(redis_io_runtime_retire_socket(&runtime, first_socket), TURBO_OK);
-    check_equal(redis_io_runtime_retire_socket(&runtime, first_socket), TURBO_EBUSY);
-    check_equal(redis_io_runtime_retire_socket(&runtime, second_socket), TURBO_ENOBUFS);
-    check_equal(redis_io_runtime_forget_socket(&runtime, first_socket), TURBO_OK);
-    check_equal(redis_io_runtime_retire_socket(&runtime, second_socket), TURBO_OK);
-    check_equal(redis_io_runtime_forget_socket(&runtime, second_socket), TURBO_OK);
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_init(&runtime, &config), SALTS_OK);
+    check_equal(redis_io_runtime_retire_socket(&runtime, first_socket), SALTS_OK);
+    check_equal(redis_io_runtime_retire_socket(&runtime, first_socket), SALTS_EBUSY);
+    check_equal(redis_io_runtime_retire_socket(&runtime, second_socket), SALTS_ENOBUFS);
+    check_equal(redis_io_runtime_forget_socket(&runtime, first_socket), SALTS_OK);
+    check_equal(redis_io_runtime_retire_socket(&runtime, second_socket), SALTS_OK);
+    check_equal(redis_io_runtime_forget_socket(&runtime, second_socket), SALTS_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
   }
 
   it("rejects a reused socket identity while its previous backend lane retires") {
@@ -107,41 +107,41 @@ suite("redis cflow io runtime") {
                                            .buffer = (void *)&runtime,
                                            .length = 1u};
 
-    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
+    check_equal(redis_io_runtime_init(&runtime, &config), SALTS_OK);
     check_equal(redis_io_runtime_attach_publisher(&runtime, &publisher, redis_test_drive, NULL, &backend,
                                                &backend_user),
-                TURBO_OK);
-    check_equal(redis_io_runtime_retire_socket(&runtime, socket_identity), TURBO_OK);
-    check_equal(backend.submit(backend_user, &actor, 1u, 1u, &operation), TURBO_EBUSY);
-    check_equal(redis_io_runtime_forget_socket(&runtime, socket_identity), TURBO_OK);
-    check_equal(redis_io_runtime_detach_publisher(&publisher), TURBO_OK);
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+                SALTS_OK);
+    check_equal(redis_io_runtime_retire_socket(&runtime, socket_identity), SALTS_OK);
+    check_equal(backend.submit(backend_user, &actor, 1u, 1u, &operation), SALTS_EBUSY);
+    check_equal(redis_io_runtime_forget_socket(&runtime, socket_identity), SALTS_OK);
+    check_equal(redis_io_runtime_detach_publisher(&publisher), SALTS_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
   }
 
   it("rejects blocking runtime calls from an I/O callback") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 1u, 1u};
 
-    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
+    check_equal(redis_io_runtime_init(&runtime, &config), SALTS_OK);
     redis_io_runtime_enter_callback();
-    check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(1000000000)), TURBO_EBUSY);
+    check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(1000000000)), SALTS_EBUSY);
     check_equal(
         redis_io_runtime_forget_socket_wait(&runtime, (uintptr_t)1234u, UINT64_C(1000000000)),
-        TURBO_EBUSY);
+        SALTS_EBUSY);
     redis_io_runtime_leave_callback();
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
   }
 
   it("requires close before destroy") {
     redis_io_runtime runtime = {0};
     redis_io_runtime_config config = {redis_test_backend_kind(), 1u, 1u};
 
-    check_equal(redis_io_runtime_init(&runtime, &config), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_EBUSY);
+    check_equal(redis_io_runtime_init(&runtime, &config), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_EBUSY);
     check_true(redis_io_runtime_valid(&runtime));
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
   }
 }

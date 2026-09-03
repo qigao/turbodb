@@ -70,7 +70,7 @@ REDIS_API int redis_cluster_init(redis_cluster *cluster,
  * connect every discovered primary pool. WAIT carries the exact underlying
  * CFlow waitable. A changed topology requires close/destroy followed by init;
  * command streams report MOVED/ASK as ordinary Redis server errors. An ERROR
- * with TURBO_EBUSY preserves the current phase and is retryable after the
+ * with SALTS_EBUSY preserves the current phase and is retryable after the
  * current wake/driver callback returns.
  */
 REDIS_API redis_cluster_connect_step redis_cluster_connect_next(

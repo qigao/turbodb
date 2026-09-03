@@ -1,7 +1,7 @@
 #include "redis_sentinel.h"
 
-#include "turbo_error.h"
-#include "turbo_str.h"
+#include "salts_error.h"
+#include "salts_str.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -96,24 +96,24 @@ static int redis_sentinel_parse_master(redis_sentinel_impl *impl, const redis_re
   char *end = NULL;
   unsigned long port;
   tstr host;
-  if (!reply || reply->type != REDIS_REPLY_ARRAY || reply->element_count != 2u) return TURBO_EPROTO;
+  if (!reply || reply->type != REDIS_REPLY_ARRAY || reply->element_count != 2u) return SALTS_EPROTO;
   host_reply = reply->elements[0];
   port_reply = reply->elements[1];
   if (!host_reply || !port_reply ||
       (host_reply->type != REDIS_REPLY_BULK_STRING && host_reply->type != REDIS_REPLY_STRING) ||
       (port_reply->type != REDIS_REPLY_BULK_STRING && port_reply->type != REDIS_REPLY_STRING) ||
       !host_reply->str || host_reply->len == 0u || !port_reply->str || port_reply->len == 0u)
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   errno = 0;
   port = strtoul(port_reply->str, &end, 10);
   if (errno != 0 || end != port_reply->str + port_reply->len || port == 0u || port > UINT16_MAX)
-    return TURBO_EPROTO;
+    return SALTS_EPROTO;
   host = tstr_new_len(host_reply->str, host_reply->len);
-  if (!host) return TURBO_ENOMEM;
+  if (!host) return SALTS_ENOMEM;
   tstr_free(impl->master_host);
   impl->master_host = host;
   impl->master_port = (uint16_t)port;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static void redis_sentinel_free_impl(redis_sentinel_impl *impl) {
@@ -144,9 +144,9 @@ int redis_sentinel_init(redis_sentinel *sentinel, const redis_sentinel_config *c
       config->receive_chunk_bytes == 0u || config->discovery_reply_bytes == 0u ||
       config->cancel_timeout_ns == 0u || config->sentinel_count > SIZE_MAX / sizeof(tstr) ||
       config->sentinel_count > SIZE_MAX / sizeof(uint16_t))
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   impl = (redis_sentinel_impl *)calloc(1, sizeof(*impl));
-  if (!impl) return TURBO_ENOMEM;
+  if (!impl) return SALTS_ENOMEM;
   impl->sentinel_hosts = (tstr *)calloc(config->sentinel_count, sizeof(tstr));
   impl->sentinel_ports = (uint16_t *)calloc(config->sentinel_count, sizeof(uint16_t));
   impl->service_name = redis_sentinel_copy(config->service_name);
@@ -183,41 +183,41 @@ int redis_sentinel_init(redis_sentinel *sentinel, const redis_sentinel_config *c
     redis_pool_config pool_config =
         redis_sentinel_pool_config(impl, impl->sentinel_hosts[0], impl->sentinel_ports[0],
                                    impl->sentinel_username, impl->sentinel_password, 0, 1u);
-    if (redis_pool_init(&impl->discovery_pool, &pool_config) != TURBO_OK) goto invalid;
+    if (redis_pool_init(&impl->discovery_pool, &pool_config) != SALTS_OK) goto invalid;
   }
   sentinel->impl = impl;
-  return TURBO_OK;
+  return SALTS_OK;
 
 invalid:
   redis_sentinel_free_impl(impl);
-  return TURBO_EINVAL;
+  return SALTS_EINVAL;
 no_memory:
   redis_sentinel_free_impl(impl);
-  return TURBO_ENOMEM;
+  return SALTS_ENOMEM;
 }
 
 redis_sentinel_connect_step redis_sentinel_connect_next(redis_sentinel *sentinel) {
   redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
   cflow_waitable empty_waitable;
-  int cleanup_status = TURBO_OK;
+  int cleanup_status = SALTS_OK;
   memset(&empty_waitable, 0, sizeof(empty_waitable));
   if (!impl)
-    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, TURBO_EINVAL, empty_waitable);
+    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, SALTS_EINVAL, empty_waitable);
   if (impl->phase == REDIS_SENTINEL_PHASE_READY)
-    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_DONE, TURBO_OK, empty_waitable);
+    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_DONE, SALTS_OK, empty_waitable);
   if (impl->phase == REDIS_SENTINEL_PHASE_DISCOVERY_CONNECT) {
     redis_pool_connect_step connected = redis_pool_connect_next(&impl->discovery_pool);
     if (connected.kind == REDIS_POOL_CONNECT_WAIT)
-      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK, connected.waitable);
+      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, SALTS_OK, connected.waitable);
     if (connected.kind == REDIS_POOL_CONNECT_ERROR) {
-      if (connected.status != TURBO_EBUSY) impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+      if (connected.status != SALTS_EBUSY) impl->phase = REDIS_SENTINEL_PHASE_FAILED;
       return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, connected.status, empty_waitable);
     }
     {
       const char *arguments[] = {"SENTINEL", "get-master-addr-by-name", impl->service_name};
       int status = redis_pool_command_open(&impl->discovery_pool, 3, arguments, NULL,
                                            impl->discovery_reply_bytes, &impl->discovery_stream);
-      if (status != TURBO_OK) {
+      if (status != SALTS_OK) {
         impl->phase = REDIS_SENTINEL_PHASE_FAILED;
         return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, status, empty_waitable);
       }
@@ -228,7 +228,7 @@ redis_sentinel_connect_step redis_sentinel_connect_next(redis_sentinel *sentinel
     for (;;) {
       redis_cflow_stream_step discovered = redis_pool_stream_next(&impl->discovery_stream);
       if (discovered.kind == REDIS_CFLOW_STREAM_WAIT)
-        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK, discovered.waitable);
+        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, SALTS_OK, discovered.waitable);
       if (discovered.kind == REDIS_CFLOW_STREAM_ERROR) {
         redis_reply_free(discovered.item);
         impl->phase = REDIS_SENTINEL_PHASE_FAILED;
@@ -238,7 +238,7 @@ redis_sentinel_connect_step redis_sentinel_connect_next(redis_sentinel *sentinel
       if (discovered.kind == REDIS_CFLOW_STREAM_ITEM) {
         int status = redis_sentinel_parse_master(impl, discovered.item);
         redis_reply_free(discovered.item);
-        if (status != TURBO_OK) {
+        if (status != SALTS_OK) {
           impl->phase = REDIS_SENTINEL_PHASE_FAILED;
           return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, status, empty_waitable);
         }
@@ -247,7 +247,7 @@ redis_sentinel_connect_step redis_sentinel_connect_next(redis_sentinel *sentinel
       }
       if (!impl->discovery_item_seen) {
         impl->phase = REDIS_SENTINEL_PHASE_FAILED;
-        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, TURBO_EPROTO, empty_waitable);
+        return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, SALTS_EPROTO, empty_waitable);
       }
       impl->phase = REDIS_SENTINEL_PHASE_DISCOVERY_CLEANUP;
       break;
@@ -256,38 +256,38 @@ redis_sentinel_connect_step redis_sentinel_connect_next(redis_sentinel *sentinel
   if (impl->phase == REDIS_SENTINEL_PHASE_DISCOVERY_CLEANUP) {
     if (impl->discovery_stream.impl) {
       cleanup_status = redis_pool_stream_destroy(&impl->discovery_stream);
-      if (cleanup_status != TURBO_OK) goto cleanup_error;
+      if (cleanup_status != SALTS_OK) goto cleanup_error;
     }
     if (impl->discovery_pool.impl) {
       cleanup_status = redis_pool_close(&impl->discovery_pool);
-      if (cleanup_status != TURBO_OK) goto cleanup_error;
+      if (cleanup_status != SALTS_OK) goto cleanup_error;
       cleanup_status = redis_pool_destroy(&impl->discovery_pool);
-      if (cleanup_status != TURBO_OK) goto cleanup_error;
+      if (cleanup_status != SALTS_OK) goto cleanup_error;
     }
     {
       redis_pool_config pool_config =
           redis_sentinel_pool_config(impl, impl->master_host, impl->master_port, impl->username,
                                      impl->password, impl->database, impl->connection_capacity);
       cleanup_status = redis_pool_init(&impl->master_pool, &pool_config);
-      if (cleanup_status != TURBO_OK) goto cleanup_error;
+      if (cleanup_status != SALTS_OK) goto cleanup_error;
     }
     impl->phase = REDIS_SENTINEL_PHASE_MASTER_CONNECT;
   }
   if (impl->phase == REDIS_SENTINEL_PHASE_MASTER_CONNECT) {
     redis_pool_connect_step connected = redis_pool_connect_next(&impl->master_pool);
     if (connected.kind == REDIS_POOL_CONNECT_WAIT)
-      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, TURBO_OK, connected.waitable);
+      return redis_sentinel_result(REDIS_SENTINEL_CONNECT_WAIT, SALTS_OK, connected.waitable);
     if (connected.kind == REDIS_POOL_CONNECT_ERROR) {
-      if (connected.status != TURBO_EBUSY) impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+      if (connected.status != SALTS_EBUSY) impl->phase = REDIS_SENTINEL_PHASE_FAILED;
       return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, connected.status, empty_waitable);
     }
     impl->phase = REDIS_SENTINEL_PHASE_READY;
-    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_DONE, TURBO_OK, empty_waitable);
+    return redis_sentinel_result(REDIS_SENTINEL_CONNECT_DONE, SALTS_OK, empty_waitable);
   }
-  return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, TURBO_ESHUTDOWN, empty_waitable);
+  return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, SALTS_ESHUTDOWN, empty_waitable);
 
 cleanup_error:
-  if (cleanup_status != TURBO_EBUSY) impl->phase = REDIS_SENTINEL_PHASE_FAILED;
+  if (cleanup_status != SALTS_EBUSY) impl->phase = REDIS_SENTINEL_PHASE_FAILED;
   return redis_sentinel_result(REDIS_SENTINEL_CONNECT_ERROR, cleanup_status, empty_waitable);
 }
 
@@ -296,17 +296,17 @@ int redis_sentinel_command_open(redis_sentinel *sentinel, int argc, const char *
                                 redis_pool_stream *out_stream) {
   redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
   if (!impl || impl->phase != REDIS_SENTINEL_PHASE_READY)
-    return impl ? TURBO_ESHUTDOWN : TURBO_EINVAL;
+    return impl ? SALTS_ESHUTDOWN : SALTS_EINVAL;
   return redis_pool_command_open(&impl->master_pool, argc, argv, argvlen, max_reply_bytes,
                                  out_stream);
 }
 
 int redis_sentinel_get_master(const redis_sentinel *sentinel, redis_sentinel_master *master) {
   const redis_sentinel_impl *impl = redis_sentinel_get_const(sentinel);
-  if (!impl || !master || impl->phase != REDIS_SENTINEL_PHASE_READY) return TURBO_EINVAL;
+  if (!impl || !master || impl->phase != REDIS_SENTINEL_PHASE_READY) return SALTS_EINVAL;
   master->host = impl->master_host;
   master->port = impl->master_port;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int redis_sentinel_ready(const redis_sentinel *sentinel) {
@@ -317,38 +317,38 @@ int redis_sentinel_ready(const redis_sentinel *sentinel) {
 int redis_sentinel_close(redis_sentinel *sentinel) {
   redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
   int status;
-  if (!impl) return TURBO_EINVAL;
-  if (impl->phase == REDIS_SENTINEL_PHASE_CLOSED) return TURBO_OK;
+  if (!impl) return SALTS_EINVAL;
+  if (impl->phase == REDIS_SENTINEL_PHASE_CLOSED) return SALTS_OK;
   impl->phase = REDIS_SENTINEL_PHASE_CLOSING;
   if (impl->discovery_stream.impl) {
     status = redis_pool_stream_destroy(&impl->discovery_stream);
-    if (status != TURBO_OK) return status;
+    if (status != SALTS_OK) return status;
   }
   if (impl->discovery_pool.impl) {
     status = redis_pool_close(&impl->discovery_pool);
-    if (status != TURBO_OK) return status;
+    if (status != SALTS_OK) return status;
     status = redis_pool_destroy(&impl->discovery_pool);
-    if (status != TURBO_OK) return status;
+    if (status != SALTS_OK) return status;
   }
   if (impl->master_pool.impl) {
     status = redis_pool_close(&impl->master_pool);
-    if (status != TURBO_OK) return status;
+    if (status != SALTS_OK) return status;
   }
   impl->phase = REDIS_SENTINEL_PHASE_CLOSED;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int redis_sentinel_destroy(redis_sentinel *sentinel) {
   redis_sentinel_impl *impl = redis_sentinel_get(sentinel);
   int status;
-  if (!impl) return TURBO_EINVAL;
+  if (!impl) return SALTS_EINVAL;
   status = redis_sentinel_close(sentinel);
-  if (status != TURBO_OK) return status;
+  if (status != SALTS_OK) return status;
   if (impl->master_pool.impl) {
     status = redis_pool_destroy(&impl->master_pool);
-    if (status != TURBO_OK) return status;
+    if (status != SALTS_OK) return status;
   }
   redis_sentinel_free_impl(impl);
   sentinel->impl = NULL;
-  return TURBO_OK;
+  return SALTS_OK;
 }

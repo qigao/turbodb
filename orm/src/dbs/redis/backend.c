@@ -4,8 +4,8 @@
 #include "query.h"
 
 #include <redis_cflow.h>
-#include <turbo/clock.h>
-#include <turbo_error.h>
+#include <salts/clock.h>
+#include <salts_error.h>
 
 #include <inttypes.h>
 #include <limits.h>
@@ -93,7 +93,7 @@ typedef struct orm_redis_command_result {
 } orm_redis_command_result;
 
 #define ORM_REDIS_COMMAND_RESULT_INIT                                                              \
-  {TURBO_OK, REDIS_COMMAND_NOT_SENT, REDIS_SERVER_ERROR_NONE, NULL}
+  {SALTS_OK, REDIS_COMMAND_NOT_SENT, REDIS_SERVER_ERROR_NONE, NULL}
 
 typedef struct orm_redis_arguments {
   vec_t values;
@@ -263,23 +263,23 @@ static int orm_redis_command_run(orm_redis_backend_state *state, int count, cons
   redis_cflow_stream stream = {0};
   redis_cflow_stream_step step;
   uint64_t timeout_ns = orm_redis_timeout_ns(state->settings.command_timeout_ms);
-  uint64_t started = turbo_hrtime();
+  uint64_t started = salts_hrtime();
   uint64_t deadline = timeout_ns > UINT64_MAX - started ? UINT64_MAX : started + timeout_ns;
   int status;
   *out = (orm_redis_command_result)ORM_REDIS_COMMAND_RESULT_INIT;
   status =
       redis_cflow_command_open(&state->connection, count, argv, lengths, max_reply_bytes, &stream);
-  if (status != TURBO_OK) {
+  if (status != SALTS_OK) {
     out->status = status;
     return status;
   }
   for (;;) {
     step = redis_cflow_stream_next(&stream);
     if (step.kind == REDIS_CFLOW_STREAM_WAIT) {
-      uint64_t now = turbo_hrtime();
-      status = now >= deadline ? TURBO_ETIMEDOUT
+      uint64_t now = salts_hrtime();
+      status = now >= deadline ? SALTS_ETIMEDOUT
                                : redis_io_runtime_wait_idle(&state->runtime, deadline - now);
-      if (status == TURBO_OK) continue;
+      if (status == SALTS_OK) continue;
       out->status = status;
       out->outcome = step.outcome;
       (void)redis_cflow_stream_cancel(&stream);
@@ -297,7 +297,7 @@ static int orm_redis_command_run(orm_redis_backend_state *state, int count, cons
     if (step.kind == REDIS_CFLOW_STREAM_ITEM) {
       if (out->reply != NULL) {
         redis_reply_free(step.item);
-        out->status = TURBO_EPROTO;
+        out->status = SALTS_EPROTO;
         out->outcome = REDIS_COMMAND_REPLY_UNKNOWN;
         (void)redis_cflow_stream_destroy(&stream);
         return out->status;
@@ -307,10 +307,10 @@ static int orm_redis_command_run(orm_redis_backend_state *state, int count, cons
       out->server_error = redis_server_error_classify(step.item);
       continue;
     }
-    out->status = out->reply != NULL ? TURBO_OK : TURBO_EPROTO;
+    out->status = out->reply != NULL ? SALTS_OK : SALTS_EPROTO;
     out->outcome = out->reply != NULL ? REDIS_COMMAND_REPLIED : REDIS_COMMAND_REPLY_UNKNOWN;
     status = redis_cflow_stream_destroy(&stream);
-    if (status != TURBO_OK && out->status == TURBO_OK) out->status = status;
+    if (status != SALTS_OK && out->status == SALTS_OK) out->status = status;
     return out->status;
   }
 }
@@ -569,7 +569,7 @@ static orm_redis_driver_step orm_redis_stream_failure(orm_redis_stream_driver *d
                                                       redis_cflow_stream_step native) {
   orm_redis_driver_step step = ORM_REDIS_DRIVER_STEP_INIT;
   step.kind = ORM_REDIS_DRIVER_ERROR;
-  step.status = native.status == TURBO_ENOBUFS            ? ORM_STATUS_LIMIT_EXCEEDED
+  step.status = native.status == SALTS_ENOBUFS            ? ORM_STATUS_LIMIT_EXCEEDED
                 : native.outcome == REDIS_COMMAND_REPLIED ? ORM_STATUS_DATASTORE_ERROR
                                                           : ORM_STATUS_CONNECTION_ERROR;
   if (native.item != NULL && native.item->str != NULL)
@@ -704,18 +704,18 @@ static void orm_redis_stream_release(void *context, void *row) {
 
 static void orm_redis_stream_cancel(void *context) {
   orm_redis_stream_driver *driver = (orm_redis_stream_driver *)context;
-  if (driver != NULL && redis_cflow_stream_cancel(&driver->stream) != TURBO_OK)
+  if (driver != NULL && redis_cflow_stream_cancel(&driver->stream) != SALTS_OK)
     driver->cleanup_pending = 1;
 }
 
 static int orm_redis_stream_cleanup(orm_redis_stream_driver *driver) {
   orm_redis_backend_state *owner;
   int status;
-  if (driver == NULL) return TURBO_EINVAL;
+  if (driver == NULL) return SALTS_EINVAL;
   owner = driver->owner;
   if (driver->stream.impl != NULL) {
     status = redis_cflow_stream_destroy(&driver->stream);
-    if (status != TURBO_OK) {
+    if (status != SALTS_OK) {
       driver->cleanup_pending = 1;
       return status;
     }
@@ -725,12 +725,12 @@ static int orm_redis_stream_cleanup(orm_redis_stream_driver *driver) {
     owner->cursor_active = 0;
   }
   free(driver);
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 static int orm_redis_cleanup_deferred_stream(orm_redis_backend_state *state) {
   if (state == NULL || state->active_driver == NULL || !state->active_driver->cleanup_pending)
-    return TURBO_OK;
+    return SALTS_OK;
   return orm_redis_stream_cleanup(state->active_driver);
 }
 
@@ -765,7 +765,7 @@ static orm_status_t orm_redis_backend_open(void *context, const orm_query_plan *
   if (state == NULL || plan == NULL || limits == NULL || out_cursor == NULL)
     return orm_redis_fail(error, ORM_STATUS_INVALID_ARGUMENT, "invalid Redis cursor request");
   native_status = orm_redis_cleanup_deferred_stream(state);
-  if (native_status != TURBO_OK)
+  if (native_status != SALTS_OK)
     return orm_redis_fail(error, ORM_STATUS_BUSY, "Redis row Publisher cleanup is still pending");
   if (state->cursor_active)
     return orm_redis_fail(error, ORM_STATUS_BUSY,
@@ -800,9 +800,9 @@ static orm_status_t orm_redis_backend_open(void *context, const orm_query_plan *
   native_status =
       redis_cflow_stream_open(&state->connection, (int)vec_size(&query.arguments), argv, lengths,
                               (size_t)limits->max_result_bytes, max_items, &stream_driver->stream);
-  if (native_status != TURBO_OK) {
+  if (native_status != SALTS_OK) {
     status = orm_redis_fail(
-        error, native_status == TURBO_EBUSY ? ORM_STATUS_BUSY : ORM_STATUS_CONNECTION_ERROR,
+        error, native_status == SALTS_EBUSY ? ORM_STATUS_BUSY : ORM_STATUS_CONNECTION_ERROR,
         "open Redis RESP stream failed");
     goto cleanup;
   }
@@ -837,7 +837,7 @@ static orm_status_t orm_redis_backend_execute(void *context, const orm_query_pla
     return orm_redis_fail(error, ORM_STATUS_INVALID_ARGUMENT, "invalid Redis command request");
   {
     int cleanup_status = orm_redis_cleanup_deferred_stream(state);
-    if (cleanup_status != TURBO_OK)
+    if (cleanup_status != SALTS_OK)
       return orm_redis_fail(error, ORM_STATUS_BUSY, "Redis row Publisher cleanup is still pending");
   }
   if (state->cursor_active)
@@ -872,14 +872,14 @@ static orm_status_t orm_redis_backend_begin(void *context, orm_isolation_t isola
 static void orm_redis_backend_destroy(void *context) {
   orm_redis_backend_state *state = (orm_redis_backend_state *)context;
   if (state == NULL) return;
-  if (state->active_driver != NULL && orm_redis_stream_cleanup(state->active_driver) != TURBO_OK)
+  if (state->active_driver != NULL && orm_redis_stream_cleanup(state->active_driver) != SALTS_OK)
     return;
   if (redis_cflow_connection_valid(&state->connection) &&
-      redis_cflow_connection_destroy(&state->connection) != TURBO_OK)
+      redis_cflow_connection_destroy(&state->connection) != SALTS_OK)
     return;
   if (redis_io_runtime_valid(&state->runtime)) {
-    if (redis_io_runtime_close(&state->runtime) != TURBO_OK) return;
-    if (redis_io_runtime_destroy(&state->runtime) != TURBO_OK) return;
+    if (redis_io_runtime_close(&state->runtime) != SALTS_OK) return;
+    if (redis_io_runtime_destroy(&state->runtime) != SALTS_OK) return;
   }
   orm_redis_settings_destroy(&state->settings);
   free(state);
@@ -895,7 +895,7 @@ static orm_status_t orm_redis_verify_query_engine(orm_redis_backend_state *state
                           "Redis max_result_bytes exceeds size_t");
   native_status =
       orm_redis_command_run(state, 3, arguments, NULL, (size_t)limits->max_result_bytes, &result);
-  if (native_status != TURBO_OK || result.server_error != REDIS_SERVER_ERROR_NONE) {
+  if (native_status != SALTS_OK || result.server_error != REDIS_SERVER_ERROR_NONE) {
     redis_reply_free(result.reply);
     return orm_redis_fail(error,
                           result.outcome == REDIS_COMMAND_REPLIED ? ORM_STATUS_UNSUPPORTED
@@ -923,7 +923,7 @@ static orm_status_t orm_redis_expect_ok(orm_redis_backend_state *state, int coun
   orm_redis_command_result result = ORM_REDIS_COMMAND_RESULT_INIT;
   int status =
       orm_redis_command_run(state, count, arguments, NULL, ORM_REDIS_CONTROL_BUFFER_BYTES, &result);
-  if (status != TURBO_OK || result.server_error != REDIS_SERVER_ERROR_NONE) {
+  if (status != SALTS_OK || result.server_error != REDIS_SERVER_ERROR_NONE) {
     redis_reply_free(result.reply);
     return orm_redis_fail(error,
                           result.outcome == REDIS_COMMAND_REPLIED ? ORM_STATUS_DATASTORE_ERROR
@@ -1007,7 +1007,7 @@ orm_status_t orm_redis_backend_create(const orm_config_t *config, const orm_limi
       (redis_io_runtime_config){redis_io_default_backend_kind(), ORM_REDIS_IO_SOURCE_CAPACITY,
                                 ORM_REDIS_IO_COMPLETION_BATCH_CAPACITY};
   native_status = redis_io_runtime_init(&state->runtime, &runtime_config);
-  if (native_status != TURBO_OK) {
+  if (native_status != SALTS_OK) {
     status = orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR,
                             "initialize Redis CFlow I/O runtime failed");
     goto fail;
@@ -1022,7 +1022,7 @@ orm_status_t orm_redis_backend_create(const orm_config_t *config, const orm_limi
                                           receive_chunk_bytes,
                                           orm_redis_timeout_ns(state->settings.command_timeout_ms)};
   native_status = redis_cflow_connection_open(&state->connection, &open_config);
-  if (native_status != TURBO_OK) {
+  if (native_status != SALTS_OK) {
     status = orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR, "resolve Redis endpoint failed");
     goto fail;
   }
@@ -1036,7 +1036,7 @@ orm_status_t orm_redis_backend_create(const orm_config_t *config, const orm_limi
     }
     native_status = redis_io_runtime_wait_idle(&state->runtime,
                                                orm_redis_timeout_ns(state->settings.timeout_ms));
-    if (native_status != TURBO_OK) {
+    if (native_status != SALTS_OK) {
       status = orm_redis_fail(error, ORM_STATUS_CONNECTION_ERROR, "connect Redis timed out");
       goto fail;
     }

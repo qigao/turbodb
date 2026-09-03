@@ -68,7 +68,10 @@ if((ORM_BUILD_TESTS OR ORM_WITH_PGSQL) AND
 endif()
 
 # Find required base dependencies
-find_package(TurboUtils CONFIG REQUIRED)
+if(NOT TARGET Salts::Core)
+  find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
+               NO_DEFAULT_PATH)
+endif()
 
 # Find backend-specific dependencies based on enabled options
 if(ORM_WITH_SQLITE)
@@ -144,9 +147,9 @@ target_include_directories(
          $<INSTALL_INTERFACE:include/shared/orm>
   PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
 target_link_libraries(
-  turbo_orm PUBLIC TurboUtils::Core
-  PRIVATE TurboUtils::CSerde TurboUtils::CBind TurboUtils::CFlow
-          TurboUtils::STL TurboUtils::Platform)
+  turbo_orm PUBLIC Salts::Core
+  PRIVATE Salts::CSerde Salts::CBind Salts::CFlow
+          Salts::CSTL Salts::Platform)
 
 if(ORM_WITH_SQLITE)
   target_compile_definitions(turbo_orm PRIVATE ORM_WITH_SQLITE)
@@ -230,8 +233,8 @@ if(ORM_WITH_PGSQL)
   target_link_libraries(
     orm_postgresql
     PUBLIC turbo_orm
-    PRIVATE PostgreSQL::PostgreSQL TurboUtils::CSerde TurboUtils::CBind
-            TurboUtils::CFlow TurboUtils::STL)
+    PRIVATE PostgreSQL::PostgreSQL Salts::CSerde Salts::CBind
+            Salts::CFlow Salts::CSTL)
   # Some libpq packages close static BoringSSL archives through the C++
   # runtime. This changes only final linkage; every implementation source in
   # the component remains C11.
@@ -357,14 +360,14 @@ if(WIN32)
     RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
     DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
     PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
-                        "clang_rt.asan_dynamic-.*" "turbo_utils\\.dll"
+                        "clang_rt.asan_dynamic-.*" "salts_utils\\.dll"
     POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 else()
   install(
     RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
     DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
-    PRE_EXCLUDE_REGEXES "libturbo_.*"
+    PRE_EXCLUDE_REGEXES "libsalts_.*"
     POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
@@ -388,14 +391,14 @@ if(ORM_WITH_PGSQL)
       DIRECTORIES ${ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES}
       PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
                           "clang_rt.asan_dynamic-.*" "turbo_orm\\.dll"
-                          "turbo_utils\\.dll"
+                          "salts_utils\\.dll"
       POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
       RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
   else()
     install(
       RUNTIME_DEPENDENCY_SET OrmPostgreSQLRuntimeDependencies
       DIRECTORIES ${ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES}
-      PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libturbo_.*"
+      PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libsalts_.*"
       POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
   endif()
@@ -437,9 +440,9 @@ if(ORM_BUILD_TESTS)
     PUBLIC ${ORM_INCLUDE_DIR}
     PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
   target_link_libraries(
-    orm_c_test_static PUBLIC TurboUtils::Core
-    PRIVATE TurboUtils::CSerde TurboUtils::CBind TurboUtils::CFlow
-            TurboUtils::STL TurboUtils::Platform)
+    orm_c_test_static PUBLIC Salts::Core
+    PRIVATE Salts::CSerde Salts::CBind Salts::CFlow
+            Salts::CSTL Salts::Platform)
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
     target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
@@ -466,7 +469,7 @@ if(ORM_BUILD_TESTS)
 endif()
 
 if(ORM_BUILD_TESTS)
-set(ORM_TEST_PRIVATE_LIBS TurboUtils::Core)
+set(ORM_TEST_PRIVATE_LIBS Salts::Core)
 
 add_test(
   NAME orm_shared_package_contract
@@ -476,7 +479,7 @@ add_test(
     "-DORM_PACKAGE_TEST_BINARY_ROOT=${CMAKE_CURRENT_BINARY_DIR}/tests/package"
     "-DORM_PACKAGE_TEST_BUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DORM_PACKAGE_TEST_INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake"
-    "-DORM_PACKAGE_TEST_TURBOUTILS_DIR=${TurboUtils_DIR}"
+    "-DORM_PACKAGE_TEST_SALTS_ROOT=$ENV{SALTS_ROOT}"
     "-DORM_PACKAGE_TEST_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
     "-DORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR=${ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR}"
     "-DORM_PACKAGE_TEST_CONFIG=$<CONFIG>"
@@ -493,8 +496,8 @@ function(orm_link_internal_test TARGET_NAME)
 endfunction()
 
 if(ORM_WITH_SQLITE)
-  list(APPEND ORM_TEST_PRIVATE_LIBS SQLite::SQLite3 TurboUtils::CSerde
-                                    TurboUtils::CFlow)
+  list(APPEND ORM_TEST_PRIVATE_LIBS SQLite::SQLite3 Salts::CSerde
+                                    Salts::CFlow)
 endif()
 if(ORM_WITH_REDIS)
   list(APPEND ORM_TEST_PRIVATE_LIBS TurboDB::Redis)
@@ -528,7 +531,7 @@ target_include_directories(
   orm_mongo_query_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
-orm_link_internal_test(orm_mongo_query_test TurboUtils::TinyTest
+orm_link_internal_test(orm_mongo_query_test Salts::TinyTest
                        mongo::bson_shared)
 set_target_properties(orm_mongo_query_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -552,8 +555,8 @@ target_include_directories(
   PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
           ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/postgres ${ORM_ABI_TEST_DIR}
           ${ORM_TEST_SUPPORT_DIR} ${PostgreSQL_INCLUDE_DIRS})
-target_link_libraries(orm_postgres_libpq_test PRIVATE TurboUtils::Core
-                                                  TurboUtils::TinyTest)
+target_link_libraries(orm_postgres_libpq_test PRIVATE Salts::Core
+                                                  Salts::TinyTest)
 set_target_properties(
   orm_postgres_libpq_test PROPERTIES CXX_STANDARD_REQUIRED ON
                                      C_STANDARD_REQUIRED ON
@@ -569,7 +572,7 @@ add_executable(orm_postgresql_component_test
                tests/flow/orm_postgresql_component_test.c)
 target_compile_features(orm_postgresql_component_test PRIVATE c_std_11)
 target_link_libraries(orm_postgresql_component_test PRIVATE orm_postgresql
-                                                            TurboUtils::TinyTest)
+                                                            Salts::TinyTest)
 set_target_properties(orm_postgresql_component_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_postgresql_component_test)
@@ -583,7 +586,7 @@ if(ORM_POSTGRES_LIVE_TESTS)
   add_executable(orm_postgres_live_test tests/integration/postgres_live_test.c)
   target_compile_features(orm_postgres_live_test PRIVATE c_std_11)
   target_link_libraries(orm_postgres_live_test PRIVATE orm_postgresql
-                                                         TurboUtils::TinyTest)
+                                                         Salts::TinyTest)
   set_target_properties(orm_postgres_live_test
                         PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
   orm_enable_strict_warnings(orm_postgres_live_test)
@@ -602,8 +605,8 @@ target_compile_definitions(orm_cbind_publisher_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_cbind_publisher_test PRIVATE ${ORM_INCLUDE_DIR}
                                  ${ORM_FLOW_SOURCE_DIR})
-orm_link_internal_test(orm_cbind_publisher_test TurboUtils::CBind
-                       TurboUtils::CFlow TurboUtils::TinyTest)
+orm_link_internal_test(orm_cbind_publisher_test Salts::CBind
+                       Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_cbind_publisher_test PROPERTIES C_STANDARD_REQUIRED ON
                                                         FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_cbind_publisher_test)
@@ -618,7 +621,7 @@ target_compile_features(orm_pure_c_build_test PRIVATE c_std_11)
 target_compile_definitions(orm_pure_c_build_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_pure_c_build_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_pure_c_build_test PRIVATE turbo_orm
-                                                    TurboUtils::TinyTest)
+                                                    Salts::TinyTest)
 set_target_properties(orm_pure_c_build_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_pure_c_build_test)
@@ -635,7 +638,7 @@ target_include_directories(
   orm_sql_render_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                               ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
-orm_link_internal_test(orm_sql_render_test TurboUtils::TinyTest)
+orm_link_internal_test(orm_sql_render_test Salts::TinyTest)
 set_target_properties(orm_sql_render_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_sql_render_test)
@@ -653,8 +656,8 @@ target_compile_definitions(orm_postgres_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_postgres_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                                  ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/postgres)
-orm_link_internal_test(orm_postgres_flow_test TurboUtils::CFlow
-                       TurboUtils::TinyTest)
+orm_link_internal_test(orm_postgres_flow_test Salts::CFlow
+                       Salts::TinyTest)
 set_target_properties(orm_postgres_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_postgres_flow_test)
@@ -670,8 +673,8 @@ target_compile_definitions(orm_redis_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_redis_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/redis)
-orm_link_internal_test(orm_redis_flow_test TurboUtils::CBind
-                       TurboUtils::CFlow TurboUtils::TinyTest)
+orm_link_internal_test(orm_redis_flow_test Salts::CBind
+                       Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_redis_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_redis_flow_test)
@@ -687,8 +690,8 @@ target_compile_definitions(orm_mongo_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_mongo_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
-orm_link_internal_test(orm_mongo_flow_test TurboUtils::CBind
-                       TurboUtils::CFlow TurboUtils::TinyTest)
+orm_link_internal_test(orm_mongo_flow_test Salts::CBind
+                       Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_mongo_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_mongo_flow_test)
@@ -706,7 +709,7 @@ target_include_directories(
   orm_tidesdb_row_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                                 ${ORM_FLOW_SOURCE_DIR}
                                 ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/tidesdb)
-orm_link_internal_test(orm_tidesdb_row_test TurboUtils::TinyTest)
+orm_link_internal_test(orm_tidesdb_row_test Salts::TinyTest)
 set_target_properties(orm_tidesdb_row_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_tidesdb_row_test)
@@ -722,8 +725,8 @@ target_compile_definitions(orm_tidesdb_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_tidesdb_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                                 ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/tidesdb)
-orm_link_internal_test(orm_tidesdb_flow_test TurboUtils::CBind
-                       TurboUtils::CFlow TurboUtils::TinyTest)
+orm_link_internal_test(orm_tidesdb_flow_test Salts::CBind
+                       Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_tidesdb_flow_test)
@@ -740,8 +743,8 @@ target_compile_features(orm_tidesdb_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_tidesdb_public_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_tidesdb_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(
-  orm_tidesdb_public_flow_test PRIVATE turbo_orm TurboUtils::CBind
-                                       TurboUtils::CFlow TurboUtils::TinyTest)
+  orm_tidesdb_public_flow_test PRIVATE turbo_orm Salts::CBind
+                                       Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_public_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_tidesdb_public_flow_test)
@@ -760,8 +763,8 @@ target_include_directories(
   orm_sqlite_flow_test PRIVATE ${ORM_INCLUDE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sqlite)
-orm_link_internal_test(orm_sqlite_flow_test SQLite::SQLite3 TurboUtils::CBind
-                       TurboUtils::CFlow TurboUtils::TinyTest)
+orm_link_internal_test(orm_sqlite_flow_test SQLite::SQLite3 Salts::CBind
+                       Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_sqlite_flow_test PROPERTIES C_STANDARD_REQUIRED ON
                                                        FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_sqlite_flow_test)
@@ -775,9 +778,9 @@ add_executable(orm_public_flow_test tests/flow/orm_public_flow_test.c)
 target_compile_features(orm_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_public_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_public_flow_test PRIVATE turbo_orm TurboUtils::CBind
-                                                   TurboUtils::CFlow
-                                                   TurboUtils::TinyTest)
+target_link_libraries(orm_public_flow_test PRIVATE turbo_orm Salts::CBind
+                                                   Salts::CFlow
+                                                   Salts::TinyTest)
 set_target_properties(orm_public_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_public_flow_test)
@@ -791,9 +794,9 @@ add_executable(orm_cpp_flow_test tests/flow/orm_cpp_flow_test.cpp)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_cpp_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_cpp_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_cpp_flow_test PRIVATE turbo_orm TurboUtils::CBind
-                                                TurboUtils::CFlow
-                                                TurboUtils::TinyTest)
+target_link_libraries(orm_cpp_flow_test PRIVATE turbo_orm Salts::CBind
+                                                Salts::CFlow
+                                                Salts::TinyTest)
 set_target_properties(orm_cpp_flow_test
                       PROPERTIES CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_cpp_flow_test)
@@ -809,7 +812,7 @@ target_include_directories(
   orm_redis_query_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/redis)
-orm_link_internal_test(orm_redis_query_test TurboUtils::TinyTest)
+orm_link_internal_test(orm_redis_query_test Salts::TinyTest)
 orm_enable_strict_warnings(orm_redis_query_test)
 if(MSVC)
   target_compile_options(orm_redis_query_test
@@ -841,7 +844,7 @@ endif()
 
 if(WIN32)
   set(ORM_TEST_RUNTIME_PATH
-      "PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboUtils::Core>")
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
                         orm_cbind_publisher orm_pure_c_build orm_sql_render
                         orm_postgres_flow)

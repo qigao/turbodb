@@ -1,6 +1,6 @@
 #include "redis_socket.h"
 
-#include "turbo_error.h"
+#include "salts_error.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -29,9 +29,9 @@ int redis_socket_platform_init(void) {
 #if defined(_WIN32)
   WSADATA data;
   int status = WSAStartup(MAKEWORD(2, 2), &data);
-  return status == 0 ? TURBO_OK : -status;
+  return status == 0 ? SALTS_OK : -status;
 #else
-  return TURBO_OK;
+  return SALTS_OK;
 #endif
 }
 
@@ -51,18 +51,18 @@ int redis_socket_resolve(const char *host, uint16_t port,
   size_t used = 0u;
   int status;
   bool overflow = false;
-  if (count == NULL) return TURBO_EINVAL;
+  if (count == NULL) return SALTS_EINVAL;
   *count = 0u;
   if (host == NULL || host[0] == '\0' || addresses == NULL ||
       capacity == 0u || port == 0u)
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_protocol = IPPROTO_TCP;
   (void)snprintf(service, sizeof(service), "%u", (unsigned int)port);
   status = getaddrinfo(host, service, &hints, &results);
-  if (status != 0) return TURBO_EHOSTUNREACH;
+  if (status != 0) return SALTS_EHOSTUNREACH;
   for (current = results; current != NULL; current = current->ai_next) {
     redis_socket_family family;
     if (current->ai_family == AF_INET)
@@ -88,15 +88,15 @@ int redis_socket_resolve(const char *host, uint16_t port,
   }
   freeaddrinfo(results);
   *count = used;
-  if (overflow) return TURBO_ENOBUFS;
-  return used != 0u ? TURBO_OK : TURBO_EHOSTUNREACH;
+  if (overflow) return SALTS_ENOBUFS;
+  return used != 0u ? SALTS_OK : SALTS_EHOSTUNREACH;
 }
 
 static int redis_socket_set_nonblocking(uintptr_t socket_value) {
 #if defined(_WIN32)
   u_long enabled = 1u;
   return ioctlsocket((SOCKET)socket_value, FIONBIO, &enabled) == 0
-             ? TURBO_OK
+             ? SALTS_OK
              : redis_socket_last_error();
 #else
   int flags;
@@ -107,7 +107,7 @@ static int redis_socket_set_nonblocking(uintptr_t socket_value) {
   while (fcntl((int)socket_value, F_SETFL, flags | O_NONBLOCK) < 0) {
     if (errno != EINTR) return -errno;
   }
-  return TURBO_OK;
+  return SALTS_OK;
 #endif
 }
 
@@ -116,17 +116,17 @@ int redis_socket_open(const redis_socket_address *address,
   int native_family;
   uintptr_t socket_value;
   int status;
-  if (out_socket == NULL) return TURBO_EINVAL;
+  if (out_socket == NULL) return SALTS_EINVAL;
   *out_socket = REDIS_SOCKET_INVALID;
   if (address == NULL || address->length == 0u ||
       address->length > REDIS_SOCKET_ADDRESS_CAPACITY)
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   if (address->family == REDIS_SOCKET_IPV4)
     native_family = AF_INET;
   else if (address->family == REDIS_SOCKET_IPV6)
     native_family = AF_INET6;
   else
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
 #if defined(_WIN32)
   socket_value = (uintptr_t)WSASocketW(native_family, SOCK_STREAM, IPPROTO_TCP,
                                        NULL, 0u, WSA_FLAG_OVERLAPPED);
@@ -137,21 +137,21 @@ int redis_socket_open(const redis_socket_address *address,
   if ((int)socket_value < 0) return redis_socket_last_error();
 #endif
   status = redis_socket_set_nonblocking(socket_value);
-  if (status != TURBO_OK) {
+  if (status != SALTS_OK) {
     (void)redis_socket_close(socket_value);
     return status;
   }
   *out_socket = socket_value;
-  return TURBO_OK;
+  return SALTS_OK;
 }
 
 int redis_socket_close_once(uintptr_t socket_value, int *consumed) {
   if (socket_value == REDIS_SOCKET_INVALID || consumed == NULL)
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
 #if defined(_WIN32)
   if (closesocket((SOCKET)socket_value) == 0) {
     *consumed = 1;
-    return TURBO_OK;
+    return SALTS_OK;
   }
   {
     int error = WSAGetLastError();
@@ -159,7 +159,7 @@ int redis_socket_close_once(uintptr_t socket_value, int *consumed) {
     return -error;
   }
 #else
-  int status = close((int)socket_value) == 0 ? TURBO_OK : -errno;
+  int status = close((int)socket_value) == 0 ? SALTS_OK : -errno;
   *consumed = 1;
   return status;
 #endif

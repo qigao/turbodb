@@ -4,7 +4,7 @@
 #include "query.h"
 
 #include <mongoc/mongoc.h>
-#include <turbo/thread.h>
+#include <salts/thread.h>
 
 #include <limits.h>
 #include <stdio.h>
@@ -35,7 +35,7 @@ typedef struct orm_mongo_transaction_state {
   int active;
 } orm_mongo_transaction_state;
 
-static turbo_once_t orm_mongo_once = TURBO_ONCE_INIT;
+static salts_once_t orm_mongo_once = SALTS_ONCE_INIT;
 static int orm_mongo_cleanup_registered;
 
 static void orm_mongo_process_init(void) {
@@ -733,7 +733,7 @@ orm_status_t orm_mongo_backend_create(const orm_config_t *config,
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   memset(out_backend, 0, sizeof(*out_backend));
-  turbo_once(&orm_mongo_once, orm_mongo_process_init);
+  salts_once(&orm_mongo_once, orm_mongo_process_init);
   if (!orm_mongo_cleanup_registered) {
     orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
                   "register MongoDB process cleanup failed");

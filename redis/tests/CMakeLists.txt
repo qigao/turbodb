@@ -1,19 +1,19 @@
 cmake_minimum_required(VERSION 3.15)
 
-set(REDIS_TEST_LIBS tedis TurboUtils::TinyTest)
+set(REDIS_TEST_LIBS tedis Salts::TinyTest)
 set(REDIS_TEST_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 cmake_add_test(
   NAME test_redis_io
   SOURCES test_redis_io.c ../redis_io.c
-  LIBS TurboUtils::CFlow TurboUtils::Core TurboUtils::TinyTest
+  LIBS Salts::CFlow Salts::Core Salts::TinyTest
   INCLUDES ${REDIS_TEST_INCLUDES}
   FOLDER "redis/tests")
 target_compile_definitions(test_redis_io PRIVATE REDIS_BUILD)
 cmake_add_test(
   NAME test_redis_socket
   SOURCES test_redis_socket.c ../redis_socket.c
-  LIBS TurboUtils::Core TurboUtils::TinyTest
+  LIBS Salts::Core Salts::TinyTest
   INCLUDES ${REDIS_TEST_INCLUDES}
   FOLDER "redis/tests")
 if(WIN32)
@@ -30,7 +30,7 @@ cmake_add_test(
 cmake_add_test(
   NAME test_redis_cflow
   SOURCES test_redis_cflow.c
-  LIBS ${REDIS_TEST_LIBS} TurboUtils::CFlow
+  LIBS ${REDIS_TEST_LIBS} Salts::CFlow
   INCLUDES ${REDIS_TEST_INCLUDES}
   FOLDER "redis/tests")
 target_compile_definitions(test_redis_cflow PRIVATE REDIS_BUILD)

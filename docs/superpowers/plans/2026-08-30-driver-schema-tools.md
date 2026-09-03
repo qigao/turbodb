@@ -6,7 +6,7 @@
 
 **Architecture:** 共用纯 C CLI/file/error core；每个 executable 静态绑定一个最小 schema-driver ops table。SQLite 使用 `sqlite3_exec`，PostgreSQL 使用 libpq simple query 并 drain 所有 results。工具不链接 ORM/CFlow/TurboParser。
 
-**Tech Stack:** C11、SQLite3、libpq、TurboUtils Core/turbo_fs、CMake Presets、TinyTest。
+**Tech Stack:** C11、SQLite3、libpq、Salts Core/salts_fs、CMake Presets、TinyTest。
 
 **Spec:** `docs/architecture/driver-data-tools.md`
 
@@ -76,7 +76,7 @@ git commit -m "build(dbtools): add independent driver tool gates"
 - Modify: `dbtools/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: argv, `turbo_fs`, statically supplied `dbtool_schema_driver_ops`.
+- Consumes: argv, `salts_fs`, statically supplied `dbtool_schema_driver_ops`.
 - Produces: one `schema apply` invocation and a stable process exit mapping.
 
 - [x] **Step 1: Write failing CLI behavior tests**
@@ -93,7 +93,7 @@ Build `dbtool_cli_test` and `dbtool_file_test`; expected compile failure because
 
 - [x] **Step 4: Implement minimal core**
 
-Define one internal status enum and `dbtool_error { status, native_code, stage, message }`. Parse without fallback. File load performs `turbo_fs_stat` and checked bound validation before `turbo_fs_read_file`; invocation owns the buffer until `apply()` returns and releases it on one cleanup path.
+Define one internal status enum and `dbtool_error { status, native_code, stage, message }`. Parse without fallback. File load performs `salts_fs_stat` and checked bound validation before `salts_fs_read_file`; invocation owns the buffer until `apply()` returns and releases it on one cleanup path.
 
 - [x] **Step 5: Run GREEN and mutation checks**
 

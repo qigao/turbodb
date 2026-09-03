@@ -83,7 +83,7 @@ REDIS_API int redis_cflow_connection_init_attached(
     const redis_cflow_connection_config *config);
 REDIS_API int redis_cflow_connection_open(
     redis_cflow_connection *connection, const redis_cflow_open_config *config);
-/* TURBO_EBUSY is retryable after the current wake/driver callback returns. */
+/* SALTS_EBUSY is retryable after the current wake/driver callback returns. */
 REDIS_API redis_cflow_connect_step redis_cflow_connection_connect_next(
     redis_cflow_connection *connection);
 REDIS_API int redis_cflow_connection_valid(

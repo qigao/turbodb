@@ -68,18 +68,18 @@ C++ 只提供 header wrapper。`orm::connection` 增加接收 C connector functi
   `OrmTargets.cmake` 额外导出 `Orm::PostgreSQL`，不生成独立 driver package。
 - core 和 component 只提供 shared SDK。component 自己封闭 libpq 的 runtime
   dependencies，消费端不执行 `find_dependency(PostgreSQL)`。
-- CBind/CSerde/CFlow 继续来自 TurboUtils。ORM 不新增 TurboParser runtime 依赖，也不在运行时调用 `tbe_compiler`。
+- CBind/CSerde/CFlow 继续来自 Salts。ORM 不新增 parser runtime 依赖，也不在运行时调用 `tbe_compiler`。
 
-## DataBind/CBind 关系
+## CBind 关系
 
-复合主键属于 query construction，不属于 wire-format serialization。ORM 因此不解析 schema 文件，也不复制 DataBind 的 descriptor/runtime。
+复合主键属于 query construction，不属于 wire-format serialization。ORM 因此不解析 schema 文件，也不复制独立 binding runtime 的 descriptor。
 
 需要 typed facade 时只允许两条外部路线：
 
 1. build/CI 使用 `tbe_compiler --source-output` 生成 `.h/.c`，生成代码把 key members 转成 `orm_key_part_t[]`；
 2. 现有 C struct 使用 `TBE_TYPED_DEFINE_STRUCT` 描述，应用层 adapter 读取明确的 key metadata 并构造 `orm_key_part_t[]`。
 
-两条路线都在调用边界完成值转换；ORM 立即复制 key parts，不保存 DataBind object、descriptor child 或 callback-borrowed view。
+两条路线都在调用边界完成值转换；ORM 立即复制 key parts，不保存 CBind object、descriptor child 或 callback-borrowed view。
 
 ## Live test gate
 

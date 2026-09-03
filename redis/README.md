@@ -1,7 +1,7 @@
 # TurboDB Redis
 
 TurboDB Redis is a pure C, incremental RESP client built on
-`TurboUtils::CFlow`. It does not depend on TurboNet or expose coroutine/socket
+`Salts::CFlow`. It does not depend on TurboNet or expose coroutine/socket
 types. C++ consumers use the same C headers or header-only wrappers supplied by
 their application.
 
@@ -30,7 +30,7 @@ attached Publishers.
 
 ```c
 #include <redis_cflow.h>
-#include <turbo_error.h>
+#include <salts_error.h>
 
 #include <stdint.h>
 
@@ -44,13 +44,13 @@ int ping(redis_io_runtime *runtime) {
   redis_cflow_connect_step connected;
   redis_cflow_stream_step step;
   int status = redis_cflow_connection_open(&connection, &open);
-  if (status != TURBO_OK) return status;
+  if (status != SALTS_OK) return status;
 
   do {
     connected = redis_cflow_connection_connect_next(&connection);
     if (connected.kind == REDIS_CFLOW_CONNECT_WAIT) {
       status = redis_io_runtime_wait_idle(runtime, UINT64_C(5000000000));
-      if (status != TURBO_OK) goto cleanup_connection;
+      if (status != SALTS_OK) goto cleanup_connection;
     }
   } while (connected.kind == REDIS_CFLOW_CONNECT_WAIT);
   if (connected.kind == REDIS_CFLOW_CONNECT_ERROR) {
@@ -59,17 +59,17 @@ int ping(redis_io_runtime *runtime) {
   }
   status = redis_cflow_command_open(&connection, 1, argv, NULL, 64u * 1024u,
                                     &stream);
-  if (status != TURBO_OK) goto cleanup_connection;
+  if (status != SALTS_OK) goto cleanup_connection;
   do {
     step = redis_cflow_stream_next(&stream);
     if (step.kind == REDIS_CFLOW_STREAM_WAIT) {
       status = redis_io_runtime_wait_idle(runtime, UINT64_C(5000000000));
-      if (status != TURBO_OK) goto cleanup_stream;
+      if (status != SALTS_OK) goto cleanup_stream;
     }
   } while (step.kind == REDIS_CFLOW_STREAM_WAIT);
   if (step.kind == REDIS_CFLOW_STREAM_ITEM) {
     redis_reply_free(step.item);
-    status = TURBO_OK;
+    status = SALTS_OK;
   } else {
     redis_reply_free(step.item);
     status = step.status;
@@ -86,7 +86,7 @@ cleanup_connection:
 The blocking example advances only after `redis_io_runtime_wait_idle()`. In a
 reactive driver, a wake callback schedules the next step instead of calling it
 inline. If a connection, pool, Cluster, or Sentinel connect step reports
-`ERROR` with `TURBO_EBUSY`, its phase is preserved: retry after the current
+`ERROR` with `SALTS_EBUSY`, its phase is preserved: retry after the current
 wake/driver callback returns. Other `ERROR` statuses are terminal.
 
 ## Pool, Cluster, and Sentinel ownership
@@ -94,7 +94,7 @@ wake/driver callback returns. Other `ERROR` statuses are terminal.
 The pool owns a fixed array of connections. A successful
 `redis_pool_command_open()` transfers one slot lease to `redis_pool_stream`.
 The lease is returned only after `DONE`/`ERROR` or explicit destroy. Saturation
-returns `TURBO_ENOBUFS`; there is no hidden queue or overflow allocation.
+returns `SALTS_ENOBUFS`; there is no hidden queue or overflow allocation.
 After a transport failure or cancellation, destroy the terminal command stream
 and drive `redis_pool_connect_next()` again to rebuild invalid slots in place.
 
@@ -113,7 +113,7 @@ Commands use `redis_sentinel_command_open()`.
 
 These objects and their streams are scheduler-affine. Stop admission, destroy
 all command streams, close the facade, then destroy it. `close()` returns
-`TURBO_EBUSY` while a pool lease is still active.
+`SALTS_EBUSY` while a pool lease is still active.
 
 ## Error and reply semantics
 
@@ -133,5 +133,5 @@ all command streams, close the facade, then destroy it. `close()` returns
 ## Build dependency
 
 Link `TurboDB::Redis`. Its public first-party dependencies are
-`TurboUtils::Core` and `TurboUtils::CFlow`; `find_package(TurboNet)` is not
+`Salts::Core` and `Salts::CFlow`; `find_package(TurboNet)` is not
 required.

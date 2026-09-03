@@ -3,8 +3,8 @@
 
 #include <cmeta/struct.h>
 #include <sqlite3.h>
-#include <turbo_cmeta_data.h>
-#include <turbo_str.h>
+#include <salts_cmeta_data.h>
+#include <salts_str.h>
 #include "tinytest.h"
 
 #include <stddef.h>
@@ -112,9 +112,9 @@ static const cmeta_data_desc orm_sqlite_test_owned_string_data = {
     .stable_id = "orm.test.owned-string",
     .display_name = "owned string",
     .kind = CMETA_DATA_STRING,
-    .storage_type = &turbo_tstr_cmeta_type,
+    .storage_type = &salts_tstr_cmeta_type,
     .shape = &orm_sqlite_test_owned_string_shape,
-    .buffer_ops = &turbo_tstr_cmeta_buffer_ops
+    .buffer_ops = &salts_tstr_cmeta_buffer_ops
 };
 static const cmeta_data_desc orm_sqlite_test_owned_bytes_data = {
     .struct_size = sizeof(cmeta_data_desc),
@@ -122,9 +122,9 @@ static const cmeta_data_desc orm_sqlite_test_owned_bytes_data = {
     .stable_id = "orm.test.owned-bytes",
     .display_name = "owned bytes",
     .kind = CMETA_DATA_BYTES,
-    .storage_type = &turbo_tstr_cmeta_type,
+    .storage_type = &salts_tstr_cmeta_type,
     .shape = &orm_sqlite_test_owned_string_shape,
-    .buffer_ops = &turbo_tstr_cmeta_buffer_ops
+    .buffer_ops = &salts_tstr_cmeta_buffer_ops
 };
 static const cmeta_data_field_desc orm_sqlite_test_text_row_fields[] = {
     {"orm.test.SqliteTextRow.id", "id", offsetof(orm_sqlite_test_text_row, id),

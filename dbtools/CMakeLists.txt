@@ -33,7 +33,7 @@ add_library(
   src/dbtool_cli.c)
 target_compile_features(turbodb_dbtool_core PUBLIC c_std_11)
 target_include_directories(turbodb_dbtool_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(turbodb_dbtool_core PUBLIC TurboUtils::Core)
+target_link_libraries(turbodb_dbtool_core PUBLIC Salts::Core)
 cmake_config_target(turbodb_dbtool_core NO_INSTALL FOLDER "dbtools")
 
 if(MSVC)
@@ -154,7 +154,13 @@ if(TURBODB_DBTOOLS_WITH_PGSQL)
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools)
 endif()
 
-set(dbtools_runtime_targets TurboUtils::Core)
+if(WIN32 AND TURBODB_DBTOOLS_WITH_SQLITE AND TURBODB_DBTOOLS_WITH_PGSQL)
+  # Both tools stage Salts::Core into the shared runtime directory. Serialize
+  # their POST_BUILD copies so parallel builds cannot open salts.dll at once.
+  add_dependencies(turbodb-postgresql turbodb-sqlite)
+endif()
+
+set(dbtools_runtime_targets Salts::Core)
 if(TURBODB_DBTOOLS_WITH_SQLITE)
   list(APPEND dbtools_runtime_targets SQLite::SQLite3)
 endif()
@@ -166,6 +172,7 @@ foreach(dbtools_runtime_target IN LISTS dbtools_runtime_targets)
   dbtool_collect_runtime_directories(${dbtools_runtime_target}
                                      dbtools_runtime_directories)
 endforeach()
+
 if(WIN32)
   install(
     RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
@@ -195,26 +202,28 @@ if(BUILD_TESTS)
         -DDBTOOLS_PACKAGE_TEST_CONFIG=${CMAKE_BUILD_TYPE}
         -DDBTOOLS_PACKAGE_TEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sqlite_schema.sql
         -DDBTOOLS_PACKAGE_TEST_WITH_PGSQL=$<BOOL:${TURBODB_DBTOOLS_WITH_PGSQL}>
+        -DDBTOOLS_PACKAGE_TEST_SALTS_ROOT=$ENV{SALTS_ROOT}
+        -DDBTOOLS_PACKAGE_TEST_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}
         -P
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/package/run_dbtools_package_contract.cmake)
   endif()
   cmake_add_test(
     NAME dbtool_file_test
     SOURCES tests/dbtool_file_test.c
-    LIBS turbodb_dbtool_core TurboUtils::TinyTest
+    LIBS turbodb_dbtool_core Salts::TinyTest
     INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
     FOLDER "dbtools/tests")
   cmake_add_test(
     NAME dbtool_cli_test
     SOURCES tests/dbtool_cli_test.c
-    LIBS turbodb_dbtool_core TurboUtils::TinyTest
+    LIBS turbodb_dbtool_core Salts::TinyTest
     INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
     FOLDER "dbtools/tests")
   if(TURBODB_DBTOOLS_WITH_SQLITE)
     cmake_add_test(
       NAME dbtool_sqlite_test
       SOURCES tests/dbtool_sqlite_test.c
-      LIBS turbodb_dbtool_sqlite TurboUtils::TinyTest
+      LIBS turbodb_dbtool_sqlite Salts::TinyTest
       INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
       FOLDER "dbtools/tests")
     dbtool_enable_strict_warnings(dbtool_sqlite_test)
@@ -223,7 +232,7 @@ if(BUILD_TESTS)
     cmake_add_test(
       NAME dbtool_postgresql_test
       SOURCES tests/dbtool_postgresql_test.c tests/fake_libpq.c
-      LIBS turbodb_dbtool_postgresql TurboUtils::TinyTest
+      LIBS turbodb_dbtool_postgresql Salts::TinyTest
       INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
                ${CMAKE_CURRENT_SOURCE_DIR}/tests
       FOLDER "dbtools/tests")
@@ -233,7 +242,7 @@ if(BUILD_TESTS)
       cmake_add_test(
         NAME dbtool_postgresql_live_test
         SOURCES tests/postgresql_live_test.c
-        LIBS turbodb_dbtool_postgresql TurboUtils::TinyTest
+        LIBS turbodb_dbtool_postgresql Salts::TinyTest
         INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
         FOLDER "dbtools/tests")
       dbtool_enable_strict_warnings(dbtool_postgresql_live_test)

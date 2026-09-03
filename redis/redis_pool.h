@@ -77,8 +77,8 @@ typedef struct redis_pool_stats {
  * Copy configuration and allocate fixed slot storage without doing I/O.
  *
  * The pool is scheduler-affine. Every function, including stream functions,
- * must run on the same executor thread. Returns TURBO_EINVAL for invalid or
- * zero-capacity configuration and TURBO_ENOMEM on allocation failure.
+ * must run on the same executor thread. Returns SALTS_EINVAL for invalid or
+ * zero-capacity configuration and SALTS_ENOMEM on allocation failure.
  */
 REDIS_API int redis_pool_init(redis_pool *pool,
                               const redis_pool_config *config);
@@ -104,7 +104,7 @@ REDIS_API int redis_pool_ready(const redis_pool *pool);
  *
  * `argv` is copied by the RESP command source. On success, `out_stream` owns a
  * lease until terminal or destroy. When all usable slots are borrowed this
- * returns TURBO_ENOBUFS; no waiter or overflow connection is created.
+ * returns SALTS_ENOBUFS; no waiter or overflow connection is created.
  */
 REDIS_API int redis_pool_command_open(redis_pool *pool, int argc,
                                       const char **argv,
@@ -128,7 +128,7 @@ REDIS_API int redis_pool_stream_destroy(redis_pool_stream *stream);
 /** Stop admission and close connections; EBUSY while any stream owner lives. */
 REDIS_API int redis_pool_close(redis_pool *pool);
 
-/** Destroy a closed/quiescent pool. Active leases return TURBO_EBUSY. */
+/** Destroy a closed/quiescent pool. Active leases return SALTS_EBUSY. */
 REDIS_API int redis_pool_destroy(redis_pool *pool);
 
 REDIS_API void redis_pool_get_stats(const redis_pool *pool,

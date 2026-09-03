@@ -1,8 +1,8 @@
 #include "../redis_sentinel.h"
 
 #include "tinytest.h"
-#include "turbo_error.h"
-#include "turbo_thread.h"
+#include "salts_error.h"
+#include "salts_thread.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +23,7 @@ typedef int redis_sentinel_test_socket;
 
 typedef struct redis_sentinel_test_server {
   redis_sentinel_test_socket listener;
-  turbo_thread_t thread;
+  salts_thread_t thread;
   uint16_t port;
   int connections;
 } redis_sentinel_test_server;
@@ -112,45 +112,45 @@ suite("redis CFlow Sentinel") {
     redis_sentinel_master master;
 
     server.listener = REDIS_SENTINEL_TEST_INVALID;
-    check_equal(redis_io_runtime_init(&runtime, &runtime_config), TURBO_OK);
+    check_equal(redis_io_runtime_init(&runtime, &runtime_config), SALTS_OK);
     check_equal(redis_sentinel_test_listen(&server), 0);
     ports[0] = server.port;
-    check_equal(turbo_thread_create(&server.thread, redis_sentinel_test_server_main, &server),
-                TURBO_OK);
+    check_equal(salts_thread_create(&server.thread, redis_sentinel_test_server_main, &server),
+                SALTS_OK);
     config.runtime = &runtime;
     config.sentinel_hosts = hosts;
     config.sentinel_ports = ports;
     config.sentinel_count = 1u;
     config.service_name = "primary";
     config.connection_capacity = 1u;
-    check_equal(redis_sentinel_init(&sentinel, &config), TURBO_OK);
+    check_equal(redis_sentinel_init(&sentinel, &config), SALTS_OK);
     connected = redis_sentinel_connect_next(&sentinel);
     while (connected.kind == REDIS_SENTINEL_CONNECT_WAIT) {
-      check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
+      check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
       connected = redis_sentinel_connect_next(&sentinel);
     }
     check_equal(connected.kind, REDIS_SENTINEL_CONNECT_DONE);
-    check_equal(connected.status, TURBO_OK);
-    check_equal(redis_sentinel_get_master(&sentinel, &master), TURBO_OK);
+    check_equal(connected.status, SALTS_OK);
+    check_equal(redis_sentinel_get_master(&sentinel, &master), SALTS_OK);
     check_equal(master.host, "127.0.0.1");
     check_equal(master.port, server.port);
-    check_equal(redis_sentinel_command_open(&sentinel, 1, ping, NULL, 1024u, &command), TURBO_OK);
+    check_equal(redis_sentinel_command_open(&sentinel, 1, ping, NULL, 1024u, &command), SALTS_OK);
     do {
       step = redis_pool_stream_next(&command);
       if (step.kind == REDIS_CFLOW_STREAM_WAIT)
-        check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
+        check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
     } while (step.kind == REDIS_CFLOW_STREAM_WAIT);
     check_equal(step.kind, REDIS_CFLOW_STREAM_ITEM);
     check_equal(step.item->str, "PONG", 4u);
     redis_reply_free(step.item);
     check_equal(redis_pool_stream_next(&command).kind, REDIS_CFLOW_STREAM_DONE);
-    check_equal(redis_pool_stream_destroy(&command), TURBO_OK);
-    check_equal(redis_sentinel_close(&sentinel), TURBO_OK);
-    check_equal(redis_sentinel_destroy(&sentinel), TURBO_OK);
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
-    check_equal(turbo_thread_join(&server.thread), TURBO_OK);
-    turbo_thread_destroy(&server.thread);
+    check_equal(redis_pool_stream_destroy(&command), SALTS_OK);
+    check_equal(redis_sentinel_close(&sentinel), SALTS_OK);
+    check_equal(redis_sentinel_destroy(&sentinel), SALTS_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
+    check_equal(salts_thread_join(&server.thread), SALTS_OK);
+    salts_thread_destroy(&server.thread);
     redis_sentinel_test_close(server.listener);
     check_equal(server.connections, 2);
   }

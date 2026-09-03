@@ -5,26 +5,26 @@
 #include <stdlib.h>
 
 static int dbtool_native_stat(void *context, const char *path,
-                              turbo_fs_stat_t *out) {
+                              salts_fs_stat_t *out) {
   (void)context;
-  return turbo_fs_stat(path, out);
+  return salts_fs_stat(path, out);
 }
 
-static turbo_file_t dbtool_native_open(void *context, const char *path,
+static salts_file_t dbtool_native_open(void *context, const char *path,
                                        int flags, int mode) {
   (void)context;
-  return turbo_fs_open(path, flags, mode);
+  return salts_fs_open(path, flags, mode);
 }
 
-static int dbtool_native_read(void *context, turbo_file_t file, char *data,
+static int dbtool_native_read(void *context, salts_file_t file, char *data,
                               size_t size) {
   (void)context;
-  return turbo_fs_read(file, data, size);
+  return salts_fs_read(file, data, size);
 }
 
-static int dbtool_native_close(void *context, turbo_file_t file) {
+static int dbtool_native_close(void *context, salts_file_t file) {
   (void)context;
-  return turbo_fs_close(file);
+  return salts_fs_close(file);
 }
 
 static const dbtool_file_ops dbtool_native_file_ops = {
@@ -42,8 +42,8 @@ dbtool_status dbtool_file_read_with_ops(const char *path, size_t max_bytes,
                                         const dbtool_file_ops *ops,
                                         void *ops_context,
                                         dbtool_error *error) {
-  turbo_fs_stat_t info = {0};
-  turbo_file_t file = TURBO_INVALID_FILE;
+  salts_fs_stat_t info = {0};
+  salts_file_t file = SALTS_INVALID_FILE;
   char *data = NULL;
   size_t expected;
   size_t offset = 0u;
@@ -92,8 +92,8 @@ dbtool_status dbtool_file_read_with_ops(const char *path, size_t max_bytes,
     return DBTOOL_STATUS_OUT_OF_MEMORY;
   }
 
-  file = ops->open(ops_context, path, TURBO_FS_O_RDONLY, 0);
-  if (file == TURBO_INVALID_FILE) {
+  file = ops->open(ops_context, path, SALTS_FS_O_RDONLY, 0);
+  if (file == SALTS_INVALID_FILE) {
     status = DBTOOL_STATUS_FILE_ERROR;
     dbtool_file_fail(error, status, "open-script", 0,
                      "cannot open SQL script");
@@ -143,7 +143,7 @@ dbtool_status dbtool_file_read_with_ops(const char *path, size_t max_bytes,
   data[expected] = '\0';
 
 cleanup:
-  if (file != TURBO_INVALID_FILE) {
+  if (file != SALTS_INVALID_FILE) {
     native_code = ops->close(ops_context, file);
     if (native_code != 0 && status == DBTOOL_STATUS_OK) {
       status = DBTOOL_STATUS_FILE_ERROR;

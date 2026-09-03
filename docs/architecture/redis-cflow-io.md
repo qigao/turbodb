@@ -2,7 +2,7 @@
 
 ## Decision
 
-Redis uses `TurboUtils::CFlow` as its only asynchronous execution and socket
+Redis uses `Salts::CFlow` as its only asynchronous execution and socket
 I/O dependency. CoroNet types, socket ownership, coroutine waits, and
 connection pools are removed from the Redis public and private implementation.
 
@@ -47,7 +47,7 @@ latency-sensitive scheduler thread when hostname lookup may block.
 | Thread topology | Scheduler-affine connection/Publisher resume; native completion may arrive from a backend worker; one runtime serial Executor orders bridge and Publisher-owner driver tasks |
 | Ordering | Exactly one native operation is active per connection; Redis command replies remain FIFO |
 | Capacity | Attached Publishers, pool connections, command bytes, receive bytes, decoded bytes, and top-level item count are hard limits |
-| Backpressure | Full Publisher admission/pool capacity returns `TURBO_ENOBUFS`; no unbounded allocation or silent fallback |
+| Backpressure | Full Publisher admission/pool capacity returns `SALTS_ENOBUFS`; no unbounded allocation or silent fallback |
 
 ## Connection Pool Lease Protocol
 
@@ -70,9 +70,9 @@ transport/protocol failure, or an incomplete reply destroys the connection and
 makes the slot `INVALID`. A borrowed connection pointer is never exposed.
 
 Capacity is configured once and checked before allocation. When every usable
-slot is borrowed, command admission returns `TURBO_ENOBUFS`; it never blocks,
+slot is borrowed, command admission returns `SALTS_ENOBUFS`; it never blocks,
 queues an unbounded waiter, or allocates an overflow connection. `close()` stops
-new admission and returns `TURBO_EBUSY` while leases remain. `destroy()` is only
+new admission and returns `SALTS_EBUSY` while leases remain. `destroy()` is only
 valid after quiescence. Pool statistics expose idle, borrowed, invalid, rejected,
 completed, and failed counts.
 
@@ -171,7 +171,7 @@ not supported.
   reuse, cancellation disconnect, pool saturation and recovery, static
   `CLUSTER SLOTS` routing, and startup Sentinel discovery.
 - Build: Redis and ORM targets link without TurboNet; installed package can be
-  consumed with `TurboUtils::CFlow` only.
+  consumed with `Salts::CFlow` only.
 - Safety: deterministic tests cover single-transfer reply ownership,
   capacity-one completion sequencing, Publisher admission recovery, reentrant
   blocking-call rejection, callback-quiescent cancellation, and

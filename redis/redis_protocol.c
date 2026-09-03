@@ -1,7 +1,7 @@
 #include "redis_internal.h"
 
 #include <fmt.h>
-#include "turbo_error.h"
+#include "salts_error.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -25,32 +25,32 @@ int redis_resp_command_build_bounded(int argc, const char **argv,
   int index;
   if (argc <= 0 || !argv || max_command_bytes == 0u || !out_command ||
       *out_command)
-    return TURBO_EINVAL;
+    return SALTS_EINVAL;
   total = 1u + redis_resp_decimal_digits((size_t)argc) + 2u;
-  if (total > max_command_bytes) return TURBO_ENOBUFS;
+  if (total > max_command_bytes) return SALTS_ENOBUFS;
   for (index = 0; index < argc; ++index) {
     size_t length;
     size_t framing;
-    if (!argv[index]) return TURBO_EINVAL;
+    if (!argv[index]) return SALTS_EINVAL;
     length = argvlen ? argvlen[index] : strlen(argv[index]);
     framing = 1u + redis_resp_decimal_digits(length) + 2u + 2u;
     if (length > max_command_bytes || framing > max_command_bytes - length ||
         total > max_command_bytes - framing - length)
-      return TURBO_ENOBUFS;
+      return SALTS_ENOBUFS;
     total += framing + length;
   }
   command = tstr_new();
-  if (!command) return TURBO_ENOMEM;
+  if (!command) return SALTS_ENOMEM;
   next = tstr_reserve(command, total);
   if (!next) {
     tstr_free(command);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   command = next;
   next = tstr_append_format(command, "*{}\r\n", argc);
   if (!next) {
     tstr_free(command);
-    return TURBO_ENOMEM;
+    return SALTS_ENOMEM;
   }
   command = next;
   for (index = 0; index < argc; ++index) {
@@ -58,22 +58,22 @@ int redis_resp_command_build_bounded(int argc, const char **argv,
     next = tstr_append_format(command, "${}\r\n", length);
     if (!next) {
       tstr_free(command);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
     command = next;
     next = tstr_cat_v(command, vstr_from_buf(argv[index], length));
     if (!next) {
       tstr_free(command);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
     command = next;
     next = tstr_cat_len(command, "\r\n", 2u);
     if (!next) {
       tstr_free(command);
-      return TURBO_ENOMEM;
+      return SALTS_ENOMEM;
     }
     command = next;
   }
   *out_command = command;
-  return TURBO_OK;
+  return SALTS_OK;
 }

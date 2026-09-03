@@ -40,7 +40,7 @@ target_include_directories(
                $<INSTALL_INTERFACE:include> $<INSTALL_INTERFACE:include/redis>
         PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
-target_link_libraries(tedis PUBLIC TurboUtils::Core TurboUtils::CFlow)
+target_link_libraries(tedis PUBLIC Salts::Core Salts::CFlow)
 
 # Platform-specific settings
 if(WIN32)

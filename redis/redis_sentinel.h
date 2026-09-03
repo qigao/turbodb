@@ -66,7 +66,7 @@ REDIS_API int redis_sentinel_init(redis_sentinel *sentinel,
  * Query the first configured endpoint with `SENTINEL
  * get-master-addr-by-name`, then connect the discovered master pool. WAIT
  * carries the exact underlying CFlow waitable. Discovery is startup-only; a
- * failover requires close/destroy followed by init. An ERROR with TURBO_EBUSY
+ * failover requires close/destroy followed by init. An ERROR with SALTS_EBUSY
  * preserves the current phase and is retryable after the current wake/driver
  * callback returns.
  */

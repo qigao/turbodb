@@ -1,8 +1,8 @@
 #include "../redis_cluster.h"
 
 #include "tinytest.h"
-#include "turbo_error.h"
-#include "turbo_thread.h"
+#include "salts_error.h"
+#include "salts_thread.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +23,7 @@ typedef int redis_cluster_test_socket;
 
 typedef struct redis_cluster_test_server {
   redis_cluster_test_socket listener;
-  turbo_thread_t thread;
+  salts_thread_t thread;
   uint16_t port;
   int connections;
   int commands;
@@ -121,49 +121,49 @@ suite("redis CFlow cluster") {
     const redis_cluster_node *node;
 
     server.listener = REDIS_CLUSTER_TEST_INVALID;
-    check_equal(redis_io_runtime_init(&runtime, &runtime_config), TURBO_OK);
+    check_equal(redis_io_runtime_init(&runtime, &runtime_config), SALTS_OK);
     check_equal(redis_cluster_test_listen(&server), 0);
     ports[0] = server.port;
-    check_equal(turbo_thread_create(&server.thread, redis_cluster_test_server_main, &server),
-                TURBO_OK);
+    check_equal(salts_thread_create(&server.thread, redis_cluster_test_server_main, &server),
+                SALTS_OK);
     config.runtime = &runtime;
     config.seed_hosts = hosts;
     config.seed_ports = ports;
     config.seed_count = 1u;
     config.connections_per_node = 1u;
     config.max_nodes = 2u;
-    check_equal(redis_cluster_init(&cluster, &config), TURBO_OK);
+    check_equal(redis_cluster_init(&cluster, &config), SALTS_OK);
     connected = redis_cluster_connect_next(&cluster);
     while (connected.kind == REDIS_CLUSTER_CONNECT_WAIT) {
-      check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
+      check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
       connected = redis_cluster_connect_next(&cluster);
     }
     check_equal(connected.kind, REDIS_CLUSTER_CONNECT_DONE);
-    check_equal(connected.status, TURBO_OK);
+    check_equal(connected.status, SALTS_OK);
     check_equal(connected.node_count, 1u);
     node = redis_cluster_node_for_slot(&cluster, 0u);
     check_not_null(node);
     check_equal(node->port, server.port);
 
     check_equal(redis_cluster_command_open(&cluster, "key", 3u, 2, get, NULL, 1024u, &command),
-                TURBO_OK);
+                SALTS_OK);
     do {
       step = redis_pool_stream_next(&command);
       if (step.kind == REDIS_CFLOW_STREAM_WAIT)
-        check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), TURBO_OK);
+        check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
     } while (step.kind == REDIS_CFLOW_STREAM_WAIT);
     check_equal(step.kind, REDIS_CFLOW_STREAM_ITEM);
     check_equal(step.item->type, REDIS_REPLY_BULK_STRING);
     check_equal(step.item->str, "value", 5u);
     redis_reply_free(step.item);
     check_equal(redis_pool_stream_next(&command).kind, REDIS_CFLOW_STREAM_DONE);
-    check_equal(redis_pool_stream_destroy(&command), TURBO_OK);
-    check_equal(redis_cluster_close(&cluster), TURBO_OK);
-    check_equal(redis_cluster_destroy(&cluster), TURBO_OK);
-    check_equal(redis_io_runtime_close(&runtime), TURBO_OK);
-    check_equal(redis_io_runtime_destroy(&runtime), TURBO_OK);
-    check_equal(turbo_thread_join(&server.thread), TURBO_OK);
-    turbo_thread_destroy(&server.thread);
+    check_equal(redis_pool_stream_destroy(&command), SALTS_OK);
+    check_equal(redis_cluster_close(&cluster), SALTS_OK);
+    check_equal(redis_cluster_destroy(&cluster), SALTS_OK);
+    check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
+    check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
+    check_equal(salts_thread_join(&server.thread), SALTS_OK);
+    salts_thread_destroy(&server.thread);
     redis_cluster_test_close(server.listener);
     check_equal(server.connections, 2);
     check_equal(server.commands, 2);

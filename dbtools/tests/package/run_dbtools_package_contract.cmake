@@ -51,9 +51,47 @@ if(NOT EXISTS "${sqlite_executable}")
   message(FATAL_ERROR "staged SQLite tool is missing: ${sqlite_executable}")
 endif()
 
+set(original_runtime_path "$ENV{PATH}")
+if(WIN32)
+  set(filtered_runtime_path_entries)
+  set(excluded_runtime_path_roots "${DBTOOLS_PACKAGE_TEST_BUILD_DIR}")
+  foreach(optional_root IN ITEMS DBTOOLS_PACKAGE_TEST_SALTS_ROOT
+                                 DBTOOLS_PACKAGE_TEST_VCPKG_INSTALLED_DIR)
+    if(DEFINED ${optional_root} AND NOT "${${optional_root}}" STREQUAL "")
+      list(APPEND excluded_runtime_path_roots "${${optional_root}}")
+    endif()
+  endforeach()
+  set(runtime_path_entries "$ENV{PATH}")
+  foreach(runtime_path_entry IN LISTS runtime_path_entries)
+    file(TO_CMAKE_PATH "${runtime_path_entry}" runtime_path_entry_normalized)
+    string(TOLOWER "${runtime_path_entry_normalized}/"
+           runtime_path_entry_comparable)
+    set(exclude_runtime_path_entry FALSE)
+    foreach(excluded_runtime_path_root IN LISTS excluded_runtime_path_roots)
+      file(TO_CMAKE_PATH "${excluded_runtime_path_root}"
+           excluded_runtime_path_root_normalized)
+      string(TOLOWER "${excluded_runtime_path_root_normalized}/"
+             excluded_runtime_path_root_comparable)
+      string(FIND "${runtime_path_entry_comparable}"
+             "${excluded_runtime_path_root_comparable}"
+             excluded_runtime_path_root_position)
+      if(excluded_runtime_path_root_position EQUAL 0)
+        set(exclude_runtime_path_entry TRUE)
+        break()
+      endif()
+    endforeach()
+    if(NOT exclude_runtime_path_entry)
+      list(APPEND filtered_runtime_path_entries "${runtime_path_entry}")
+    endif()
+  endforeach()
+  list(JOIN filtered_runtime_path_entries ";" filtered_runtime_path)
+  set(ENV{PATH} "${filtered_runtime_path}")
+else()
+  set(ENV{PATH} "")
+endif()
+
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E env --unset=PATH
-          "${sqlite_executable}" --help
+  COMMAND "${sqlite_executable}" --help
   RESULT_VARIABLE help_result
   OUTPUT_VARIABLE help_stdout
   ERROR_VARIABLE help_stderr)
@@ -64,8 +102,8 @@ if(NOT help_result EQUAL 0 OR NOT help_stdout MATCHES "schema apply")
 endif()
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E env --unset=PATH
-          "${sqlite_executable}" schema apply --database "${test_database}"
+  COMMAND "${sqlite_executable}" schema apply
+          --database "${test_database}"
           --file "${DBTOOLS_PACKAGE_TEST_FIXTURE}"
   RESULT_VARIABLE apply_result
   OUTPUT_VARIABLE apply_stdout
@@ -77,8 +115,8 @@ if(NOT apply_result EQUAL 0 OR NOT apply_stdout MATCHES "statements=4")
 endif()
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E env --unset=PATH
-          "${sqlite_executable}" schema apply --database "${test_database}"
+  COMMAND "${sqlite_executable}" schema apply
+          --database "${test_database}"
           --file "${DBTOOLS_PACKAGE_TEST_FIXTURE}"
   RESULT_VARIABLE duplicate_result
   OUTPUT_VARIABLE duplicate_stdout
@@ -98,8 +136,7 @@ if(DBTOOLS_PACKAGE_TEST_WITH_PGSQL)
             "staged PostgreSQL tool is missing: ${postgresql_executable}")
   endif()
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env --unset=PATH
-            "${postgresql_executable}" --help
+    COMMAND "${postgresql_executable}" --help
     RESULT_VARIABLE postgresql_help_result
     OUTPUT_VARIABLE postgresql_help_stdout
     ERROR_VARIABLE postgresql_help_stderr)
@@ -111,3 +148,5 @@ if(DBTOOLS_PACKAGE_TEST_WITH_PGSQL)
             "stderr:\n${postgresql_help_stderr}")
   endif()
 endif()
+
+set(ENV{PATH} "${original_runtime_path}")

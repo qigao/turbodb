@@ -1,7 +1,7 @@
 #include "../redis_internal.h"
 
 #include "tinytest.h"
-#include "turbo_error.h"
+#include "salts_error.h"
 
 #include <string.h>
 
@@ -105,11 +105,11 @@ suite("redis bounded RESP buffer") {
 
     check_equal(redis_resp_command_build_bounded(
                     1, arguments, lengths, sizeof(expected) - 1u, &command),
-                TURBO_ENOBUFS);
+                SALTS_ENOBUFS);
     check_null(command);
     check_equal(redis_resp_command_build_bounded(
                     1, arguments, lengths, sizeof(expected), &command),
-                TURBO_OK);
+                SALTS_OK);
     check_equal(tstr_len(command), sizeof(expected));
     check_equal(command, expected, sizeof(expected));
     tstr_free(command);

@@ -54,21 +54,18 @@ include(GNUInstallDirs)
 include(CMakeOptions.cmake)
 include(Sanitizers)
 include(CmakeUtils)
- 
-foreach(_turbodb_dependency_root IN ITEMS TURBOUTILS_ROOT)
-  if(NOT DEFINED ENV{${_turbodb_dependency_root}} OR
-     "$ENV{${_turbodb_dependency_root}}" STREQUAL "")
-    message(FATAL_ERROR
-            "Required dependency root is not defined: ${_turbodb_dependency_root}")
-  endif()
-  if(NOT IS_DIRECTORY "$ENV{${_turbodb_dependency_root}}")
-    message(FATAL_ERROR
-            "${_turbodb_dependency_root} is not a directory: $ENV{${_turbodb_dependency_root}}")
-  endif()
-endforeach()
 
-find_package(TurboUtils CONFIG REQUIRED
-             PATHS "$ENV{TURBOUTILS_ROOT}" NO_DEFAULT_PATH)
+if(NOT DEFINED ENV{SALTS_ROOT} OR "$ENV{SALTS_ROOT}" STREQUAL "")
+  message(FATAL_ERROR "SALTS_ROOT must name the installed Salts profile")
+endif()
+file(TO_CMAKE_PATH "$ENV{SALTS_ROOT}" SALTS_ROOT_PATH)
+if(NOT IS_DIRECTORY "${SALTS_ROOT_PATH}")
+  message(FATAL_ERROR "SALTS_ROOT is not a directory: $ENV{SALTS_ROOT}")
+endif()
+unset(Salts_DIR CACHE)
+unset(Salts_DIR)
+find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
+             NO_DEFAULT_PATH)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(zstd CONFIG REQUIRED)

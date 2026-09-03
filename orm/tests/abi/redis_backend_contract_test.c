@@ -1,6 +1,6 @@
 #include "orm.h"
-#include "turbo_error.h"
-#include "turbo_thread.h"
+#include "salts_error.h"
+#include "salts_thread.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -25,7 +25,7 @@ enum { ORM_REDIS_TEST_RECEIVE_TIMEOUT_MS = 5000 };
 
 typedef struct orm_redis_test_server {
   orm_redis_test_socket listener;
-  turbo_thread_t thread;
+  salts_thread_t thread;
   uint16_t port;
   int accepted;
   int valid_command;
@@ -160,9 +160,9 @@ static int orm_redis_test_missing_query_engine(void) {
     orm_redis_test_socket_runtime_destroy();
     return 1;
   }
-  if (turbo_thread_create(&server.thread,
+  if (salts_thread_create(&server.thread,
                           orm_redis_missing_command_server_main,
-                          &server) != TURBO_OK) {
+                          &server) != SALTS_OK) {
     fprintf(stderr, "create Redis test server thread failed\n");
     orm_redis_test_close_socket(server.listener);
     orm_redis_test_socket_runtime_destroy();
@@ -182,11 +182,11 @@ static int orm_redis_test_missing_query_engine(void) {
 
   orm_redis_test_close_socket(server.listener);
   server.listener = ORM_REDIS_TEST_INVALID_SOCKET;
-  if (turbo_thread_join(&server.thread) != TURBO_OK) {
+  if (salts_thread_join(&server.thread) != SALTS_OK) {
     fprintf(stderr, "join Redis test server thread failed\n");
     failed = 1;
   }
-  turbo_thread_destroy(&server.thread);
+  salts_thread_destroy(&server.thread);
   orm_redis_test_socket_runtime_destroy();
 
   if (!server.accepted || !server.valid_command || !server.sent_reply) {
