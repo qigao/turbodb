@@ -3,6 +3,43 @@
 TurboDB 提供纯 C 数据库组件、C++ header-only 包装和按 native driver 构建的数据库工具。
 ORM、Redis、TidesDB 与 standalone tools 分别由 CMake 选项控制。
 
+## Redis ordered apply and Stream outbox
+
+The `redis_lua_apply.h` API exposes a Redis-native, bounded primitive for
+replicated-state adapters. One Lua `EVAL` atomically performs a single
+hash-field write, advances `applied_index`/term/command-id metadata, and
+appends the same command to a Redis Stream outbox. It is an additive `tedis`
+API and does not change the ORM transaction contract.
+
+Its metadata, state, and outbox keys, command-id, field, and value are borrowed
+until `redis_lua_apply_open` returns. The three keys must carry the same
+non-empty Cluster hash tag, for example `raft:{orders}:meta`,
+`raft:{orders}:state`, and `raft:{orders}:outbox`; mismatched or missing
+tags fail before dispatch.
+
+Drive the operation by calling `redis_lua_apply_next` until it stops returning
+`REDIS_LUA_APPLY_WAIT`, waiting on the supplied CFlow waitable between calls,
+then call `redis_lua_apply_destroy`. `APPLIED` is the first durable
+application; `REPLAYED` requires the same current index, term, and
+command-id; `GAP` means the index is not the next valid transition; and
+`CONFLICT` means the current index is occupied by a different term or
+command-id. If the command was sent but no response can be trusted, the
+terminal receipt is `COMMIT_UNKNOWN`: read the authoritative applied index
+before choosing a retry.
+
+The script compares and increments indexes as canonical decimal strings, not
+Lua floating-point numbers, so the complete unsigned 64-bit Raft-index range
+remains exact.
+
+Stream delivery remains at-least-once. Consumers must project idempotently and
+acknowledge only after that projection succeeds.
+
+The normal Redis test suite is self-contained. To enable its real-server case,
+set `TURBODB_REDIS_TEST_PORT` to an isolated Redis port before running
+`ctest --preset win-release-user -R "^test_redis_lua_apply$"`. That case
+verifies actual Lua execution, Stream mutation, and the `UINT64_MAX` index
+boundary through the public `tedis` API.
+
 ## Standalone DDL SQL tools
 
 `turbodb-sqlite` 与 `turbodb-postgresql` 可批量执行数据库初始化 SQL，且不经过
