@@ -39,6 +39,16 @@ if(WIN32)
 endif()
 
 cmake_add_test(
+  NAME test_redis_lua_apply
+  SOURCES test_redis_lua_apply.c
+  LIBS ${REDIS_TEST_LIBS}
+  INCLUDES ${REDIS_TEST_INCLUDES}
+  FOLDER "redis/tests")
+if(WIN32)
+  target_link_libraries(test_redis_lua_apply PRIVATE ws2_32)
+endif()
+
+cmake_add_test(
   NAME test_redis_pool
   SOURCES test_redis_pool.c
   LIBS ${REDIS_TEST_LIBS}

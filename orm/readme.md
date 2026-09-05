@@ -196,9 +196,13 @@ must outlive that Publisher.
   `max_scan_rows` and `max_scan_bytes`; transaction commit/rollback returns
   `ORM_STATUS_BUSY` while a transaction row Publisher is open.
 - Redis: Redis Query Engine row Publisher and direct mutation commands. ORM-level
-  `MULTI/EXEC` is currently unsupported because affected rows are unavailable
-  until commit; it requires a future commit-aware Publisher protocol. SELECT is
-  lazy at first demand and does not materialize the complete RESP reply.
+  `MULTI/EXEC` remains unsupported because affected rows are unavailable until
+  commit; it requires a future commit-aware Publisher protocol. The additive
+  `tedis` `redis_lua_apply` API is instead a fixed Redis-native ordered-write
+  primitive for replicated state adapters: it commits one hash mutation,
+  applied-index metadata, and a Stream outbox entry atomically. It is not an
+  ORM transaction or an arbitrary-query escape hatch. SELECT is lazy at first
+  demand and does not materialize the complete RESP reply.
   Projected CMeta scalar kinds drive strict conversion of RESP bulk strings;
   non-canonical numeric or boolean representations fail at the cursor boundary.
   Destroying a Publisher before completion disconnects that client so unread
