@@ -1,7 +1,7 @@
 # Redis Client (RESP Protocol) Async Redis client implementing RESP protocol
 
 set(REDIS_HEADERS redis_export.h redis_reply.h redis_io.h redis_cflow.h redis_lua_apply.h
-                  redis_pool.h redis_cluster.h redis_sentinel.h)
+                  redis_lua_apply_batch.h redis_pool.h redis_cluster.h redis_sentinel.h)
 
 if(NOT RE2C_EXECUTABLE)
   message(FATAL_ERROR "Redis RESP parser requires re2c")
@@ -13,7 +13,7 @@ cmake_add_grammar(
   FOLDER "redis")
 
 add_library(tedis SHARED redis_io.c redis_io_flow.c redis_socket.c redis_protocol.c redis_cflow.c
-                         redis_lua_apply.c
+                         redis_lua_apply.c redis_lua_apply_batch.c
                          redis_pool.c redis_cluster.c redis_sentinel.c
                          redis_parser.c
                          ${REDIS_RESP_LEXER_GEN}
