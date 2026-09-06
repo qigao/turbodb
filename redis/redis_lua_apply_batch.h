@@ -67,13 +67,25 @@ typedef struct redis_lua_apply_batch_step {
  * Atomically advances one contiguous Raft range in the metadata commit marker,
  * stores every payload and identity in hashes, and appends a Stream outbox
  * record for each entry. All four keys must use one equal, non-empty Redis
- * Cluster hash tag. The command is submitted exactly once.
+ * Cluster hash tag. The command is submitted exactly once. The owning
+ * redis_cflow_connection max_command_bytes must accommodate the Lua script,
+ * RESP framing, and all request payload bytes.
  *
  * Redis server errors after a command has been sent are reported as
  * REDIS_LUA_APPLY_COMMIT_UNKNOWN. Callers must reconcile metadata and journal
  * state before retrying.
  */
 REDIS_API int redis_lua_apply_batch_open(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_request *request,
+    redis_lua_apply_batch *out_operation);
+/**
+ * Reads the metadata-backed commit state for request without writing Redis.
+ * PENDING means the committed prefix matches and the exact request can be
+ * retried through redis_lua_apply_batch_open. COMMIT_UNKNOWN alone never
+ * authorizes a retry.
+ */
+REDIS_API int redis_lua_apply_batch_reconcile_open(
     redis_cflow_connection *connection,
     const redis_lua_apply_batch_request *request,
     redis_lua_apply_batch *out_operation);

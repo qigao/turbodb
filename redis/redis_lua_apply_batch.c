@@ -45,6 +45,15 @@ static const char redis_lua_apply_batch_script[] =
     "  local kind = redis.call('TYPE', key)['ok']\n"
     "  return kind == 'none' or kind == expected\n"
     "end\n"
+    "local function event_matches(event, index, term, command_id, payload)\n"
+    "  local fields\n"
+    "  if #event ~= 2 or event[1] ~= index .. '-0' then return false end\n"
+    "  fields = event[2]\n"
+    "  return #fields == 8 and fields[1] == 'index' and fields[2] == index and\n"
+    "         fields[3] == 'term' and fields[4] == term and\n"
+    "         fields[5] == 'command_id' and fields[6] == command_id and\n"
+    "         fields[7] == 'payload' and fields[8] == payload\n"
+    "end\n"
     "if (#ARGV == 0) or (#ARGV % 4 ~= 0) then return {'INVALID', 'arguments'} end\n"
     "if not key_type_is(KEYS[1], 'hash') or not key_type_is(KEYS[2], 'hash') or\n"
     "   not key_type_is(KEYS[3], 'hash') or not key_type_is(KEYS[4], 'stream') then\n"
@@ -65,6 +74,22 @@ static const char redis_lua_apply_batch_script[] =
     "  end\n"
     "  previous = index\n"
     "end\n"
+    "local prepared_events = {}\n"
+    "for offset = 1, #ARGV, 4 do\n"
+    "  local index = ARGV[offset]\n"
+    "  local term = ARGV[offset + 1]\n"
+    "  local command_id = ARGV[offset + 2]\n"
+    "  local payload = ARGV[offset + 3]\n"
+    "  local identity = redis.call('HGET', KEYS[3], index)\n"
+    "  local stored_payload = redis.call('HGET', KEYS[2], index)\n"
+    "  local event = redis.call('XRANGE', KEYS[4], index .. '-0', index .. '-0')\n"
+    "  if (identity and identity ~= term .. string.char(0) .. command_id) or\n"
+    "     (stored_payload and stored_payload ~= payload) or\n"
+    "     (#event ~= 0 and (#event ~= 1 or not event_matches(event[1], index, term, command_id, payload))) then\n"
+    "    return {'CONFLICT', applied}\n"
+    "  end\n"
+    "  prepared_events[index] = #event == 1\n"
+    "end\n"
     "local cursor = applied\n"
     "local applied_any = false\n"
     "local final_term = nil\n"
@@ -84,7 +109,9 @@ static const char redis_lua_apply_batch_script[] =
     "    if index ~= decimal_increment(cursor) then return {'GAP', applied} end\n"
     "    redis.call('HSET', KEYS[2], index, payload)\n"
     "    redis.call('HSET', KEYS[3], index, term .. string.char(0) .. command_id)\n"
-    "    redis.call('XADD', KEYS[4], '*', 'index', index, 'term', term, 'command_id', command_id, 'payload', payload)\n"
+    "    if not prepared_events[index] then\n"
+    "      redis.call('XADD', KEYS[4], index .. '-0', 'index', index, 'term', term, 'command_id', command_id, 'payload', payload)\n"
+    "    end\n"
     "    cursor = index\n"
     "    final_term = term\n"
     "    final_command_id = command_id\n"
@@ -94,6 +121,69 @@ static const char redis_lua_apply_batch_script[] =
     "if applied_any then\n"
     "  redis.call('HSET', KEYS[1], 'applied_index', cursor, 'term', final_term, 'command_id', final_command_id)\n"
     "  return {'APPLIED', cursor}\n"
+    "end\n"
+    "return {'REPLAYED', applied}\n";
+
+static const char redis_lua_apply_batch_reconcile_script[] =
+    "local MAX_U64 = '18446744073709551615'\n"
+    "local function decimal_compare(left, right)\n"
+    "  if #left ~= #right then return #left < #right and -1 or 1 end\n"
+    "  if left == right then return 0 end\n"
+    "  return left < right and -1 or 1\n"
+    "end\n"
+    "local function valid_u64(value)\n"
+    "  if not string.match(value, '^0$') and not string.match(value, '^[1-9][0-9]*$') then return false end\n"
+    "  return #value < #MAX_U64 or (#value == #MAX_U64 and decimal_compare(value, MAX_U64) <= 0)\n"
+    "end\n"
+    "local function decimal_increment(value)\n"
+    "  local chars = {}\n"
+    "  local carry = 1\n"
+    "  for index = #value, 1, -1 do\n"
+    "    local digit = string.byte(value, index) - 48 + carry\n"
+    "    if digit == 10 then chars[index] = '0' else chars[index] = string.char(48 + digit); carry = 0 end\n"
+    "  end\n"
+    "  if carry == 1 then table.insert(chars, 1, '1') end\n"
+    "  return table.concat(chars)\n"
+    "end\n"
+    "local function key_type_is(key, expected)\n"
+    "  local kind = redis.call('TYPE', key)['ok']\n"
+    "  return kind == 'none' or kind == expected\n"
+    "end\n"
+    "if (#ARGV == 0) or (#ARGV % 4 ~= 0) then return {'INVALID', 'arguments'} end\n"
+    "if not key_type_is(KEYS[1], 'hash') or not key_type_is(KEYS[2], 'hash') or\n"
+    "   not key_type_is(KEYS[3], 'hash') or not key_type_is(KEYS[4], 'stream') then\n"
+    "  return {'INVALID', 'key_type'}\n"
+    "end\n"
+    "local applied = redis.call('HGET', KEYS[1], 'applied_index') or '0'\n"
+    "if not valid_u64(applied) then return {'INVALID', 'applied_index'} end\n"
+    "local previous = nil\n"
+    "for offset = 1, #ARGV, 4 do\n"
+    "  local index = ARGV[offset]\n"
+    "  local term = ARGV[offset + 1]\n"
+    "  local command_id = ARGV[offset + 2]\n"
+    "  if not valid_u64(index) or index == '0' or not valid_u64(term) or term == '0' or #command_id == 0 then\n"
+    "    return {'INVALID', 'record'}\n"
+    "  end\n"
+    "  if previous ~= nil and index ~= decimal_increment(previous) then\n"
+    "    return {'INVALID', 'range'}\n"
+    "  end\n"
+    "  previous = index\n"
+    "end\n"
+    "for offset = 1, #ARGV, 4 do\n"
+    "  local index = ARGV[offset]\n"
+    "  local term = ARGV[offset + 1]\n"
+    "  local command_id = ARGV[offset + 2]\n"
+    "  local payload = ARGV[offset + 3]\n"
+    "  if decimal_compare(index, applied) <= 0 then\n"
+    "    local identity = redis.call('HGET', KEYS[3], index)\n"
+    "    local stored_payload = redis.call('HGET', KEYS[2], index)\n"
+    "    if identity ~= term .. string.char(0) .. command_id or stored_payload ~= payload then\n"
+    "      return {'CONFLICT', applied}\n"
+    "    end\n"
+    "  else\n"
+    "    if index ~= decimal_increment(applied) then return {'GAP', applied} end\n"
+    "    return {'PENDING', applied}\n"
+    "  end\n"
     "end\n"
     "return {'REPLAYED', applied}\n";
 
@@ -219,6 +309,8 @@ static int redis_lua_apply_batch_parse_kind(
     *out_kind = REDIS_LUA_APPLY_GAP;
   else if (reply->len == 8u && memcmp(reply->str, "CONFLICT", 8u) == 0)
     *out_kind = REDIS_LUA_APPLY_CONFLICT;
+  else if (reply->len == 7u && memcmp(reply->str, "PENDING", 7u) == 0)
+    *out_kind = REDIS_LUA_APPLY_PENDING;
   else
     return SALTS_EPROTO;
   return SALTS_OK;
@@ -245,9 +337,10 @@ static redis_lua_apply_batch_step redis_lua_apply_batch_finish(
   return step;
 }
 
-int redis_lua_apply_batch_open(
+static int redis_lua_apply_batch_open_script(
     redis_cflow_connection *connection,
     const redis_lua_apply_batch_request *request,
+    const char *script, size_t script_length,
     redis_lua_apply_batch *out_operation) {
   static const char eval_command[] = "EVAL";
   static const char key_count[] = "4";
@@ -258,7 +351,8 @@ int redis_lua_apply_batch_open(
   size_t record_index;
   redis_lua_apply_batch_impl *impl;
   int status;
-  if (connection == NULL || out_operation == NULL || out_operation->impl != NULL)
+  if (connection == NULL || script == NULL || script_length == 0u ||
+      out_operation == NULL || out_operation->impl != NULL)
     return SALTS_EINVAL;
   status = redis_lua_apply_batch_validate(request);
   if (status != SALTS_OK) return status;
@@ -277,8 +371,8 @@ int redis_lua_apply_batch_open(
   }
   arguments[0] = eval_command;
   lengths[0] = sizeof(eval_command) - 1u;
-  arguments[1] = redis_lua_apply_batch_script;
-  lengths[1] = sizeof(redis_lua_apply_batch_script) - 1u;
+  arguments[1] = script;
+  lengths[1] = script_length;
   arguments[2] = key_count;
   lengths[2] = sizeof(key_count) - 1u;
   arguments[3] = request->metadata_key;
@@ -345,6 +439,24 @@ int redis_lua_apply_batch_open(
   }
   out_operation->impl = impl;
   return SALTS_OK;
+}
+
+int redis_lua_apply_batch_open(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_request *request,
+    redis_lua_apply_batch *out_operation) {
+  return redis_lua_apply_batch_open_script(
+      connection, request, redis_lua_apply_batch_script,
+      sizeof(redis_lua_apply_batch_script) - 1u, out_operation);
+}
+
+int redis_lua_apply_batch_reconcile_open(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_request *request,
+    redis_lua_apply_batch *out_operation) {
+  return redis_lua_apply_batch_open_script(
+      connection, request, redis_lua_apply_batch_reconcile_script,
+      sizeof(redis_lua_apply_batch_reconcile_script) - 1u, out_operation);
 }
 
 redis_lua_apply_batch_step redis_lua_apply_batch_next(
