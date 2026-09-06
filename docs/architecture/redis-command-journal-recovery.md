@@ -31,6 +31,47 @@ The caller owns retry policy. TurboDB guarantees only that a `PENDING` result
 permits the identical request to be retried without changing the journal,
 identity, or outbox facts for already prepared entries.
 
+## Snapshot-aware Journal Compaction
+
+`redis_lua_apply_batch_compact_open` removes a single explicitly bounded,
+inclusive journal range after the caller has made the corresponding Raft
+snapshot durable. The request supplies `first_index`, `last_index`,
+`snapshot_index`, and `snapshot_term`; its four metadata, journal, identity,
+and outbox keys follow the same Cluster hash-tag rule as batch apply. A range
+cannot exceed `REDIS_LUA_APPLY_BATCH_MAX_RECORDS`, is not split by TurboDB,
+and must begin at `metadata.journal_floor + 1`.
+
+`metadata` is the sole retention fact. Before the first delete, the Lua
+transaction verifies that `metadata.applied_index >= snapshot_index`, that the
+identity at `snapshot_index` begins with the exact snapshot term, and that
+every journal and identity field in the range exists. It then deletes journal
+fields, deletes identity fields, and writes these metadata fields last:
+
+| Field | Meaning |
+| --- | --- |
+| `journal_floor` | Inclusive Raft index through which journal facts were removed. |
+| `journal_compaction_first_index` | First index of the most recently completed compaction request. |
+| `journal_compaction_snapshot_index` | Durable snapshot index that authorized that request. |
+| `journal_compaction_snapshot_term` | Durable snapshot term that authorized that request. |
+
+This ordering makes the metadata tuple the compaction commit marker. A lost
+reply must be handled by `redis_lua_apply_batch_compact_reconcile_open`:
+
+| Receipt | Meaning | Caller action |
+| --- | --- | --- |
+| `REPLAYED` | `journal_floor` and all three persisted request facts exactly match. | Treat as compacted. |
+| `PENDING` | The preceding floor, applied marker, snapshot identity, and full source range are still valid. | Retry the identical request once through `redis_lua_apply_batch_compact_open`. |
+| `GAP` | The applied marker, retention floor, or source hashes cannot establish the requested contiguous range. | Stop and rebuild/recover from the Raft fact source. |
+| `CONFLICT` | The snapshot identity, persisted completion tuple, or Redis type is incompatible. | Fault the state machine; do not retry. |
+| `COMMIT_UNKNOWN` or transport error | The caller cannot yet know whether the script committed. | Reconnect and reconcile again; do not compact blindly. |
+
+The Stream outbox is deliberately not a journal-retention structure. Neither
+compaction script calls `XDEL`, `XTRIM`, or another Stream mutation; its
+consumer group owns delivery retention and settlement. TurboRaft must quiesce
+apply/write activity for the compacted prefix, retain the durable snapshot
+until it observes `APPLIED` or `REPLAYED`, and issue each successive bounded
+range with the latest `journal_floor`.
+
 ## Constraints
 
 All metadata, journal, identity, and outbox keys use one equal, non-empty

@@ -1,4 +1,5 @@
 #include "../redis_lua_apply_batch.h"
+#include "../redis_lua_apply_batch_compact.h"
 
 #include "tinytest.h"
 #include "salts_error.h"
@@ -36,6 +37,25 @@ static redis_lua_apply_batch_request redis_lua_apply_batch_test_request(
   request.outbox_key_length = strlen(request.outbox_key);
   request.records = records;
   request.record_count = record_count;
+  return request;
+}
+
+static redis_lua_apply_batch_compact_request
+redis_lua_apply_batch_compact_test_request(void) {
+  redis_lua_apply_batch_compact_request request =
+      REDIS_LUA_APPLY_BATCH_COMPACT_REQUEST_INIT;
+  request.metadata_key = "raft:{orders}:meta";
+  request.metadata_key_length = strlen(request.metadata_key);
+  request.journal_key = "raft:{orders}:journal";
+  request.journal_key_length = strlen(request.journal_key);
+  request.identity_key = "raft:{orders}:identity";
+  request.identity_key_length = strlen(request.identity_key);
+  request.outbox_key = "raft:{orders}:outbox";
+  request.outbox_key_length = strlen(request.outbox_key);
+  request.first_index = UINT64_C(42);
+  request.last_index = UINT64_C(43);
+  request.snapshot_index = UINT64_C(43);
+  request.snapshot_term = UINT64_C(123456);
   return request;
 }
 
@@ -96,6 +116,35 @@ static redis_reply_t *redis_lua_apply_batch_test_command(
 }
 
 spec("redis_lua_apply_batch") {
+  it("rejects invalid journal compaction requests before opening I/O") {
+    redis_cflow_connection connection = {0};
+    redis_lua_apply_batch_compact_request request =
+        redis_lua_apply_batch_compact_test_request();
+    redis_lua_apply_batch operation = {0};
+
+    request.snapshot_term = 0u;
+    check_equal(redis_lua_apply_batch_compact_open(&connection, &request,
+                                                   &operation),
+                SALTS_EINVAL);
+    check_null(operation.impl);
+
+    request = redis_lua_apply_batch_compact_test_request();
+    request.last_index = request.first_index +
+                         REDIS_LUA_APPLY_BATCH_MAX_RECORDS;
+    check_equal(redis_lua_apply_batch_compact_open(&connection, &request,
+                                                   &operation),
+                SALTS_EINVAL);
+    check_null(operation.impl);
+
+    request = redis_lua_apply_batch_compact_test_request();
+    request.outbox_key = "raft:{other}:outbox";
+    request.outbox_key_length = strlen(request.outbox_key);
+    check_equal(redis_lua_apply_batch_compact_open(&connection, &request,
+                                                   &operation),
+                SALTS_EINVAL);
+    check_null(operation.impl);
+  }
+
   it("rejects an empty batch before opening an I/O command") {
     redis_cflow_connection connection = {0};
     redis_lua_apply_batch_request request =
@@ -158,7 +207,7 @@ spec("redis_lua_apply_batch") {
         "raft:{orders}:identity", "raft:{orders}:outbox"};
     static const char *seed_command[] = {
         "HSET", "raft:{orders}:meta", "applied_index", "41", "term", "7",
-        "command_id", "seed-41"};
+        "command_id", "seed-41", "journal_floor", "41"};
     static const char *prepared_stream_command[] = {
         "XADD", "raft:{orders}:outbox", "42-0", "index", "42", "term",
         "123456", "command_id", "command-42", "payload", "first"};
@@ -169,6 +218,12 @@ spec("redis_lua_apply_batch") {
         "HGET", "raft:{orders}:meta", "applied_index"};
     static const char *outbox_command[] = {
         "XLEN", "raft:{orders}:outbox"};
+    static const char *journal_floor_command[] = {
+        "HGET", "raft:{orders}:meta", "journal_floor"};
+    static const char *journal_42_command[] = {
+        "HEXISTS", "raft:{orders}:journal", "42"};
+    static const char *identity_43_command[] = {
+        "HEXISTS", "raft:{orders}:identity", "43"};
     redis_io_runtime runtime = {0};
     redis_io_runtime_config runtime_config = {
         redis_lua_apply_batch_test_backend(), 1u, 1u};
@@ -177,6 +232,8 @@ spec("redis_lua_apply_batch") {
     redis_cflow_connect_step connect_step;
     redis_lua_apply_batch_request request =
         redis_lua_apply_batch_test_request(records, 2u);
+    redis_lua_apply_batch_compact_request compact_request =
+        redis_lua_apply_batch_compact_test_request();
     redis_lua_apply_batch operation = {0};
     redis_lua_apply_batch_step step;
     redis_reply_t *reply;
@@ -207,7 +264,7 @@ spec("redis_lua_apply_batch") {
     check_not_null(reply);
     redis_reply_free(reply);
     reply = redis_lua_apply_batch_test_command(
-        &connection, &runtime, 8, seed_command);
+        &connection, &runtime, 10, seed_command);
     check_not_null(reply);
     redis_reply_free(reply);
     reply = redis_lua_apply_batch_test_command(
@@ -286,6 +343,67 @@ spec("redis_lua_apply_batch") {
     check_equal(reply->type, REDIS_REPLY_INTEGER);
     check_equal(reply->integer, 2);
     redis_reply_free(reply);
+
+    check_equal(redis_lua_apply_batch_compact_reconcile_open(
+                    &connection, &compact_request, &operation),
+                SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_PENDING);
+    check_equal(step.receipt.applied_index, UINT64_C(41));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
+
+    check_equal(redis_lua_apply_batch_compact_open(&connection, &compact_request,
+                                                   &operation),
+                SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_APPLIED);
+    check_equal(step.receipt.applied_index, UINT64_C(43));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
+    reply = redis_lua_apply_batch_test_command(&connection, &runtime, 3,
+                                               journal_floor_command);
+    check_not_null(reply);
+    check_equal(reply->type, REDIS_REPLY_BULK_STRING);
+    check_equal(reply->str, "43", 2u);
+    redis_reply_free(reply);
+    reply = redis_lua_apply_batch_test_command(&connection, &runtime, 3,
+                                               journal_42_command);
+    check_not_null(reply);
+    check_equal(reply->type, REDIS_REPLY_INTEGER);
+    check_equal(reply->integer, 0);
+    redis_reply_free(reply);
+    reply = redis_lua_apply_batch_test_command(&connection, &runtime, 3,
+                                               identity_43_command);
+    check_not_null(reply);
+    check_equal(reply->type, REDIS_REPLY_INTEGER);
+    check_equal(reply->integer, 0);
+    redis_reply_free(reply);
+    reply = redis_lua_apply_batch_test_command(&connection, &runtime, 2,
+                                               outbox_command);
+    check_not_null(reply);
+    check_equal(reply->type, REDIS_REPLY_INTEGER);
+    check_equal(reply->integer, 2);
+    redis_reply_free(reply);
+
+    check_equal(redis_lua_apply_batch_compact_reconcile_open(
+                    &connection, &compact_request, &operation),
+                SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_REPLAYED);
+    check_equal(step.receipt.applied_index, UINT64_C(43));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
+
+    compact_request.first_index = UINT64_C(43);
+    check_equal(redis_lua_apply_batch_compact_reconcile_open(
+                    &connection, &compact_request, &operation),
+                SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_CONFLICT);
+    check_equal(step.receipt.applied_index, UINT64_C(43));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
 
     reply = redis_lua_apply_batch_test_command(
         &connection, &runtime, 5, delete_command);

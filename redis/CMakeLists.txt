@@ -1,7 +1,8 @@
 # Redis Client (RESP Protocol) Async Redis client implementing RESP protocol
 
 set(REDIS_HEADERS redis_export.h redis_reply.h redis_io.h redis_cflow.h redis_lua_apply.h
-                  redis_lua_apply_batch.h redis_pool.h redis_cluster.h redis_sentinel.h)
+                  redis_lua_apply_batch.h redis_lua_apply_batch_compact.h redis_pool.h
+                  redis_cluster.h redis_sentinel.h)
 
 if(NOT RE2C_EXECUTABLE)
   message(FATAL_ERROR "Redis RESP parser requires re2c")
