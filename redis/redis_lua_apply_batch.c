@@ -1,4 +1,5 @@
 #include "redis_lua_apply_batch.h"
+#include "redis_lua_apply_batch_compact.h"
 
 #include "salts_error.h"
 
@@ -13,6 +14,10 @@
 #define REDIS_LUA_APPLY_BATCH_RECORD_ARGUMENTS 4u
 #define REDIS_LUA_APPLY_BATCH_MAX_REPLY_BYTES 512u
 #define REDIS_LUA_APPLY_BATCH_U64_TEXT_BYTES 21u
+#define REDIS_LUA_APPLY_BATCH_COMPACT_LUA_ARGUMENTS 5u
+#define REDIS_LUA_APPLY_BATCH_COMPACT_COMMAND_ARGUMENTS \
+  (REDIS_LUA_APPLY_BATCH_COMMAND_PREFIX_ARGUMENTS + \
+   REDIS_LUA_APPLY_BATCH_COMPACT_LUA_ARGUMENTS)
 
 /*
  * Redis does not roll back writes that precede a script runtime error. The
@@ -186,6 +191,160 @@ static const char redis_lua_apply_batch_reconcile_script[] =
     "  end\n"
     "end\n"
     "return {'REPLAYED', applied}\n";
+
+/*
+ * The metadata floor is the sole retention commit marker.  Every possible
+ * script error is checked before HDEL because Redis does not roll back a Lua
+ * script that has already mutated state.  The Stream key is intentionally
+ * type-checked but never mutated: delivery retention belongs to its consumer.
+ */
+static const char redis_lua_apply_batch_compact_script[] =
+    "local MAX_U64 = '18446744073709551615'\n"
+    "local function decimal_compare(left, right)\n"
+    "  if #left ~= #right then return #left < #right and -1 or 1 end\n"
+    "  if left == right then return 0 end\n"
+    "  return left < right and -1 or 1\n"
+    "end\n"
+    "local function valid_u64(value)\n"
+    "  if not string.match(value, '^0$') and not string.match(value, '^[1-9][0-9]*$') then return false end\n"
+    "  return #value < #MAX_U64 or (#value == #MAX_U64 and decimal_compare(value, MAX_U64) <= 0)\n"
+    "end\n"
+    "local function decimal_increment(value)\n"
+    "  local chars = {}\n"
+    "  local carry = 1\n"
+    "  for index = #value, 1, -1 do\n"
+    "    local digit = string.byte(value, index) - 48 + carry\n"
+    "    if digit == 10 then chars[index] = '0' else chars[index] = string.char(48 + digit); carry = 0 end\n"
+    "  end\n"
+    "  if carry == 1 then table.insert(chars, 1, '1') end\n"
+    "  return table.concat(chars)\n"
+    "end\n"
+    "local function key_type_is(key, expected)\n"
+    "  local kind = redis.call('TYPE', key)['ok']\n"
+    "  return kind == 'none' or kind == expected\n"
+    "end\n"
+    "local first = ARGV[1]\n"
+    "local last = ARGV[2]\n"
+    "local snapshot_index = ARGV[3]\n"
+    "local snapshot_term = ARGV[4]\n"
+    "local max_records = ARGV[5]\n"
+    "if #ARGV ~= 5 or not valid_u64(first) or first == '0' or not valid_u64(last) or\n"
+    "   not valid_u64(snapshot_index) or snapshot_index == '0' or\n"
+    "   not valid_u64(snapshot_term) or snapshot_term == '0' or not valid_u64(max_records) or\n"
+    "   max_records == '0' or\n"
+    "   decimal_compare(last, first) < 0 or decimal_compare(snapshot_index, last) < 0 then\n"
+    "  return {'CONFLICT', '0'}\n"
+    "end\n"
+    "if not key_type_is(KEYS[1], 'hash') or not key_type_is(KEYS[2], 'hash') or\n"
+    "   not key_type_is(KEYS[3], 'hash') or not key_type_is(KEYS[4], 'stream') then\n"
+    "  return {'CONFLICT', '0'}\n"
+    "end\n"
+    "local applied = redis.call('HGET', KEYS[1], 'applied_index') or '0'\n"
+    "local floor = redis.call('HGET', KEYS[1], 'journal_floor') or '0'\n"
+    "if not valid_u64(applied) or not valid_u64(floor) then return {'CONFLICT', '0'} end\n"
+    "if decimal_compare(applied, snapshot_index) < 0 then return {'GAP', floor} end\n"
+    "if floor == MAX_U64 or first ~= decimal_increment(floor) then return {'GAP', floor} end\n"
+    "local snapshot_identity = redis.call('HGET', KEYS[3], snapshot_index)\n"
+    "local snapshot_prefix = snapshot_term .. string.char(0)\n"
+    "if not snapshot_identity or #snapshot_identity <= #snapshot_prefix or\n"
+    "   string.sub(snapshot_identity, 1, #snapshot_prefix) ~= snapshot_prefix then\n"
+    "  return {'CONFLICT', floor}\n"
+    "end\n"
+    "local fields = {}\n"
+    "local cursor = first\n"
+    "while true do\n"
+    "  if not redis.call('HGET', KEYS[2], cursor) or not redis.call('HGET', KEYS[3], cursor) then\n"
+    "    return {'GAP', floor}\n"
+    "  end\n"
+    "  table.insert(fields, cursor)\n"
+    "  if cursor == last then break end\n"
+    "  if #fields >= tonumber(max_records) then return {'CONFLICT', floor} end\n"
+    "  cursor = decimal_increment(cursor)\n"
+    "  if not valid_u64(cursor) then return {'CONFLICT', floor} end\n"
+    "end\n"
+    "redis.call('HDEL', KEYS[2], unpack(fields))\n"
+    "redis.call('HDEL', KEYS[3], unpack(fields))\n"
+    "redis.call('HSET', KEYS[1], 'journal_floor', last,\n"
+    "           'journal_compaction_first_index', first,\n"
+    "           'journal_compaction_snapshot_index', snapshot_index,\n"
+    "           'journal_compaction_snapshot_term', snapshot_term)\n"
+    "return {'APPLIED', last}\n";
+
+static const char redis_lua_apply_batch_compact_reconcile_script[] =
+    "local MAX_U64 = '18446744073709551615'\n"
+    "local function decimal_compare(left, right)\n"
+    "  if #left ~= #right then return #left < #right and -1 or 1 end\n"
+    "  if left == right then return 0 end\n"
+    "  return left < right and -1 or 1\n"
+    "end\n"
+    "local function valid_u64(value)\n"
+    "  if not string.match(value, '^0$') and not string.match(value, '^[1-9][0-9]*$') then return false end\n"
+    "  return #value < #MAX_U64 or (#value == #MAX_U64 and decimal_compare(value, MAX_U64) <= 0)\n"
+    "end\n"
+    "local function decimal_increment(value)\n"
+    "  local chars = {}\n"
+    "  local carry = 1\n"
+    "  for index = #value, 1, -1 do\n"
+    "    local digit = string.byte(value, index) - 48 + carry\n"
+    "    if digit == 10 then chars[index] = '0' else chars[index] = string.char(48 + digit); carry = 0 end\n"
+    "  end\n"
+    "  if carry == 1 then table.insert(chars, 1, '1') end\n"
+    "  return table.concat(chars)\n"
+    "end\n"
+    "local function key_type_is(key, expected)\n"
+    "  local kind = redis.call('TYPE', key)['ok']\n"
+    "  return kind == 'none' or kind == expected\n"
+    "end\n"
+    "local first = ARGV[1]\n"
+    "local last = ARGV[2]\n"
+    "local snapshot_index = ARGV[3]\n"
+    "local snapshot_term = ARGV[4]\n"
+    "local max_records = ARGV[5]\n"
+    "if #ARGV ~= 5 or not valid_u64(first) or first == '0' or not valid_u64(last) or\n"
+    "   not valid_u64(snapshot_index) or snapshot_index == '0' or\n"
+    "   not valid_u64(snapshot_term) or snapshot_term == '0' or not valid_u64(max_records) or\n"
+    "   max_records == '0' or\n"
+    "   decimal_compare(last, first) < 0 or decimal_compare(snapshot_index, last) < 0 then\n"
+    "  return {'CONFLICT', '0'}\n"
+    "end\n"
+    "if not key_type_is(KEYS[1], 'hash') or not key_type_is(KEYS[2], 'hash') or\n"
+    "   not key_type_is(KEYS[3], 'hash') or not key_type_is(KEYS[4], 'stream') then\n"
+    "  return {'CONFLICT', '0'}\n"
+    "end\n"
+    "local applied = redis.call('HGET', KEYS[1], 'applied_index') or '0'\n"
+    "local floor = redis.call('HGET', KEYS[1], 'journal_floor') or '0'\n"
+    "if not valid_u64(applied) or not valid_u64(floor) then return {'CONFLICT', '0'} end\n"
+    "local stored_first_index = redis.call('HGET', KEYS[1], 'journal_compaction_first_index')\n"
+    "local stored_snapshot_index = redis.call('HGET', KEYS[1], 'journal_compaction_snapshot_index')\n"
+    "local stored_snapshot_term = redis.call('HGET', KEYS[1], 'journal_compaction_snapshot_term')\n"
+    "if floor == last then\n"
+    "  if stored_first_index == first and stored_snapshot_index == snapshot_index and\n"
+    "     stored_snapshot_term == snapshot_term then\n"
+    "    return {'REPLAYED', last}\n"
+    "  end\n"
+    "  return {'CONFLICT', floor}\n"
+    "end\n"
+    "if decimal_compare(applied, snapshot_index) < 0 or floor == MAX_U64 or\n"
+    "   first ~= decimal_increment(floor) then return {'GAP', floor} end\n"
+    "local snapshot_identity = redis.call('HGET', KEYS[3], snapshot_index)\n"
+    "local snapshot_prefix = snapshot_term .. string.char(0)\n"
+    "if not snapshot_identity or #snapshot_identity <= #snapshot_prefix or\n"
+    "   string.sub(snapshot_identity, 1, #snapshot_prefix) ~= snapshot_prefix then\n"
+    "  return {'CONFLICT', floor}\n"
+    "end\n"
+    "local cursor = first\n"
+    "local count = 0\n"
+    "while true do\n"
+    "  if not redis.call('HGET', KEYS[2], cursor) or not redis.call('HGET', KEYS[3], cursor) then\n"
+    "    return {'GAP', floor}\n"
+    "  end\n"
+    "  count = count + 1\n"
+    "  if cursor == last then break end\n"
+    "  if count >= tonumber(max_records) then return {'CONFLICT', floor} end\n"
+    "  cursor = decimal_increment(cursor)\n"
+    "  if not valid_u64(cursor) then return {'CONFLICT', floor} end\n"
+    "end\n"
+    "return {'PENDING', floor}\n";
 
 typedef struct redis_lua_apply_batch_impl {
   redis_cflow_stream stream;
@@ -457,6 +616,133 @@ int redis_lua_apply_batch_reconcile_open(
   return redis_lua_apply_batch_open_script(
       connection, request, redis_lua_apply_batch_reconcile_script,
       sizeof(redis_lua_apply_batch_reconcile_script) - 1u, out_operation);
+}
+
+static int redis_lua_apply_batch_compact_validate(
+    const redis_lua_apply_batch_compact_request *request) {
+  const char *metadata_tag;
+  const char *journal_tag;
+  const char *identity_tag;
+  const char *outbox_tag;
+  size_t metadata_tag_length;
+  size_t journal_tag_length;
+  size_t identity_tag_length;
+  size_t outbox_tag_length;
+  int status;
+  if (request == NULL || request->first_index == 0u ||
+      request->last_index < request->first_index ||
+      request->last_index - request->first_index >=
+          REDIS_LUA_APPLY_BATCH_MAX_RECORDS ||
+      request->snapshot_index == 0u || request->snapshot_term == 0u ||
+      request->snapshot_index < request->last_index)
+    return SALTS_EINVAL;
+  status = redis_lua_apply_batch_tag(request->metadata_key,
+                                     request->metadata_key_length, &metadata_tag,
+                                     &metadata_tag_length);
+  if (status != SALTS_OK) return status;
+  status = redis_lua_apply_batch_tag(request->journal_key,
+                                     request->journal_key_length, &journal_tag,
+                                     &journal_tag_length);
+  if (status != SALTS_OK) return status;
+  status = redis_lua_apply_batch_tag(request->identity_key,
+                                     request->identity_key_length, &identity_tag,
+                                     &identity_tag_length);
+  if (status != SALTS_OK) return status;
+  status = redis_lua_apply_batch_tag(request->outbox_key,
+                                     request->outbox_key_length, &outbox_tag,
+                                     &outbox_tag_length);
+  if (status != SALTS_OK) return status;
+  if (metadata_tag_length != journal_tag_length ||
+      metadata_tag_length != identity_tag_length ||
+      metadata_tag_length != outbox_tag_length ||
+      memcmp(metadata_tag, journal_tag, metadata_tag_length) != 0 ||
+      memcmp(metadata_tag, identity_tag, metadata_tag_length) != 0 ||
+      memcmp(metadata_tag, outbox_tag, metadata_tag_length) != 0)
+    return SALTS_EINVAL;
+  return SALTS_OK;
+}
+
+static int redis_lua_apply_batch_compact_open_script(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_compact_request *request,
+    const char *script, size_t script_length,
+    redis_lua_apply_batch *out_operation) {
+  static const char eval_command[] = "EVAL";
+  static const char key_count[] = "4";
+  const char *arguments[REDIS_LUA_APPLY_BATCH_COMPACT_COMMAND_ARGUMENTS];
+  size_t lengths[REDIS_LUA_APPLY_BATCH_COMPACT_COMMAND_ARGUMENTS];
+  char number_text[REDIS_LUA_APPLY_BATCH_COMPACT_LUA_ARGUMENTS]
+                  [REDIS_LUA_APPLY_BATCH_U64_TEXT_BYTES];
+  const uint64_t values[REDIS_LUA_APPLY_BATCH_COMPACT_LUA_ARGUMENTS] = {
+      request != NULL ? request->first_index : 0u,
+      request != NULL ? request->last_index : 0u,
+      request != NULL ? request->snapshot_index : 0u,
+      request != NULL ? request->snapshot_term : 0u,
+      (uint64_t)REDIS_LUA_APPLY_BATCH_MAX_RECORDS};
+  redis_lua_apply_batch_impl *impl;
+  size_t index;
+  int status;
+  if (connection == NULL || script == NULL || script_length == 0u ||
+      out_operation == NULL || out_operation->impl != NULL)
+    return SALTS_EINVAL;
+  status = redis_lua_apply_batch_compact_validate(request);
+  if (status != SALTS_OK) return status;
+  arguments[0] = eval_command;
+  lengths[0] = sizeof(eval_command) - 1u;
+  arguments[1] = script;
+  lengths[1] = script_length;
+  arguments[2] = key_count;
+  lengths[2] = sizeof(key_count) - 1u;
+  arguments[3] = request->metadata_key;
+  lengths[3] = request->metadata_key_length;
+  arguments[4] = request->journal_key;
+  lengths[4] = request->journal_key_length;
+  arguments[5] = request->identity_key;
+  lengths[5] = request->identity_key_length;
+  arguments[6] = request->outbox_key;
+  lengths[6] = request->outbox_key_length;
+  for (index = 0u; index < REDIS_LUA_APPLY_BATCH_COMPACT_LUA_ARGUMENTS; ++index) {
+    int written = snprintf(number_text[index],
+                           REDIS_LUA_APPLY_BATCH_U64_TEXT_BYTES,
+                           "%" PRIu64, values[index]);
+    if (written < 0 ||
+        (size_t)written >= REDIS_LUA_APPLY_BATCH_U64_TEXT_BYTES)
+      return SALTS_ERANGE;
+    arguments[REDIS_LUA_APPLY_BATCH_COMMAND_PREFIX_ARGUMENTS + index] =
+        number_text[index];
+    lengths[REDIS_LUA_APPLY_BATCH_COMMAND_PREFIX_ARGUMENTS + index] =
+        (size_t)written;
+  }
+  impl = (redis_lua_apply_batch_impl *)calloc(1u, sizeof(*impl));
+  if (impl == NULL) return SALTS_ENOMEM;
+  status = redis_cflow_command_open(
+      connection, (int)REDIS_LUA_APPLY_BATCH_COMPACT_COMMAND_ARGUMENTS,
+      arguments, lengths, REDIS_LUA_APPLY_BATCH_MAX_REPLY_BYTES, &impl->stream);
+  if (status != SALTS_OK) {
+    free(impl);
+    return status;
+  }
+  out_operation->impl = impl;
+  return SALTS_OK;
+}
+
+int redis_lua_apply_batch_compact_open(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_compact_request *request,
+    redis_lua_apply_batch *out_operation) {
+  return redis_lua_apply_batch_compact_open_script(
+      connection, request, redis_lua_apply_batch_compact_script,
+      sizeof(redis_lua_apply_batch_compact_script) - 1u, out_operation);
+}
+
+int redis_lua_apply_batch_compact_reconcile_open(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_compact_request *request,
+    redis_lua_apply_batch *out_operation) {
+  return redis_lua_apply_batch_compact_open_script(
+      connection, request, redis_lua_apply_batch_compact_reconcile_script,
+      sizeof(redis_lua_apply_batch_compact_reconcile_script) - 1u,
+      out_operation);
 }
 
 redis_lua_apply_batch_step redis_lua_apply_batch_next(
