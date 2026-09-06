@@ -40,7 +40,9 @@ typedef enum redis_lua_apply_receipt_kind {
   REDIS_LUA_APPLY_GAP,
   REDIS_LUA_APPLY_CONFLICT,
   REDIS_LUA_APPLY_COMMIT_UNKNOWN,
-  REDIS_LUA_APPLY_ERROR
+  REDIS_LUA_APPLY_ERROR,
+  /** A verified prefix is committed; the exact request may be retried. */
+  REDIS_LUA_APPLY_PENDING
 } redis_lua_apply_receipt_kind;
 
 typedef struct redis_lua_apply_receipt {

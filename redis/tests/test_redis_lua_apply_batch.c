@@ -9,6 +9,7 @@
 
 #define REDIS_LUA_APPLY_BATCH_TEST_WAIT_TIMEOUT_NS UINT64_C(5000000000)
 #define REDIS_LUA_APPLY_BATCH_TEST_MAX_STEPS 16u
+#define REDIS_LUA_APPLY_BATCH_TEST_MAX_COMMAND_BYTES 8192u
 
 static cflow_io_native_backend_kind redis_lua_apply_batch_test_backend(void) {
 #if defined(_WIN32)
@@ -158,6 +159,9 @@ spec("redis_lua_apply_batch") {
     static const char *seed_command[] = {
         "HSET", "raft:{orders}:meta", "applied_index", "41", "term", "7",
         "command_id", "seed-41"};
+    static const char *prepared_stream_command[] = {
+        "XADD", "raft:{orders}:outbox", "42-0", "index", "42", "term",
+        "123456", "command_id", "command-42", "payload", "first"};
     static const char *high_seed_command[] = {
         "HSET", "raft:{orders}:meta", "applied_index", "18446744073709551613",
         "term", "8", "command_id", "seed-high"};
@@ -185,7 +189,8 @@ spec("redis_lua_apply_batch") {
                port <= UINT16_MAX);
     check_equal(redis_io_runtime_init(&runtime, &runtime_config), SALTS_OK);
     connection_config = (redis_cflow_open_config){
-        &runtime, "127.0.0.1", (uint16_t)port, 1u, 4096u, 64u, 4096u, 64u,
+        &runtime, "127.0.0.1", (uint16_t)port, 1u,
+        REDIS_LUA_APPLY_BATCH_TEST_MAX_COMMAND_BYTES, 64u, 4096u, 64u,
         REDIS_LUA_APPLY_BATCH_TEST_WAIT_TIMEOUT_NS};
     check_equal(redis_cflow_connection_open(&connection, &connection_config),
                 SALTS_OK);
@@ -205,6 +210,18 @@ spec("redis_lua_apply_batch") {
         &connection, &runtime, 8, seed_command);
     check_not_null(reply);
     redis_reply_free(reply);
+    reply = redis_lua_apply_batch_test_command(
+        &connection, &runtime, 11, prepared_stream_command);
+    check_not_null(reply);
+    redis_reply_free(reply);
+
+    check_equal(redis_lua_apply_batch_reconcile_open(&connection, &request,
+                                                      &operation), SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_PENDING);
+    check_equal(step.receipt.applied_index, UINT64_C(41));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
 
     check_equal(redis_lua_apply_batch_open(&connection, &request, &operation),
                 SALTS_OK);
@@ -234,6 +251,13 @@ spec("redis_lua_apply_batch") {
     check_equal(step.receipt.kind, REDIS_LUA_APPLY_REPLAYED);
     check_equal(step.receipt.applied_index, UINT64_C(43));
     check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
+    check_equal(redis_lua_apply_batch_reconcile_open(&connection, &request,
+                                                      &operation), SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_REPLAYED);
+    check_equal(step.receipt.applied_index, UINT64_C(43));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
     reply = redis_lua_apply_batch_test_command(&connection, &runtime, 2,
                                                outbox_command);
     check_not_null(reply);
@@ -244,6 +268,13 @@ spec("redis_lua_apply_batch") {
     request.records = conflicting_records;
     check_equal(redis_lua_apply_batch_open(&connection, &request, &operation),
                 SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_CONFLICT);
+    check_equal(step.receipt.applied_index, UINT64_C(43));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
+    check_equal(redis_lua_apply_batch_reconcile_open(&connection, &request,
+                                                      &operation), SALTS_OK);
     step = redis_lua_apply_batch_test_complete(&operation, &runtime);
     check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
     check_equal(step.receipt.kind, REDIS_LUA_APPLY_CONFLICT);
