@@ -59,6 +59,15 @@ redis_lua_apply_batch_compact_test_request(void) {
   return request;
 }
 
+static redis_lua_apply_batch_compact_state_request
+redis_lua_apply_batch_compact_state_test_request(void) {
+  redis_lua_apply_batch_compact_state_request request =
+      REDIS_LUA_APPLY_BATCH_COMPACT_STATE_REQUEST_INIT;
+  request.metadata_key = "raft:{orders}:meta";
+  request.metadata_key_length = strlen(request.metadata_key);
+  return request;
+}
+
 static redis_lua_apply_batch_step redis_lua_apply_batch_test_complete(
     redis_lua_apply_batch *operation, redis_io_runtime *runtime) {
   redis_lua_apply_batch_step step = REDIS_LUA_APPLY_BATCH_STEP_INIT;
@@ -234,6 +243,8 @@ spec("redis_lua_apply_batch") {
         redis_lua_apply_batch_test_request(records, 2u);
     redis_lua_apply_batch_compact_request compact_request =
         redis_lua_apply_batch_compact_test_request();
+    redis_lua_apply_batch_compact_state_request compact_state_request =
+        redis_lua_apply_batch_compact_state_test_request();
     redis_lua_apply_batch operation = {0};
     redis_lua_apply_batch_step step;
     redis_reply_t *reply;
@@ -367,6 +378,14 @@ spec("redis_lua_apply_batch") {
     check_equal(reply->type, REDIS_REPLY_BULK_STRING);
     check_equal(reply->str, "43", 2u);
     redis_reply_free(reply);
+    check_equal(redis_lua_apply_batch_compact_state_open(
+                    &connection, &compact_state_request, &operation),
+                SALTS_OK);
+    step = redis_lua_apply_batch_test_complete(&operation, &runtime);
+    check_equal(step.kind, REDIS_LUA_APPLY_BATCH_DONE);
+    check_equal(step.receipt.kind, REDIS_LUA_APPLY_APPLIED);
+    check_equal(step.receipt.applied_index, UINT64_C(43));
+    check_equal(redis_lua_apply_batch_destroy(&operation), SALTS_OK);
     reply = redis_lua_apply_batch_test_command(&connection, &runtime, 3,
                                                journal_42_command);
     check_not_null(reply);

@@ -30,6 +30,15 @@ typedef struct redis_lua_apply_batch_compact_request {
   (redis_lua_apply_batch_compact_request){NULL, 0u, NULL, 0u, NULL, 0u, \
                                           NULL, 0u, 0u, 0u, 0u, 0u}
 
+/** Only metadata owns the durable journal compaction floor. */
+typedef struct redis_lua_apply_batch_compact_state_request {
+  const char *metadata_key;
+  size_t metadata_key_length;
+} redis_lua_apply_batch_compact_state_request;
+
+#define REDIS_LUA_APPLY_BATCH_COMPACT_STATE_REQUEST_INIT \
+  (redis_lua_apply_batch_compact_state_request){NULL, 0u}
+
 /**
  * Atomically removes one bounded, contiguous journal and identity range after
  * matching the durable snapshot's term against its identity entry. All four
@@ -51,6 +60,17 @@ REDIS_API int redis_lua_apply_batch_compact_open(
 REDIS_API int redis_lua_apply_batch_compact_reconcile_open(
     redis_cflow_connection *connection,
     const redis_lua_apply_batch_compact_request *request,
+    redis_lua_apply_batch *out_operation);
+
+/**
+ * Reads the durable journal floor without writing Redis. On completion the
+ * receipt is APPLIED and receipt.applied_index is the current journal_floor
+ * (zero when no compaction has completed). The metadata key must be a single,
+ * non-empty Redis key; no local state is retained.
+ */
+REDIS_API int redis_lua_apply_batch_compact_state_open(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_compact_state_request *request,
     redis_lua_apply_batch *out_operation);
 
 #ifdef __cplusplus
