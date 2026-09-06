@@ -18,6 +18,7 @@
 #define REDIS_LUA_APPLY_BATCH_COMPACT_COMMAND_ARGUMENTS \
   (REDIS_LUA_APPLY_BATCH_COMMAND_PREFIX_ARGUMENTS + \
    REDIS_LUA_APPLY_BATCH_COMPACT_LUA_ARGUMENTS)
+#define REDIS_LUA_APPLY_BATCH_COMPACT_STATE_COMMAND_ARGUMENTS 4u
 
 /*
  * Redis does not roll back writes that precede a script runtime error. The
@@ -345,6 +346,23 @@ static const char redis_lua_apply_batch_compact_reconcile_script[] =
     "  if not valid_u64(cursor) then return {'CONFLICT', floor} end\n"
     "end\n"
     "return {'PENDING', floor}\n";
+
+static const char redis_lua_apply_batch_compact_state_script[] =
+    "local MAX_U64 = '18446744073709551615'\n"
+    "local function decimal_compare(left, right)\n"
+    "  if #left ~= #right then return #left < #right and -1 or 1 end\n"
+    "  if left == right then return 0 end\n"
+    "  return left < right and -1 or 1\n"
+    "end\n"
+    "local function valid_u64(value)\n"
+    "  if not string.match(value, '^0$') and not string.match(value, '^[1-9][0-9]*$') then return false end\n"
+    "  return #value < #MAX_U64 or (#value == #MAX_U64 and decimal_compare(value, MAX_U64) <= 0)\n"
+    "end\n"
+    "local kind = redis.call('TYPE', KEYS[1])['ok']\n"
+    "if kind ~= 'none' and kind ~= 'hash' then return {'CONFLICT', '0'} end\n"
+    "local floor = redis.call('HGET', KEYS[1], 'journal_floor') or '0'\n"
+    "if not valid_u64(floor) then return {'CONFLICT', '0'} end\n"
+    "return {'APPLIED', floor}\n";
 
 typedef struct redis_lua_apply_batch_impl {
   redis_cflow_stream stream;
@@ -743,6 +761,41 @@ int redis_lua_apply_batch_compact_reconcile_open(
       connection, request, redis_lua_apply_batch_compact_reconcile_script,
       sizeof(redis_lua_apply_batch_compact_reconcile_script) - 1u,
       out_operation);
+}
+
+int redis_lua_apply_batch_compact_state_open(
+    redis_cflow_connection *connection,
+    const redis_lua_apply_batch_compact_state_request *request,
+    redis_lua_apply_batch *out_operation) {
+  static const char eval_command[] = "EVAL";
+  static const char key_count[] = "1";
+  const char *arguments[REDIS_LUA_APPLY_BATCH_COMPACT_STATE_COMMAND_ARGUMENTS];
+  size_t lengths[REDIS_LUA_APPLY_BATCH_COMPACT_STATE_COMMAND_ARGUMENTS];
+  redis_lua_apply_batch_impl *impl;
+  int status;
+  if (connection == NULL || request == NULL ||
+      request->metadata_key == NULL || request->metadata_key_length == 0u ||
+      out_operation == NULL || out_operation->impl != NULL)
+    return SALTS_EINVAL;
+  arguments[0] = eval_command;
+  lengths[0] = sizeof(eval_command) - 1u;
+  arguments[1] = redis_lua_apply_batch_compact_state_script;
+  lengths[1] = sizeof(redis_lua_apply_batch_compact_state_script) - 1u;
+  arguments[2] = key_count;
+  lengths[2] = sizeof(key_count) - 1u;
+  arguments[3] = request->metadata_key;
+  lengths[3] = request->metadata_key_length;
+  impl = (redis_lua_apply_batch_impl *)calloc(1u, sizeof(*impl));
+  if (impl == NULL) return SALTS_ENOMEM;
+  status = redis_cflow_command_open(
+      connection, (int)REDIS_LUA_APPLY_BATCH_COMPACT_STATE_COMMAND_ARGUMENTS,
+      arguments, lengths, REDIS_LUA_APPLY_BATCH_MAX_REPLY_BYTES, &impl->stream);
+  if (status != SALTS_OK) {
+    free(impl);
+    return status;
+  }
+  out_operation->impl = impl;
+  return SALTS_OK;
 }
 
 redis_lua_apply_batch_step redis_lua_apply_batch_next(
