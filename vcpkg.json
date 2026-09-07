@@ -6,13 +6,18 @@
       "name": "pkgconf",
       "host": true
     },
-    {
-      "name": "sqlite3",
-      "version>=": "3.49.0"
-    },
     "zstd"
   ],
   "features": {
+    "sqlite": {
+      "description": "Build SQLite ORM and database-tool backends",
+      "dependencies": [
+        {
+          "name": "sqlite3",
+          "version>=": "3.49.0"
+        }
+      ]
+    },
     "mongodb": {
       "description": "Build the optional MongoDB ORM backend",
       "dependencies": [
