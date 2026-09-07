@@ -35,18 +35,16 @@ option(TURBODB_BUILD_REDIS "Build the Redis client library" ON)
 set(TIDESDB_WITH_SNAPPY OFF CACHE BOOL "build with Snappy compression support")
 set(TIDESDB_WITH_LZ4 OFF CACHE BOOL "build with LZ4 compression support")
 
-# ORM ships its SQLite and PostgreSQL backends by default. Native driver
-# dependencies remain private to their backend components.
+# ORM always ships its embedded TidesDB backend. SQLite and PostgreSQL remain
+# enabled by default; native driver dependencies stay private to components.
 set(ORM_WITH_SQLITE_DEFAULT ON)
 set(ORM_WITH_PGSQL_DEFAULT ON)
 set(ORM_WITH_REDIS_DEFAULT OFF)
 set(ORM_WITH_MONGODB_DEFAULT OFF)
-set(ORM_WITH_TIDESDB_DEFAULT OFF)
 
 option(ORM_WITH_SQLITE "Enable SQLite backend for ORM" ${ORM_WITH_SQLITE_DEFAULT})
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend for ORM" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_WITH_REDIS "Enable Redis backend for ORM" ${ORM_WITH_REDIS_DEFAULT})
 option(ORM_WITH_MONGODB "Enable MongoDB backend for ORM" ${ORM_WITH_MONGODB_DEFAULT})
-option(ORM_WITH_TIDESDB "Enable TidesDB embedded backend for ORM" ${ORM_WITH_TIDESDB_DEFAULT})
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)

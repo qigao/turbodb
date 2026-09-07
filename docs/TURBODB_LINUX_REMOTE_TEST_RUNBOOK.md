@@ -228,7 +228,6 @@ if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
 fi
 cmake --fresh --preset "$orm_preset" \
     -DTIDESDB_BUILD_TESTS=OFF \
-    -DORM_WITH_TIDESDB=OFF \
     -DORM_WITH_REDIS=ON \
     -DTURBODB_BUILD_DBTOOLS=ON \
     -DTURBODB_DBTOOLS_WITH_SQLITE=ON \
@@ -413,7 +412,8 @@ tests/failures/errors/skipped 证据。
 
 ### 仍看到 TidesDB 测试
 
-`TIDESDB_BUILD_TESTS=OFF` 与 `ORM_WITH_TIDESDB=OFF` 关闭独立 TidesDB engine 集成测试。TurboDB 自身不依赖真实 TidesDB 的 adapter/mock tests 仍可能出现，这是预期行为。
+`TIDESDB_BUILD_TESTS=OFF` 只关闭独立 TidesDB engine 测试。TidesDB backend 是
+`Orm::C` 的固定组成，因此 TurboDB 的 ORM TidesDB 集成测试仍会运行，这是预期行为。
 
 ### vcpkg 下载慢或重复编译
 
