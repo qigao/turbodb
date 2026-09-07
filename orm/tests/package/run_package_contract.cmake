@@ -4,7 +4,9 @@ foreach(required_variable IN ITEMS ORM_PACKAGE_TEST_SOURCE_DIR
                                    ORM_PACKAGE_TEST_BINARY_ROOT
                                    ORM_PACKAGE_TEST_BUILD_DIR
                                    ORM_PACKAGE_TEST_INSTALL_SCRIPT
-                                   ORM_PACKAGE_TEST_SALTS_ROOT)
+                                   ORM_PACKAGE_TEST_SALTS_ROOT
+                                   ORM_PACKAGE_TEST_EXPECT_SQLITE
+                                   ORM_PACKAGE_TEST_EXPECT_POSTGRESQL)
   if(NOT DEFINED ${required_variable} OR "${${required_variable}}" STREQUAL "")
     message(FATAL_ERROR "${required_variable} is required")
   endif()
@@ -102,6 +104,8 @@ set(configure_command
     -S "${ORM_PACKAGE_TEST_SOURCE_DIR}"
     -B "${consumer_build_dir}"
     "-DOrm_DIR=${package_dir}"
+    "-DORM_PACKAGE_EXPECT_SQLITE=${ORM_PACKAGE_TEST_EXPECT_SQLITE}"
+    "-DORM_PACKAGE_EXPECT_POSTGRESQL=${ORM_PACKAGE_TEST_EXPECT_POSTGRESQL}"
     -DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE
     -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE)
 
@@ -138,6 +142,47 @@ if(NOT configure_result EQUAL 0)
           "shared Orm package consumer configure failed\n"
           "stdout:\n${configure_stdout}\n"
           "stderr:\n${configure_stderr}")
+endif()
+
+if(NOT ORM_PACKAGE_TEST_EXPECT_SQLITE)
+  set(missing_sqlite_build_dir "${test_root}/missing-sqlite-consumer-build")
+  set(missing_sqlite_configure_command
+      "${CMAKE_COMMAND}"
+      -E env
+      "SALTS_ROOT=${ORM_PACKAGE_TEST_SALTS_ROOT}"
+      "${CMAKE_COMMAND}"
+      -S "${CMAKE_CURRENT_LIST_DIR}/../package_consumer/sqlite"
+      -B "${missing_sqlite_build_dir}"
+      "-DOrm_DIR=${package_dir}"
+      -DCMAKE_FIND_USE_PACKAGE_REGISTRY=FALSE
+      -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=FALSE)
+  if(DEFINED ORM_PACKAGE_TEST_GENERATOR AND
+     NOT "${ORM_PACKAGE_TEST_GENERATOR}" STREQUAL "")
+    list(APPEND missing_sqlite_configure_command
+         -G "${ORM_PACKAGE_TEST_GENERATOR}")
+  endif()
+  if(DEFINED ORM_PACKAGE_TEST_C_COMPILER AND
+     NOT "${ORM_PACKAGE_TEST_C_COMPILER}" STREQUAL "")
+    list(APPEND missing_sqlite_configure_command
+         "-DCMAKE_C_COMPILER=${ORM_PACKAGE_TEST_C_COMPILER}")
+  endif()
+  execute_process(
+    COMMAND ${missing_sqlite_configure_command}
+    RESULT_VARIABLE missing_sqlite_result
+    OUTPUT_VARIABLE missing_sqlite_stdout
+    ERROR_VARIABLE missing_sqlite_stderr)
+  if(missing_sqlite_result EQUAL 0)
+    message(FATAL_ERROR
+            "SQLite-requiring consumer accepted a package without SQLite")
+  endif()
+  string(CONCAT missing_sqlite_output "${missing_sqlite_stdout}"
+                "${missing_sqlite_stderr}")
+  string(FIND "${missing_sqlite_output}"
+         "requires SQLite backend support" missing_sqlite_message_position)
+  if(missing_sqlite_message_position EQUAL -1)
+    message(FATAL_ERROR
+            "SQLite-requiring consumer failed without the expected capability diagnostic\n${missing_sqlite_output}")
+  endif()
 endif()
 
 set(build_command "${CMAKE_COMMAND}" --build "${consumer_build_dir}")

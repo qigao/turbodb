@@ -469,6 +469,8 @@ add_test(
     "-DORM_PACKAGE_TEST_SALTS_ROOT=$ENV{SALTS_ROOT}"
     "-DORM_PACKAGE_TEST_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
     "-DORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR=${ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR}"
+    "-DORM_PACKAGE_TEST_EXPECT_SQLITE=${ORM_WITH_SQLITE}"
+    "-DORM_PACKAGE_TEST_EXPECT_POSTGRESQL=${ORM_WITH_PGSQL}"
     "-DORM_PACKAGE_TEST_CONFIG=$<CONFIG>"
     "-DORM_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}"
     "-DORM_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
@@ -613,6 +615,21 @@ if(MSVC)
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
 add_test(NAME orm_pure_c_build COMMAND orm_pure_c_build_test)
+
+add_executable(orm_backend_profile_test tests/abi/backend_profile_test.c)
+target_compile_features(orm_backend_profile_test PRIVATE c_std_11)
+target_compile_definitions(
+  orm_backend_profile_test
+  PRIVATE ORM_C_STATIC ORM_EXPECT_SQLITE=$<BOOL:${ORM_WITH_SQLITE}>)
+orm_link_internal_test(orm_backend_profile_test Salts::TinyTest)
+set_target_properties(orm_backend_profile_test
+                      PROPERTIES FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_backend_profile_test)
+if(MSVC)
+  target_compile_options(orm_backend_profile_test
+                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+add_test(NAME orm_backend_profile COMMAND orm_backend_profile_test)
 
 add_executable(orm_sql_render_test tests/flow/orm_sql_render_test.c)
 target_compile_features(orm_sql_render_test PRIVATE c_std_11)
@@ -828,7 +845,7 @@ if(WIN32)
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
                         orm_cbind_publisher orm_pure_c_build orm_sql_render
-                        orm_postgres_flow)
+                        orm_postgres_flow orm_backend_profile)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")

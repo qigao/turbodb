@@ -53,6 +53,15 @@ Runtime libraries that are dynamically linked remain deployment artifacts,
 not consumer CMake packages. A static clone exists only inside the test build;
 there is no installable static Orm SDK contract.
 
+The standard development and release presets explicitly build SQLite and
+PostgreSQL and install to `turbodb/debug` or `turbodb/release`. PostgreSQL-only
+and PostgreSQL-live presets explicitly disable SQLite and install to
+`turbodb/release-pg`. These package identities must not share an install
+prefix: installing one profile never mutates the other profile's exported
+capabilities or runtime closure. Named presets repeat their backend values on
+purpose so that reconfiguring a reused build tree restores the declared
+profile instead of retaining a stale cache value.
+
 ## Consequences and compatibility
 
 - External callers using `find_package(TurboDB COMPONENTS ORM)` or
@@ -66,6 +75,9 @@ there is no installable static Orm SDK contract.
   carries no Orm package dependency.
 - The installed TurboDB package continues to own `TurboDB::Redis` for direct
   Redis users; an installed Orm package never finds it from consumer CMake.
+- `OrmConfig.cmake` exports `Orm_WITH_SQLITE` and `Orm_WITH_POSTGRESQL` so a
+  consumer can reject a package that lacks its required backend during
+  configure. No alternate package prefix or runtime backend is selected.
 
 ## Migration and rollback
 
@@ -85,5 +97,8 @@ need no rollback action.
   generated install rule names the backend runtime `bin` directory.
 - Build and test TurboDB/Orm, FlowMQ, and Flowie in dependency order.
 - Configure and link installed package consumers from clean build directories.
+- Check that staged capability markers match the producing build and that a
+  SQLite-requiring consumer rejects the PostgreSQL-only package at configure
+  time.
 - Inspect shared runtime dependencies separately from CMake development
   dependencies on Windows and Linux.

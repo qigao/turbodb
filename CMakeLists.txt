@@ -57,6 +57,16 @@ set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "cmake")
 include(CTest)
 enable_testing()
 
+if(BUILD_TESTING)
+  add_test(
+    NAME turbodb_install_profile_contract
+    COMMAND
+      ${CMAKE_COMMAND}
+      "-DTURBODB_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/validate_install_profiles.cmake")
+endif()
+
 include(GNUInstallDirs)
 include(CMakeOptions.cmake)
 include(Sanitizers)

@@ -75,6 +75,7 @@
             "name": "win-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
+                "ORM_WITH_SQLITE": "ON",
                 "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
@@ -91,6 +92,7 @@
         {
             "name": "win-release-user",
             "cacheVariables": {
+                "ORM_WITH_SQLITE": "ON",
                 "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
@@ -110,10 +112,13 @@
             "inherits": "win-release-user",
             "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG",
             "cacheVariables": {
+                "ORM_WITH_SQLITE": "OFF",
                 "ORM_WITH_PGSQL": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "OFF",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows"
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg"
             },
             "environment": {
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
@@ -138,6 +143,7 @@
             "name": "linux-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
+                "ORM_WITH_SQLITE": "ON",
                 "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
@@ -154,6 +160,7 @@
         {
             "name": "linux-release-user",
             "cacheVariables": {
+                "ORM_WITH_SQLITE": "ON",
                 "ORM_WITH_PGSQL": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
@@ -173,11 +180,14 @@
             "inherits": "linux-release-user",
             "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
             "cacheVariables": {
+                "ORM_WITH_SQLITE": "OFF",
                 "ORM_WITH_PGSQL": "ON",
                 "ORM_POSTGRES_LIVE_TESTS": "ON",
+                "TURBODB_DBTOOLS_WITH_SQLITE": "OFF",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux"
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg"
             },
             "environment": {
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",

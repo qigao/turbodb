@@ -222,15 +222,19 @@ cmake --build --preset install-linux-release-user
 cd /work/src/turbodb
 orm_preset=linux-release-user
 orm_install_preset=install-linux-release-user
+orm_install_root=/opt/turbodb/release
+orm_sqlite_dbtools=ON
 if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
     orm_preset=linux-release-pg-live-user
     orm_install_preset=install-linux-release-pg-live-user
+    orm_install_root=/opt/turbodb/release-pg
+    orm_sqlite_dbtools=OFF
 fi
 cmake --fresh --preset "$orm_preset" \
     -DTIDESDB_BUILD_TESTS=OFF \
     -DORM_WITH_REDIS=ON \
     -DTURBODB_BUILD_DBTOOLS=ON \
-    -DTURBODB_DBTOOLS_WITH_SQLITE=ON \
+    -DTURBODB_DBTOOLS_WITH_SQLITE="$orm_sqlite_dbtools" \
     -DENABLE_TESTS=ON \
     -DBUILD_TESTING=ON
 cmake --build --preset "$orm_preset"
@@ -262,15 +266,14 @@ PY
 
 cmake --build --preset "$orm_install_preset"
 
-/opt/turbodb/release/bin/turbodb-sqlite --help
 if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
-    /opt/turbodb/release/bin/turbodb-postgresql --help
-fi
-sha256sum /opt/turbodb/release/bin/turbodb-sqlite \
-    > /work/artifacts/dbtools-binaries.sha256
-if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
-    sha256sum /opt/turbodb/release/bin/turbodb-postgresql \
-        >> /work/artifacts/dbtools-binaries.sha256
+    "$orm_install_root/bin/turbodb-postgresql" --help
+    sha256sum "$orm_install_root/bin/turbodb-postgresql" \
+        > /work/artifacts/dbtools-binaries.sha256
+else
+    "$orm_install_root/bin/turbodb-sqlite" --help
+    sha256sum "$orm_install_root/bin/turbodb-sqlite" \
+        > /work/artifacts/dbtools-binaries.sha256
 fi
 
 if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
@@ -280,11 +283,11 @@ if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
         -B "$shared_consumer_build" \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="/opt/turbodb/release;/opt/salts/release;/work/src/turbodb/vcpkg_installed_pg/x64-linux"
+        -DCMAKE_PREFIX_PATH="$orm_install_root;/opt/salts/release;/work/src/turbodb/vcpkg_installed_pg/x64-linux"
     cmake --build "$shared_consumer_build"
-    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/salts/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
+    LD_LIBRARY_PATH="$orm_install_root/lib:/opt/salts/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
         "$shared_consumer_build/orm_postgresql_c_consumer"
-    LD_LIBRARY_PATH="/opt/turbodb/release/lib:/opt/salts/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
+    LD_LIBRARY_PATH="$orm_install_root/lib:/opt/salts/release/lib:/work/src/turbodb/vcpkg_installed_pg/x64-linux/lib:${LD_LIBRARY_PATH:-}" \
         "$shared_consumer_build/orm_postgresql_cpp_consumer"
 
     echo "Installed package consumers verified: shared x C/C++"
