@@ -9,6 +9,13 @@ if(ORM_WITH_MONGODB)
   list(APPEND VCPKG_MANIFEST_FEATURES mongodb)
 endif()
 
+option(ORM_WITH_SQLITE "Enable SQLite backend" ON)
+option(TURBODB_DBTOOLS_WITH_SQLITE
+       "Enable SQLite standalone database tools" ON)
+if(ORM_WITH_SQLITE OR TURBODB_DBTOOLS_WITH_SQLITE)
+  list(APPEND VCPKG_MANIFEST_FEATURES sqlite)
+endif()
+
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ON)
 option(TURBODB_DBTOOLS_WITH_PGSQL
        "Enable PostgreSQL standalone database tools" ON)

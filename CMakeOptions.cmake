@@ -22,7 +22,6 @@ else()
 endif()
 option(TURBODB_BUILD_DBTOOLS "Build standalone database tools"
        ${TURBODB_BUILD_DBTOOLS_DEFAULT})
-option(TURBODB_DBTOOLS_WITH_SQLITE "Enable SQLite standalone database tools" ON)
 option(TURBODB_DBTOOLS_WITH_PGSQL
        "Enable PostgreSQL standalone database tools" ON)
 option(TURBODB_DBTOOLS_PG_LIVE_TESTS
@@ -42,7 +41,6 @@ set(ORM_WITH_PGSQL_DEFAULT ON)
 set(ORM_WITH_REDIS_DEFAULT OFF)
 set(ORM_WITH_MONGODB_DEFAULT OFF)
 
-option(ORM_WITH_SQLITE "Enable SQLite backend for ORM" ${ORM_WITH_SQLITE_DEFAULT})
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend for ORM" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_WITH_REDIS "Enable Redis backend for ORM" ${ORM_WITH_REDIS_DEFAULT})
 option(ORM_WITH_MONGODB "Enable MongoDB backend for ORM" ${ORM_WITH_MONGODB_DEFAULT})
