@@ -55,6 +55,20 @@ cmake --build --preset win-release-user --target turbodb-sqlite turbodb-postgres
 cmake --build --preset install-win-release-user
 ```
 
+PostgreSQL-only builds use an isolated package prefix and do not contain the
+SQLite ORM backend or SQLite dbtool:
+
+```powershell
+cmake --preset win-release-dbtools-pg-user
+cmake --build --preset win-release-dbtools-pg-user
+ctest --preset win-release-dbtools-pg-user --output-on-failure
+cmake --build --preset install-win-release-dbtools-pg-user
+```
+
+The full package is installed under `turbodb/release`; the PostgreSQL-only
+package is installed under `turbodb/release-pg`. Consumers must select the
+required package explicitly. The build does not fall back between them.
+
 执行 SQLite bootstrap：
 
 ```powershell
