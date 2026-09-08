@@ -12,7 +12,7 @@
 
 #include <cbind/cbind.h>
 #include <cflow/cflow.h>
-#include <salts_str.h>
+#include <tstr.h>
 
 #if defined(ORM_C_STATIC)
 #define ORM_C_API

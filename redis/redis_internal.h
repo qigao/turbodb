@@ -9,7 +9,7 @@
 #include "redis_export.h"
 #include "redis_reply.h"
 #include "salts_buffer.h"
-#include "salts_str.h"
+#include "tstr.h"
 
 #define REDIS_RESP_MAX_DEPTH 128u
 

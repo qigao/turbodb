@@ -1,6 +1,6 @@
 #include "redis_internal.h"
 #include "redis_resp_parser.h"
-#include "salts_str.h"
+#include "tstr.h"
 
 #include <limits.h>
 #include <stddef.h>

@@ -1,7 +1,7 @@
 #include "redis_pool.h"
 
 #include "salts_error.h"
-#include "salts_str.h"
+#include "tstr.h"
 
 #include <limits.h>
 #include <stdio.h>
