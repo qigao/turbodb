@@ -4,7 +4,7 @@
 #include <cmeta/struct.h>
 #include <sqlite3.h>
 #include <salts_cmeta_data.h>
-#include <salts_str.h>
+#include <tstr.h>
 #include "tinytest.h"
 
 #include <stddef.h>

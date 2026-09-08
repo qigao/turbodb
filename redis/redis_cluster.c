@@ -1,7 +1,7 @@
 #include "redis_cluster.h"
 
 #include "salts_error.h"
-#include "salts_str.h"
+#include "tstr.h"
 
 #include <stdlib.h>
 #include <string.h>
