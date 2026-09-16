@@ -19,7 +19,6 @@ env:
   SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
   SALTS_UTILS_COMMIT: 0b3876018e5bdaed70fecbc0d0863cb394dd6044
   ASAN_OPTIONS: detect_leaks=1:detect_odr_violation=2:halt_on_error=1
-  LD_LIBRARY_PATH: ${{ runner.temp }}/sdk/turbodb-debug/lib:/opt/salts/debug/lib:/opt/salts-utils/debug/lib
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
 jobs:
@@ -164,6 +163,7 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/turbodb-configure.log"
           cmake --build build/turbodb-sdk --target install -j2 2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/turbodb-build.log"
           git -C .ci/deps/turbodb diff --exit-code
+          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/sdk/turbodb-debug/lib:/opt/salts/debug/lib:/opt/salts-utils/debug/lib" >> "$GITHUB_ENV"
 
       - name: Apply focused Task 4 validation-only CMake assembly
         shell: bash
