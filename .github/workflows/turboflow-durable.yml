@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  TURBO_FLOW_COMMIT: 1e0d001523d57746e06aa114b3af010fbcb92a4c
+  TURBO_FLOW_COMMIT: 0a5408f6bf4e8d04555a6c4e200bf81de73873bc
   TURBODB_COMMIT: 855e9c3eeb77d41fa1fc20fc44cc01ebe9c77a41
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
@@ -169,8 +169,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          python3 .github/ci/task4_runtime_assembly.py
-          printf '\nadd_subdirectory(io/turbodb)\n' >> CMakeLists.txt
+          python3 .github/ci/task4_runtime_assembly.py --turbodb
           git diff -- CMakeLists.txt turbo_flow/CMakeLists.txt | tee "$RUNNER_TEMP/task4-runtime-evidence/focused-cmake.patch"
 
       - name: Configure focused exact-source Graph build
@@ -201,7 +200,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake --build build/task4-runtime --target test_turbodb_inbox test_flow_durable_buffer test_flow_durable_admission test_flow_durable_lifecycle test_flow_durable_memory_plugin test_flow_plugin_generation test_flow_durable_identity test_flow_inbox test_flow_inbox_source test_flow_inbox_driver test_flow_async_terminal test_flow_run test_flow_operation_result test_flow_projection_owner test_flow_projection_owner_fault -j2 2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/build.log"
+          cmake --build build/task4-runtime --target test_turbodb_inbox test_turbodb_durable_buffer_plugin test_flow_durable_buffer test_flow_durable_admission test_flow_durable_lifecycle test_flow_durable_memory_plugin test_flow_plugin_generation test_flow_durable_identity test_flow_inbox test_flow_inbox_source test_flow_inbox_driver test_flow_async_terminal test_flow_run test_flow_operation_result test_flow_projection_owner test_flow_projection_owner_fault -j2 2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/build.log"
 
       - name: Run durable buffer and shared driver tests
         shell: bash
