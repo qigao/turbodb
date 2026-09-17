@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  TURBO_FLOW_COMMIT: 3ebd5e0b292ae4bb39461618b31ec1436e1a8d0b
+  TURBO_FLOW_COMMIT: 2b313caa06450739dab77a19bda72716b7e1aa88
   TURBODB_COMMIT: 855e9c3eeb77d41fa1fc20fc44cc01ebe9c77a41
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
@@ -170,7 +170,7 @@ jobs:
         run: |
           set -euxo pipefail
           python3 .github/ci/task4_runtime_assembly.py --turbodb
-          git diff -- CMakeLists.txt turbo_flow/CMakeLists.txt | tee "$RUNNER_TEMP/task4-runtime-evidence/focused-cmake.patch"
+          git diff -- CMakeLists.txt turbo_flow/CMakeLists.txt ingress/protocol/inbox/CMakeLists.txt | tee "$RUNNER_TEMP/task4-runtime-evidence/focused-cmake.patch"
 
       - name: Configure focused exact-source Graph build
         shell: bash
@@ -229,8 +229,8 @@ jobs:
         run: |
           set -euxo pipefail
           test "$(git rev-parse HEAD)" = "${{ env.TURBO_FLOW_COMMIT }}"
-          test -z "$(git diff --name-only | grep -Ev '^(CMakeLists\.txt|turbo_flow/CMakeLists\.txt)$' || true)"
-          git diff --exit-code -- turbo_flow/include turbo_flow/src turbo_flow/tests io/durable io/turbodb
+          test -z "$(git diff --name-only | grep -Ev '^(CMakeLists\.txt|turbo_flow/CMakeLists\.txt|ingress/protocol/inbox/CMakeLists\.txt)$' || true)"
+          git diff --exit-code -- turbo_flow/include turbo_flow/src turbo_flow/tests io/durable io/turbodb ingress/protocol/inbox/src ingress/protocol/inbox/include ingress/protocol/inbox/protocol_inbox.schema
 
       - name: Upload Task 4 evidence
         if: always()
