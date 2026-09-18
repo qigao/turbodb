@@ -1,0 +1,48 @@
+name: Driver descriptor source contract
+on:
+  push:
+    branches: [feat/runtime-driver-sdk-descriptors]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    name: Descriptor contract (${{ matrix.compiler }}, ${{ matrix.config }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang, gcc]
+        config: [debug, release]
+    env:
+      CC: ${{ matrix.compiler }}
+      CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: .ci-salts
+          persist-credentials: false
+      - name: Preserve prefix regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 orm/tests/driver/run_source_contract.py --salts-source .ci-salts --contract-source orm/src/driver/orm_driver_contract.c --build-dir build/prefix --config '${{ matrix.config }}' 2>&1 | tee evidence/prefix.log
+      - name: Compile and execute descriptor behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 orm/tests/driver/run_source_contract.py --salts-source .ci-salts --contract-source orm/tests/driver/orm_driver_descriptor_red.c --test-source orm/tests/driver/orm_driver_descriptor_test.c --layout-source orm/tests/driver/orm_driver_descriptor_layout_test.cpp --build-dir build/descriptor --config '${{ matrix.config }}' 2>&1 | tee evidence/descriptor.log
+      - name: Keep exact behavior evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: descriptor-${{ matrix.compiler }}-${{ matrix.config }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
