@@ -5,8 +5,15 @@
 
 #define HEADER(T) {sizeof(T), ORM_DRIVER_ABI_VERSION}
 #define TABLE(p) (orm_driver_table_v1){(p), sizeof(*(p)), 0u}
-#define TEXT(s) (orm_driver_bytes_v1){(s), sizeof(s) - 1u}
+#define FIXTURE_TEXT(s) fixture_bytes((s), sizeof(s) - 1u)
 #define EXPECT_OK(call) check_equal((call), ORM_STATUS_OK)
+
+/* Keep compound literals out of TinyTest's unevaluated _Generic operands:
+ * MSVC otherwise diagnoses their synthesized temporaries with C4189. */
+static orm_driver_bytes_v1 fixture_bytes(const void *data, uint64_t size) {
+  orm_driver_bytes_v1 value = {data, size};
+  return value;
+}
 
 typedef struct handshake_session {
   const orm_driver_api_v1 *api;
@@ -31,7 +38,7 @@ static void start(handshake_session *s) {
   s->limits = limits();
   EXPECT_OK(orm_driver_get_api_v1(&s->host, sizeof(s->host), &s->api, &bytes));
   EXPECT_OK(orm_driver_validate_api_v1(s->api, bytes,
-      orm_driver_fixture_bundle(), TEXT(ORM_DRIVER_FIXTURE_ID), 0u, NULL));
+      orm_driver_fixture_bundle(), FIXTURE_TEXT(ORM_DRIVER_FIXTURE_ID), 0u, NULL));
   s->ops = s->api->module_ops.data;
   EXPECT_OK(s->ops->initialize(&s->host, &s->module, NULL));
   check_not_null(s->module);
@@ -140,7 +147,7 @@ spec("driver bootstrap handshake") {
     check_true(api == second);
     check_equal(bytes, second_bytes);
     EXPECT_OK(orm_driver_validate_api_v1(api, bytes, orm_driver_fixture_bundle(),
-                                        TEXT(ORM_DRIVER_FIXTURE_ID), 0u, NULL));
+                                        FIXTURE_TEXT(ORM_DRIVER_FIXTURE_ID), 0u, NULL));
     check_equal(api->capabilities, ORM_DRIVER_FIXTURE_CAPS);
     check_equal(api->execution_models, ORM_DRIVER_EXEC_CALLER_BLOCKING);
     check_equal(orm_driver_fixture_stats_get().init_calls, 0u);
@@ -222,13 +229,13 @@ spec("driver fixture ownership protocol") {
     orm_driver_fixture_reset(); handshake_session s; start(&s);
     char value[] = "first";
     orm_driver_connection_v1 first = {0}, second = {0};
-    EXPECT_OK(create(&s, (orm_driver_bytes_v1){value, sizeof(value)-1u}, &first));
+    EXPECT_OK(create(&s, fixture_bytes(value, sizeof(value)-1u), &first));
     memcpy(value, "other", sizeof(value));
-    EXPECT_OK(create(&s, TEXT("second"), &second));
+    EXPECT_OK(create(&s, FIXTURE_TEXT("second"), &second));
     check_true(first.context != second.context);
-    row(&s, &first, TEXT("first")); row(&s, &second, TEXT("second"));
-    EXPECT_OK(orm_driver_fixture_set_value(&first, TEXT("changed")));
-    row(&s, &first, TEXT("changed")); row(&s, &second, TEXT("second"));
+    row(&s, &first, FIXTURE_TEXT("first")); row(&s, &second, FIXTURE_TEXT("second"));
+    EXPECT_OK(orm_driver_fixture_set_value(&first, FIXTURE_TEXT("changed")));
+    row(&s, &first, FIXTURE_TEXT("changed")); row(&s, &second, FIXTURE_TEXT("second"));
     connection_ops(&first)->destroy(first.context);
     connection_ops(&second)->destroy(second.context);
     stop(&s); clean();
@@ -238,18 +245,18 @@ spec("driver fixture ownership protocol") {
   it("refuses finalization until every connection of that module is destroyed") {
     orm_driver_fixture_reset(); handshake_session s; start(&s);
     orm_driver_connection_v1 a = {0}, b = {0};
-    EXPECT_OK(create(&s, TEXT("a"), &a)); EXPECT_OK(create(&s, TEXT("b"), &b));
+    EXPECT_OK(create(&s, FIXTURE_TEXT("a"), &a)); EXPECT_OK(create(&s, FIXTURE_TEXT("b"), &b));
     check_equal(s.ops->finalize(s.module, NULL), ORM_STATUS_BUSY);
     connection_ops(&a)->destroy(a.context);
     check_equal(s.ops->finalize(s.module, NULL), ORM_STATUS_BUSY);
-    row(&s, &b, TEXT("b")); connection_ops(&b)->destroy(b.context);
+    row(&s, &b, FIXTURE_TEXT("b")); connection_ops(&b)->destroy(b.context);
     stop(&s); clean();
   }
   it("does not confuse another module connections with its own") {
     orm_driver_fixture_reset(); handshake_session a, b; start(&a); start(&b);
     check_true(a.module != b.module);
-    orm_driver_connection_v1 c = {0}; EXPECT_OK(create(&b, TEXT("b"), &c));
-    stop(&a); row(&b, &c, TEXT("b"));
+    orm_driver_connection_v1 c = {0}; EXPECT_OK(create(&b, FIXTURE_TEXT("b"), &c));
+    stop(&a); row(&b, &c, FIXTURE_TEXT("b"));
     connection_ops(&c)->destroy(c.context); stop(&b); clean();
   }
   it("uses copied host tables after initialize instead of retained host pointers") {
@@ -260,8 +267,8 @@ spec("driver fixture ownership protocol") {
     void *module = NULL; EXPECT_OK(s.ops->initialize(&host, &module, NULL));
     stop(&s); s.module = module;
     memset(&host, 0, sizeof(host)); memset(&local, 0, sizeof(local));
-    orm_driver_connection_v1 c = {0}; EXPECT_OK(create(&s, TEXT("copy"), &c));
-    row(&s, &c, TEXT("copy")); connection_ops(&c)->destroy(c.context);
+    orm_driver_connection_v1 c = {0}; EXPECT_OK(create(&s, FIXTURE_TEXT("copy"), &c));
+    row(&s, &c, FIXTURE_TEXT("copy")); connection_ops(&c)->destroy(c.context);
     stop(&s); clean();
   }
   it("revalidates the host before module allocation") {
@@ -294,13 +301,13 @@ spec("driver fixture ownership protocol") {
       orm_driver_connection_v1 c, zero = {0}; memset(&c, 0xa5, sizeof(c));
       const orm_driver_fixture_stats before = orm_driver_fixture_stats_get();
       orm_driver_fixture_fail_next(point);
-      check_equal(create(&s, TEXT("failure"), &c), ORM_STATUS_OUT_OF_MEMORY);
+      check_equal(create(&s, FIXTURE_TEXT("failure"), &c), ORM_STATUS_OUT_OF_MEMORY);
       check_equal(memcmp(&c, &zero, sizeof(c)), 0);
       orm_driver_fixture_stats after = orm_driver_fixture_stats_get();
       check_equal(after.live_connections, 0u);
       check_equal(after.allocations - before.allocations,
                   after.deallocations - before.deallocations);
-      EXPECT_OK(create(&s, TEXT("retry"), &c)); row(&s, &c, TEXT("retry"));
+      EXPECT_OK(create(&s, FIXTURE_TEXT("retry"), &c)); row(&s, &c, FIXTURE_TEXT("retry"));
       connection_ops(&c)->destroy(c.context);
     }
     stop(&s); clean();
@@ -308,7 +315,7 @@ spec("driver fixture ownership protocol") {
   it("cancels before a row without producing data or leaking its lease") {
     orm_driver_fixture_reset(); handshake_session s; start(&s);
     orm_driver_connection_v1 c = {0}; orm_driver_cursor_v1 cursor = {0};
-    EXPECT_OK(create(&s, TEXT("cancel"), &c));
+    EXPECT_OK(create(&s, FIXTURE_TEXT("cancel"), &c));
     EXPECT_OK(open_kind(&s, &c, ORM_DRIVER_PLAN_SELECT, &cursor));
     const orm_driver_cursor_ops_v1 *ops = cursor_ops(&cursor);
     ops->cancel(cursor.context); ops->cancel(cursor.context);
@@ -321,13 +328,13 @@ spec("driver fixture ownership protocol") {
   it("keeps delivered row bytes alive through cancellation until cursor destroy") {
     orm_driver_fixture_reset(); handshake_session s; start(&s);
     orm_driver_connection_v1 c = {0}; orm_driver_cursor_v1 cursor = {0};
-    EXPECT_OK(create(&s, TEXT("held"), &c));
+    EXPECT_OK(create(&s, FIXTURE_TEXT("held"), &c));
     EXPECT_OK(open_kind(&s, &c, ORM_DRIVER_PLAN_SELECT, &cursor));
     const orm_driver_cursor_ops_v1 *ops = cursor_ops(&cursor);
     cserde_reader reader = {0}; orm_driver_step_v1 step = {0};
     EXPECT_OK(ops->next(cursor.context, &reader, &step, NULL));
-    check_equal(orm_driver_fixture_set_value(&c, TEXT("mutation")), ORM_STATUS_BUSY);
-    ops->cancel(cursor.context); read_value(&reader, TEXT("held"));
+    check_equal(orm_driver_fixture_set_value(&c, FIXTURE_TEXT("mutation")), ORM_STATUS_BUSY);
+    ops->cancel(cursor.context); read_value(&reader, FIXTURE_TEXT("held"));
     check_equal(orm_driver_fixture_stats_get().live_tickets, 1u);
     ops->destroy(cursor.context); connection_ops(&c)->destroy(c.context);
     stop(&s); clean();
@@ -336,20 +343,20 @@ spec("driver fixture ownership protocol") {
     orm_driver_fixture_reset(); handshake_session s; start(&s);
     unsigned char payload[ORM_DRIVER_FIXTURE_VALUE_BYTES + 1u]; memset(payload, 'x', sizeof(payload));
     orm_driver_connection_v1 c = {0};
-    EXPECT_OK(create(&s, (orm_driver_bytes_v1){payload, ORM_DRIVER_FIXTURE_VALUE_BYTES}, &c));
-    row(&s, &c, (orm_driver_bytes_v1){payload, ORM_DRIVER_FIXTURE_VALUE_BYTES});
+    EXPECT_OK(create(&s, fixture_bytes(payload, ORM_DRIVER_FIXTURE_VALUE_BYTES), &c));
+    row(&s, &c, fixture_bytes(payload, ORM_DRIVER_FIXTURE_VALUE_BYTES));
     connection_ops(&c)->destroy(c.context);
-    check_equal(create(&s, (orm_driver_bytes_v1){payload, sizeof(payload)}, &c), ORM_STATUS_LIMIT_EXCEEDED);
+    check_equal(create(&s, fixture_bytes(payload, sizeof(payload)), &c), ORM_STATUS_LIMIT_EXCEEDED);
     check_null(c.context);
-    check_equal(create(&s, (orm_driver_bytes_v1){NULL, 1u}, &c), ORM_STATUS_INVALID_ARGUMENT);
-    EXPECT_OK(create(&s, (orm_driver_bytes_v1){NULL, 0u}, &c));
-    row(&s, &c, (orm_driver_bytes_v1){NULL, 0u}); connection_ops(&c)->destroy(c.context);
+    check_equal(create(&s, fixture_bytes(NULL, 1u), &c), ORM_STATUS_INVALID_ARGUMENT);
+    EXPECT_OK(create(&s, fixture_bytes(NULL, 0u), &c));
+    row(&s, &c, fixture_bytes(NULL, 0u)); connection_ops(&c)->destroy(c.context);
     stop(&s); clean();
   }
   it("rejects unsupported plans and output limits before allocating a cursor") {
     orm_driver_fixture_reset(); handshake_session s; start(&s);
     orm_driver_connection_v1 c = {0}; orm_driver_cursor_v1 cursor, zero = {0};
-    EXPECT_OK(create(&s, TEXT("abc"), &c));
+    EXPECT_OK(create(&s, FIXTURE_TEXT("abc"), &c));
     const uint32_t before = orm_driver_fixture_stats_get().allocations;
     memset(&cursor, 0xa5, sizeof(cursor));
     check_equal(open_kind(&s, &c, ORM_DRIVER_PLAN_RAW_SQL, &cursor), ORM_STATUS_UNSUPPORTED);
@@ -370,14 +377,14 @@ spec("driver fixture ownership protocol") {
     for (uint32_t i = 0u; i < ORM_DRIVER_FIXTURE_TICKETS; ++i)
       EXPECT_OK(life->acquire(&s, &tickets[i], NULL));
     orm_driver_connection_v1 c = {0}; orm_driver_cursor_v1 cursor = {0};
-    EXPECT_OK(create(&s, TEXT("bounded"), &c));
+    EXPECT_OK(create(&s, FIXTURE_TEXT("bounded"), &c));
     orm_driver_fixture_stats before = orm_driver_fixture_stats_get();
     check_equal(open_kind(&s, &c, ORM_DRIVER_PLAN_SELECT, &cursor), ORM_STATUS_LIMIT_EXCEEDED);
     check_null(cursor.context);
     orm_driver_fixture_stats after = orm_driver_fixture_stats_get();
     check_equal(after.allocations-before.allocations, after.deallocations-before.deallocations);
     for (uint32_t i = 0u; i < ORM_DRIVER_FIXTURE_TICKETS; ++i) life->release(tickets[i]);
-    row(&s, &c, TEXT("bounded")); connection_ops(&c)->destroy(c.context); stop(&s); clean();
+    row(&s, &c, FIXTURE_TEXT("bounded")); connection_ops(&c)->destroy(c.context); stop(&s); clean();
   }
   it("rejects bad configuration or limits and does not allocate") {
     orm_driver_fixture_reset(); handshake_session s; start(&s);

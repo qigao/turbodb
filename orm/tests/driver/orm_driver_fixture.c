@@ -38,8 +38,20 @@ typedef struct fixture_cursor {
   int finished;
 } fixture_cursor;
 
-static const orm_driver_connection_ops_v1 connection_ops;
-static const orm_driver_cursor_ops_v1 cursor_ops;
+/* Declare callbacks rather than tentative const objects (MSVC C4132). */
+static void ORM_DRIVER_CALL destroy_connection(void *context);
+static orm_status_t ORM_DRIVER_CALL open_cursor(void *context,
+    const orm_driver_plan_view_v1 *plan, const orm_driver_limits_v1 *limits,
+    orm_driver_cursor_v1 *out, orm_error_t *error);
+static orm_status_t ORM_DRIVER_CALL next(void *context, cserde_reader *reader,
+    orm_driver_step_v1 *step, orm_error_t *error);
+static void ORM_DRIVER_CALL cancel(void *context);
+static void ORM_DRIVER_CALL destroy_cursor(void *context);
+
+static const orm_driver_connection_ops_v1 connection_ops = {
+    HEADER(orm_driver_connection_ops_v1), destroy_connection, open_cursor, NULL, NULL};
+static const orm_driver_cursor_ops_v1 cursor_ops = {
+    HEADER(orm_driver_cursor_ops_v1), next, cancel, destroy_cursor, NULL, NULL};
 
 static orm_status_t result(orm_error_t *error, orm_status_t status) {
   if (error != NULL) {
@@ -383,10 +395,6 @@ static orm_status_t ORM_DRIVER_CALL open_cursor(void *context,
 
 static const orm_driver_module_ops_v1 module_ops = {
     HEADER(orm_driver_module_ops_v1), initialize, finalize};
-static const orm_driver_connection_ops_v1 connection_ops = {
-    HEADER(orm_driver_connection_ops_v1), destroy_connection, open_cursor, NULL, NULL};
-static const orm_driver_cursor_ops_v1 cursor_ops = {
-    HEADER(orm_driver_cursor_ops_v1), next, cancel, destroy_cursor, NULL, NULL};
 static const orm_driver_api_v1 api = {
     HEADER(orm_driver_api_v1), {17u, 29u, 43u},
     {ORM_DRIVER_FIXTURE_ID, sizeof(ORM_DRIVER_FIXTURE_ID)-1u}, NULL, 0u, 0u,
