@@ -69,3 +69,14 @@ add_executable(orm_driver_layout_test ../tests/driver/orm_driver_layout_test.cpp
 target_link_libraries(orm_driver_layout_test PRIVATE orm_driver_sdk
   orm_driver_build_options)
 add_test(NAME orm_driver_layout COMMAND orm_driver_layout_test)
+
+add_executable(orm_driver_descriptor_test ../tests/driver/orm_driver_descriptor_test.c)
+target_link_libraries(orm_driver_descriptor_test PRIVATE orm_driver_contract
+  orm_driver_build_options Salts::TinyTest)
+add_test(NAME orm_driver_descriptor COMMAND orm_driver_descriptor_test)
+
+add_executable(orm_driver_descriptor_layout_test
+  ../tests/driver/orm_driver_descriptor_layout_test.cpp)
+target_link_libraries(orm_driver_descriptor_layout_test PRIVATE orm_driver_sdk
+  orm_driver_build_options)
+add_test(NAME orm_driver_descriptor_layout COMMAND orm_driver_descriptor_layout_test)

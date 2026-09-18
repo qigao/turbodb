@@ -21,12 +21,18 @@ def main() -> int:
     parser.add_argument("--contract-source", required=True, type=Path)
     parser.add_argument("--build-dir", required=True, type=Path)
     parser.add_argument("--config", choices=("debug", "release"), required=True)
+    parser.add_argument("--test-source", type=Path,
+                        default=Path("orm/tests/driver/orm_driver_prefix_test.c"))
+    parser.add_argument("--layout-source", type=Path,
+                        default=Path("orm/tests/driver/orm_driver_layout_test.cpp"))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[3]
     salts = args.salts_source.resolve(strict=True)
     contract = args.contract_source.resolve(strict=True)
-    if not contract.is_relative_to(root):
-        parser.error("contract source must belong to this checkout")
+    test = args.test_source.resolve(strict=True)
+    layout_source = args.layout_source.resolve(strict=True)
+    if any(not p.is_relative_to(root) for p in (contract, test, layout_source)):
+        parser.error("contract and test sources must belong to this checkout")
     head = subprocess.check_output(
         ["git", "-C", str(salts), "rev-parse", "HEAD"], text=True).strip()
     if head != SALTS_COMMIT:
@@ -54,18 +60,16 @@ def main() -> int:
         flags += ["-O1", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
     else:
         flags += ["-O2"]
-    executable = output / "orm_driver_prefix_test"
-    rc = run([cc, "-std=c11", *flags, *includes, str(contract),
-              str(root / "orm/tests/driver/orm_driver_prefix_test.c"),
+    executable = output / test.stem
+    rc = run([cc, "-std=c11", *flags, *includes, str(contract), str(test),
               str(salts / "tinytest/src/tinytest.c"),
               str(salts / "tinytest/src/tinymock.c"), "-pthread", "-lm",
               "-o", str(executable)])
     if rc:
         return rc
-    layout = output / "orm_driver_layout_test"
+    layout = output / layout_source.stem
     rc = run([cxx, "-std=c++17", *flags, *includes,
-              str(root / "orm/tests/driver/orm_driver_layout_test.cpp"),
-              "-o", str(layout)])
+              str(layout_source), "-o", str(layout)])
     if rc:
         return rc
     rc = run([str(layout)])
