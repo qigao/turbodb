@@ -1,3 +1,9 @@
+/* TidesDB's Linux compatibility inlines require GNU libc declarations.
+ * Feature selection must precede bridge.h and every transitive system header. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "bridge.h"
 
 #include <tidesdb.h>
