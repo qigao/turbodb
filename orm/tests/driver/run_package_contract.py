@@ -14,7 +14,7 @@ import sys
 SALTS_COMMIT = "c4197712261a563ed7e238152b34cb50a2ef98a9"
 EXPECTED_TESTS = {"orm_driver_prefix", "orm_driver_layout",
                   "orm_driver_descriptor", "orm_driver_descriptor_layout",
-                  "orm_driver_handshake"}
+                  "orm_driver_handshake", "orm_driver_c_consumer", "orm_driver_cpp_consumer"}
 EXPECTED_CASES = {"prefix": 18, "descriptor": 46, "handshake": 19}
 
 
@@ -172,12 +172,33 @@ def main() -> int:
     binaries = {}
     for name in ("orm_driver_prefix_test", "orm_driver_layout_test",
                  "orm_driver_descriptor_test", "orm_driver_descriptor_layout_test",
-                 "orm_driver_handshake_test"):
+                 "orm_driver_handshake_test", "orm_driver_c_consumer",
+                 "orm_driver_cpp_consumer"):
         path = sdk_build / "bin" / (name + executable_suffix)
         binaries[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
         imports = (["dumpbin", "/dependents", str(path)] if system == "windows" else
                    ["readelf", "-d", str(path)])
         run(imports, root, env, evidence / f"{name}-imports.log")
+    module = sdk_build / "bin" / ("orm_driver_contract_fixture" +
+                                 (".dll" if system == "windows" else ".so"))
+    binaries[module.name] = hashlib.sha256(module.read_bytes()).hexdigest()
+    export_command = (["dumpbin", "/exports", str(module)] if system == "windows" else
+                      ["readelf", "--wide", "--dyn-syms", str(module)])
+    symbols = run(export_command, root, env, evidence / "module-exports.log")
+    if system == "windows":
+        exports = re.findall(r"^\s*\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)",
+                             symbols, re.MULTILINE)
+    else:
+        entries = re.findall(
+            r"^\s*\d+:\s+\S+\s+\S+\s+\S+\s+(GLOBAL|WEAK|UNIQUE)"
+            r"\s+(DEFAULT|PROTECTED)\s+(\S+)\s+(\S+)", symbols, re.MULTILINE)
+        exports = [name for _, _, index, name in entries if index != "UND"]
+    if sorted(exports) != ["orm_driver_get_api_v1"]:
+        raise RuntimeError(f"unexpected driver module exports: {exports}")
+    module_imports = (["dumpbin", "/dependents", str(module)] if system == "windows" else
+                      ["readelf", "-d", str(module)])
+    run(module_imports, root, env, evidence / "module-imports.log")
+    manifest["module_exports"] = exports
     manifest.update(status="passed", tests=names, tinytest_cases=sum(EXPECTED_CASES.values()),
                     tinytest_case_groups=EXPECTED_CASES,
                     binary_sha256=binaries,
