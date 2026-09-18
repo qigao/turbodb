@@ -1,0 +1,105 @@
+name: Driver SDK installed package
+on:
+  push:
+    branches: [feat/runtime-driver-sdk-prefix]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    name: Installed SDK (${{ matrix.os }}, ${{ matrix.config }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+        config: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: .ci-salts
+          persist-credentials: false
+      - name: Check CI provenance regression
+        shell: pwsh
+        run: python -m unittest discover -s orm/tests/driver -p test_package_provenance.py -v
+      - name: Set up Linux tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nasm re2c
+          test -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+      - name: Set up Windows tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install re2c -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 're2c installation failed' }
+          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
+          if (-not (Test-Path -LiteralPath $toolchain)) { throw 'vcpkg toolchain is missing' }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+      - name: Record exact dependency cache identity
+        id: identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = (Resolve-Path -LiteralPath $env:VCPKG_ROOT).Path
+          $revision = git -C $root rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg revision is unknown' }
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          "DRIVER_SDK_VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          "DRIVER_SDK_VCPKG_REVISION=$revision" >> $env:GITHUB_ENV
+          Write-Output "vcpkg cache identity: root=$root revision=$revision"
+          if (-not $env:ImageOS -or -not $env:ImageVersion) { throw 'runner image identity is missing' }
+          $cache = Join-Path $env:GITHUB_WORKSPACE '.ci-vcpkg-cache'
+          New-Item -ItemType Directory -Force -Path $cache | Out-Null
+          "VCPKG_BINARY_SOURCES=clear;files,$cache,readwrite" >> $env:GITHUB_ENV
+          "key=$env:ImageOS-$env:ImageVersion-$revision" >> $env:GITHUB_OUTPUT
+      - name: Restore vcpkg binary packages
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-vcpkg-cache
+          key: driver-sdk-vcpkg-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}-${{ hashFiles('.ci-salts/vcpkg.json', '.ci-salts/vcpkg-configuration.json', '.ci-salts/vcpkg-ports/**') }}
+      - name: Build real Salts package and test SDK on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config '${{ matrix.config }}'
+      - name: Build real Salts package and test SDK on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          echo VsDevCmd selected VCPKG_ROOT=%VCPKG_ROOT%
+          rem Keep the explicitly selected runner toolchain used by the cache key.
+          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
+          python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
+      - name: Save completed vcpkg binary packages
+        if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-vcpkg-cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Keep complete package evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: driver-package-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: warn
