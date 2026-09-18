@@ -15,6 +15,8 @@ _Static_assert(offsetof(orm_driver_header_v1, abi_version) == 4u,
 _Static_assert(sizeof(orm_status_t) == sizeof(int32_t), "status width");
 
 spec("driver prefix bounds") {
+  /* TinyTest's MSVC spec callback parameter is intentionally unused. */
+  (void)ttest_config__;
   it("rejects every physically short allocation without reading a header") {
     for (uint32_t n = 0u; n < ORM_DRIVER_HEADER_BYTES; ++n) {
       unsigned char *p = (unsigned char *)malloc(n == 0u ? 1u : n);
@@ -171,6 +173,8 @@ spec("driver prefix bounds") {
 }
 
 spec("driver byte view bounds") {
+  /* TinyTest's MSVC spec callback parameter is intentionally unused. */
+  (void)ttest_config__;
   it("accepts either null or nonnull empty views at a zero budget") {
     const unsigned char byte = 0u;
     const orm_driver_bytes_v1 null_view = {NULL, 0u};
