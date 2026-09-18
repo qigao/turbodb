@@ -33,6 +33,40 @@ def run(argv: list[str], cwd: Path, env: dict[str, str], log: Path) -> str:
     return text.split("\n", 2)[2]
 
 
+def vcpkg_identity(env: dict[str, str]) -> dict[str, str]:
+    """Reject environment drift from the identity captured before cache restore."""
+    required = ("VCPKG_ROOT", "DRIVER_SDK_VCPKG_ROOT", "DRIVER_SDK_VCPKG_REVISION")
+    if any(not env.get(key) for key in required):
+        raise RuntimeError("vcpkg cache identity is missing")
+    root = Path(env["VCPKG_ROOT"]).resolve(strict=True)
+    expected = Path(env["DRIVER_SDK_VCPKG_ROOT"]).resolve(strict=True)
+    if root != expected:
+        raise RuntimeError(f"vcpkg root mismatch: expected {expected}, got {root}")
+    toolchain = root / "scripts/buildsystems/vcpkg.cmake"
+    if not toolchain.is_file():
+        raise RuntimeError(f"vcpkg toolchain is missing: {toolchain}")
+    revision = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+        env=env, text=True).strip()
+    if revision != env["DRIVER_SDK_VCPKG_REVISION"]:
+        raise RuntimeError(f"vcpkg revision mismatch: got {revision}")
+    return {"root": str(root), "revision": revision,
+            "toolchain": str(toolchain.resolve(strict=True)),
+            "toolchain_sha256": hashlib.sha256(toolchain.read_bytes()).hexdigest()}
+
+
+def configured_toolchain(cache: Path, expected: str) -> str:
+    """Check CMake's actual selection, not just the incoming environment."""
+    matches = re.findall(r"^CMAKE_TOOLCHAIN_FILE:(?:FILEPATH|STRING)=(.+)$",
+                         cache.read_text(encoding="utf-8"), re.MULTILINE)
+    if len(matches) != 1:
+        raise RuntimeError("configured vcpkg toolchain mismatch: missing or duplicate entry")
+    actual = Path(matches[0]).resolve(strict=True)
+    if actual != Path(expected):
+        raise RuntimeError(f"configured vcpkg toolchain mismatch: got {actual}")
+    return str(actual)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--salts-source", required=True, type=Path)
@@ -47,6 +81,8 @@ def main() -> int:
     evidence.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["PROJECT_ROOT"] = str(root)
+    identity = vcpkg_identity(env)
+    print("vcpkg_identity=" + json.dumps(identity), flush=True)
     head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
                                    text=True).strip()
     salts_head = subprocess.check_output(
@@ -74,6 +110,7 @@ def main() -> int:
         "arch": platform.machine(), "profile": args.config,
         "salts_preset": salts_preset, "sdk_preset": sdk_preset,
         "mode": "installed-package", "status": "not-completed",
+        "vcpkg": identity,
     }
     manifest_path = evidence / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -81,6 +118,11 @@ def main() -> int:
     run(["cmake", "--version"], root, env, evidence / "cmake-version.log")
     run(["cmake", "--preset", salts_preset, "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
         salts, env, evidence / "salts-configure.log")
+    if vcpkg_identity(env) != identity:
+        raise RuntimeError("vcpkg identity changed during configure")
+    identity["configured_toolchain"] = configured_toolchain(
+        salts_build / "CMakeCache.txt", identity["toolchain"])
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     run(["cmake", "--build", "--preset", salts_preset, "--parallel", "4"],
         salts, env, evidence / "salts-build.log")
     run(["cmake", "--install", str(salts_build), "--prefix", str(prefix)],
