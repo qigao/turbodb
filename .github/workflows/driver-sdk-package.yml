@@ -1,7 +1,7 @@
 name: Driver SDK installed package
 on:
   push:
-    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers]
+    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view]
   workflow_dispatch:
 permissions:
   contents: read
@@ -90,6 +90,69 @@ jobs:
           rem Keep the explicitly selected runner toolchain used by the cache key.
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
+      # The core adapter uses the real core presets and backend dependencies.
+      # Only CI machine paths change; the original backend/profile selections stay on.
+      - name: Configure core preset paths for this runner
+        if: github.ref_name == 'feat/runtime-driver-sdk-plan-view'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $preset = Get-Content CMakeUserPresets.json -Raw | ConvertFrom-Json -AsHashtable
+          foreach ($item in $preset.configurePresets) {
+            if ($item.name -in @('win-toolchain', 'linux-paths')) {
+              $item.environment.PROJECT_ROOT = $env:GITHUB_WORKSPACE
+              $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
+              $item.environment.VCPKG_ROOT = $env:DRIVER_SDK_VCPKG_ROOT
+            }
+          }
+          $preset | ConvertTo-Json -Depth 30 | Set-Content CMakeUserPresets.json -Encoding utf8NoBOM
+          New-Item -ItemType Directory -Force -Path evidence/core | Out-Null
+          git diff -- CMakeUserPresets.json > evidence/core/ci-paths.diff
+          if ($LASTEXITCODE -ne 0) { throw 'cannot record CI path adaptation' }
+      - name: Build and test native plan adapter on Linux
+        if: github.ref_name == 'feat/runtime-driver-sdk-plan-view' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile=linux-release-user
+          build=build/linux-gcc-release
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            profile=linux-dev-user
+            build=build/linux-gcc-debug
+          fi
+          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+          git rev-parse HEAD | tee evidence/core/head.txt
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WARNINGS_AS_ERRORS=ON 2>&1 | tee evidence/core/configure.log
+          cp "$build/compile_commands.json" evidence/core/compile_commands.json
+          cp "$build/CMakeCache.txt" evidence/core/CMakeCache.txt
+          cmake --build --preset "$profile" --target orm_driver_plan_view_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test --parallel 4 2>&1 | tee evidence/core/build.log
+          ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_sql_render|orm_public_flow|orm_cpp_flow)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
+      - name: Build and test native plan adapter on Windows
+        if: github.ref_name == 'feat/runtime-driver-sdk-plan-view' && runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
+          set "ASAN_OPTIONS=halt_on_error=1"
+          set "PROFILE=win-release-user"
+          set "BUILD=build\Msvc-Release"
+          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
+          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
+          git rev-parse HEAD > evidence\core\head.txt
+          if errorlevel 1 exit /b 1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WARNINGS_AS_ERRORS=ON > evidence\core\configure.log 2>&1
+          if errorlevel 1 (type evidence\core\configure.log & exit /b 1)
+          copy "%BUILD%\compile_commands.json" evidence\core\compile_commands.json
+          if errorlevel 1 exit /b 1
+          copy "%BUILD%\CMakeCache.txt" evidence\core\CMakeCache.txt
+          if errorlevel 1 exit /b 1
+          cmake --build --preset "%PROFILE%" --target orm_driver_plan_view_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test --parallel 4 > evidence\core\build.log 2>&1
+          if errorlevel 1 (type evidence\core\build.log & exit /b 1)
+          ctest --preset "%PROFILE%" -R "^(orm_driver_plan_view|orm_sql_render|orm_public_flow|orm_cpp_flow)$" --verbose --no-tests=error > evidence\core\ctest.log 2>&1
+          if errorlevel 1 (type evidence\core\ctest.log & exit /b 1)
+          type evidence\core\ctest.log
       - name: Save completed vcpkg binary packages
         if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

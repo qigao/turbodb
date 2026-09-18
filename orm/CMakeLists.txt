@@ -648,6 +648,21 @@ if(MSVC)
 endif()
 add_test(NAME orm_sql_render COMMAND orm_sql_render_test)
 
+# Candidate plan adapter is exercised against the real core, not the SDK fixture.
+add_executable(orm_driver_plan_view_test
+  tests/driver/orm_driver_plan_view_test.c
+  tests/driver/orm_driver_plan_red_input.c)
+target_compile_features(orm_driver_plan_view_test PRIVATE c_std_11)
+target_compile_definitions(orm_driver_plan_view_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_driver_plan_view_test PRIVATE
+  ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/driver)
+orm_link_internal_test(orm_driver_plan_view_test Salts::TinyTest)
+set_target_properties(orm_driver_plan_view_test
+  PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_driver_plan_view_test)
+add_test(NAME orm_driver_plan_view COMMAND orm_driver_plan_view_test)
+
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
 add_executable(orm_postgres_flow_test ${ORM_POSTGRES_FLOW_TEST_SOURCES})
@@ -844,7 +859,7 @@ if(WIN32)
   set(ORM_TEST_RUNTIME_PATH
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
-                        orm_cbind_publisher orm_pure_c_build orm_sql_render
+                        orm_cbind_publisher orm_pure_c_build orm_sql_render orm_driver_plan_view
                         orm_postgres_flow orm_backend_profile)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
