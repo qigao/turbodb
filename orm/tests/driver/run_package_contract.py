@@ -13,8 +13,9 @@ import sys
 
 SALTS_COMMIT = "c4197712261a563ed7e238152b34cb50a2ef98a9"
 EXPECTED_TESTS = {"orm_driver_prefix", "orm_driver_layout",
-                  "orm_driver_descriptor", "orm_driver_descriptor_layout"}
-EXPECTED_CASES = {"prefix": 18, "descriptor": 46}
+                  "orm_driver_descriptor", "orm_driver_descriptor_layout",
+                  "orm_driver_handshake"}
+EXPECTED_CASES = {"prefix": 18, "descriptor": 46, "handshake": 19}
 
 
 def run(argv: list[str], cwd: Path, env: dict[str, str], log: Path) -> str:
@@ -170,7 +171,8 @@ def main() -> int:
     executable_suffix = ".exe" if system == "windows" else ""
     binaries = {}
     for name in ("orm_driver_prefix_test", "orm_driver_layout_test",
-                 "orm_driver_descriptor_test", "orm_driver_descriptor_layout_test"):
+                 "orm_driver_descriptor_test", "orm_driver_descriptor_layout_test",
+                 "orm_driver_handshake_test"):
         path = sdk_build / "bin" / (name + executable_suffix)
         binaries[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
         imports = (["dumpbin", "/dependents", str(path)] if system == "windows" else

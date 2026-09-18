@@ -1,0 +1,71 @@
+name: Driver handshake source contract
+on:
+  push:
+    branches: [feat/runtime-driver-sdk-handshake]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    name: Handshake (${{ matrix.compiler }}, ${{ matrix.config }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang, gcc]
+        config: [debug, release]
+    env:
+      CC: ${{ matrix.compiler }}
+      CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: .ci-salts
+          persist-credentials: false
+      - name: Compile and run native contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/handshake evidence
+          exec > >(tee evidence/native.log) 2>&1
+          git rev-parse HEAD
+          test "$(git -C .ci-salts rev-parse HEAD)" = c4197712261a563ed7e238152b34cb50a2ef98a9
+          includes=(-Iorm/include/orm)
+          for module in tinytest cmeta cflow cstl cserde cbind utils platform concurrency coroutine native-io vendor/sds; do
+            for path in ".ci-salts/$module/include" ".ci-salts/$module"; do
+              if [[ -d "$path" ]]; then includes+=(-isystem "$path"); fi
+            done
+          done
+          includes+=(-isystem .ci-salts)
+          flags=(-g -Wall -Wextra -Werror -DORM_C_STATIC)
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            flags+=(-O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+          else
+            flags+=(-O2)
+          fi
+          set -x
+          "$CC" --version
+          "$CC" -std=c11 "${flags[@]}" "${includes[@]}" orm/src/driver/orm_driver_contract.c orm/tests/driver/orm_driver_fixture.c orm/tests/driver/orm_driver_handshake_test.c .ci-salts/cserde/src/reader.c .ci-salts/cserde/src/token.c .ci-salts/tinytest/src/tinytest.c .ci-salts/tinytest/src/tinymock.c -pthread -lm -o build/handshake/handshake
+          build/handshake/handshake
+          for test in prefix descriptor; do
+            "$CC" -std=c11 "${flags[@]}" "${includes[@]}" -Iorm/src/driver orm/src/driver/orm_driver_contract.c "orm/tests/driver/orm_driver_${test}_test.c" .ci-salts/tinytest/src/tinytest.c .ci-salts/tinytest/src/tinymock.c -pthread -lm -o "build/handshake/$test"
+            "build/handshake/$test"
+          done
+          for test in orm_driver_layout_test orm_driver_descriptor_layout_test; do
+            "$CXX" -std=c++17 "${flags[@]}" "${includes[@]}" "orm/tests/driver/$test.cpp" -o "build/handshake/$test"
+            "build/handshake/$test"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: handshake-${{ matrix.compiler }}-${{ matrix.config }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
