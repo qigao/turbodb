@@ -661,6 +661,12 @@ orm_link_internal_test(orm_driver_plan_view_test Salts::TinyTest)
 set_target_properties(orm_driver_plan_view_test
   PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_driver_plan_view_test)
+# Keep this new boundary strict without changing legacy core warning defaults.
+if(MSVC)
+  target_compile_options(orm_driver_plan_view_test PRIVATE /WX)
+else()
+  target_compile_options(orm_driver_plan_view_test PRIVATE -Werror)
+endif()
 add_test(NAME orm_driver_plan_view COMMAND orm_driver_plan_view_test)
 
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
