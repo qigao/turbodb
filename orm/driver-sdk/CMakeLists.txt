@@ -87,3 +87,27 @@ add_executable(orm_driver_handshake_test
 target_link_libraries(orm_driver_handshake_test PRIVATE orm_driver_contract
   orm_driver_build_options Salts::TinyTest)
 add_test(NAME orm_driver_handshake COMMAND orm_driver_handshake_test)
+
+# Compile the same fixture independently: consumers never link a MODULE target.
+add_library(orm_driver_contract_fixture MODULE ../tests/driver/orm_driver_fixture.c)
+target_compile_definitions(orm_driver_contract_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
+target_link_libraries(orm_driver_contract_fixture PRIVATE orm_driver_contract
+  orm_driver_build_options)
+set_target_properties(orm_driver_contract_fixture PROPERTIES
+  PREFIX "" C_VISIBILITY_PRESET hidden WINDOWS_EXPORT_ALL_SYMBOLS OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # Imported static Salts objects must not become extra plugin API exports.
+  target_link_options(orm_driver_contract_fixture PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
+add_executable(orm_driver_c_consumer
+  ../tests/driver/consumer.c ../tests/driver/orm_driver_fixture.c)
+target_link_libraries(orm_driver_c_consumer PRIVATE orm_driver_contract
+  orm_driver_build_options)
+add_test(NAME orm_driver_c_consumer COMMAND orm_driver_c_consumer)
+
+add_executable(orm_driver_cpp_consumer
+  ../tests/driver/consumer.cpp ../tests/driver/orm_driver_fixture.c)
+target_link_libraries(orm_driver_cpp_consumer PRIVATE orm_driver_contract
+  orm_driver_build_options)
+add_test(NAME orm_driver_cpp_consumer COMMAND orm_driver_cpp_consumer)

@@ -77,9 +77,9 @@ jobs:
           "$CXX" -std=c++17 "${flags[@]}" "${includes[@]}" orm/tests/driver/consumer.cpp "${objects[@]}" -o build/handshake/cpp-consumer
           build/handshake/c-consumer
           build/handshake/cpp-consumer
-          "$CC" -std=c11 "${flags[@]}" "${includes[@]}" -fPIC -shared -DORM_DRIVER_MODULE_BUILD orm/src/driver/orm_driver_contract.c orm/tests/driver/orm_driver_fixture.c .ci-salts/cserde/src/reader.c .ci-salts/cserde/src/token.c -o build/handshake/orm_driver_contract_fixture.so
+          "$CC" -std=c11 "${flags[@]}" "${includes[@]}" -fPIC -fvisibility=hidden -shared -DORM_DRIVER_MODULE_BUILD orm/src/driver/orm_driver_contract.c orm/tests/driver/orm_driver_fixture.c .ci-salts/cserde/src/reader.c .ci-salts/cserde/src/token.c -o build/handshake/orm_driver_contract_fixture.so
           readelf --wide --dyn-syms build/handshake/orm_driver_contract_fixture.so | tee evidence/module-symbols.log
-          exports=$(awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") && $6 == "DEFAULT" {print $8}' evidence/module-symbols.log | sort -u)
+          exports=$(awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK" || $5 == "UNIQUE") && ($6 == "DEFAULT" || $6 == "PROTECTED") {print $8}' evidence/module-symbols.log | sort -u)
           test "$exports" = orm_driver_get_api_v1
       - uses: actions/upload-artifact@v4
         if: always()
