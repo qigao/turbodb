@@ -1,53 +1,115 @@
 # TurboDB
 
-TurboDB 提供纯 C 数据库组件、C++ header-only 包装和按 native driver 构建的数据库工具。
-ORM、Redis、TidesDB 与 standalone tools 分别由 CMake 选项控制。
+**Typed and bounded database/storage infrastructure for the Salts ecosystem.**
+
+TurboDB provides C database components, C++ header-only wrappers, native-driver database tooling, Redis/TidesDB integrations, and optional ORM capabilities. It uses the installed [Salts](https://github.com/qigao/salts) SDK as its systems foundation while keeping storage semantics, drivers, durability behavior, and database-specific contracts owned by TurboDB.
+
+**Tags:** C11 · C++17 · database · storage · ORM · Redis · SQLite · PostgreSQL · durability · async-io
+
+## Built on Salts
+
+TurboDB does not treat Salts as a generic utility dependency. Selected runtime-facing components reuse Salts so database work participates in the same type, ownership, execution, and error model as the rest of the ecosystem.
+
+Depending on the component, TurboDB can reuse:
+
+- **CMeta** for stable typed metadata and semantic identity at API boundaries.
+- **CFlow** for bounded execution, waitables, and explicit asynchronous progress.
+- **NativeIO / Platform / Core** for lower-level runtime and operating-system primitives.
+- **CSTL / CSerde / binding layers** where typed storage or serialization contracts require them.
+
+Not every TurboDB executable links every Salts subsystem. Standalone DDL tools intentionally keep a much narrower dependency closure.
+
+## Ecosystem role
+
+```text
+Salts
+  ├── salts-utils
+  ├── salts-net
+  └── DataBind
+        ↓
+      TurboDB
+        ↓
+ durable storage providers / application data infrastructure
+        ↓
+ TurboFlow and other higher-level systems
+```
+
+TurboDB is the **storage/data infrastructure layer**. It owns database-specific behavior. Salts owns the shared systems semantics underneath it.
+
+## Main areas
+
+| Area | Responsibility |
+| --- | --- |
+| ORM | Optional database-facing object/record mapping |
+| Redis | Redis-native primitives and durable/ordered adapter support |
+| TidesDB | TidesDB integration |
+| SQLite | Native driver support and standalone schema application |
+| PostgreSQL | Native driver support and standalone schema application |
+| dbtools | Explicit standalone database tools |
+| C++ wrappers | Header-only convenience APIs over C components where applicable |
+
+Build options keep these areas independently selectable.
 
 ## Redis ordered apply and Stream outbox
 
-The `redis_lua_apply.h` API exposes a Redis-native, bounded primitive for
-replicated-state adapters. One Lua `EVAL` atomically performs a single
-hash-field write, advances `applied_index`/term/command-id metadata, and
-appends the same command to a Redis Stream outbox. It is an additive `tedis`
-API and does not change the ORM transaction contract.
+The `redis_lua_apply.h` API exposes a Redis-native, bounded primitive for replicated-state adapters.
 
-Its metadata, state, and outbox keys, command-id, field, and value are borrowed
-until `redis_lua_apply_open` returns. The three keys must carry the same
-non-empty Cluster hash tag, for example `raft:{orders}:meta`,
-`raft:{orders}:state`, and `raft:{orders}:outbox`; mismatched or missing
-tags fail before dispatch.
+A single Lua `EVAL` atomically:
 
-Drive the operation by calling `redis_lua_apply_next` until it stops returning
-`REDIS_LUA_APPLY_WAIT`, waiting on the supplied CFlow waitable between calls,
-then call `redis_lua_apply_destroy`. `APPLIED` is the first durable
-application; `REPLAYED` requires the same current index, term, and
-command-id; `GAP` means the index is not the next valid transition; and
-`CONFLICT` means the current index is occupied by a different term or
-command-id. If the command was sent but no response can be trusted, the
-terminal receipt is `COMMIT_UNKNOWN`: read the authoritative applied index
-before choosing a retry.
+1. performs one hash-field write;
+2. advances `applied_index` / term / command-id metadata;
+3. appends the same command to a Redis Stream outbox.
 
-The script compares and increments indexes as canonical decimal strings, not
-Lua floating-point numbers, so the complete unsigned 64-bit Raft-index range
-remains exact.
+This is additive to the `tedis` API and does not change the ORM transaction contract.
 
-Stream delivery remains at-least-once. Consumers must project idempotently and
-acknowledge only after that projection succeeds.
+### Key ownership and cluster requirements
 
-The normal Redis test suite is self-contained. To enable its real-server case,
-set `TURBODB_REDIS_TEST_PORT` to an isolated Redis port before running
-`ctest --preset win-release-user -R "^test_redis_lua_apply$"`. That case
-verifies actual Lua execution, Stream mutation, and the `UINT64_MAX` index
-boundary through the public `tedis` API.
+Metadata, state, outbox keys, command-id, field, and value are borrowed until `redis_lua_apply_open` returns.
+
+The three Redis keys must use the same non-empty Cluster hash tag, for example:
+
+```text
+raft:{orders}:meta
+raft:{orders}:state
+raft:{orders}:outbox
+```
+
+Missing or mismatched tags fail before dispatch.
+
+### Progress model
+
+Drive the operation with `redis_lua_apply_next` until it stops returning `REDIS_LUA_APPLY_WAIT`. Wait on the supplied CFlow waitable between calls, then destroy the operation with `redis_lua_apply_destroy`.
+
+Terminal receipts:
+
+- `APPLIED` — first durable application;
+- `REPLAYED` — same current index, term, and command-id;
+- `GAP` — index is not the next valid transition;
+- `CONFLICT` — the current index is occupied by another term or command-id;
+- `COMMIT_UNKNOWN` — the command may have been sent, but no response can be trusted.
+
+For `COMMIT_UNKNOWN`, read the authoritative applied index before choosing a retry.
+
+Indexes are compared and incremented as canonical decimal strings rather than Lua floating-point values, preserving the complete unsigned 64-bit Raft-index range.
+
+Stream delivery remains at-least-once. Consumers must project idempotently and acknowledge only after projection succeeds.
 
 ## Standalone DDL SQL tools
 
-`turbodb-sqlite` 与 `turbodb-postgresql` 可批量执行数据库初始化 SQL，且不经过
-ORM。二者只通过 driver 执行 DDL SQL 文件，命令为 `schema apply`；它们不是 migration
-diff/history 管理器，也不会
-加载运行时 driver plugin。
+`turbodb-sqlite` and `turbodb-postgresql` execute database bootstrap/schema SQL directly through native drivers.
 
-Windows 默认 Release 配置构建 SQLite 与 PostgreSQL 工具：
+They are intentionally narrow:
+
+- command: `schema apply`;
+- no migration diff/history engine;
+- no runtime driver-plugin loading;
+- no implicit outer transaction;
+- no stdin execution;
+- no automatic retry or backend fallback.
+
+### Build
+
+Windows Release builds both SQLite and PostgreSQL tools by default:
 
 ```powershell
 cmake --fresh --preset win-release-user
@@ -55,8 +117,7 @@ cmake --build --preset win-release-user --target turbodb-sqlite turbodb-postgres
 cmake --build --preset install-win-release-user
 ```
 
-PostgreSQL-only builds use an isolated package prefix and do not contain the
-SQLite ORM backend or SQLite dbtool:
+A PostgreSQL-only package uses its own isolated profile:
 
 ```powershell
 cmake --preset win-release-dbtools-pg-user
@@ -65,11 +126,9 @@ ctest --preset win-release-dbtools-pg-user --output-on-failure
 cmake --build --preset install-win-release-dbtools-pg-user
 ```
 
-The full package is installed under `turbodb/release`; the PostgreSQL-only
-package is installed under `turbodb/release-pg`. Consumers must select the
-required package explicitly. The build does not fall back between them.
+Consumers must select the intended package explicitly. Profiles do not fall back to each other.
 
-执行 SQLite bootstrap：
+### SQLite
 
 ```powershell
 turbodb-sqlite schema apply `
@@ -77,32 +136,87 @@ turbodb-sqlite schema apply `
   --file .\bootstrap.sqlite.sql
 ```
 
-PostgreSQL 连接串只通过调用方命名的环境变量传递，避免出现在普通命令行参数和错误
-输出中；不指定 `--conninfo-env` 时使用 libpq 的标准环境、service 与 `.pgpass`：
+### PostgreSQL
+
+Connection information can be provided through a caller-selected environment variable so credentials do not need to appear in ordinary command-line arguments:
 
 ```powershell
 $env:APP_PG_CONNINFO = 'host=127.0.0.1 dbname=app user=app'
+
 turbodb-postgresql schema apply `
   --file .\bootstrap.postgresql.sql `
   --conninfo-env APP_PG_CONNINFO
 ```
 
-默认脚本上限为 16 MiB，可用 `--max-script-bytes` 显式调整。SQLite 还支持
-`--busy-timeout-ms`，默认 5000 ms。输入文件必须非空、可完整读取且不含嵌入 NUL；工具
-不读 stdin、不重试、不切换 driver。
+Without `--conninfo-env`, libpq's standard environment, service, and `.pgpass` behavior applies.
 
-DDL 文件负责定义标准事务边界，例如 `BEGIN; ... COMMIT;`。SQLite 与 PostgreSQL 工具都
-直接执行文件，不解析、补写或嵌套外层事务。SQLite 使用一次 `sqlite3_exec()`；PostgreSQL
-使用一次 libpq simple query 并释放所有 `PGresult`。`CREATE` 与 `DROP` 的原子性完全由
-文件中的事务定义。
+The default SQL script limit is 16 MiB and can be changed explicitly with `--max-script-bytes`. SQLite also supports `--busy-timeout-ms`, defaulting to 5000 ms.
 
-退出码：`0` 成功/帮助，`2` 参数错误，`3` 文件错误，`4` 连接错误，`5` SQL 错误，
-`6` 超限，`7` 不支持，`8` 内存不足，`70` 内部错误。
+Input files must be non-empty, fully readable, and contain no embedded NUL.
 
-PostgreSQL ORM backend 与 PostgreSQL dbtool 默认构建；libpq 只作为对应实现 target 的
-private/runtime 依赖，不进入使用方的编译或链接接口。安装只暴露 dbtools executable，
-不要求使用方 `find_package(TurboDB)`。`dbtools` install component
-会携带运行所需的动态库闭包；DDL SQL tools 不链接 `turbo_orm`、CFlow、CBind、CSerde 或
-Salts parser targets。详细设计与验证边界见
-[driver-data-tools.md](docs/architecture/driver-data-tools.md)，EU Docker 验证见
-[TURBODB_LINUX_REMOTE_TEST_RUNBOOK.md](docs/TURBODB_LINUX_REMOTE_TEST_RUNBOOK.md)。
+Transaction boundaries belong to the SQL file itself:
+
+```sql
+BEGIN;
+-- schema statements
+COMMIT;
+```
+
+SQLite executes the file through one `sqlite3_exec()`. PostgreSQL uses one libpq simple-query sequence and releases all `PGresult` values.
+
+### Exit codes
+
+| Code | Meaning |
+| ---: | --- |
+| 0 | success / help |
+| 2 | argument error |
+| 3 | file error |
+| 4 | connection error |
+| 5 | SQL error |
+| 6 | configured limit exceeded |
+| 7 | unsupported operation |
+| 8 | out of memory |
+| 70 | internal error |
+
+The standalone DDL tools intentionally do **not** link the broader ORM/CFlow/binding stack when it is not required. This preserves a small and auditable runtime closure.
+
+See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detailed design boundary.
+
+## Build and package model
+
+TurboDB requires an explicitly installed Salts profile through `SALTS_ROOT`.
+
+The top-level CMake configuration resolves Salts with `NO_DEFAULT_PATH` semantics and fails if the configured root is absent or invalid. The project does not silently select another Salts installation.
+
+Main build areas are independently configurable through CMake options, including ORM backends, Redis support, and standalone database tools.
+
+## Design principles
+
+- **Database semantics stay in TurboDB.** Salts provides systems primitives, not database policy.
+- **No hidden fallback.** A failed database/provider path does not silently change storage engines.
+- **Bounded async state.** Runtime-facing operations make waiting, cancellation, ownership, and terminal state explicit.
+- **Provider-neutral upper layers.** Higher-level systems should depend on stable TurboDB contracts rather than raw driver/runtime state.
+- **Narrow dependency closure.** Tools that do not need CFlow, ORM, binding, or parser layers should not link them.
+- **Exact data representation matters.** Integer ranges, durable indexes, database value domains, and replay identity are preserved intentionally.
+
+## Relationship to higher layers
+
+TurboDB can provide durable storage to systems such as [TurboFlow](https://github.com/qigao/turbo-flow), but those systems own workflow/inbox/execution policy. TurboDB owns storage behavior and durable database-facing contracts.
+
+This boundary is intentional:
+
+```text
+TurboFlow / applications
+        ↓
+stable TurboDB provider/API boundary
+        ↓
+TurboDB storage semantics
+        ↓
+native database driver
+```
+
+Raw driver state should not leak upward as application runtime identity.
+
+---
+
+**Salts provides the typed systems foundation. TurboDB provides the storage semantics.**
