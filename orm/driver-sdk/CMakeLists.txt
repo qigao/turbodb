@@ -51,8 +51,7 @@ else()
   message(FATAL_ERROR "Driver SDK has no sanitizer policy for this compiler")
 endif()
 
-# The RED revision links a test-only unimplemented contract, not production.
-add_library(orm_driver_contract STATIC ../tests/driver/orm_driver_contract_red.c)
+add_library(orm_driver_contract STATIC ../src/driver/orm_driver_contract.c)
 target_include_directories(orm_driver_contract PRIVATE ../src/driver)
 target_link_libraries(orm_driver_contract PUBLIC orm_driver_sdk
   PRIVATE orm_driver_build_options)

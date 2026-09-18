@@ -38,7 +38,7 @@ jobs:
           git rev-parse HEAD | tee evidence/head.txt
           python3 orm/tests/driver/run_source_contract.py \
             --salts-source .ci-salts \
-            --contract-source orm/tests/driver/orm_driver_contract_red.c \
+            --contract-source orm/src/driver/orm_driver_contract.c \
             --build-dir build/source-contract \
             --config '${{ matrix.config }}' 2>&1 | tee evidence/source-contract.log
       - name: Keep actual test output
