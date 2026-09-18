@@ -33,7 +33,9 @@ struct orm_driver_host_v1 {
  * alias spans, until return. Validation cannot probe arbitrary native pointers.
  * Unknown trailing bytes are ignored, not retained. Validators allocate nothing
  * and never invoke descriptor callbacks (including on failure). Optional error
- * points to a complete writable orm_error_t; it is initialized on return.
+ * points to a complete writable orm_error_t, disjoint from every input;
+ * it is initialized on return. ID/alias validation has a 65536-byte metadata
+ * budget in addition to max_aliases (array, canonical ID and alias bytes).
  * These candidate SDK helpers do not load/register drivers or acquire leases.
  * Bootstrap export and its executable fixture are introduced in Task 3. */
 orm_status_t ORM_DRIVER_CALL orm_driver_validate_host_v1(

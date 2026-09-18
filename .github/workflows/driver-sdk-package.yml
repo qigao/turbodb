@@ -1,7 +1,7 @@
 name: Driver SDK installed package
 on:
   push:
-    branches: [feat/runtime-driver-sdk-prefix]
+    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors]
   workflow_dispatch:
 permissions:
   contents: read

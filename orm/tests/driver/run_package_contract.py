@@ -1,4 +1,4 @@
-"""Build real pinned Salts packages, then run Task 1 through SDK CMake/CTest."""
+"""Build real pinned Salts packages, then run SDK contracts through CMake/CTest."""
 from __future__ import annotations
 
 import argparse
@@ -12,8 +12,9 @@ import subprocess
 import sys
 
 SALTS_COMMIT = "c4197712261a563ed7e238152b34cb50a2ef98a9"
-EXPECTED_TESTS = {"orm_driver_prefix", "orm_driver_layout"}
-EXPECTED_CASES = 18
+EXPECTED_TESTS = {"orm_driver_prefix", "orm_driver_layout",
+                  "orm_driver_descriptor", "orm_driver_descriptor_layout"}
+EXPECTED_CASES = {"prefix": 18, "descriptor": 46}
 
 
 def run(argv: list[str], cwd: Path, env: dict[str, str], log: Path) -> str:
@@ -160,20 +161,23 @@ def main() -> int:
                              sdk_root, env, evidence / "test-list.log"))
     names = [test["name"] for test in listing["tests"]]
     if len(names) != len(EXPECTED_TESTS) or set(names) != EXPECTED_TESTS:
-        raise RuntimeError(f"unexpected Task 1 CTest inventory: {names}")
+        raise RuntimeError(f"unexpected SDK CTest inventory: {names}")
     output = run(["ctest", "--preset", sdk_preset, "--verbose", "--no-tests=error"],
                  sdk_root, env, evidence / "ctest.log")
-    if not re.search(rf"\b{EXPECTED_CASES} passed, 0 failed, 0 skipped, 0 filtered", output):
-        raise RuntimeError("CTest did not report all expected TinyTest behavior cases")
+    for group, count in EXPECTED_CASES.items():
+        if not re.search(rf"\b{count} passed, 0 failed, 0 skipped, 0 filtered", output):
+            raise RuntimeError(f"CTest did not report all {group} behavior cases")
     executable_suffix = ".exe" if system == "windows" else ""
     binaries = {}
-    for name in ("orm_driver_prefix_test", "orm_driver_layout_test"):
+    for name in ("orm_driver_prefix_test", "orm_driver_layout_test",
+                 "orm_driver_descriptor_test", "orm_driver_descriptor_layout_test"):
         path = sdk_build / "bin" / (name + executable_suffix)
         binaries[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
         imports = (["dumpbin", "/dependents", str(path)] if system == "windows" else
                    ["readelf", "-d", str(path)])
         run(imports, root, env, evidence / f"{name}-imports.log")
-    manifest.update(status="passed", tests=names, tinytest_cases=EXPECTED_CASES,
+    manifest.update(status="passed", tests=names, tinytest_cases=sum(EXPECTED_CASES.values()),
+                    tinytest_case_groups=EXPECTED_CASES,
                     binary_sha256=binaries,
                     sanitizer="address" if system == "windows" else "address,undefined")
     if args.config == "release":

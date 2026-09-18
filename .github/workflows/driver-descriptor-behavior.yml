@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 orm/tests/driver/run_source_contract.py --salts-source .ci-salts --contract-source orm/tests/driver/orm_driver_descriptor_red.c --test-source orm/tests/driver/orm_driver_descriptor_test.c --layout-source orm/tests/driver/orm_driver_descriptor_layout_test.cpp --build-dir build/descriptor --config '${{ matrix.config }}' 2>&1 | tee evidence/descriptor.log
+          python3 orm/tests/driver/run_source_contract.py --salts-source .ci-salts --contract-source orm/src/driver/orm_driver_contract.c --test-source orm/tests/driver/orm_driver_descriptor_test.c --layout-source orm/tests/driver/orm_driver_descriptor_layout_test.cpp --build-dir build/descriptor --config '${{ matrix.config }}' 2>&1 | tee evidence/descriptor.log
       - name: Keep exact behavior evidence
         if: always()
         uses: actions/upload-artifact@v4
