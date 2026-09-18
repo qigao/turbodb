@@ -1,0 +1,39 @@
+name: Driver descriptor native contract
+on:
+  push:
+    branches: [feat/runtime-driver-sdk-descriptors]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: .ci-salts
+          persist-credentials: false
+      - name: Record native baseline and reproducible sources
+        shell: bash
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/head.txt
+          git archive --format=tar HEAD > evidence/turbodb-source.tar
+          git -C .ci-salts archive --format=tar HEAD > evidence/salts-source.tar
+          python3 orm/tests/driver/run_source_contract.py --salts-source .ci-salts --contract-source orm/src/driver/orm_driver_contract.c --build-dir build/source-contract --config debug 2>&1 | tee evidence/native.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: descriptor-native-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
