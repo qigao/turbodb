@@ -651,7 +651,7 @@ add_test(NAME orm_sql_render COMMAND orm_sql_render_test)
 # Candidate plan adapter is exercised against the real core, not the SDK fixture.
 add_executable(orm_driver_plan_view_test
   tests/driver/orm_driver_plan_view_test.c
-  tests/driver/orm_driver_plan_red_input.c)
+  src/driver/orm_driver_plan_view.c)
 target_compile_features(orm_driver_plan_view_test PRIVATE c_std_11)
 target_compile_definitions(orm_driver_plan_view_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_driver_plan_view_test PRIVATE
