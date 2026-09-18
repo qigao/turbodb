@@ -18,6 +18,8 @@ env:
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
   SALTS_UTILS_COMMIT: 0b3876018e5bdaed70fecbc0d0863cb394dd6044
+  RULES_FORGE_COMMIT: 80eda13e90585ed2dad94c9e76574ea9e510eeda
+  CHTTP_COMMIT: 7c1863b0b1539e92cd4ce0d820e57c623cb609d6
   ASAN_OPTIONS: detect_leaks=1:detect_odr_violation=2:halt_on_error=1
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
@@ -164,6 +166,50 @@ jobs:
           cmake --build build/turbodb-sdk --target install -j2 2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/turbodb-build.log"
           git -C .ci/deps/turbodb diff --exit-code
           echo "LD_LIBRARY_PATH=$RUNNER_TEMP/sdk/turbodb-debug/lib:/opt/salts/debug/lib:/opt/salts-utils/debug/lib" >> "$GITHUB_ENV"
+
+      - name: Checkout pinned RulesForge
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/RulesForge
+          ref: ${{ env.RULES_FORGE_COMMIT }}
+          path: .ci/deps/rules-forge
+          persist-credentials: false
+
+      - name: Checkout pinned CHttp
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/chttp
+          ref: ${{ env.CHTTP_COMMIT }}
+          path: .ci/deps/chttp
+          persist-credentials: false
+
+      - name: Prepare Task 10 Release SDK roots
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo mkdir -p /opt/salts/release /opt/salts-utils/release /opt/rules_forge/release /opt/http-services/release /opt/turbodb/release /opt/turboflow/release
+
+      - name: Task 10 RED - configure full Release dependency contract
+        shell: bash
+        env:
+          PROJECT_ROOT: ${{ runner.temp }}/release-project
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          PKG_ROOT: /opt
+          SALTS_ROOT: /opt/salts/release
+          SALTS_UTILS_ROOT: /opt/salts-utils/release
+          RULES_FORGE_ROOT: /opt/rules_forge/release
+          HTTP_SERVICES_ROOT: /opt/http-services/release
+          TURBODB_ROOT: /opt/turbodb/release
+          TURBO_FLOW_ROOT: /opt/turboflow/release
+        run: |
+          set -euxo pipefail
+          test "$(git -C .ci/deps/rules-forge rev-parse HEAD)" = "$RULES_FORGE_COMMIT"
+          test "$(git -C .ci/deps/chttp rev-parse HEAD)" = "$CHTTP_COMMIT"
+          {
+            printf 'rules-forge %s\n' "$RULES_FORGE_COMMIT"
+            printf 'chttp %s\n' "$CHTTP_COMMIT"
+          } | tee "$RUNNER_TEMP/task4-runtime-evidence/task10-release-dependencies.txt"
+          cmake --preset linux-release-user 2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/task10-release-configure.log"
 
       - name: Apply focused Task 4 validation-only CMake assembly
         shell: bash
