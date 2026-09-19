@@ -62,6 +62,10 @@ typedef struct orm_row_cursor {
   void *context;
   /* Zero disables CFlow WAIT timeout wrapping for this backend cursor. */
   uint64_t wait_timeout_ns;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  void *owner;
+  void (*release_owner)(void *);
+#endif
 } orm_row_cursor;
 
 /*

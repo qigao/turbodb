@@ -37,6 +37,86 @@ void orm_error_set(orm_error_t *error, orm_status_t status,
                                         : orm_status_message(status)));
 }
 
+
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+/* This candidate is compiled only into the non-installed native test core.
+ * Resource cleanup runs after the control lock is released. */
+static void orm_connection_action(orm_connection_t *connection,
+                                  orm_owner_action action) {
+  if (action == ORM_OWNER_CLOSE_RESOURCES) {
+    if (connection->backend.ops != NULL && connection->backend.context != NULL)
+      connection->backend.ops->destroy(connection->backend.context);
+    memset(&connection->backend, 0, sizeof(connection->backend));
+    action = orm_owner_finish_close(&connection->owner);
+  }
+  if (action == ORM_OWNER_FREE_MEMORY) {
+    orm_owner_dispose(&connection->owner);
+    free(connection);
+  }
+}
+
+static void orm_connection_release_child(orm_connection_t *connection) {
+  orm_connection_action(connection, orm_owner_release_dependent(&connection->owner));
+}
+
+static void orm_query_action(orm_query_t *query, orm_owner_action action) {
+  if (action == ORM_OWNER_CLOSE_RESOURCES) {
+    orm_plan_destroy(&query->plan);
+    action = orm_owner_finish_close(&query->owner);
+  }
+  if (action == ORM_OWNER_FREE_MEMORY) {
+    orm_connection_t *connection = query->connection;
+    orm_owner_dispose(&query->owner);
+    free(query);
+    orm_connection_release_child(connection);
+  }
+}
+
+static void orm_query_release_execution(void *context) {
+  orm_query_t *query = context;
+  orm_query_action(query, orm_owner_release_dependent(&query->owner));
+}
+
+orm_status_t ORM_C_CALL orm_connection_close(orm_connection_t *connection,
+                                             orm_error_t *error) {
+  orm_owner_action action = ORM_OWNER_KEEP;
+  orm_status_t status = connection != NULL
+      ? orm_owner_begin_close(&connection->owner, &action)
+      : ORM_STATUS_INVALID_ARGUMENT;
+  if (status == ORM_STATUS_OK) orm_connection_action(connection, action);
+  orm_error_set(error, status, NULL);
+  return status;
+}
+
+void ORM_C_CALL orm_connection_retain(orm_connection_t *connection) {
+  if (connection == NULL || orm_owner_try_retain(&connection->owner) != ORM_STATUS_OK)
+    abort();
+}
+
+void ORM_C_CALL orm_connection_release(orm_connection_t *connection) {
+  if (connection != NULL)
+    orm_connection_action(connection, orm_owner_release_reference(&connection->owner));
+}
+
+orm_status_t ORM_C_CALL orm_query_close(orm_query_t *query, orm_error_t *error) {
+  orm_owner_action action = ORM_OWNER_KEEP;
+  orm_status_t status = query != NULL
+      ? orm_owner_begin_close(&query->owner, &action) : ORM_STATUS_INVALID_ARGUMENT;
+  if (status == ORM_STATUS_OK) orm_query_action(query, action);
+  orm_error_set(error, status, NULL);
+  return status;
+}
+
+void ORM_C_CALL orm_query_retain(orm_query_t *query) {
+  if (query == NULL || orm_owner_try_retain(&query->owner) != ORM_STATUS_OK) abort();
+}
+
+void ORM_C_CALL orm_query_release(orm_query_t *query) {
+  if (query != NULL)
+    orm_query_action(query, orm_owner_release_reference(&query->owner));
+}
+#endif
+
 bool orm_view_valid(vstr value, bool allow_empty) {
   return (allow_empty || value.len != 0u) &&
          (value.len == 0u || value.data != NULL);
@@ -224,28 +304,57 @@ static orm_status_t orm_query_make(orm_connection_t *connection, vstr input,
                                    orm_error_t *error) {
   orm_query_t *query;
   orm_status_t status;
-  if (out_query != NULL)
-    *out_query = NULL;
-  if (connection == NULL || !orm_backend_valid(&connection->backend) ||
-      out_query == NULL) {
-    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
-                  "invalid ORM query creation arguments");
+  if (out_query != NULL) *out_query = NULL;
+  if (connection == NULL || out_query == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "invalid ORM query creation arguments");
     return ORM_STATUS_INVALID_ARGUMENT;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_admit(&connection->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "connection cannot admit a query");
+    return status;
+  }
+#endif
+  if (!orm_backend_valid(&connection->backend)) {
+    status = ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM query creation arguments");
+    goto release_parent;
   }
   query = (orm_query_t *)calloc(1u, sizeof(*query));
   if (query == NULL) {
-    orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY, "allocate ORM query");
-    return ORM_STATUS_OUT_OF_MEMORY;
+    status = ORM_STATUS_OUT_OF_MEMORY;
+    orm_error_set(error, status, "allocate ORM query");
+    goto release_parent;
   }
   query->connection = connection;
-  status = orm_plan_init(&query->plan, kind, input, &connection->limits, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_init(&query->owner, ORM_OWNER_DEFAULT_REFERENCES,
+                          ORM_OWNER_DEFAULT_DEPENDENTS);
   if (status != ORM_STATUS_OK) {
     free(query);
+    orm_error_set(error, status, "initialize query owner");
+    goto release_parent;
+  }
+#endif
+  status = orm_plan_init(&query->plan, kind, input, &connection->limits, error);
+  if (status != ORM_STATUS_OK) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_query_release(query);
     return status;
+#else
+    free(query);
+    goto release_parent;
+#endif
   }
   *out_query = query;
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
+release_parent:
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_release_child(connection);
+#endif
+  return status;
 }
 
 typedef struct orm_lazy_command_state {
@@ -287,7 +396,16 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
   return output;
 }
 
-static void orm_lazy_command_destroy(void *context) { free(context); }
+static void orm_lazy_command_destroy(void *context) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_lazy_command_state *state = context;
+  orm_query_t *query = state->query;
+#endif
+  free(context);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_query_release_execution(query);
+#endif
+}
 
 static const orm_command_driver_ops orm_lazy_command_ops = {
     sizeof(orm_command_driver_ops), ORM_COMMAND_DRIVER_OPS_ABI_VERSION,
@@ -301,24 +419,30 @@ static orm_status_t orm_open_command(orm_query_t *query,
   orm_lazy_command_state *state;
   orm_command_driver driver;
   orm_status_t status;
-  if (query == NULL || query->connection == NULL || out_publisher == NULL ||
-      cflow_publisher_valid(out_publisher) ||
-      (query->plan.kind == ORM_QUERY_SELECT ||
-       (query->plan.kind == ORM_QUERY_RAW &&
-        orm_query_returns_rows(&query->plan)))) {
-    orm_error_set(error, out_publisher != NULL && cflow_publisher_valid(out_publisher)
-                             ? ORM_STATUS_INVALID_STATE
-                             : ORM_STATUS_INVALID_ARGUMENT,
-                  "invalid ORM command Publisher open");
-    return out_publisher != NULL && cflow_publisher_valid(out_publisher)
-               ? ORM_STATUS_INVALID_STATE
-               : ORM_STATUS_INVALID_ARGUMENT;
+  if (query == NULL || out_publisher == NULL || cflow_publisher_valid(out_publisher)) {
+    status = out_publisher != NULL && cflow_publisher_valid(out_publisher)
+                 ? ORM_STATUS_INVALID_STATE : ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM command Publisher open");
+    return status;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_admit(&query->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "query cannot admit a Publisher");
+    return status;
+  }
+#endif
+  if (query->connection == NULL || query->plan.kind == ORM_QUERY_SELECT ||
+      (query->plan.kind == ORM_QUERY_RAW && orm_query_returns_rows(&query->plan))) {
+    status = ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM command Publisher open");
+    goto release_query;
   }
   state = (orm_lazy_command_state *)calloc(1u, sizeof(*state));
   if (state == NULL) {
-    orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
-                  "allocate lazy ORM command");
-    return ORM_STATUS_OUT_OF_MEMORY;
+    status = ORM_STATUS_OUT_OF_MEMORY;
+    orm_error_set(error, status, "allocate lazy ORM command");
+    goto release_query;
   }
   state->query = query;
   state->database = database;
@@ -326,8 +450,12 @@ static orm_status_t orm_open_command(orm_query_t *query,
   driver.ops = &orm_lazy_command_ops;
   driver.context = state;
   status = orm_command_publisher_init(out_publisher, &driver, error);
-  if (status != ORM_STATUS_OK)
-    free(state);
+  if (status == ORM_STATUS_OK) return status;
+  free(state);
+release_query:
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_query_release_execution(query);
+#endif
   return status;
 }
 
@@ -344,10 +472,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   if (query == NULL || query->connection == NULL || config == NULL ||
       config->struct_size != sizeof(*config) ||
       config->abi_version != ORM_C_ABI_VERSION || config->row_shape == NULL ||
-      out_publisher == NULL || cflow_publisher_valid(out_publisher) ||
-      (query->plan.kind != ORM_QUERY_SELECT &&
-       !(query->plan.kind == ORM_QUERY_RAW &&
-         orm_query_returns_rows(&query->plan)))) {
+      out_publisher == NULL || cflow_publisher_valid(out_publisher)) {
     orm_error_set(error, out_publisher != NULL && cflow_publisher_valid(out_publisher)
                              ? ORM_STATUS_INVALID_STATE
                              : ORM_STATUS_INVALID_ARGUMENT,
@@ -355,6 +480,19 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
     return out_publisher != NULL && cflow_publisher_valid(out_publisher)
                ? ORM_STATUS_INVALID_STATE
                : ORM_STATUS_INVALID_ARGUMENT;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_admit(&query->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "query cannot admit a row Publisher");
+    return status;
+  }
+#endif
+  if (query->plan.kind != ORM_QUERY_SELECT &&
+      !(query->plan.kind == ORM_QUERY_RAW && orm_query_returns_rows(&query->plan))) {
+    status = ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM row Publisher open");
+    goto release_query;
   }
   status = database != NULL
                ? database->ops->open_cursor(
@@ -364,13 +502,18 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                      transaction->context, &query->plan,
                      &query->connection->limits, &cursor, error);
   if (status != ORM_STATUS_OK)
-    return status;
+    goto release_query;
   if (!orm_row_cursor_valid(&cursor)) {
     orm_row_cursor_dispose(&cursor);
     orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
                   "ORM backend returned an invalid cursor");
-    return ORM_STATUS_INTERNAL_ERROR;
+    status = ORM_STATUS_INTERNAL_ERROR;
+    goto release_query;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  cursor.owner = query;
+  cursor.release_owner = orm_query_release_execution;
+#endif
   publisher_config = (orm_cbind_publisher_config)ORM_CBIND_PUBLISHER_CONFIG_INIT(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
@@ -384,11 +527,17 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
       !cflow_publisher_timeout(&timed_publisher, out_publisher,
                             cflow_duration_from_ns(wait_timeout_ns))) {
     cflow_publisher_destroy(out_publisher);
+    memset(out_publisher, 0, sizeof(*out_publisher));
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
                   "allocate ORM row WAIT timeout source");
     return ORM_STATUS_OUT_OF_MEMORY;
   }
   if (cflow_publisher_valid(&timed_publisher)) *out_publisher = timed_publisher;
+  return status;
+release_query:
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_query_release_execution(query);
+#endif
   return status;
 }
 
@@ -495,17 +644,30 @@ orm_status_t ORM_C_CALL orm_connect_with_factory_v1(
                   "ORM backend factory returned an invalid handle");
     return ORM_STATUS_INTERNAL_ERROR;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_init(&connection->owner, ORM_OWNER_DEFAULT_REFERENCES,
+                          ORM_OWNER_DEFAULT_DEPENDENTS);
+  if (status != ORM_STATUS_OK) {
+    connection->backend.ops->destroy(connection->backend.context);
+    free(connection);
+    orm_error_set(error, status, "initialize connection owner");
+    return status;
+  }
+#endif
   *out_connection = connection;
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }
 
 void ORM_C_CALL orm_disconnect(orm_connection_t *connection) {
-  if (connection == NULL)
-    return;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_release(connection);
+#else
+  if (connection == NULL) return;
   if (connection->backend.ops != NULL && connection->backend.context != NULL)
     connection->backend.ops->destroy(connection->backend.context);
   free(connection);
+#endif
 }
 
 orm_status_t ORM_C_CALL orm_transaction_begin(
@@ -515,22 +677,42 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
   orm_status_t status;
   if (out_transaction != NULL)
     *out_transaction = NULL;
-  if (connection == NULL || !orm_backend_valid(&connection->backend) ||
+  if (connection == NULL ||
       out_transaction == NULL || !orm_valid_isolation(isolation)) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                   "invalid ORM transaction arguments");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_admit(&connection->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "connection cannot admit a transaction");
+    return status;
+  }
+#endif
+  if (!orm_backend_valid(&connection->backend)) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_release_child(connection);
+#endif
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "invalid ORM transaction arguments");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   transaction = (orm_transaction_t *)calloc(1u, sizeof(*transaction));
   if (transaction == NULL) {
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
                   "allocate ORM transaction");
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_release_child(connection);
+#endif
     return ORM_STATUS_OUT_OF_MEMORY;
   }
   status = connection->backend.ops->begin_transaction(
       connection->backend.context, isolation, &transaction->backend, error);
   if (status != ORM_STATUS_OK) {
     free(transaction);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_release_child(connection);
+#endif
     return status;
   }
   if (!orm_transaction_backend_valid(&transaction->backend)) {
@@ -539,6 +721,9 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
         transaction->backend.context != NULL)
       transaction->backend.ops->destroy(transaction->backend.context);
     free(transaction);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_release_child(connection);
+#endif
     orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
                   "backend returned an invalid transaction");
     return ORM_STATUS_INTERNAL_ERROR;
@@ -635,7 +820,13 @@ void ORM_C_CALL orm_transaction_destroy(orm_transaction_t *transaction) {
       transaction->backend.ops->destroy != NULL &&
       transaction->backend.context != NULL)
     transaction->backend.ops->destroy(transaction->backend.context);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_t *connection = transaction->connection;
+#endif
   free(transaction);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_release_child(connection);
+#endif
 }
 
 orm_status_t ORM_C_CALL orm_query_create(orm_connection_t *connection,
@@ -668,18 +859,21 @@ orm_status_t ORM_C_CALL orm_raw(orm_connection_t *connection, vstr sql,
 }
 
 void ORM_C_CALL orm_query_destroy(orm_query_t *query) {
-  if (query == NULL)
-    return;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_query_release(query);
+#else
+  if (query == NULL) return;
   orm_plan_destroy(&query->plan);
   free(query);
+#endif
 }
 
-orm_status_t ORM_C_CALL orm_query_select_all(orm_query_t *query,
+static orm_status_t orm_query_select_all_unlocked(orm_query_t *query,
                                             orm_error_t *error) {
   return orm_plan_select_all(query != NULL ? &query->plan : NULL, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_add_column(orm_query_t *query, vstr column,
+static orm_status_t orm_query_add_column_unlocked(orm_query_t *query, vstr column,
                                             orm_error_t *error) {
   if (query == NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
@@ -689,7 +883,7 @@ orm_status_t ORM_C_CALL orm_query_add_column(orm_query_t *query, vstr column,
                              error);
 }
 
-orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, vstr column,
+static orm_status_t orm_query_set_unlocked(orm_query_t *query, vstr column,
                                      orm_value_t value, orm_error_t *error) {
   if (query == NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
@@ -699,7 +893,7 @@ orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, vstr column,
                                  &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, vstr column,
+static orm_status_t orm_query_where_unlocked(orm_query_t *query, vstr column,
                                        orm_compare_t comparison,
                                        orm_value_t value,
                                        orm_error_t *error) {
@@ -711,7 +905,7 @@ orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, vstr column,
                                 &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_where_key(orm_query_t *query,
+static orm_status_t orm_query_where_key_unlocked(orm_query_t *query,
                                             const orm_key_part_t *parts,
                                             uint32_t part_count,
                                             orm_error_t *error) {
@@ -723,7 +917,7 @@ orm_status_t ORM_C_CALL orm_query_where_key(orm_query_t *query,
                           &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t value,
+static orm_status_t orm_query_bind_unlocked(orm_query_t *query, orm_value_t value,
                                       orm_error_t *error) {
   if (query == NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
@@ -733,7 +927,7 @@ orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t value,
                            error);
 }
 
-orm_status_t ORM_C_CALL orm_query_order_by(orm_query_t *query, vstr column,
+static orm_status_t orm_query_order_by_unlocked(orm_query_t *query, vstr column,
                                           orm_order_t order,
                                           orm_error_t *error) {
   if (query == NULL) {
@@ -744,7 +938,7 @@ orm_status_t ORM_C_CALL orm_query_order_by(orm_query_t *query, vstr column,
                             &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit,
+static orm_status_t orm_query_set_limit_unlocked(orm_query_t *query, uint64_t limit,
                                            orm_error_t *error) {
   if (query == NULL || query->plan.kind != ORM_QUERY_SELECT) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
@@ -762,7 +956,7 @@ orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit,
   return ORM_STATUS_OK;
 }
 
-orm_status_t ORM_C_CALL orm_query_set_offset(orm_query_t *query,
+static orm_status_t orm_query_set_offset_unlocked(orm_query_t *query,
                                             uint64_t offset,
                                             orm_error_t *error) {
   if (query == NULL || query->plan.kind != ORM_QUERY_SELECT) {
@@ -775,6 +969,62 @@ orm_status_t ORM_C_CALL orm_query_set_offset(orm_query_t *query,
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }
+
+/* Locked wrapper around the existing plan mutations. This contains no native
+ * backend callback; the installed ABI 4 build keeps its original admission. */
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+#define ORM_MUTATION_RETURN(query_, error_, expression_) do { \
+  if ((query_) == NULL) return (expression_); \
+  orm_status_t admission_ = orm_owner_begin_write(&(query_)->owner); \
+  if (admission_ != ORM_STATUS_OK) { \
+    orm_error_set((error_), admission_, "query mutation is not admitted"); \
+    return admission_; \
+  } \
+  orm_status_t result_ = (expression_); \
+  orm_owner_end_write(&(query_)->owner); \
+  return result_; \
+} while (0)
+#else
+#define ORM_MUTATION_RETURN(query_, error_, expression_) return (expression_)
+#endif
+
+orm_status_t ORM_C_CALL orm_query_select_all(orm_query_t *query, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_select_all_unlocked(query, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_add_column(orm_query_t *query, vstr column, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_add_column_unlocked(query, column, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, vstr column, orm_value_t value, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_set_unlocked(query, column, value, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, vstr column, orm_compare_t comparison, orm_value_t value, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_where_unlocked(query, column, comparison, value, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_where_key(orm_query_t *query, const orm_key_part_t *parts, uint32_t part_count, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_where_key_unlocked(query, parts, part_count, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t value, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_bind_unlocked(query, value, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_order_by(orm_query_t *query, vstr column, orm_order_t order, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_order_by_unlocked(query, column, order, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_set_limit_unlocked(query, limit, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_set_offset(orm_query_t *query, uint64_t offset, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_set_offset_unlocked(query, offset, error));
+}
+
+#undef ORM_MUTATION_RETURN
 
 orm_status_t ORM_C_CALL orm_query_open_flow(
     orm_query_t *query, const orm_flow_config_t *config,

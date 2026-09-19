@@ -46,6 +46,13 @@ void orm_row_cursor_dispose(orm_row_cursor *cursor) {
   cursor->ops = NULL;
   cursor->context = NULL;
   cursor->wait_timeout_ns = 0u;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  void *owner = cursor->owner;
+  void (*release_owner)(void *) = cursor->release_owner;
+  cursor->owner = NULL;
+  cursor->release_owner = NULL;
+  if (release_owner != NULL) release_owner(owner);
+#endif
 }
 
 static int orm_cbind_publisher_config_valid(
@@ -189,7 +196,7 @@ static void orm_cbind_publisher_destroy(void *state_) {
     return;
   if (state->terminal == CFLOW_PUBLISHER_OPEN)
     orm_cbind_publisher_cancel_cursor(state);
-  state->cursor.ops->destroy(state->cursor.context);
+  orm_row_cursor_dispose(&state->cursor);
   free(state->scratch);
   free(state);
 }
@@ -268,6 +275,10 @@ orm_status_t orm_cbind_publisher_init(cflow_publisher *out_publisher,
   cursor->ops = NULL;
   cursor->context = NULL;
   cursor->wait_timeout_ns = 0u;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  cursor->owner = NULL;
+  cursor->release_owner = NULL;
+#endif
   orm_cbind_set_error(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }

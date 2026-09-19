@@ -10,6 +10,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+#include "orm_owner.h"
+#endif
+
 enum {
   ORM_BACKEND_OPS_ABI_VERSION = 1u,
   ORM_TRANSACTION_BACKEND_OPS_ABI_VERSION = 1u
@@ -131,11 +135,17 @@ struct orm_backend {
 };
 
 struct orm_connection {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+#endif
   orm_limits limits;
   orm_backend backend;
 };
 
 struct orm_query {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+#endif
   orm_connection_t *connection;
   orm_query_plan plan;
 };
