@@ -1,5 +1,9 @@
+/* This translation unit shares the checked-owner runner. */
+#define TINYTEST_NO_MAIN
 #include "orm_internal.h"
 #include <tinytest.h>
+#include <cmeta/struct.h>
+#include <stddef.h>
 #include <string.h>
 
 /* Observers delegate to real SQLite operations without supplying any owner
@@ -18,6 +22,27 @@ static unsigned destroy_calls;
 static unsigned rollback_calls;
 static unsigned commit_calls;
 
+static int probe_commit_admission;
+static orm_status_t nested_admission;
+
+Struct(tx_owner_row, (int, id));
+static const cmeta_type_identity row_identity = CMETA_TYPE_ID_ATOM_INIT("orm.owner.TxRow");
+static const cmeta_type_traits row_traits = {
+  .flags = CMETA_TRAIT_TRIVIAL_COPY | CMETA_TRAIT_TRIVIAL_DESTROY};
+static const cmeta_type_desc row_type = {
+  .name = "tx_owner_row", .size = sizeof(tx_owner_row),
+  .align = _Alignof(tx_owner_row), .kind = CMETA_T_OBJECT,
+  .traits = &row_traits, .identity = &row_identity};
+static const cmeta_data_field_desc row_fields[] = {
+  {"orm.owner.TxRow.id", "id", offsetof(tx_owner_row, id), &cmeta_data_int}};
+static const cmeta_data_struct_shape row_shape = {
+  .layout = StructMeta(tx_owner_row), .fields = row_fields, .field_count = 1u};
+static const cmeta_data_desc row_data = {
+  .struct_size = offsetof(cmeta_data_desc, shape) + sizeof(((cmeta_data_desc *)0)->shape),
+  .abi_version = CMETA_DATA_DESC_ABI_VERSION,
+  .stable_id = "orm.owner.TxRow.data", .display_name = "TxRow",
+  .kind = CMETA_DATA_STRUCT, .storage_type = &row_type, .shape = &row_shape};
+
 static void observed_destroy(void *context) {
   ++destroy_calls;
   native_destroy(context);
@@ -28,6 +53,12 @@ static orm_status_t observed_rollback(void *context, orm_error_t *out_error) {
 }
 static orm_status_t observed_commit(void *context, orm_error_t *out_error) {
   ++commit_calls;
+  if (probe_commit_admission) {
+    orm_error_t nested_error;
+    orm_error_init(&nested_error);
+    nested_admission = orm_query_open_command_flow_in_transaction(
+        query, transaction, &second, &nested_error);
+  }
   return native_commit(context, out_error);
 }
 static void drop_publisher(cflow_publisher *publisher) {
@@ -47,6 +78,15 @@ static void open_command(cflow_publisher *publisher) {
   check_true(cflow_publisher_valid(publisher));
 }
 
+static void open_rows(const char *sql) {
+  orm_flow_config_t config;
+  orm_query_destroy(query); query = NULL;
+  check_equal(orm_raw(connection, orm_view(sql), &query, &error), ORM_STATUS_OK);
+  orm_flow_config(&config, &row_data);
+  check_equal(orm_query_open_flow_in_transaction(
+                  query, transaction, &config, &first, &error), ORM_STATUS_OK);
+}
+
 spec("real SQLite transaction Publisher ownership") {
   (void)ttest_config__;
   before_each() {
@@ -56,6 +96,7 @@ spec("real SQLite transaction Publisher ownership") {
     connection = NULL; transaction = NULL; query = NULL;
     memset(&first, 0, sizeof(first)); memset(&second, 0, sizeof(second));
     destroy_calls = 0u; rollback_calls = 0u; commit_calls = 0u;
+    probe_commit_admission = 0; nested_admission = ORM_STATUS_OK;
     orm_error_init(&error); orm_config(&config);
     filename.keyword = orm_view("filename"); filename.value = orm_view(":memory:");
     config.driver = orm_view("sqlite"); config.options = &filename;
@@ -77,8 +118,9 @@ spec("real SQLite transaction Publisher ownership") {
                         &query, &error), ORM_STATUS_OK);
   }
   after_each() {
-    /* Old-core lazy command destroy frees its state without calling the native
-     * transaction; never resume after a failed retention check. */
+    /* Old-core lazy command cleanup only frees command state; SQLite row cursor
+     * cleanup only finalizes its statement. Neither reads the freed transaction.
+     * Never resume after a failed retention check. */
     drop_publisher(&second); drop_publisher(&first);
     orm_query_destroy(query); query = NULL;
     drop_transaction(); orm_disconnect(connection); connection = NULL;
@@ -155,5 +197,47 @@ spec("real SQLite transaction Publisher ownership") {
     check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
     drop_transaction();
     check_equal(destroy_calls, 1u); check_equal(rollback_calls, 0u);
+  }
+  it("retains a released transaction through actual row decoding") {
+    tx_owner_row row = {0};
+    open_rows("select 7 as id"); drop_transaction();
+    check_equal(destroy_calls, 0u);
+    const cflow_step step = cflow_publisher_resume(&first, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_VALUE); check_equal(row.id, 7);
+    check_equal(rollback_calls, 0u); check_equal(destroy_calls, 0u);
+    drop_publisher(&first);
+    check_equal(rollback_calls, 1u); check_equal(destroy_calls, 1u);
+  }
+  it("rejects commit while an unconsumed row cursor exists") {
+    open_rows("select 7 as id");
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_BUSY);
+    check_equal(commit_calls, 0u);
+    drop_publisher(&first);
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
+  }
+  it("retains the cancelled row cursor lease until its Publisher is destroyed") {
+    open_rows("select 7 as id"); cflow_publisher_cancel(&first);
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_BUSY);
+    check_equal(rollback_calls, 0u);
+    drop_publisher(&first);
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_OK);
+  }
+  it("releases transaction admission after native row open fails") {
+    orm_flow_config_t config;
+    orm_query_destroy(query); query = NULL;
+    check_equal(orm_raw(connection, orm_view("select id from missing_tx_table"),
+                        &query, &error), ORM_STATUS_OK);
+    orm_flow_config(&config, &row_data);
+    check_equal(orm_query_open_flow_in_transaction(query, transaction, &config,
+                                                   &first, &error), ORM_STATUS_SQL_ERROR);
+    check_false(cflow_publisher_valid(&first));
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
+    drop_transaction(); check_equal(destroy_calls, 1u); check_equal(rollback_calls, 0u);
+  }
+  it("rejects new Publisher admission during an actual native commit callback") {
+    probe_commit_admission = 1;
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
+    check_equal(nested_admission, ORM_STATUS_BUSY);
+    check_false(cflow_publisher_valid(&second)); check_equal(commit_calls, 1u);
   }
 }
