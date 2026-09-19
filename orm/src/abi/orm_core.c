@@ -37,6 +37,313 @@ void orm_error_set(orm_error_t *error, orm_status_t status,
                                         : orm_status_message(status)));
 }
 
+
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+/* This candidate is compiled only into the non-installed native test core.
+ * Resource cleanup runs after the control lock is released. */
+/* Failure is terminal for business operations, but never consumes a hold or
+ * closes resources. A query/Pub can outlive its application's connection ref. */
+static orm_status_t orm_connection_business_status(orm_connection_t *connection,
+                                                    orm_error_t *error) {
+  orm_status_t status;
+  orm_status_t cause;
+  if (connection == NULL) return ORM_STATUS_INVALID_ARGUMENT;
+  salts_mutex_lock(&connection->owner.mutex);
+  cause = connection->failure;
+  status = cause == ORM_STATUS_OK ? ORM_STATUS_OK : ORM_STATUS_INVALID_STATE;
+  salts_mutex_unlock(&connection->owner.mutex);
+  if (status != ORM_STATUS_OK)
+    orm_error_set(error, status, cause == ORM_OWNER_STATUS_CLEANUP_FAILED
+        ? "connection is unusable after a cleanup failure"
+        : "connection is unusable after an uncertain commit");
+  return status;
+}
+
+static void orm_connection_mark_unknown(orm_connection_t *connection) {
+  salts_mutex_lock(&connection->owner.mutex);
+  connection->failure = ORM_OWNER_STATUS_COMMIT_UNKNOWN;
+  salts_mutex_unlock(&connection->owner.mutex);
+}
+
+static orm_status_t orm_connection_admit_business(orm_connection_t *connection) {
+  orm_owner *owner = &connection->owner;
+  orm_status_t status = ORM_STATUS_OK;
+  salts_mutex_lock(&owner->mutex);
+  if (connection->failure != ORM_STATUS_OK || owner->phase != ORM_OWNER_OPEN ||
+      owner->references == 0u)
+    status = ORM_STATUS_INVALID_STATE;
+  else if (owner->dependents >= owner->max_dependents)
+    status = ORM_STATUS_LIMIT_EXCEEDED;
+  else
+    ++owner->dependents;
+  salts_mutex_unlock(&owner->mutex);
+  return status;
+}
+
+static void orm_connection_action(orm_connection_t *connection,
+                                  orm_owner_action action) {
+  if (action == ORM_OWNER_CLOSE_RESOURCES) {
+    if (connection->backend.ops != NULL && connection->backend.context != NULL)
+      connection->backend.ops->destroy(connection->backend.context);
+    memset(&connection->backend, 0, sizeof(connection->backend));
+    action = orm_owner_finish_close(&connection->owner);
+  }
+  if (action == ORM_OWNER_FREE_MEMORY) {
+    orm_owner_dispose(&connection->owner);
+    free(connection);
+  }
+}
+
+static void orm_connection_release_child(orm_connection_t *connection) {
+  orm_connection_action(connection, orm_owner_release_dependent(&connection->owner));
+}
+
+/* Final release has no synchronous error receiver. The default policy cannot
+ * silently continue; an explicit host handler may return, but cannot recover
+ * or unload the quarantined native state. */
+static void orm_cleanup_fail_fast(const orm_error_t *native_error) {
+  (void)fprintf(stderr, "ORM cleanup failed (%d): %s\n",
+                 (int)native_error->status, native_error->message);
+  (void)fflush(stderr);
+  abort();
+}
+
+static void orm_transaction_quarantine(orm_transaction_t *transaction,
+                                       const orm_error_t *native_error) {
+  orm_connection_t *connection = transaction->connection;
+  orm_owner_cleanup_policy policy;
+  /* Lock order matches admission: parent before child. Neither native cleanup
+   * nor the host error handler executes while either control lock is held. */
+  salts_mutex_lock(&connection->owner.mutex);
+  salts_mutex_lock(&transaction->owner.mutex);
+  if (transaction->owner.phase != ORM_OWNER_CLOSING ||
+      transaction->owner.dependents != 0u) abort();
+  transaction->cleanup_error = *native_error;
+  transaction->owner.phase = ORM_OWNER_CLOSE_FAILED;
+  if (connection->failure != ORM_OWNER_STATUS_CLEANUP_FAILED)
+    connection->cleanup_error = *native_error;
+  connection->failure = ORM_OWNER_STATUS_CLEANUP_FAILED;
+  connection->owner.phase = ORM_OWNER_CLOSE_FAILED;
+  policy = connection->cleanup_policy;
+  salts_mutex_unlock(&transaction->owner.mutex);
+  salts_mutex_unlock(&connection->owner.mutex);
+  if (policy.notify != NULL)
+    policy.notify(policy.context, &transaction->cleanup_error);
+  else
+    orm_cleanup_fail_fast(&transaction->cleanup_error);
+}
+
+/* Publishers/native calls have already returned before this action is claimed.
+ * A failed final rollback stops BEFORE native destroy and parent-hold release;
+ * native destroy's void ABI cannot report or prove successful error recovery. */
+static void orm_transaction_action(orm_transaction_t *transaction,
+                                   orm_owner_action action) {
+  if (action == ORM_OWNER_CLOSE_RESOURCES) {
+    if (transaction->state == ORM_TRANSACTION_ACTIVE &&
+        orm_transaction_backend_valid(&transaction->backend)) {
+      orm_error_t cleanup_error;
+      orm_error_init(&cleanup_error);
+      const orm_status_t status = transaction->backend.ops->rollback(
+          transaction->backend.context, &cleanup_error);
+      if (status != ORM_STATUS_OK) {
+        /* The returned status is authoritative even when a backend leaves the
+         * optional error buffer unfilled. The host owns and bounds this copy. */
+        cleanup_error.struct_size = sizeof(cleanup_error);
+        cleanup_error.status = status;
+        cleanup_error.message[sizeof(cleanup_error.message) - 1u] = '\0';
+        if (cleanup_error.message[0] == '\0')
+          orm_error_set(&cleanup_error, status, NULL);
+        orm_transaction_quarantine(transaction, &cleanup_error);
+        return;
+      }
+    }
+    if (transaction->backend.ops != NULL &&
+        transaction->backend.ops->destroy != NULL &&
+        transaction->backend.context != NULL)
+      transaction->backend.ops->destroy(transaction->backend.context);
+    memset(&transaction->backend, 0, sizeof(transaction->backend));
+    action = orm_owner_finish_close(&transaction->owner);
+  }
+  if (action == ORM_OWNER_FREE_MEMORY) {
+    orm_connection_t *connection = transaction->connection;
+    orm_owner_dispose(&transaction->owner);
+    free(transaction);
+    orm_connection_release_child(connection);
+  }
+}
+
+/* Native work and close admission share the owner lock. No native callback
+ * runs under it; CLOSING protects even a last-reference release in destroy. */
+orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
+                                              orm_error_t *error) {
+  orm_status_t status = ORM_STATUS_OK;
+  orm_owner_action action = ORM_OWNER_KEEP;
+  if (transaction == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "transaction handle is null");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  orm_owner *owner = &transaction->owner;
+  salts_mutex_lock(&owner->mutex);
+  if (owner->phase == ORM_OWNER_CLOSE_FAILED) {
+    status = ORM_OWNER_STATUS_CLEANUP_FAILED;
+  } else if (owner->phase == ORM_OWNER_CLOSED) {
+    /* A closed handle can still be held; close does not consume its reference. */
+  } else if (owner->dependents != 0u || transaction->operation_active ||
+             owner->phase == ORM_OWNER_CLOSING) {
+    status = ORM_STATUS_BUSY;
+  } else if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u ||
+             (transaction->state != ORM_TRANSACTION_COMMITTED &&
+              transaction->state != ORM_TRANSACTION_ROLLED_BACK &&
+              transaction->state != ORM_TRANSACTION_COMMIT_UNKNOWN)) {
+    status = ORM_STATUS_INVALID_STATE;
+  } else {
+    owner->phase = ORM_OWNER_CLOSING;
+    action = ORM_OWNER_CLOSE_RESOURCES;
+  }
+  salts_mutex_unlock(&owner->mutex);
+  if (status == ORM_STATUS_OK) orm_transaction_action(transaction, action);
+  orm_error_set(error, status, status == ORM_OWNER_STATUS_CLEANUP_FAILED
+      ? transaction->cleanup_error.message : NULL);
+  return status;
+}
+
+void ORM_C_CALL orm_transaction_retain(orm_transaction_t *transaction) {
+  if (transaction == NULL ||
+      orm_owner_try_retain(&transaction->owner) != ORM_STATUS_OK) abort();
+}
+
+void ORM_C_CALL orm_transaction_release(orm_transaction_t *transaction) {
+  if (transaction != NULL)
+    orm_transaction_action(transaction,
+                           orm_owner_release_reference(&transaction->owner));
+}
+
+static void orm_transaction_release_execution(void *context) {
+  orm_transaction_t *transaction = context;
+  orm_transaction_action(transaction,
+                         orm_owner_release_dependent(&transaction->owner));
+}
+
+static orm_status_t orm_transaction_admit(orm_transaction_t *transaction,
+                                          orm_error_t *error) {
+  orm_owner *owner = &transaction->owner;
+  orm_status_t status = ORM_STATUS_OK;
+  salts_mutex_lock(&owner->mutex);
+  if (transaction->operation_active)
+    status = ORM_STATUS_BUSY;
+  else if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u ||
+           transaction->state != ORM_TRANSACTION_ACTIVE)
+    status = ORM_STATUS_INVALID_STATE;
+  else if (owner->dependents >= owner->max_dependents)
+    status = ORM_STATUS_LIMIT_EXCEEDED;
+  else
+    ++owner->dependents;
+  salts_mutex_unlock(&owner->mutex);
+  orm_error_set(error, status, NULL);
+  return status;
+}
+
+static orm_status_t orm_transaction_begin_operation(
+    orm_transaction_t *transaction, orm_error_t *error) {
+  orm_status_t status;
+  if (transaction == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_STATE, "ORM transaction is not active");
+    return ORM_STATUS_INVALID_STATE;
+  }
+  status = orm_owner_begin_write(&transaction->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "transaction control operation is not admitted");
+    return status;
+  }
+  if (transaction->state != ORM_TRANSACTION_ACTIVE ||
+      !orm_transaction_backend_valid(&transaction->backend)) {
+    orm_owner_end_write(&transaction->owner);
+    orm_error_set(error, ORM_STATUS_INVALID_STATE, "ORM transaction is not active");
+    return ORM_STATUS_INVALID_STATE;
+  }
+  /* begin_write established zero dependents and a nonzero configured budget.
+   * Reserve completion before unlocking: a callback may release the last public
+   * reference, but cannot cause cleanup while it is still executing. */
+  transaction->operation_active = true;
+  transaction->owner.dependents = 1u;
+  orm_owner_end_write(&transaction->owner);
+  return ORM_STATUS_OK;
+}
+
+static void orm_transaction_end_operation(orm_transaction_t *transaction,
+                                          orm_status_t status,
+                                          orm_transaction_state next_state) {
+  if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
+    orm_connection_mark_unknown(transaction->connection);
+  salts_mutex_lock(&transaction->owner.mutex);
+  if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
+    transaction->state = ORM_TRANSACTION_COMMIT_UNKNOWN;
+  else if (status == ORM_STATUS_OK)
+    transaction->state = next_state;
+  transaction->operation_active = false;
+  salts_mutex_unlock(&transaction->owner.mutex);
+  orm_transaction_release_execution(transaction);
+}
+
+static void orm_query_action(orm_query_t *query, orm_owner_action action) {
+  if (action == ORM_OWNER_CLOSE_RESOURCES) {
+    orm_plan_destroy(&query->plan);
+    action = orm_owner_finish_close(&query->owner);
+  }
+  if (action == ORM_OWNER_FREE_MEMORY) {
+    orm_connection_t *connection = query->connection;
+    orm_owner_dispose(&query->owner);
+    free(query);
+    orm_connection_release_child(connection);
+  }
+}
+
+static void orm_query_release_execution(void *context) {
+  orm_query_t *query = context;
+  orm_query_action(query, orm_owner_release_dependent(&query->owner));
+}
+
+orm_status_t ORM_C_CALL orm_connection_close(orm_connection_t *connection,
+                                             orm_error_t *error) {
+  orm_owner_action action = ORM_OWNER_KEEP;
+  orm_status_t status = connection != NULL
+      ? orm_owner_begin_close(&connection->owner, &action)
+      : ORM_STATUS_INVALID_ARGUMENT;
+  if (status == ORM_STATUS_OK) orm_connection_action(connection, action);
+  orm_error_set(error, status, status == ORM_OWNER_STATUS_CLEANUP_FAILED
+      ? connection->cleanup_error.message : NULL);
+  return status;
+}
+
+void ORM_C_CALL orm_connection_retain(orm_connection_t *connection) {
+  if (connection == NULL || orm_owner_try_retain(&connection->owner) != ORM_STATUS_OK)
+    abort();
+}
+
+void ORM_C_CALL orm_connection_release(orm_connection_t *connection) {
+  if (connection != NULL)
+    orm_connection_action(connection, orm_owner_release_reference(&connection->owner));
+}
+
+orm_status_t ORM_C_CALL orm_query_close(orm_query_t *query, orm_error_t *error) {
+  orm_owner_action action = ORM_OWNER_KEEP;
+  orm_status_t status = query != NULL
+      ? orm_owner_begin_close(&query->owner, &action) : ORM_STATUS_INVALID_ARGUMENT;
+  if (status == ORM_STATUS_OK) orm_query_action(query, action);
+  orm_error_set(error, status, NULL);
+  return status;
+}
+
+void ORM_C_CALL orm_query_retain(orm_query_t *query) {
+  if (query == NULL || orm_owner_try_retain(&query->owner) != ORM_STATUS_OK) abort();
+}
+
+void ORM_C_CALL orm_query_release(orm_query_t *query) {
+  if (query != NULL)
+    orm_query_action(query, orm_owner_release_reference(&query->owner));
+}
+#endif
+
 bool orm_view_valid(vstr value, bool allow_empty) {
   return (allow_empty || value.len != 0u) &&
          (value.len == 0u || value.data != NULL);
@@ -224,34 +531,63 @@ static orm_status_t orm_query_make(orm_connection_t *connection, vstr input,
                                    orm_error_t *error) {
   orm_query_t *query;
   orm_status_t status;
-  if (out_query != NULL)
-    *out_query = NULL;
-  if (connection == NULL || !orm_backend_valid(&connection->backend) ||
-      out_query == NULL) {
-    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
-                  "invalid ORM query creation arguments");
+  if (out_query != NULL) *out_query = NULL;
+  if (connection == NULL || out_query == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "invalid ORM query creation arguments");
     return ORM_STATUS_INVALID_ARGUMENT;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_connection_admit_business(connection);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "connection cannot admit a query");
+    return status;
+  }
+#endif
+  if (!orm_backend_valid(&connection->backend)) {
+    status = ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM query creation arguments");
+    goto release_parent;
   }
   query = (orm_query_t *)calloc(1u, sizeof(*query));
   if (query == NULL) {
-    orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY, "allocate ORM query");
-    return ORM_STATUS_OUT_OF_MEMORY;
+    status = ORM_STATUS_OUT_OF_MEMORY;
+    orm_error_set(error, status, "allocate ORM query");
+    goto release_parent;
   }
   query->connection = connection;
-  status = orm_plan_init(&query->plan, kind, input, &connection->limits, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_init(&query->owner, ORM_OWNER_DEFAULT_REFERENCES,
+                          ORM_OWNER_DEFAULT_DEPENDENTS);
   if (status != ORM_STATUS_OK) {
     free(query);
+    orm_error_set(error, status, "initialize query owner");
+    goto release_parent;
+  }
+#endif
+  status = orm_plan_init(&query->plan, kind, input, &connection->limits, error);
+  if (status != ORM_STATUS_OK) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_query_release(query);
     return status;
+#else
+    free(query);
+    goto release_parent;
+#endif
   }
   *out_query = query;
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
+release_parent:
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_release_child(connection);
+#endif
+  return status;
 }
 
 typedef struct orm_lazy_command_state {
   orm_query_t *query;
   orm_backend *database;
-  orm_transaction_backend *transaction;
+  orm_transaction_t *transaction;
   char error_message[ORM_C_ERROR_MESSAGE_CAPACITY];
 } orm_lazy_command_state;
 
@@ -267,13 +603,22 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
     output.message = "invalid lazy ORM command state";
     return output;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_connection_business_status(state->query->connection, &error);
+  if (status != ORM_STATUS_OK) {
+    output.status = status;
+    (void)snprintf(state->error_message, sizeof(state->error_message), "%s", error.message);
+    output.message = state->error_message;
+    return output;
+  }
+#endif
   if (state->database != NULL) {
     status = state->database->ops->execute_command(
         state->database->context, &state->query->plan,
         &state->query->connection->limits, &affected, &error);
   } else {
-    status = state->transaction->ops->execute_command(
-        state->transaction->context, &state->query->plan,
+    status = state->transaction->backend.ops->execute_command(
+        state->transaction->backend.context, &state->query->plan,
         &state->query->connection->limits, &affected, &error);
   }
   output.status = status;
@@ -287,7 +632,18 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
   return output;
 }
 
-static void orm_lazy_command_destroy(void *context) { free(context); }
+static void orm_lazy_command_destroy(void *context) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_lazy_command_state *state = context;
+  orm_query_t *query = state->query;
+  orm_transaction_t *transaction = state->transaction;
+#endif
+  free(context);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (transaction != NULL) orm_transaction_release_execution(transaction);
+  orm_query_release_execution(query);
+#endif
+}
 
 static const orm_command_driver_ops orm_lazy_command_ops = {
     sizeof(orm_command_driver_ops), ORM_COMMAND_DRIVER_OPS_ABI_VERSION,
@@ -295,30 +651,46 @@ static const orm_command_driver_ops orm_lazy_command_ops = {
 
 static orm_status_t orm_open_command(orm_query_t *query,
                                      orm_backend *database,
-                                     orm_transaction_backend *transaction,
+                                     orm_transaction_t *transaction,
                                      cflow_publisher *out_publisher,
                                      orm_error_t *error) {
   orm_lazy_command_state *state;
   orm_command_driver driver;
   orm_status_t status;
-  if (query == NULL || query->connection == NULL || out_publisher == NULL ||
-      cflow_publisher_valid(out_publisher) ||
-      (query->plan.kind == ORM_QUERY_SELECT ||
-       (query->plan.kind == ORM_QUERY_RAW &&
-        orm_query_returns_rows(&query->plan)))) {
-    orm_error_set(error, out_publisher != NULL && cflow_publisher_valid(out_publisher)
-                             ? ORM_STATUS_INVALID_STATE
-                             : ORM_STATUS_INVALID_ARGUMENT,
-                  "invalid ORM command Publisher open");
-    return out_publisher != NULL && cflow_publisher_valid(out_publisher)
-               ? ORM_STATUS_INVALID_STATE
-               : ORM_STATUS_INVALID_ARGUMENT;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  bool transaction_held = false;
+#endif
+  if (query == NULL || out_publisher == NULL || cflow_publisher_valid(out_publisher)) {
+    status = out_publisher != NULL && cflow_publisher_valid(out_publisher)
+                 ? ORM_STATUS_INVALID_STATE : ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM command Publisher open");
+    return status;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_admit(&query->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "query cannot admit a Publisher");
+    return status;
+  }
+  status = orm_connection_business_status(query->connection, error);
+  if (status != ORM_STATUS_OK) goto release_query;
+  if (transaction != NULL) {
+    status = orm_transaction_admit(transaction, error);
+    if (status != ORM_STATUS_OK) goto release_query;
+    transaction_held = true;
+  }
+#endif
+  if (query->connection == NULL || query->plan.kind == ORM_QUERY_SELECT ||
+      (query->plan.kind == ORM_QUERY_RAW && orm_query_returns_rows(&query->plan))) {
+    status = ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM command Publisher open");
+    goto release_query;
   }
   state = (orm_lazy_command_state *)calloc(1u, sizeof(*state));
   if (state == NULL) {
-    orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
-                  "allocate lazy ORM command");
-    return ORM_STATUS_OUT_OF_MEMORY;
+    status = ORM_STATUS_OUT_OF_MEMORY;
+    orm_error_set(error, status, "allocate lazy ORM command");
+    goto release_query;
   }
   state->query = query;
   state->database = database;
@@ -326,13 +698,18 @@ static orm_status_t orm_open_command(orm_query_t *query,
   driver.ops = &orm_lazy_command_ops;
   driver.context = state;
   status = orm_command_publisher_init(out_publisher, &driver, error);
-  if (status != ORM_STATUS_OK)
-    free(state);
+  if (status == ORM_STATUS_OK) return status;
+  free(state);
+release_query:
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (transaction_held) orm_transaction_release_execution(transaction);
+  orm_query_release_execution(query);
+#endif
   return status;
 }
 
 static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
-                                  orm_transaction_backend *transaction,
+                                  orm_transaction_t *transaction,
                                   const orm_flow_config_t *config,
                                   cflow_publisher *out_publisher,
                                   orm_error_t *error) {
@@ -341,13 +718,13 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   cflow_publisher timed_publisher = {0};
   uint64_t wait_timeout_ns;
   orm_status_t status;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  bool transaction_held = false;
+#endif
   if (query == NULL || query->connection == NULL || config == NULL ||
       config->struct_size != sizeof(*config) ||
       config->abi_version != ORM_C_ABI_VERSION || config->row_shape == NULL ||
-      out_publisher == NULL || cflow_publisher_valid(out_publisher) ||
-      (query->plan.kind != ORM_QUERY_SELECT &&
-       !(query->plan.kind == ORM_QUERY_RAW &&
-         orm_query_returns_rows(&query->plan)))) {
+      out_publisher == NULL || cflow_publisher_valid(out_publisher)) {
     orm_error_set(error, out_publisher != NULL && cflow_publisher_valid(out_publisher)
                              ? ORM_STATUS_INVALID_STATE
                              : ORM_STATUS_INVALID_ARGUMENT,
@@ -356,21 +733,49 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                ? ORM_STATUS_INVALID_STATE
                : ORM_STATUS_INVALID_ARGUMENT;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_admit(&query->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "query cannot admit a row Publisher");
+    return status;
+  }
+  status = orm_connection_business_status(query->connection, error);
+  if (status != ORM_STATUS_OK) goto release_query;
+  if (transaction != NULL) {
+    status = orm_transaction_admit(transaction, error);
+    if (status != ORM_STATUS_OK) goto release_query;
+    transaction_held = true;
+  }
+#endif
+  if (query->plan.kind != ORM_QUERY_SELECT &&
+      !(query->plan.kind == ORM_QUERY_RAW && orm_query_returns_rows(&query->plan))) {
+    status = ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "invalid ORM row Publisher open");
+    goto release_query;
+  }
   status = database != NULL
                ? database->ops->open_cursor(
                      database->context, &query->plan,
                      &query->connection->limits, &cursor, error)
-               : transaction->ops->open_cursor(
-                     transaction->context, &query->plan,
+               : transaction->backend.ops->open_cursor(
+                     transaction->backend.context, &query->plan,
                      &query->connection->limits, &cursor, error);
   if (status != ORM_STATUS_OK)
-    return status;
+    goto release_query;
   if (!orm_row_cursor_valid(&cursor)) {
     orm_row_cursor_dispose(&cursor);
     orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
                   "ORM backend returned an invalid cursor");
-    return ORM_STATUS_INTERNAL_ERROR;
+    status = ORM_STATUS_INTERNAL_ERROR;
+    goto release_query;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  cursor.owner = query;
+  cursor.release_owner = orm_query_release_execution;
+  cursor.transaction_owner = transaction;
+  cursor.release_transaction_owner = transaction != NULL
+      ? orm_transaction_release_execution : NULL;
+#endif
   publisher_config = (orm_cbind_publisher_config)ORM_CBIND_PUBLISHER_CONFIG_INIT(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
@@ -384,11 +789,18 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
       !cflow_publisher_timeout(&timed_publisher, out_publisher,
                             cflow_duration_from_ns(wait_timeout_ns))) {
     cflow_publisher_destroy(out_publisher);
+    memset(out_publisher, 0, sizeof(*out_publisher));
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
                   "allocate ORM row WAIT timeout source");
     return ORM_STATUS_OUT_OF_MEMORY;
   }
   if (cflow_publisher_valid(&timed_publisher)) *out_publisher = timed_publisher;
+  return status;
+release_query:
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (transaction_held) orm_transaction_release_execution(transaction);
+  orm_query_release_execution(query);
+#endif
   return status;
 }
 
@@ -396,6 +808,10 @@ uint32_t ORM_C_CALL orm_c_abi_version(void) { return ORM_C_ABI_VERSION; }
 
 const char *ORM_C_CALL orm_status_message(orm_status_t status) {
   switch (status) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    case ORM_OWNER_STATUS_COMMIT_UNKNOWN: return "commit outcome unknown";
+    case ORM_OWNER_STATUS_CLEANUP_FAILED: return "cleanup failed";
+#endif
     case ORM_STATUS_OK: return "ok";
     case ORM_STATUS_INVALID_ARGUMENT: return "invalid argument";
     case ORM_STATUS_ABI_MISMATCH: return "ABI mismatch";
@@ -495,17 +911,30 @@ orm_status_t ORM_C_CALL orm_connect_with_factory_v1(
                   "ORM backend factory returned an invalid handle");
     return ORM_STATUS_INTERNAL_ERROR;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_init(&connection->owner, ORM_OWNER_DEFAULT_REFERENCES,
+                          ORM_OWNER_DEFAULT_DEPENDENTS);
+  if (status != ORM_STATUS_OK) {
+    connection->backend.ops->destroy(connection->backend.context);
+    free(connection);
+    orm_error_set(error, status, "initialize connection owner");
+    return status;
+  }
+#endif
   *out_connection = connection;
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }
 
 void ORM_C_CALL orm_disconnect(orm_connection_t *connection) {
-  if (connection == NULL)
-    return;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_release(connection);
+#else
+  if (connection == NULL) return;
   if (connection->backend.ops != NULL && connection->backend.context != NULL)
     connection->backend.ops->destroy(connection->backend.context);
   free(connection);
+#endif
 }
 
 orm_status_t ORM_C_CALL orm_transaction_begin(
@@ -515,22 +944,56 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
   orm_status_t status;
   if (out_transaction != NULL)
     *out_transaction = NULL;
-  if (connection == NULL || !orm_backend_valid(&connection->backend) ||
+  if (connection == NULL ||
       out_transaction == NULL || !orm_valid_isolation(isolation)) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                   "invalid ORM transaction arguments");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_connection_admit_business(connection);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "connection cannot admit a transaction");
+    return status;
+  }
+#endif
+  if (!orm_backend_valid(&connection->backend)) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_release_child(connection);
+#endif
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "invalid ORM transaction arguments");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   transaction = (orm_transaction_t *)calloc(1u, sizeof(*transaction));
   if (transaction == NULL) {
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
                   "allocate ORM transaction");
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_release_child(connection);
+#endif
     return ORM_STATUS_OUT_OF_MEMORY;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_owner_init(&transaction->owner, ORM_OWNER_DEFAULT_REFERENCES,
+                          ORM_OWNER_DEFAULT_DEPENDENTS);
+  if (status != ORM_STATUS_OK) {
+    free(transaction);
+    orm_connection_release_child(connection);
+    orm_error_set(error, status, "initialize transaction owner");
+    return status;
+  }
+  transaction->connection = connection;
+#endif
   status = connection->backend.ops->begin_transaction(
       connection->backend.context, isolation, &transaction->backend, error);
   if (status != ORM_STATUS_OK) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    transaction->backend = (orm_transaction_backend){0};
+    orm_transaction_action(transaction,
+                           orm_owner_release_reference(&transaction->owner));
+#else
     free(transaction);
+#endif
     return status;
   }
   if (!orm_transaction_backend_valid(&transaction->backend)) {
@@ -538,7 +1001,13 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
         transaction->backend.ops->destroy != NULL &&
         transaction->backend.context != NULL)
       transaction->backend.ops->destroy(transaction->backend.context);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    transaction->backend = (orm_transaction_backend){0};
+    orm_transaction_action(transaction,
+                           orm_owner_release_reference(&transaction->owner));
+#else
     free(transaction);
+#endif
     orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
                   "backend returned an invalid transaction");
     return ORM_STATUS_INTERNAL_ERROR;
@@ -554,6 +1023,10 @@ static orm_status_t orm_transaction_finish(orm_transaction_t *transaction,
                                            bool commit,
                                            orm_error_t *error) {
   orm_status_t status;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_transaction_begin_operation(transaction, error);
+  if (status != ORM_STATUS_OK) return status;
+#else
   if (transaction == NULL ||
       !orm_transaction_backend_valid(&transaction->backend) ||
       transaction->state != ORM_TRANSACTION_ACTIVE) {
@@ -561,13 +1034,29 @@ static orm_status_t orm_transaction_finish(orm_transaction_t *transaction,
                   "ORM transaction is not active");
     return ORM_STATUS_INVALID_STATE;
   }
+#endif
   status = commit ? transaction->backend.ops->commit(
                         transaction->backend.context, error)
                   : transaction->backend.ops->rollback(
                         transaction->backend.context, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  /* Once COMMIT was dispatched, connection loss cannot prove non-commit.
+   * Keep an explicit native unknown as well; neither path is replayable. */
+  if (commit && status == ORM_STATUS_CONNECTION_ERROR) {
+    status = ORM_OWNER_STATUS_COMMIT_UNKNOWN;
+    if (error != NULL && error->struct_size >= sizeof(*error)) {
+      error->status = status; /* Preserve the native diagnostic, not overlapping copy. */
+      if (error->message[0] == '\0')
+        orm_error_set(error, status, "commit outcome is unknown");
+    }
+  }
+  orm_transaction_end_operation(transaction, status,
+      commit ? ORM_TRANSACTION_COMMITTED : ORM_TRANSACTION_ROLLED_BACK);
+#else
   if (status == ORM_STATUS_OK)
     transaction->state = commit ? ORM_TRANSACTION_COMMITTED
                                 : ORM_TRANSACTION_ROLLED_BACK;
+#endif
   return status;
 }
 
@@ -582,46 +1071,77 @@ orm_status_t ORM_C_CALL orm_transaction_rollback(
 }
 
 typedef orm_status_t (*orm_savepoint_fn)(void *, vstr, orm_error_t *);
+typedef enum orm_savepoint_kind {
+  ORM_SAVEPOINT_CREATE,
+  ORM_SAVEPOINT_ROLLBACK,
+  ORM_SAVEPOINT_RELEASE
+} orm_savepoint_kind;
 
 static orm_status_t orm_transaction_savepoint_call(
-    orm_transaction_t *transaction, vstr name, orm_savepoint_fn function,
+    orm_transaction_t *transaction, vstr name, orm_savepoint_kind operation,
     orm_error_t *error) {
-  if (transaction == NULL || transaction->state != ORM_TRANSACTION_ACTIVE ||
-      !orm_view_valid(name, false) || memchr(name.data, '\0', name.len) != NULL ||
-      function == NULL) {
+  orm_status_t status;
+  orm_savepoint_fn function = NULL;
+  if (transaction == NULL || !orm_view_valid(name, false) ||
+      memchr(name.data, '\0', name.len) != NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
                   "invalid ORM savepoint operation");
     return ORM_STATUS_INVALID_STATE;
   }
-  return function(transaction->backend.context, name, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_transaction_begin_operation(transaction, error);
+  if (status != ORM_STATUS_OK) return status;
+#else
+  if (transaction->state != ORM_TRANSACTION_ACTIVE ||
+      !orm_transaction_backend_valid(&transaction->backend)) {
+    orm_error_set(error, ORM_STATUS_INVALID_STATE,
+                  "invalid ORM savepoint operation");
+    return ORM_STATUS_INVALID_STATE;
+  }
+#endif
+  /* Admission must precede reading the function table: checked-close clears it.
+   * Its completion hold also prevents concurrent cleanup during native calls. */
+  switch (operation) {
+  case ORM_SAVEPOINT_CREATE: function = transaction->backend.ops->savepoint; break;
+  case ORM_SAVEPOINT_ROLLBACK:
+    function = transaction->backend.ops->rollback_to_savepoint; break;
+  case ORM_SAVEPOINT_RELEASE:
+    function = transaction->backend.ops->release_savepoint; break;
+  }
+  if (function == NULL) {
+    status = ORM_STATUS_INVALID_STATE;
+    orm_error_set(error, status, "invalid ORM savepoint operation");
+  } else {
+    status = function(transaction->backend.context, name, error);
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_transaction_end_operation(transaction, status, ORM_TRANSACTION_ACTIVE);
+#endif
+  return status;
 }
 
 orm_status_t ORM_C_CALL orm_transaction_savepoint(
     orm_transaction_t *transaction, vstr name, orm_error_t *error) {
-  return orm_transaction_savepoint_call(
-      transaction, name,
-      transaction != NULL ? transaction->backend.ops->savepoint : NULL, error);
+  return orm_transaction_savepoint_call(transaction, name, ORM_SAVEPOINT_CREATE,
+                                        error);
 }
 
 orm_status_t ORM_C_CALL orm_transaction_rollback_to_savepoint(
     orm_transaction_t *transaction, vstr name, orm_error_t *error) {
-  return orm_transaction_savepoint_call(
-      transaction, name,
-      transaction != NULL ? transaction->backend.ops->rollback_to_savepoint
-                          : NULL,
-      error);
+  return orm_transaction_savepoint_call(transaction, name, ORM_SAVEPOINT_ROLLBACK,
+                                        error);
 }
 
 orm_status_t ORM_C_CALL orm_transaction_release_savepoint(
     orm_transaction_t *transaction, vstr name, orm_error_t *error) {
-  return orm_transaction_savepoint_call(
-      transaction, name,
-      transaction != NULL ? transaction->backend.ops->release_savepoint
-                          : NULL,
-      error);
+  return orm_transaction_savepoint_call(transaction, name, ORM_SAVEPOINT_RELEASE,
+                                        error);
 }
 
 void ORM_C_CALL orm_transaction_destroy(orm_transaction_t *transaction) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_transaction_release(transaction);
+#else
   orm_error_t ignored;
   if (transaction == NULL)
     return;
@@ -636,6 +1156,7 @@ void ORM_C_CALL orm_transaction_destroy(orm_transaction_t *transaction) {
       transaction->backend.context != NULL)
     transaction->backend.ops->destroy(transaction->backend.context);
   free(transaction);
+#endif
 }
 
 orm_status_t ORM_C_CALL orm_query_create(orm_connection_t *connection,
@@ -668,18 +1189,21 @@ orm_status_t ORM_C_CALL orm_raw(orm_connection_t *connection, vstr sql,
 }
 
 void ORM_C_CALL orm_query_destroy(orm_query_t *query) {
-  if (query == NULL)
-    return;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_query_release(query);
+#else
+  if (query == NULL) return;
   orm_plan_destroy(&query->plan);
   free(query);
+#endif
 }
 
-orm_status_t ORM_C_CALL orm_query_select_all(orm_query_t *query,
+static orm_status_t orm_query_select_all_unlocked(orm_query_t *query,
                                             orm_error_t *error) {
   return orm_plan_select_all(query != NULL ? &query->plan : NULL, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_add_column(orm_query_t *query, vstr column,
+static orm_status_t orm_query_add_column_unlocked(orm_query_t *query, vstr column,
                                             orm_error_t *error) {
   if (query == NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
@@ -689,7 +1213,7 @@ orm_status_t ORM_C_CALL orm_query_add_column(orm_query_t *query, vstr column,
                              error);
 }
 
-orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, vstr column,
+static orm_status_t orm_query_set_unlocked(orm_query_t *query, vstr column,
                                      orm_value_t value, orm_error_t *error) {
   if (query == NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
@@ -699,7 +1223,7 @@ orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, vstr column,
                                  &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, vstr column,
+static orm_status_t orm_query_where_unlocked(orm_query_t *query, vstr column,
                                        orm_compare_t comparison,
                                        orm_value_t value,
                                        orm_error_t *error) {
@@ -711,7 +1235,7 @@ orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, vstr column,
                                 &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_where_key(orm_query_t *query,
+static orm_status_t orm_query_where_key_unlocked(orm_query_t *query,
                                             const orm_key_part_t *parts,
                                             uint32_t part_count,
                                             orm_error_t *error) {
@@ -723,7 +1247,7 @@ orm_status_t ORM_C_CALL orm_query_where_key(orm_query_t *query,
                           &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t value,
+static orm_status_t orm_query_bind_unlocked(orm_query_t *query, orm_value_t value,
                                       orm_error_t *error) {
   if (query == NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "query handle is null");
@@ -733,7 +1257,7 @@ orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t value,
                            error);
 }
 
-orm_status_t ORM_C_CALL orm_query_order_by(orm_query_t *query, vstr column,
+static orm_status_t orm_query_order_by_unlocked(orm_query_t *query, vstr column,
                                           orm_order_t order,
                                           orm_error_t *error) {
   if (query == NULL) {
@@ -744,7 +1268,7 @@ orm_status_t ORM_C_CALL orm_query_order_by(orm_query_t *query, vstr column,
                             &query->connection->limits, error);
 }
 
-orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit,
+static orm_status_t orm_query_set_limit_unlocked(orm_query_t *query, uint64_t limit,
                                            orm_error_t *error) {
   if (query == NULL || query->plan.kind != ORM_QUERY_SELECT) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
@@ -762,7 +1286,7 @@ orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit,
   return ORM_STATUS_OK;
 }
 
-orm_status_t ORM_C_CALL orm_query_set_offset(orm_query_t *query,
+static orm_status_t orm_query_set_offset_unlocked(orm_query_t *query,
                                             uint64_t offset,
                                             orm_error_t *error) {
   if (query == NULL || query->plan.kind != ORM_QUERY_SELECT) {
@@ -775,6 +1299,62 @@ orm_status_t ORM_C_CALL orm_query_set_offset(orm_query_t *query,
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }
+
+/* Locked wrapper around the existing plan mutations. This contains no native
+ * backend callback; the installed ABI 4 build keeps its original admission. */
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+#define ORM_MUTATION_RETURN(query_, error_, expression_) do { \
+  if ((query_) == NULL) return (expression_); \
+  orm_status_t admission_ = orm_owner_begin_write(&(query_)->owner); \
+  if (admission_ != ORM_STATUS_OK) { \
+    orm_error_set((error_), admission_, "query mutation is not admitted"); \
+    return admission_; \
+  } \
+  orm_status_t result_ = (expression_); \
+  orm_owner_end_write(&(query_)->owner); \
+  return result_; \
+} while (0)
+#else
+#define ORM_MUTATION_RETURN(query_, error_, expression_) return (expression_)
+#endif
+
+orm_status_t ORM_C_CALL orm_query_select_all(orm_query_t *query, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_select_all_unlocked(query, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_add_column(orm_query_t *query, vstr column, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_add_column_unlocked(query, column, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_set(orm_query_t *query, vstr column, orm_value_t value, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_set_unlocked(query, column, value, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_where(orm_query_t *query, vstr column, orm_compare_t comparison, orm_value_t value, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_where_unlocked(query, column, comparison, value, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_where_key(orm_query_t *query, const orm_key_part_t *parts, uint32_t part_count, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_where_key_unlocked(query, parts, part_count, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_bind(orm_query_t *query, orm_value_t value, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_bind_unlocked(query, value, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_order_by(orm_query_t *query, vstr column, orm_order_t order, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_order_by_unlocked(query, column, order, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_set_limit(orm_query_t *query, uint64_t limit, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_set_limit_unlocked(query, limit, error));
+}
+
+orm_status_t ORM_C_CALL orm_query_set_offset(orm_query_t *query, uint64_t offset, orm_error_t *error) {
+  ORM_MUTATION_RETURN(query, error, orm_query_set_offset_unlocked(query, offset, error));
+}
+
+#undef ORM_MUTATION_RETURN
 
 orm_status_t ORM_C_CALL orm_query_open_flow(
     orm_query_t *query, const orm_flow_config_t *config,
@@ -789,13 +1369,15 @@ orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
     const orm_flow_config_t *config, cflow_publisher *out_publisher,
     orm_error_t *error) {
   if (query == NULL || transaction == NULL ||
+#if !defined(ORM_NATIVE_OWNER_CANDIDATE)
       transaction->state != ORM_TRANSACTION_ACTIVE ||
+#endif
       query->connection != transaction->connection) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_rows(query, NULL, &transaction->backend, config, out_publisher,
+  return orm_open_rows(query, NULL, transaction, config, out_publisher,
                        error);
 }
 
@@ -810,12 +1392,14 @@ orm_status_t ORM_C_CALL orm_query_open_command_flow_in_transaction(
     orm_query_t *query, orm_transaction_t *transaction,
     cflow_publisher *out_publisher, orm_error_t *error) {
   if (query == NULL || transaction == NULL ||
+#if !defined(ORM_NATIVE_OWNER_CANDIDATE)
       transaction->state != ORM_TRANSACTION_ACTIVE ||
+#endif
       query->connection != transaction->connection) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_command(query, NULL, &transaction->backend, out_publisher,
+  return orm_open_command(query, NULL, transaction, out_publisher,
                           error);
 }

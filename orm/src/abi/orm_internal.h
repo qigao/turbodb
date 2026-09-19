@@ -10,6 +10,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+#include "orm_owner.h"
+#endif
+
 enum {
   ORM_BACKEND_OPS_ABI_VERSION = 1u,
   ORM_TRANSACTION_BACKEND_OPS_ABI_VERSION = 1u
@@ -131,11 +135,21 @@ struct orm_backend {
 };
 
 struct orm_connection {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+  /* Terminal business failure, protected by owner.mutex; cleanup stays legal. */
+  orm_status_t failure;
+  orm_owner_cleanup_policy cleanup_policy;
+  orm_error_t cleanup_error;
+#endif
   orm_limits limits;
   orm_backend backend;
 };
 
 struct orm_query {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+#endif
   orm_connection_t *connection;
   orm_query_plan plan;
 };
@@ -143,10 +157,19 @@ struct orm_query {
 typedef enum orm_transaction_state {
   ORM_TRANSACTION_ACTIVE = 0,
   ORM_TRANSACTION_COMMITTED,
-  ORM_TRANSACTION_ROLLED_BACK
+  ORM_TRANSACTION_ROLLED_BACK,
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  ORM_TRANSACTION_COMMIT_UNKNOWN
+#endif
 } orm_transaction_state;
 
 struct orm_transaction {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+  /* Protected by owner.mutex; native callbacks never hold that mutex. */
+  bool operation_active;
+  orm_error_t cleanup_error;
+#endif
   orm_connection_t *connection;
   orm_transaction_backend backend;
   orm_transaction_state state;

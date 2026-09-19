@@ -101,6 +101,9 @@ endif()
 
 add_subdirectory(tidesdb)
 add_subdirectory(orm)
+if(ORM_BUILD_TESTS AND ORM_WITH_SQLITE)
+  add_subdirectory(orm/tests/ownership)
+endif()
 
 if(TURBODB_BUILD_REDIS)
   cmake_config_package(
