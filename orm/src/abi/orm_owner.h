@@ -15,7 +15,7 @@
  * Callers must already own a reference or dependent hold; this cannot validate
  * arbitrary/stale pointers. Budgets are supplied before publication. */
 /* Private candidate status; the ABI 5 facade assigns its published taxonomy. */
-enum { ORM_OWNER_STATUS_COMMIT_UNKNOWN = 16 };
+enum { ORM_OWNER_STATUS_COMMIT_UNKNOWN = 16, ORM_OWNER_STATUS_CLEANUP_FAILED = 17 };
 
 enum {
   ORM_OWNER_DEFAULT_REFERENCES = 256u,
@@ -25,13 +25,24 @@ typedef enum orm_owner_phase {
   ORM_OWNER_OPEN,
   ORM_OWNER_RELEASE_PENDING,
   ORM_OWNER_CLOSING,
-  ORM_OWNER_CLOSED
+  ORM_OWNER_CLOSED,
+  ORM_OWNER_CLOSE_FAILED
 } orm_owner_phase;
 typedef enum orm_owner_action {
   ORM_OWNER_KEEP,
   ORM_OWNER_CLOSE_RESOURCES,
   ORM_OWNER_FREE_MEMORY
 } orm_owner_action;
+/* Host-owned policy. Set before admitting any child, then immutable through
+ * final cleanup. Error is borrowed only for notify; copy it to keep diagnostics.
+ * The host keeps context alive through all delayed notifications.
+ * notify must not reenter this connection/runtime. Returning cannot recover a
+ * quarantined owner. NULL selects the default fail-fast handler. */
+typedef struct orm_owner_cleanup_policy {
+  void (*notify)(void *context, const orm_error_t *native_error);
+  void *context;
+} orm_owner_cleanup_policy;
+
 typedef struct orm_owner {
   salts_mutex_t mutex;
   uint32_t references;

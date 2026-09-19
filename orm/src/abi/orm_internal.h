@@ -139,6 +139,8 @@ struct orm_connection {
   orm_owner owner;
   /* Terminal business failure, protected by owner.mutex; cleanup stays legal. */
   orm_status_t failure;
+  orm_owner_cleanup_policy cleanup_policy;
+  orm_error_t cleanup_error;
 #endif
   orm_limits limits;
   orm_backend backend;
@@ -166,6 +168,7 @@ struct orm_transaction {
   orm_owner owner;
   /* Protected by owner.mutex; native callbacks never hold that mutex. */
   bool operation_active;
+  orm_error_t cleanup_error;
 #endif
   orm_connection_t *connection;
   orm_transaction_backend backend;

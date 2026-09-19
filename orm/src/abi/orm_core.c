@@ -46,13 +46,16 @@ void orm_error_set(orm_error_t *error, orm_status_t status,
 static orm_status_t orm_connection_business_status(orm_connection_t *connection,
                                                     orm_error_t *error) {
   orm_status_t status;
+  orm_status_t cause;
   if (connection == NULL) return ORM_STATUS_INVALID_ARGUMENT;
   salts_mutex_lock(&connection->owner.mutex);
-  status = connection->failure == ORM_STATUS_OK
-      ? ORM_STATUS_OK : ORM_STATUS_INVALID_STATE;
+  cause = connection->failure;
+  status = cause == ORM_STATUS_OK ? ORM_STATUS_OK : ORM_STATUS_INVALID_STATE;
   salts_mutex_unlock(&connection->owner.mutex);
   if (status != ORM_STATUS_OK)
-    orm_error_set(error, status, "connection is unusable after an uncertain commit");
+    orm_error_set(error, status, cause == ORM_OWNER_STATUS_CLEANUP_FAILED
+        ? "connection is unusable after a cleanup failure"
+        : "connection is unusable after an uncertain commit");
   return status;
 }
 
@@ -95,19 +98,64 @@ static void orm_connection_release_child(orm_connection_t *connection) {
   orm_connection_action(connection, orm_owner_release_dependent(&connection->owner));
 }
 
-/* A Publisher and each admitted native control call hold the real transaction.
- * Final cleanup is reached only after its cursor/callback has returned. The
- * existing rollback-error policy is unchanged here; #28 tracks its replacement
- * before the complete public ABI 5 family may be published. */
+/* Final release has no synchronous error receiver. The default policy cannot
+ * silently continue; an explicit host handler may return, but cannot recover
+ * or unload the quarantined native state. */
+static void orm_cleanup_fail_fast(const orm_error_t *native_error) {
+  (void)fprintf(stderr, "ORM cleanup failed (%d): %s\n",
+                 (int)native_error->status, native_error->message);
+  (void)fflush(stderr);
+  abort();
+}
+
+static void orm_transaction_quarantine(orm_transaction_t *transaction,
+                                       const orm_error_t *native_error) {
+  orm_connection_t *connection = transaction->connection;
+  orm_owner_cleanup_policy policy;
+  /* Lock order matches admission: parent before child. Neither native cleanup
+   * nor the host error handler executes while either control lock is held. */
+  salts_mutex_lock(&connection->owner.mutex);
+  salts_mutex_lock(&transaction->owner.mutex);
+  if (transaction->owner.phase != ORM_OWNER_CLOSING ||
+      transaction->owner.dependents != 0u) abort();
+  transaction->cleanup_error = *native_error;
+  transaction->owner.phase = ORM_OWNER_CLOSE_FAILED;
+  if (connection->failure != ORM_OWNER_STATUS_CLEANUP_FAILED)
+    connection->cleanup_error = *native_error;
+  connection->failure = ORM_OWNER_STATUS_CLEANUP_FAILED;
+  connection->owner.phase = ORM_OWNER_CLOSE_FAILED;
+  policy = connection->cleanup_policy;
+  salts_mutex_unlock(&transaction->owner.mutex);
+  salts_mutex_unlock(&connection->owner.mutex);
+  if (policy.notify != NULL)
+    policy.notify(policy.context, &transaction->cleanup_error);
+  else
+    orm_cleanup_fail_fast(&transaction->cleanup_error);
+}
+
+/* Publishers/native calls have already returned before this action is claimed.
+ * A failed final rollback stops BEFORE native destroy and parent-hold release;
+ * native destroy's void ABI cannot report or prove successful error recovery. */
 static void orm_transaction_action(orm_transaction_t *transaction,
                                    orm_owner_action action) {
   if (action == ORM_OWNER_CLOSE_RESOURCES) {
     if (transaction->state == ORM_TRANSACTION_ACTIVE &&
         orm_transaction_backend_valid(&transaction->backend)) {
-      orm_error_t ignored;
-      orm_error_init(&ignored);
-      (void)transaction->backend.ops->rollback(transaction->backend.context,
-                                               &ignored);
+      orm_error_t cleanup_error;
+      orm_error_init(&cleanup_error);
+      const orm_status_t status = transaction->backend.ops->rollback(
+          transaction->backend.context, &cleanup_error);
+      if (status != ORM_STATUS_OK) {
+        /* The returned status is authoritative even when a backend leaves the
+         * optional error buffer unfilled. The host owns and bounds this copy. */
+        cleanup_error.struct_size = sizeof(cleanup_error);
+        cleanup_error.status = status;
+        cleanup_error.message[sizeof(cleanup_error.message) - 1u] = '\0';
+        if (cleanup_error.message[0] == '\0')
+          orm_error_set(&cleanup_error, status, NULL);
+        orm_transaction_quarantine(transaction, &cleanup_error);
+        return;
+      }
     }
     if (transaction->backend.ops != NULL &&
         transaction->backend.ops->destroy != NULL &&
@@ -136,7 +184,9 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
   }
   orm_owner *owner = &transaction->owner;
   salts_mutex_lock(&owner->mutex);
-  if (owner->phase == ORM_OWNER_CLOSED) {
+  if (owner->phase == ORM_OWNER_CLOSE_FAILED) {
+    status = ORM_OWNER_STATUS_CLEANUP_FAILED;
+  } else if (owner->phase == ORM_OWNER_CLOSED) {
     /* A closed handle can still be held; close does not consume its reference. */
   } else if (owner->dependents != 0u || transaction->operation_active ||
              owner->phase == ORM_OWNER_CLOSING) {
@@ -152,7 +202,8 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
   }
   salts_mutex_unlock(&owner->mutex);
   if (status == ORM_STATUS_OK) orm_transaction_action(transaction, action);
-  orm_error_set(error, status, NULL);
+  orm_error_set(error, status, status == ORM_OWNER_STATUS_CLEANUP_FAILED
+      ? transaction->cleanup_error.message : NULL);
   return status;
 }
 
@@ -259,7 +310,8 @@ orm_status_t ORM_C_CALL orm_connection_close(orm_connection_t *connection,
       ? orm_owner_begin_close(&connection->owner, &action)
       : ORM_STATUS_INVALID_ARGUMENT;
   if (status == ORM_STATUS_OK) orm_connection_action(connection, action);
-  orm_error_set(error, status, NULL);
+  orm_error_set(error, status, status == ORM_OWNER_STATUS_CLEANUP_FAILED
+      ? connection->cleanup_error.message : NULL);
   return status;
 }
 
@@ -758,6 +810,7 @@ const char *ORM_C_CALL orm_status_message(orm_status_t status) {
   switch (status) {
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
     case ORM_OWNER_STATUS_COMMIT_UNKNOWN: return "commit outcome unknown";
+    case ORM_OWNER_STATUS_CLEANUP_FAILED: return "cleanup failed";
 #endif
     case ORM_STATUS_OK: return "ok";
     case ORM_STATUS_INVALID_ARGUMENT: return "invalid argument";

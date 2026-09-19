@@ -28,7 +28,8 @@ orm_status_t orm_owner_try_retain(orm_owner *owner) {
   orm_status_t status = ORM_STATUS_OK;
   if (!owner_valid(owner)) return ORM_STATUS_INVALID_ARGUMENT;
   salts_mutex_lock(&owner->mutex);
-  if (owner->references == 0u || owner->phase == ORM_OWNER_CLOSING)
+  if (owner->references == 0u || owner->phase == ORM_OWNER_CLOSING ||
+      owner->phase == ORM_OWNER_CLOSE_FAILED)
     status = ORM_STATUS_INVALID_STATE;
   else if (owner->references >= owner->max_references)
     status = ORM_STATUS_LIMIT_EXCEEDED;
@@ -54,6 +55,8 @@ orm_status_t orm_owner_admit(orm_owner *owner) {
 
 /* Called only under the lock. Cleanup is claimed here, never executed here. */
 static orm_owner_action owner_after_release(orm_owner *owner) {
+  /* An irreversible failure is quarantined, never a retryable close request. */
+  if (owner->phase == ORM_OWNER_CLOSE_FAILED) return ORM_OWNER_KEEP;
   if (owner->references != 0u) return ORM_OWNER_KEEP;
   if (owner->dependents != 0u) {
     if (owner->phase == ORM_OWNER_OPEN)
@@ -91,7 +94,9 @@ orm_status_t orm_owner_begin_close(orm_owner *owner, orm_owner_action *action) {
   if (action != NULL) *action = ORM_OWNER_KEEP;
   if (!owner_valid(owner) || action == NULL) return ORM_STATUS_INVALID_ARGUMENT;
   salts_mutex_lock(&owner->mutex);
-  if (owner->phase == ORM_OWNER_CLOSED) {
+  if (owner->phase == ORM_OWNER_CLOSE_FAILED) {
+    status = ORM_OWNER_STATUS_CLEANUP_FAILED;
+  } else if (owner->phase == ORM_OWNER_CLOSED) {
     /* A held, already-closed handle remains a legal idempotent close target. */
   } else if (owner->dependents != 0u || owner->phase == ORM_OWNER_CLOSING) {
     status = ORM_STATUS_BUSY;
