@@ -64,27 +64,30 @@ endforeach()
 # the real PostgreSQL adapter with the candidate, never link its stable DLL.
 if(ORM_POSTGRES_LIVE_TESTS)
   find_package(PostgreSQL REQUIRED)
-  add_executable(orm_owner_postgres_test orm_owner_postgres_test.c
-    ../../src/dbs/postgres/component.c ../../src/dbs/postgres/backend.c
-    ../../src/dbs/postgres/orm_postgres_libpq.c
-    ../../src/dbs/postgres/orm_postgres_cursor.c)
-  target_compile_definitions(orm_owner_postgres_test PRIVATE
-    ORM_POSTGRESQL_STATIC ORM_WITH_PGSQL)
-  target_include_directories(orm_owner_postgres_test PRIVATE
-    ../../src/abi ../../src/flow ../../src/dbs/sql ../../src/dbs/postgres)
-  target_link_libraries(orm_owner_postgres_test PRIVATE orm_owner_test_core
-    PostgreSQL::PostgreSQL Salts::CBind Salts::CFlow Salts::TinyTest)
-  set_target_properties(orm_owner_postgres_test PROPERTIES C_STANDARD 11
-    C_STANDARD_REQUIRED ON LINKER_LANGUAGE CXX FOLDER "orm/tests")
-  if(MSVC)
-    target_compile_options(orm_owner_postgres_test PRIVATE /W4 /WX /Zc:preprocessor)
-  else()
-    target_compile_options(orm_owner_postgres_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
-  endif()
-  add_test(NAME orm_owner_postgres COMMAND orm_owner_postgres_test)
-  set_tests_properties(orm_owner_postgres PROPERTIES TIMEOUT 60)
-  if(WIN32)
-    set_tests_properties(orm_owner_postgres PROPERTIES ENVIRONMENT_MODIFICATION
-      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>")
-  endif()
+  foreach(pg_name IN ITEMS orm_owner_postgres orm_owner_postgres_loss)
+    set(pg_target ${pg_name}_test)
+    add_executable(${pg_target} ${pg_target}.c
+      ../../src/dbs/postgres/component.c ../../src/dbs/postgres/backend.c
+      ../../src/dbs/postgres/orm_postgres_libpq.c
+      ../../src/dbs/postgres/orm_postgres_cursor.c)
+    target_compile_definitions(${pg_target} PRIVATE
+      ORM_POSTGRESQL_STATIC ORM_WITH_PGSQL)
+    target_include_directories(${pg_target} PRIVATE
+      ../../src/abi ../../src/flow ../../src/dbs/sql ../../src/dbs/postgres)
+    target_link_libraries(${pg_target} PRIVATE orm_owner_test_core
+      PostgreSQL::PostgreSQL Salts::CBind Salts::CFlow Salts::TinyTest)
+    set_target_properties(${pg_target} PROPERTIES C_STANDARD 11
+      C_STANDARD_REQUIRED ON LINKER_LANGUAGE CXX FOLDER "orm/tests")
+    if(MSVC)
+      target_compile_options(${pg_target} PRIVATE /W4 /WX /Zc:preprocessor)
+    else()
+      target_compile_options(${pg_target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    add_test(NAME ${pg_name} COMMAND ${pg_target})
+    set_tests_properties(${pg_name} PROPERTIES TIMEOUT 60)
+    if(WIN32)
+      set_tests_properties(${pg_name} PROPERTIES ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>")
+    endif()
+  endforeach()
 endif()

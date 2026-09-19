@@ -188,8 +188,8 @@ jobs:
           export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
           cmake --preset "$profile" -DORM_BUILD_TESTS=ON -DORM_POSTGRES_LIVE_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/core/postgres-configure.log
           cp "$build/compile_commands.json" evidence/core/postgres-compile-commands.json
-          cmake --build --preset "$profile" --target orm_owner_postgres_test orm_postgres_live_test --parallel 4 2>&1 | tee evidence/core/postgres-build.log
-          ctest --preset "$profile" -R '^(orm_owner_postgres|orm_postgres_live)$' --verbose --no-tests=error 2>&1 | tee evidence/core/postgres-ctest.log
+          cmake --build --preset "$profile" --target orm_owner_postgres_test orm_owner_postgres_loss_test orm_postgres_live_test --parallel 4 2>&1 | tee evidence/core/postgres-build.log
+          ctest --preset "$profile" -R '^(orm_owner_postgres|orm_owner_postgres_loss|orm_postgres_live)$' --verbose --no-tests=error 2>&1 | tee evidence/core/postgres-ctest.log
       - name: Save completed vcpkg binary packages
         if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
