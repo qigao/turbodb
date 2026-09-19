@@ -15,6 +15,20 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2022]
         config: [debug, release]
+    # Empty image disables the Linux-only disposable service on Windows and
+    # branches that do not contain the native owner test target.
+    services:
+      postgres:
+        image: ${{ matrix.os == 'ubuntu-24.04' && github.ref_name == 'feat/orm-native-ownership' && 'postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929' || '' }}
+        env:
+          POSTGRES_USER: orm_owner_ci
+          POSTGRES_PASSWORD: orm_owner_ci_only
+          POSTGRES_DB: orm_owner_ci
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U orm_owner_ci -d orm_owner_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -157,6 +171,25 @@ jobs:
           ctest --preset "%PROFILE%" -R "^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race)$" --verbose --no-tests=error > evidence\core\ownership.log 2>&1
           if errorlevel 1 (type evidence\core\ownership.log & exit /b 1)
           type evidence\core\ownership.log
+      - name: Verify native ownership against real PostgreSQL
+        if: github.ref_name == 'feat/orm-native-ownership' && runner.os == 'Linux'
+        shell: bash
+        env:
+          TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
+        run: |
+          set -euo pipefail
+          profile=linux-release-user
+          build=build/linux-gcc-release
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            profile=linux-dev-user
+            build=build/linux-gcc-debug
+          fi
+          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+          cmake --preset "$profile" -DORM_BUILD_TESTS=ON -DORM_POSTGRES_LIVE_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/core/postgres-configure.log
+          cp "$build/compile_commands.json" evidence/core/postgres-compile-commands.json
+          cmake --build --preset "$profile" --target orm_owner_postgres_test orm_postgres_live_test --parallel 4 2>&1 | tee evidence/core/postgres-build.log
+          ctest --preset "$profile" -R '^(orm_owner_postgres|orm_postgres_live)$' --verbose --no-tests=error 2>&1 | tee evidence/core/postgres-ctest.log
       - name: Save completed vcpkg binary packages
         if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
