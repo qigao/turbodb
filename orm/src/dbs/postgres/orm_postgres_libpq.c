@@ -30,6 +30,10 @@ static const char *orm_postgres_libpq_connection_error(void *context) {
   return PQerrorMessage((const PGconn *)context);
 }
 
+static int orm_postgres_libpq_connection_ok(void *context) {
+  return PQstatus((const PGconn *)context) == CONNECTION_OK;
+}
+
 static orm_postgres_result_status orm_postgres_libpq_status(
     const void *result) {
   switch (PQresultStatus((const PGresult *)result)) {
@@ -104,7 +108,7 @@ static const orm_postgres_command_ops orm_postgres_libpq_command_ops = {
     sizeof(orm_postgres_command_ops), ORM_POSTGRES_COMMAND_OPS_ABI_VERSION,
     orm_postgres_libpq_send, orm_postgres_libpq_enable_single_row,
     orm_postgres_libpq_next_result, orm_postgres_libpq_release_result,
-    orm_postgres_libpq_connection_error};
+    orm_postgres_libpq_connection_error, orm_postgres_libpq_connection_ok};
 
 static const orm_postgres_result_ops orm_postgres_libpq_result_ops = {
     sizeof(orm_postgres_result_ops), ORM_POSTGRES_RESULT_OPS_ABI_VERSION,

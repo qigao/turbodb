@@ -37,6 +37,7 @@ struct orm_postgres_cursor_state {
   size_t *bytea_offsets;
   size_t *bytea_sizes;
   int query_active;
+  int completion_seen;
   int terminal;
   char error_message[ORM_C_ERROR_MESSAGE_CAPACITY];
 };
@@ -100,7 +101,7 @@ static int orm_postgres_command_ops_valid(
          ops->abi_version == ORM_POSTGRES_COMMAND_OPS_ABI_VERSION &&
          ops->send_query != NULL && ops->enable_single_row != NULL &&
          ops->next_result != NULL && ops->release_result != NULL &&
-         ops->connection_error != NULL;
+         ops->connection_error != NULL && ops->connection_ok != NULL;
 }
 
 static int orm_postgres_result_ops_valid(const orm_postgres_result_ops *ops) {
@@ -116,6 +117,9 @@ static int orm_postgres_result_ops_valid(const orm_postgres_result_ops *ops) {
 static orm_status_t orm_postgres_sqlstate_status(const char *sqlstate) {
   if (sqlstate == NULL || strlen(sqlstate) != 5u)
     return ORM_STATUS_SQL_ERROR;
+  if ((sqlstate[0] == '0' && sqlstate[1] == '8') ||
+      strcmp(sqlstate, "57P01") == 0 || strcmp(sqlstate, "57P02") == 0)
+    return ORM_STATUS_CONNECTION_ERROR;
   if (sqlstate[0] == '2' && sqlstate[1] == '3')
     return ORM_STATUS_CONSTRAINT;
   if (strcmp(sqlstate, "40001") == 0 || strcmp(sqlstate, "40P01") == 0 ||
@@ -239,6 +243,7 @@ static orm_row_cursor_step orm_postgres_cursor_error(
   orm_row_cursor_step step = ORM_ROW_CURSOR_STEP_INIT;
   (void)snprintf(state->error_message, sizeof(state->error_message), "%s",
                  message != NULL ? message : orm_status_message(status));
+  orm_postgres_set_error(state->config.runtime_error, status, state->error_message);
   step.kind = ORM_ROW_CURSOR_ERROR;
   step.status = status;
   step.message = state->error_message;
@@ -439,6 +444,19 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
     if (state->current_result == NULL) {
       state->query_active = 0;
       state->terminal = 1;
+      /* NULL ends libpq retrieval; only a terminal result acknowledges success.
+       * Never erase an already received command completion merely because the
+       * connection subsequently becomes unusable. */
+      if (!state->completion_seen) {
+        if (!state->driver.command->connection_ok(state->driver.context)) {
+          message = state->driver.command->connection_error(state->driver.context);
+          return orm_postgres_cursor_error(state, ORM_STATUS_CONNECTION_ERROR,
+              message != NULL && *message != '\0' ? message
+                  : "PostgreSQL connection lost before query completion");
+        }
+        return orm_postgres_cursor_error(state, ORM_STATUS_DATASTORE_ERROR,
+            "PostgreSQL result stream ended without query completion");
+      }
       step.kind = ORM_ROW_CURSOR_DONE;
       return step;
     }
@@ -446,7 +464,13 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
     if (result_status == ORM_POSTGRES_RESULT_ERROR) {
       char diagnostic[ORM_C_ERROR_MESSAGE_CAPACITY];
       const char *sqlstate = state->driver.result->sqlstate(state->current_result);
-      const orm_status_t error_status = orm_postgres_sqlstate_status(sqlstate);
+      orm_status_t error_status = orm_postgres_sqlstate_status(sqlstate);
+      /* A valid SQLSTATE is the server's explicit result. Consult connection
+       * health only for failures without that acknowledgement; error text by
+       * itself is neither proof of disconnection nor a safe-retry signal. */
+      if ((sqlstate == NULL || strlen(sqlstate) != 5u) &&
+          !state->driver.command->connection_ok(state->driver.context))
+        error_status = ORM_STATUS_CONNECTION_ERROR;
       message = state->driver.result->error(state->current_result);
       if (sqlstate != NULL && strlen(sqlstate) == 5u) {
         (void)snprintf(diagnostic, sizeof(diagnostic), "SQLSTATE=%s %s",
@@ -502,6 +526,7 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
       return step;
     }
     if (result_status == ORM_POSTGRES_RESULT_COMMAND_DONE) {
+      state->completion_seen = 1;
       status = orm_postgres_parse_affected_rows(state, state->current_result);
       if (status != ORM_STATUS_OK)
         return orm_postgres_cursor_error(
@@ -511,6 +536,7 @@ static orm_row_cursor_step orm_postgres_cursor_next(void *context,
       continue;
     }
     if (result_status == ORM_POSTGRES_RESULT_TUPLES_DONE) {
+      state->completion_seen = 1;
       orm_postgres_release_current(state);
       continue;
     }
@@ -611,12 +637,15 @@ orm_status_t orm_postgres_cursor_start(
   orm_postgres_set_error(state->config.runtime_error, ORM_STATUS_OK, NULL);
 
   if (!state->driver.command->send_query(state->driver.context, request)) {
+    const orm_status_t status =
+        state->driver.command->connection_ok(state->driver.context)
+            ? ORM_STATUS_SQL_ERROR : ORM_STATUS_CONNECTION_ERROR;
     message = state->driver.command->connection_error(state->driver.context);
-    orm_postgres_set_error(error, ORM_STATUS_SQL_ERROR, message);
+    orm_postgres_set_error(error, status, message);
     free(state->bytea_sizes);
     free(state->bytea_offsets);
     free(state);
-    return ORM_STATUS_SQL_ERROR;
+    return status;
   }
   state->query_active = 1;
   if (!state->driver.command->enable_single_row(state->driver.context)) {

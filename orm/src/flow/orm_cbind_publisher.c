@@ -53,6 +53,8 @@ void orm_row_cursor_dispose(orm_row_cursor *cursor) {
   void (*release_transaction_owner)(void *) = cursor->release_transaction_owner;
   cursor->owner = NULL;
   cursor->release_owner = NULL;
+  cursor->owner_status = NULL;
+  cursor->report_owner_error = NULL;
   cursor->transaction_owner = NULL;
   cursor->release_transaction_owner = NULL;
   if (release_transaction_owner != NULL)
@@ -93,9 +95,14 @@ static cflow_step orm_cbind_publisher_fail(orm_cbind_publisher_state *state,
                                         orm_status_t status,
                                         const char *message) {
   state->terminal = CFLOW_PUBLISHER_ERROR;
-  orm_cbind_publisher_cancel_cursor(state);
+  /* A backend's message is borrowed only until cancel: own it first. */
   (void)snprintf(state->error_message, sizeof(state->error_message),
                  "%s", message != NULL ? message : orm_status_message(status));
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (state->cursor.report_owner_error != NULL)
+    state->cursor.report_owner_error(state->cursor.owner, status);
+#endif
+  orm_cbind_publisher_cancel_cursor(state);
   return (cflow_step){CFLOW_STEP_ERROR, {0}, state->error_message};
 }
 
@@ -143,6 +150,16 @@ static cflow_step orm_cbind_publisher_resume(void *state_, cflow_publish_context
     return orm_cbind_publisher_fail(state, ORM_STATUS_INVALID_ARGUMENT,
                                  "CFlow supplied null row storage");
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (state->cursor.owner_status != NULL) {
+    orm_error_t owner_error;
+    orm_error_init(&owner_error);
+    const orm_status_t owner_status = state->cursor.owner_status(
+        state->cursor.owner, &owner_error);
+    if (owner_status != ORM_STATUS_OK)
+      return orm_cbind_publisher_fail(state, owner_status, owner_error.message);
+  }
+#endif
   cursor_step = state->cursor.ops->next(state->cursor.context, &reader);
   switch (cursor_step.kind) {
     case ORM_ROW_CURSOR_WAIT:
@@ -284,6 +301,8 @@ orm_status_t orm_cbind_publisher_init(cflow_publisher *out_publisher,
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   cursor->owner = NULL;
   cursor->release_owner = NULL;
+  cursor->owner_status = NULL;
+  cursor->report_owner_error = NULL;
   cursor->transaction_owner = NULL;
   cursor->release_transaction_owner = NULL;
 #endif

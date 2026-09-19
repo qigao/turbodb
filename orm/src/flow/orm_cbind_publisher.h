@@ -65,6 +65,11 @@ typedef struct orm_row_cursor {
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   void *owner;
   void (*release_owner)(void *);
+  /* Host-only hooks borrow owner for the cursor lifetime. They do not touch
+   * native I/O or consume its hold. A terminal native connection failure must
+   * block sibling execution before the next Publisher resume. */
+  orm_status_t (*owner_status)(void *, orm_error_t *);
+  void (*report_owner_error)(void *, orm_status_t);
   void *transaction_owner;
   void (*release_transaction_owner)(void *);
 #endif

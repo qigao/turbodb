@@ -55,8 +55,34 @@ static orm_status_t orm_connection_business_status(orm_connection_t *connection,
   if (status != ORM_STATUS_OK)
     orm_error_set(error, status, cause == ORM_OWNER_STATUS_CLEANUP_FAILED
         ? "connection is unusable after a cleanup failure"
-        : "connection is unusable after an uncertain commit");
+        : cause == ORM_STATUS_CONNECTION_ERROR
+            ? "connection is unusable after native connection loss"
+            : "connection is unusable after an uncertain commit");
   return status;
+}
+
+/* Native error classification belongs to the backend. The host records only
+ * terminal connection failure; it neither destroys the session nor guesses
+ * whether a dispatched write committed. Existing stronger failures win. */
+static void orm_connection_record_native_error(orm_connection_t *connection,
+                                                orm_status_t status) {
+  if (status != ORM_STATUS_CONNECTION_ERROR) return;
+  salts_mutex_lock(&connection->owner.mutex);
+  if (connection->failure == ORM_STATUS_OK)
+    connection->failure = status;
+  salts_mutex_unlock(&connection->owner.mutex);
+}
+
+/* The Publisher's query hold keeps this context and its parent valid. These
+ * hooks allocate/release nothing and run without a native or owner lock. */
+static orm_status_t orm_query_execution_status(void *context, orm_error_t *error) {
+  const orm_query_t *query = context;
+  return orm_connection_business_status(query->connection, error);
+}
+
+static void orm_query_report_native_error(void *context, orm_status_t status) {
+  const orm_query_t *query = context;
+  orm_connection_record_native_error(query->connection, status);
 }
 
 static void orm_connection_mark_unknown(orm_connection_t *connection) {
@@ -250,6 +276,8 @@ static orm_status_t orm_transaction_begin_operation(
     orm_error_set(error, ORM_STATUS_INVALID_STATE, "ORM transaction is not active");
     return ORM_STATUS_INVALID_STATE;
   }
+  status = orm_connection_business_status(transaction->connection, error);
+  if (status != ORM_STATUS_OK) return status;
   status = orm_owner_begin_write(&transaction->owner);
   if (status != ORM_STATUS_OK) {
     orm_error_set(error, status, "transaction control operation is not admitted");
@@ -275,6 +303,8 @@ static void orm_transaction_end_operation(orm_transaction_t *transaction,
                                           orm_transaction_state next_state) {
   if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
     orm_connection_mark_unknown(transaction->connection);
+  else
+    orm_connection_record_native_error(transaction->connection, status);
   salts_mutex_lock(&transaction->owner.mutex);
   if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
     transaction->state = ORM_TRANSACTION_COMMIT_UNKNOWN;
@@ -621,6 +651,9 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
         state->transaction->backend.context, &state->query->plan,
         &state->query->connection->limits, &affected, &error);
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_record_native_error(state->query->connection, status);
+#endif
   output.status = status;
   output.affected_rows = affected;
   if (status != ORM_STATUS_OK) {
@@ -760,6 +793,9 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                : transaction->backend.ops->open_cursor(
                      transaction->backend.context, &query->plan,
                      &query->connection->limits, &cursor, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_record_native_error(query->connection, status);
+#endif
   if (status != ORM_STATUS_OK)
     goto release_query;
   if (!orm_row_cursor_valid(&cursor)) {
@@ -772,6 +808,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   cursor.owner = query;
   cursor.release_owner = orm_query_release_execution;
+  cursor.owner_status = orm_query_execution_status;
+  cursor.report_owner_error = orm_query_report_native_error;
   cursor.transaction_owner = transaction;
   cursor.release_transaction_owner = transaction != NULL
       ? orm_transaction_release_execution : NULL;
@@ -986,6 +1024,9 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
 #endif
   status = connection->backend.ops->begin_transaction(
       connection->backend.context, isolation, &transaction->backend, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_record_native_error(connection, status);
+#endif
   if (status != ORM_STATUS_OK) {
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
     transaction->backend = (orm_transaction_backend){0};
