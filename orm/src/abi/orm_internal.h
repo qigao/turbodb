@@ -137,6 +137,8 @@ struct orm_backend {
 struct orm_connection {
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   orm_owner owner;
+  /* Terminal business failure, protected by owner.mutex; cleanup stays legal. */
+  orm_status_t failure;
 #endif
   orm_limits limits;
   orm_backend backend;
@@ -153,7 +155,10 @@ struct orm_query {
 typedef enum orm_transaction_state {
   ORM_TRANSACTION_ACTIVE = 0,
   ORM_TRANSACTION_COMMITTED,
-  ORM_TRANSACTION_ROLLED_BACK
+  ORM_TRANSACTION_ROLLED_BACK,
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  ORM_TRANSACTION_COMMIT_UNKNOWN
+#endif
 } orm_transaction_state;
 
 struct orm_transaction {

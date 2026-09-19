@@ -41,6 +41,42 @@ void orm_error_set(orm_error_t *error, orm_status_t status,
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
 /* This candidate is compiled only into the non-installed native test core.
  * Resource cleanup runs after the control lock is released. */
+/* Failure is terminal for business operations, but never consumes a hold or
+ * closes resources. A query/Pub can outlive its application's connection ref. */
+static orm_status_t orm_connection_business_status(orm_connection_t *connection,
+                                                    orm_error_t *error) {
+  orm_status_t status;
+  if (connection == NULL) return ORM_STATUS_INVALID_ARGUMENT;
+  salts_mutex_lock(&connection->owner.mutex);
+  status = connection->failure == ORM_STATUS_OK
+      ? ORM_STATUS_OK : ORM_STATUS_INVALID_STATE;
+  salts_mutex_unlock(&connection->owner.mutex);
+  if (status != ORM_STATUS_OK)
+    orm_error_set(error, status, "connection is unusable after an uncertain commit");
+  return status;
+}
+
+static void orm_connection_mark_unknown(orm_connection_t *connection) {
+  salts_mutex_lock(&connection->owner.mutex);
+  connection->failure = ORM_OWNER_STATUS_COMMIT_UNKNOWN;
+  salts_mutex_unlock(&connection->owner.mutex);
+}
+
+static orm_status_t orm_connection_admit_business(orm_connection_t *connection) {
+  orm_owner *owner = &connection->owner;
+  orm_status_t status = ORM_STATUS_OK;
+  salts_mutex_lock(&owner->mutex);
+  if (connection->failure != ORM_STATUS_OK || owner->phase != ORM_OWNER_OPEN ||
+      owner->references == 0u)
+    status = ORM_STATUS_INVALID_STATE;
+  else if (owner->dependents >= owner->max_dependents)
+    status = ORM_STATUS_LIMIT_EXCEEDED;
+  else
+    ++owner->dependents;
+  salts_mutex_unlock(&owner->mutex);
+  return status;
+}
+
 static void orm_connection_action(orm_connection_t *connection,
                                   orm_owner_action action) {
   if (action == ORM_OWNER_CLOSE_RESOURCES) {
@@ -107,7 +143,8 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
     status = ORM_STATUS_BUSY;
   } else if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u ||
              (transaction->state != ORM_TRANSACTION_COMMITTED &&
-              transaction->state != ORM_TRANSACTION_ROLLED_BACK)) {
+              transaction->state != ORM_TRANSACTION_ROLLED_BACK &&
+              transaction->state != ORM_TRANSACTION_COMMIT_UNKNOWN)) {
     status = ORM_STATUS_INVALID_STATE;
   } else {
     owner->phase = ORM_OWNER_CLOSING;
@@ -185,8 +222,13 @@ static orm_status_t orm_transaction_begin_operation(
 static void orm_transaction_end_operation(orm_transaction_t *transaction,
                                           orm_status_t status,
                                           orm_transaction_state next_state) {
+  if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
+    orm_connection_mark_unknown(transaction->connection);
   salts_mutex_lock(&transaction->owner.mutex);
-  if (status == ORM_STATUS_OK) transaction->state = next_state;
+  if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
+    transaction->state = ORM_TRANSACTION_COMMIT_UNKNOWN;
+  else if (status == ORM_STATUS_OK)
+    transaction->state = next_state;
   transaction->operation_active = false;
   salts_mutex_unlock(&transaction->owner.mutex);
   orm_transaction_release_execution(transaction);
@@ -443,7 +485,7 @@ static orm_status_t orm_query_make(orm_connection_t *connection, vstr input,
     return ORM_STATUS_INVALID_ARGUMENT;
   }
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  status = orm_owner_admit(&connection->owner);
+  status = orm_connection_admit_business(connection);
   if (status != ORM_STATUS_OK) {
     orm_error_set(error, status, "connection cannot admit a query");
     return status;
@@ -509,6 +551,15 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
     output.message = "invalid lazy ORM command state";
     return output;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  status = orm_connection_business_status(state->query->connection, &error);
+  if (status != ORM_STATUS_OK) {
+    output.status = status;
+    (void)snprintf(state->error_message, sizeof(state->error_message), "%s", error.message);
+    output.message = state->error_message;
+    return output;
+  }
+#endif
   if (state->database != NULL) {
     status = state->database->ops->execute_command(
         state->database->context, &state->query->plan,
@@ -569,6 +620,8 @@ static orm_status_t orm_open_command(orm_query_t *query,
     orm_error_set(error, status, "query cannot admit a Publisher");
     return status;
   }
+  status = orm_connection_business_status(query->connection, error);
+  if (status != ORM_STATUS_OK) goto release_query;
   if (transaction != NULL) {
     status = orm_transaction_admit(transaction, error);
     if (status != ORM_STATUS_OK) goto release_query;
@@ -634,6 +687,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
     orm_error_set(error, status, "query cannot admit a row Publisher");
     return status;
   }
+  status = orm_connection_business_status(query->connection, error);
+  if (status != ORM_STATUS_OK) goto release_query;
   if (transaction != NULL) {
     status = orm_transaction_admit(transaction, error);
     if (status != ORM_STATUS_OK) goto release_query;
@@ -701,6 +756,9 @@ uint32_t ORM_C_CALL orm_c_abi_version(void) { return ORM_C_ABI_VERSION; }
 
 const char *ORM_C_CALL orm_status_message(orm_status_t status) {
   switch (status) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    case ORM_OWNER_STATUS_COMMIT_UNKNOWN: return "commit outcome unknown";
+#endif
     case ORM_STATUS_OK: return "ok";
     case ORM_STATUS_INVALID_ARGUMENT: return "invalid argument";
     case ORM_STATUS_ABI_MISMATCH: return "ABI mismatch";
@@ -840,7 +898,7 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
     return ORM_STATUS_INVALID_ARGUMENT;
   }
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  status = orm_owner_admit(&connection->owner);
+  status = orm_connection_admit_business(connection);
   if (status != ORM_STATUS_OK) {
     orm_error_set(error, status, "connection cannot admit a transaction");
     return status;
@@ -929,6 +987,16 @@ static orm_status_t orm_transaction_finish(orm_transaction_t *transaction,
                   : transaction->backend.ops->rollback(
                         transaction->backend.context, error);
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  /* Once COMMIT was dispatched, connection loss cannot prove non-commit.
+   * Keep an explicit native unknown as well; neither path is replayable. */
+  if (commit && status == ORM_STATUS_CONNECTION_ERROR) {
+    status = ORM_OWNER_STATUS_COMMIT_UNKNOWN;
+    if (error != NULL && error->struct_size >= sizeof(*error)) {
+      error->status = status; /* Preserve the native diagnostic, not overlapping copy. */
+      if (error->message[0] == '\0')
+        orm_error_set(error, status, "commit outcome is unknown");
+    }
+  }
   orm_transaction_end_operation(transaction, status,
       commit ? ORM_TRANSACTION_COMMITTED : ORM_TRANSACTION_ROLLED_BACK);
 #else

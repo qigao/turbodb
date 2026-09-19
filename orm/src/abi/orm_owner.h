@@ -14,6 +14,9 @@
  * The enclosing native object owns this mutex and releases it with its memory.
  * Callers must already own a reference or dependent hold; this cannot validate
  * arbitrary/stale pointers. Budgets are supplied before publication. */
+/* Private candidate status; the ABI 5 facade assigns its published taxonomy. */
+enum { ORM_OWNER_STATUS_COMMIT_UNKNOWN = 16 };
+
 enum {
   ORM_OWNER_DEFAULT_REFERENCES = 256u,
   ORM_OWNER_DEFAULT_DEPENDENTS = 256u

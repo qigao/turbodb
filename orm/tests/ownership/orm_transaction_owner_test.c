@@ -107,6 +107,52 @@ static void open_rows(const char *sql) {
                   query, transaction, &config, &first, &error), ORM_STATUS_OK);
 }
 
+/* Execute the actual SQLite commit, then lose only its acknowledgement.
+ * This is fault injection at the native boundary, not a mock owner. */
+static orm_status_t lost_commit_response(void *context, orm_error_t *out_error) {
+  ++commit_calls;
+  orm_status_t status = native_commit(context, out_error);
+  if (status != ORM_STATUS_OK) return status;
+  orm_error_set(out_error, ORM_STATUS_CONNECTION_ERROR, "commit response lost");
+  return ORM_STATUS_CONNECTION_ERROR;
+}
+
+static orm_status_t lost_commit_and_release(void *context, orm_error_t *out_error) {
+  orm_status_t status = lost_commit_response(context, out_error);
+  orm_transaction_t *released = transaction;
+  transaction = NULL;
+  orm_transaction_release(released);
+  return status;
+}
+
+static orm_status_t explicit_unknown_commit(void *context, orm_error_t *out_error) {
+  orm_status_t status = lost_commit_response(context, out_error);
+  if (status != ORM_STATUS_CONNECTION_ERROR) return status;
+  orm_error_set(out_error, ORM_OWNER_STATUS_COMMIT_UNKNOWN, "native commit outcome unknown");
+  return ORM_OWNER_STATUS_COMMIT_UNKNOWN;
+}
+
+static orm_status_t rejected_commit(void *context, orm_error_t *out_error) {
+  (void)context;
+  ++commit_calls;
+  orm_error_set(out_error, ORM_STATUS_SQL_ERROR, "commit rejected before effect");
+  return ORM_STATUS_SQL_ERROR;
+}
+
+static void lose_commit_response(void) {
+  orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+  open_command(&first);
+  check_equal(cflow_publisher_resume(&first, NULL, &result).kind,
+              CFLOW_STEP_VALUE_AND_DONE);
+  check_equal(result.affected_rows, (uint64_t)1u);
+  drop_publisher(&first);
+  observed_ops.commit = lost_commit_response;
+  check_equal(orm_transaction_commit(transaction, &error),
+              ORM_OWNER_STATUS_COMMIT_UNKNOWN);
+  check_equal(error.status, ORM_OWNER_STATUS_COMMIT_UNKNOWN);
+  check_equal(commit_calls, 1u);
+}
+
 spec("real SQLite transaction Publisher ownership") {
   (void)ttest_config__;
   before_each() {
@@ -454,4 +500,111 @@ spec("real SQLite transaction Publisher ownership") {
     check_equal(orm_connection_close(connection, &error), ORM_STATUS_OK);
   }
 
+
+  it("does not mark a lost commit acknowledgement as ACTIVE or rolled back") {
+    lose_commit_response();
+    check_true(transaction->state != ORM_TRANSACTION_ACTIVE);
+    check_true(transaction->state != ORM_TRANSACTION_ROLLED_BACK);
+    check_true(transaction->state != ORM_TRANSACTION_COMMITTED);
+  }
+  it("does not retry a native commit after its outcome becomes unknown") {
+    lose_commit_response();
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_INVALID_STATE);
+    check_equal(commit_calls, 1u);
+  }
+  it("does not report rollback success as resolution of an unknown commit") {
+    lose_commit_response();
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_INVALID_STATE);
+    check_equal(rollback_calls, 0u);
+  }
+  it("allows unknown transaction cleanup without an explicit rollback retry") {
+    lose_commit_response();
+    check_equal(orm_transaction_close(transaction, &error), ORM_STATUS_OK);
+    check_equal(rollback_calls, 0u);
+    check_equal(destroy_calls, 1u);
+    check_equal(orm_transaction_close(transaction, &error), ORM_STATUS_OK);
+  }
+  it("does not implicitly rollback an unknown transaction on final release") {
+    lose_commit_response(); drop_transaction();
+    check_equal(rollback_calls, 0u); check_equal(destroy_calls, 1u);
+  }
+  it("rejects a fresh query after an unknown commit even after transaction close") {
+    orm_query_t *next = NULL;
+    lose_commit_response();
+    check_equal(orm_transaction_close(transaction, &error), ORM_STATUS_OK);
+    const orm_status_t status = orm_raw(connection, orm_view("select 1"), &next, &error);
+    if (status == ORM_STATUS_OK) orm_query_destroy(next);
+    check_equal(status, ORM_STATUS_INVALID_STATE);
+    check_null(next);
+  }
+  it("rejects a fresh transaction on the unusable parent connection") {
+    orm_transaction_t *next = NULL;
+    lose_commit_response();
+    const orm_status_t status = orm_transaction_begin(
+        connection, ORM_ISOLATION_SERIALIZABLE, &next, &error);
+    if (status == ORM_STATUS_OK) orm_transaction_destroy(next);
+    check_equal(status, ORM_STATUS_INVALID_STATE);
+    check_null(next);
+  }
+  it("does not bypass connection quarantine with an existing command query") {
+    lose_commit_response();
+    check_equal(orm_query_open_command_flow(query, &first, &error), ORM_STATUS_INVALID_STATE);
+    check_false(cflow_publisher_valid(&first));
+  }
+  it("does not bypass connection quarantine with an existing row query") {
+    orm_flow_config_t config;
+    orm_query_destroy(query); query = NULL;
+    check_equal(orm_raw(connection, orm_view("select 7 as id"), &query, &error), ORM_STATUS_OK);
+    observed_ops.commit = lost_commit_response;
+    check_equal(orm_transaction_commit(transaction, &error), ORM_OWNER_STATUS_COMMIT_UNKNOWN);
+    orm_flow_config(&config, &row_data);
+    const orm_status_t status = orm_query_open_flow(query, &config, &first, &error);
+    check_equal(status, ORM_STATUS_INVALID_STATE);
+    check_false(cflow_publisher_valid(&first));
+  }
+  it("rejects transaction Publishers and savepoints after an unknown commit") {
+    lose_commit_response();
+    check_equal(orm_query_open_command_flow_in_transaction(query, transaction, &first, &error), ORM_STATUS_INVALID_STATE);
+    check_equal(orm_transaction_savepoint(transaction, orm_view("after_unknown"), &error), ORM_STATUS_INVALID_STATE);
+    check_equal(orm_transaction_rollback_to_savepoint(transaction, orm_view("after_unknown"), &error), ORM_STATUS_INVALID_STATE);
+    check_equal(orm_transaction_release_savepoint(transaction, orm_view("after_unknown"), &error), ORM_STATUS_INVALID_STATE);
+  }
+  it("invalidates an already created lazy command before native execution") {
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    check_equal(orm_query_open_command_flow(query, &second, &error), ORM_STATUS_OK);
+    lose_commit_response();
+    const cflow_step step = cflow_publisher_resume(&second, NULL, &result);
+    check_equal(step.kind, CFLOW_STEP_ERROR);
+    check_not_null(step.error);
+    check_not_null(strstr(step.error, "uncertain commit"));
+  }
+  it("does not convert an explicit SQL rejection into an unknown commit") {
+    observed_ops.commit = rejected_commit;
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_SQL_ERROR);
+    check_equal(transaction->state, ORM_TRANSACTION_ACTIVE);
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_OK);
+    check_equal(rollback_calls, 1u); check_equal(commit_calls, 1u);
+  }
+
+  it("preserves a native explicit unknown result without retrying it") {
+    observed_ops.commit = explicit_unknown_commit;
+    check_equal(orm_transaction_commit(transaction, &error), ORM_OWNER_STATUS_COMMIT_UNKNOWN);
+    check_equal(error.status, ORM_OWNER_STATUS_COMMIT_UNKNOWN);
+    check_equal(error.message, "native commit outcome unknown");
+    check_equal(orm_transaction_close(transaction, &error), ORM_STATUS_OK);
+    check_equal(commit_calls, 1u); check_equal(rollback_calls, 0u);
+  }
+  it("keeps an uncertain outcome through last-reference release in the callback") {
+    observed_ops.commit = lost_commit_and_release;
+    check_equal(orm_transaction_commit(transaction, &error), ORM_OWNER_STATUS_COMMIT_UNKNOWN);
+    check_null(transaction); check_equal(commit_calls, 1u);
+    check_equal(destroy_calls, 1u); check_equal(rollback_calls, 0u);
+    check_equal(error.message, "commit response lost");
+  }
+  it("records an uncertain outcome even without caller error storage") {
+    observed_ops.commit = lost_commit_response;
+    check_equal(orm_transaction_commit(transaction, NULL), ORM_OWNER_STATUS_COMMIT_UNKNOWN);
+    check_equal(orm_transaction_close(transaction, &error), ORM_STATUS_OK);
+    check_equal(commit_calls, 1u); check_equal(rollback_calls, 0u);
+  }
 }
