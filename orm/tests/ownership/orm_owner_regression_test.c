@@ -34,6 +34,16 @@ static void release_query(orm_query_t **query) {
   orm_query_destroy(released);
 }
 
+static void release_publisher(cflow_publisher *publisher) {
+  if (!cflow_publisher_valid(publisher))
+    return;
+  /* Interface dispatch neither accepts an empty vtable nor clears its caller.
+   * Consume the test's handle before dispatch so after_each cannot repeat it. */
+  cflow_publisher released = *publisher;
+  memset(publisher, 0, sizeof(*publisher));
+  cflow_publisher_destroy(&released);
+}
+
 static void open_insert(void) {
   check_equal(orm_raw(owner_connection, orm_view(owner_insert_sql),
                       &owner_query, &owner_error), ORM_STATUS_OK);
@@ -86,8 +96,8 @@ spec("native ORM retained ownership and execution freeze") {
     /* No resume/native call after a failed retention assertion. On the old
      * core an unconsumed command destroy only frees its command state; plan
      * destruction does not dereference its connection. This keeps RED safe. */
-    cflow_publisher_destroy(&owner_second_publisher);
-    cflow_publisher_destroy(&owner_publisher);
+    release_publisher(&owner_second_publisher);
+    release_publisher(&owner_publisher);
     orm_result_destroy(owner_result);
     owner_result = NULL;
     release_query(&owner_second_query);
@@ -132,7 +142,7 @@ spec("native ORM retained ownership and execution freeze") {
     check_equal(backend_destroy_calls, 0u);
     cflow_publisher_cancel(&owner_publisher);
     check_equal(backend_destroy_calls, 0u);
-    cflow_publisher_destroy(&owner_publisher);
+    release_publisher(&owner_publisher);
     check_equal(backend_destroy_calls, 1u);
   }
 
@@ -144,7 +154,7 @@ spec("native ORM retained ownership and execution freeze") {
     check_equal(orm_query_bind(owner_query, orm_i64(2), &owner_error), ORM_STATUS_BUSY);
     check_equal(vec_size(&owner_query->plan.raw_parameters), parameters);
     check_equal(owner_query->plan.parameter_bytes, bytes);
-    cflow_publisher_destroy(&owner_publisher);
+    release_publisher(&owner_publisher);
     check_equal(orm_query_bind(owner_query, orm_i64(2), &owner_error), ORM_STATUS_OK);
   }
 
@@ -153,7 +163,7 @@ spec("native ORM retained ownership and execution freeze") {
     open_lazy(&owner_publisher);
     cflow_publisher_cancel(&owner_publisher);
     check_equal(orm_query_bind(owner_query, orm_i64(2), &owner_error), ORM_STATUS_BUSY);
-    cflow_publisher_destroy(&owner_publisher);
+    release_publisher(&owner_publisher);
     check_equal(orm_query_bind(owner_query, orm_i64(2), &owner_error), ORM_STATUS_OK);
   }
 
@@ -161,9 +171,9 @@ spec("native ORM retained ownership and execution freeze") {
     open_insert();
     open_lazy(&owner_publisher);
     open_lazy(&owner_second_publisher);
-    cflow_publisher_destroy(&owner_publisher);
+    release_publisher(&owner_publisher);
     check_equal(orm_query_bind(owner_query, orm_i64(2), &owner_error), ORM_STATUS_BUSY);
-    cflow_publisher_destroy(&owner_second_publisher);
+    release_publisher(&owner_second_publisher);
     check_equal(orm_query_bind(owner_query, orm_i64(2), &owner_error), ORM_STATUS_OK);
   }
 
