@@ -62,7 +62,7 @@ static void orm_connection_release_child(orm_connection_t *connection) {
 /* A Publisher and each admitted native control call hold the real transaction.
  * Final cleanup is reached only after its cursor/callback has returned. The
  * existing rollback-error policy is unchanged here; #28 tracks its replacement
- * together with checked-close and the complete public ABI 5 family. */
+ * before the complete public ABI 5 family may be published. */
 static void orm_transaction_action(orm_transaction_t *transaction,
                                    orm_owner_action action) {
   if (action == ORM_OWNER_CLOSE_RESOURCES) {
@@ -86,6 +86,48 @@ static void orm_transaction_action(orm_transaction_t *transaction,
     free(transaction);
     orm_connection_release_child(connection);
   }
+}
+
+/* Native work and close admission share the owner lock. No native callback
+ * runs under it; CLOSING protects even a last-reference release in destroy. */
+orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
+                                              orm_error_t *error) {
+  orm_status_t status = ORM_STATUS_OK;
+  orm_owner_action action = ORM_OWNER_KEEP;
+  if (transaction == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "transaction handle is null");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  orm_owner *owner = &transaction->owner;
+  salts_mutex_lock(&owner->mutex);
+  if (owner->phase == ORM_OWNER_CLOSED) {
+    /* A closed handle can still be held; close does not consume its reference. */
+  } else if (owner->dependents != 0u || transaction->operation_active ||
+             owner->phase == ORM_OWNER_CLOSING) {
+    status = ORM_STATUS_BUSY;
+  } else if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u ||
+             (transaction->state != ORM_TRANSACTION_COMMITTED &&
+              transaction->state != ORM_TRANSACTION_ROLLED_BACK)) {
+    status = ORM_STATUS_INVALID_STATE;
+  } else {
+    owner->phase = ORM_OWNER_CLOSING;
+    action = ORM_OWNER_CLOSE_RESOURCES;
+  }
+  salts_mutex_unlock(&owner->mutex);
+  if (status == ORM_STATUS_OK) orm_transaction_action(transaction, action);
+  orm_error_set(error, status, NULL);
+  return status;
+}
+
+void ORM_C_CALL orm_transaction_retain(orm_transaction_t *transaction) {
+  if (transaction == NULL ||
+      orm_owner_try_retain(&transaction->owner) != ORM_STATUS_OK) abort();
+}
+
+void ORM_C_CALL orm_transaction_release(orm_transaction_t *transaction) {
+  if (transaction != NULL)
+    orm_transaction_action(transaction,
+                           orm_owner_release_reference(&transaction->owner));
 }
 
 static void orm_transaction_release_execution(void *context) {
@@ -908,61 +950,76 @@ orm_status_t ORM_C_CALL orm_transaction_rollback(
 }
 
 typedef orm_status_t (*orm_savepoint_fn)(void *, vstr, orm_error_t *);
+typedef enum orm_savepoint_kind {
+  ORM_SAVEPOINT_CREATE,
+  ORM_SAVEPOINT_ROLLBACK,
+  ORM_SAVEPOINT_RELEASE
+} orm_savepoint_kind;
 
 static orm_status_t orm_transaction_savepoint_call(
-    orm_transaction_t *transaction, vstr name, orm_savepoint_fn function,
+    orm_transaction_t *transaction, vstr name, orm_savepoint_kind operation,
     orm_error_t *error) {
-  if (transaction == NULL ||
-#if !defined(ORM_NATIVE_OWNER_CANDIDATE)
-      transaction->state != ORM_TRANSACTION_ACTIVE ||
-#endif
-      !orm_view_valid(name, false) || memchr(name.data, '\0', name.len) != NULL ||
-      function == NULL) {
+  orm_status_t status;
+  orm_savepoint_fn function = NULL;
+  if (transaction == NULL || !orm_view_valid(name, false) ||
+      memchr(name.data, '\0', name.len) != NULL) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
                   "invalid ORM savepoint operation");
     return ORM_STATUS_INVALID_STATE;
   }
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  orm_status_t status = orm_transaction_begin_operation(transaction, error);
+  status = orm_transaction_begin_operation(transaction, error);
   if (status != ORM_STATUS_OK) return status;
-  status = function(transaction->backend.context, name, error);
-  orm_transaction_end_operation(transaction, status, ORM_TRANSACTION_ACTIVE);
-  return status;
 #else
-  return function(transaction->backend.context, name, error);
+  if (transaction->state != ORM_TRANSACTION_ACTIVE ||
+      !orm_transaction_backend_valid(&transaction->backend)) {
+    orm_error_set(error, ORM_STATUS_INVALID_STATE,
+                  "invalid ORM savepoint operation");
+    return ORM_STATUS_INVALID_STATE;
+  }
 #endif
+  /* Admission must precede reading the function table: checked-close clears it.
+   * Its completion hold also prevents concurrent cleanup during native calls. */
+  switch (operation) {
+  case ORM_SAVEPOINT_CREATE: function = transaction->backend.ops->savepoint; break;
+  case ORM_SAVEPOINT_ROLLBACK:
+    function = transaction->backend.ops->rollback_to_savepoint; break;
+  case ORM_SAVEPOINT_RELEASE:
+    function = transaction->backend.ops->release_savepoint; break;
+  }
+  if (function == NULL) {
+    status = ORM_STATUS_INVALID_STATE;
+    orm_error_set(error, status, "invalid ORM savepoint operation");
+  } else {
+    status = function(transaction->backend.context, name, error);
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_transaction_end_operation(transaction, status, ORM_TRANSACTION_ACTIVE);
+#endif
+  return status;
 }
 
 orm_status_t ORM_C_CALL orm_transaction_savepoint(
     orm_transaction_t *transaction, vstr name, orm_error_t *error) {
-  return orm_transaction_savepoint_call(
-      transaction, name,
-      transaction != NULL ? transaction->backend.ops->savepoint : NULL, error);
+  return orm_transaction_savepoint_call(transaction, name, ORM_SAVEPOINT_CREATE,
+                                        error);
 }
 
 orm_status_t ORM_C_CALL orm_transaction_rollback_to_savepoint(
     orm_transaction_t *transaction, vstr name, orm_error_t *error) {
-  return orm_transaction_savepoint_call(
-      transaction, name,
-      transaction != NULL ? transaction->backend.ops->rollback_to_savepoint
-                          : NULL,
-      error);
+  return orm_transaction_savepoint_call(transaction, name, ORM_SAVEPOINT_ROLLBACK,
+                                        error);
 }
 
 orm_status_t ORM_C_CALL orm_transaction_release_savepoint(
     orm_transaction_t *transaction, vstr name, orm_error_t *error) {
-  return orm_transaction_savepoint_call(
-      transaction, name,
-      transaction != NULL ? transaction->backend.ops->release_savepoint
-                          : NULL,
-      error);
+  return orm_transaction_savepoint_call(transaction, name, ORM_SAVEPOINT_RELEASE,
+                                        error);
 }
 
 void ORM_C_CALL orm_transaction_destroy(orm_transaction_t *transaction) {
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  if (transaction != NULL)
-    orm_transaction_action(transaction,
-                           orm_owner_release_reference(&transaction->owner));
+  orm_transaction_release(transaction);
 #else
   orm_error_t ignored;
   if (transaction == NULL)

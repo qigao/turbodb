@@ -70,6 +70,13 @@ orm_status_t ORM_C_CALL orm_query_close(orm_query_t *, orm_error_t *);
 void ORM_C_CALL orm_query_retain(orm_query_t *);
 void ORM_C_CALL orm_query_release(orm_query_t *);
 
+/* Held handles only. Active transactions require explicit commit/rollback;
+ * dependent Publishers/native calls make close BUSY without changing state.
+ * Successful close leaves handle memory/parent ownership until final release. */
+orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *, orm_error_t *);
+void ORM_C_CALL orm_transaction_retain(orm_transaction_t *);
+void ORM_C_CALL orm_transaction_release(orm_transaction_t *);
+
 #ifdef __cplusplus
 }
 #endif
