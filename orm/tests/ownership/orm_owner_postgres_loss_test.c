@@ -239,6 +239,61 @@ spec("real PostgreSQL established-session loss") {
     check_equal(cflow_publisher_resume(&rows, NULL, &row).kind, CFLOW_STEP_VALUE);
     check_equal(row.id, 7);
   }
+  it("records a dead session discovered by cancel before the first resume") {
+    make_pending(); open_blocked_rows(); terminate_target();
+    cflow_publisher_cancel(&rows);
+    check_equal(next_calls, 0u);
+    check_equal(connection->failure, ORM_STATUS_CONNECTION_ERROR);
+    check_equal(orm_query_close(query, &error), ORM_STATUS_BUSY);
+    check_equal(orm_connection_close(connection, &error), ORM_STATUS_BUSY);
+    check_equal(destroy_calls, 0u);
+    check_equal(orm_query_open_command_flow(sibling, &second, &error), ORM_STATUS_INVALID_STATE);
+    check_false(cflow_publisher_valid(&second));
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    check_equal(cflow_publisher_resume(&pending, NULL, &result).kind, CFLOW_STEP_ERROR);
+    check_equal(execute_calls, 0u);
+    cflow_publisher_cancel(&rows);
+    check_equal(connection->failure, ORM_STATUS_CONNECTION_ERROR);
+    drop_publisher(&rows); drop_publisher(&pending);
+    drop_query(&query); drop_query(&sibling);
+    check_equal(orm_connection_close(connection, &error), ORM_STATUS_OK);
+    check_equal(destroy_calls, 1u);
+  }
+  it("records a dead session drained by destroy without cancel or resume") {
+    make_pending(); open_blocked_rows(); terminate_target();
+    drop_publisher(&rows);
+    check_equal(next_calls, 0u);
+    check_equal(connection->failure, ORM_STATUS_CONNECTION_ERROR);
+    check_equal(destroy_calls, 0u);
+    check_equal(orm_connection_close(connection, &error), ORM_STATUS_BUSY);
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    check_equal(cflow_publisher_resume(&pending, NULL, &result).kind, CFLOW_STEP_ERROR);
+    check_equal(execute_calls, 0u);
+    drop_publisher(&pending); drop_query(&query); drop_query(&sibling);
+    check_equal(orm_connection_close(connection, &error), ORM_STATUS_OK);
+    check_equal(destroy_calls, 1u);
+  }
+  it("does not poison a healthy session when unconsumed rows are cancelled") {
+    make_pending(); open_rows("select 7::integer as id");
+    cflow_publisher_cancel(&rows);
+    check_equal(next_calls, 0u);
+    check_equal(connection->failure, ORM_STATUS_OK);
+    check_equal(orm_query_close(query, &error), ORM_STATUS_BUSY);
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    check_equal(cflow_publisher_resume(&pending, NULL, &result).kind, CFLOW_STEP_VALUE);
+    check_equal(execute_calls, 1u);
+  }
+  it("does not poison a healthy session when cancellation drains a SQL rejection") {
+    open_rows("select (1 / 0)::integer as id");
+    cflow_publisher_cancel(&rows);
+    check_equal(next_calls, 0u);
+    check_equal(connection->failure, ORM_STATUS_OK);
+    drop_publisher(&rows); drop_query(&query);
+    open_rows("select 7::integer as id");
+    pg_loss_row row = {0};
+    check_equal(cflow_publisher_resume(&rows, NULL, &row).kind, CFLOW_STEP_VALUE);
+    check_equal(row.id, 7);
+  }
 }
 
 int main(int argc, char **argv) {
