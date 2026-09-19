@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  TURBO_FLOW_COMMIT: 0dde776103ca31c3bee8ea756e0a30e3fca25dc1
+  TURBO_FLOW_COMMIT: db06cc8d446b022bb51fcb644d0034e33ffb1883
   TURBODB_COMMIT: 855e9c3eeb77d41fa1fc20fc44cc01ebe9c77a41
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
