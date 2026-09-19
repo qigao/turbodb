@@ -1,7 +1,7 @@
 name: Driver handshake source contract
 on:
   push:
-    branches: [feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers]
+    branches: [feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/orm-native-ownership]
   workflow_dispatch:
 permissions:
   contents: read
