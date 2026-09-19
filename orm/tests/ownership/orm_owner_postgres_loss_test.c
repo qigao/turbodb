@@ -280,7 +280,7 @@ spec("real PostgreSQL established-session loss") {
     check_equal(connection->failure, ORM_STATUS_OK);
     check_equal(orm_query_close(query, &error), ORM_STATUS_BUSY);
     orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
-    check_equal(cflow_publisher_resume(&pending, NULL, &result).kind, CFLOW_STEP_VALUE);
+    check_equal(cflow_publisher_resume(&pending, NULL, &result).kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(execute_calls, 1u);
   }
   it("does not poison a healthy session when cancellation drains a SQL rejection") {

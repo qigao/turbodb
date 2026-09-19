@@ -63,6 +63,10 @@ typedef struct orm_row_cursor {
   /* Zero disables CFlow WAIT timeout wrapping for this backend cursor. */
   uint64_t wait_timeout_ns;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  /* Optional idempotent cancellation with an observable result. It finishes
+   * native draining before returning; error is copied into caller storage.
+   * A successful cancel does not release any owner or prove query completion. */
+  orm_status_t (*cancel_checked)(void *, orm_error_t *);
   void *owner;
   void (*release_owner)(void *);
   /* Host-only hooks borrow owner for the cursor lifetime. They do not touch

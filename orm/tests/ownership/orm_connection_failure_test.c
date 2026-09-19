@@ -25,6 +25,9 @@ static orm_row_cursor_destroy_fn native_cursor_destroy;
 static orm_status_t execute_error, next_error, open_error;
 static unsigned execute_calls, next_calls, disconnect_calls;
 static int overwrite_diagnostic;
+static int use_checked_cancel;
+static unsigned checked_cancel_calls;
+static orm_status_t cancel_error;
 static orm_transaction_backend_ops original_transaction_ops, failing_transaction_ops;
 static orm_status_t failed_control(void *context, orm_error_t *out) {
   (void)context;
@@ -88,6 +91,12 @@ static void observed_cancel(void *context) {
   if (overwrite_diagnostic)
     (void)snprintf(diagnostic, sizeof(diagnostic), "%s", "cancel replaced borrowed text");
 }
+static orm_status_t observed_checked_cancel(void *context, orm_error_t *out) {
+  ++checked_cancel_calls;
+  native_cancel(context);
+  orm_error_set(out, cancel_error, "native drain diagnostic");
+  return cancel_error;
+}
 static void observed_cursor_destroy(void *context) {
   native_cursor_destroy(context);
 }
@@ -107,6 +116,7 @@ static orm_status_t observed_open(void *context, const orm_query_plan *plan,
     cursor_ops.cancel = observed_cancel;
     cursor_ops.destroy = observed_cursor_destroy;
     out->ops = &cursor_ops;
+    if (use_checked_cancel) out->cancel_checked = observed_checked_cancel;
   }
   return status;
 }
@@ -133,6 +143,7 @@ spec("native connection failure propagation") {
     connection = NULL; rows = command = extra = NULL; transaction = NULL;
     memset(&first, 0, sizeof(first)); memset(&second, 0, sizeof(second));
     execute_error = next_error = open_error = ORM_STATUS_OK;
+    use_checked_cancel = 0; checked_cancel_calls = 0u; cancel_error = ORM_STATUS_OK;
     execute_calls = next_calls = disconnect_calls = 0u; overwrite_diagnostic = 0;
     (void)snprintf(diagnostic, sizeof(diagnostic), "%s", "original native connection loss");
     orm_error_init(&error); orm_config(&config); config.driver = orm_view("sqlite");
@@ -262,4 +273,48 @@ spec("native connection failure propagation") {
     fail_command();
     check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_INVALID_STATE);
   }
+  it("reports checked cancellation before parent release and does not cancel twice") {
+    use_checked_cancel = 1; cancel_error = ORM_STATUS_CONNECTION_ERROR;
+    check_equal(open_rows(&first), ORM_STATUS_OK);
+    cflow_publisher_cancel(&first);
+    check_equal(connection->failure, ORM_STATUS_CONNECTION_ERROR);
+    check_equal(next_calls, 0u);
+    check_equal(orm_query_close(rows, &error), ORM_STATUS_BUSY);
+    check_equal(orm_connection_close(connection, &error), ORM_STATUS_BUSY);
+    check_equal(disconnect_calls, 0u);
+    check_equal(orm_query_open_command_flow(command, &second, &error), ORM_STATUS_INVALID_STATE);
+    cflow_publisher_cancel(&first); drop(&first);
+    check_equal(checked_cancel_calls, 1u);
+  }
+  it("reports cancellation failure when an unconsumed Publisher is destroyed") {
+    use_checked_cancel = 1; cancel_error = ORM_STATUS_CONNECTION_ERROR;
+    check_equal(open_rows(&first), ORM_STATUS_OK);
+    drop(&first);
+    check_equal(connection->failure, ORM_STATUS_CONNECTION_ERROR);
+    check_equal(next_calls, 0u);
+    check_equal(disconnect_calls, 0u);
+    check_equal(checked_cancel_calls, 1u);
+  }
+  it("preserves the primary query diagnostic while reporting a separate drain failure") {
+    use_checked_cancel = 1; cancel_error = ORM_STATUS_CONNECTION_ERROR;
+    check_equal(open_rows(&first), ORM_STATUS_OK);
+    next_error = ORM_STATUS_SQL_ERROR;
+    failure_row row = {0};
+    const cflow_step step = cflow_publisher_resume(&first, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_ERROR);
+    check_equal(strcmp(step.error, "original native connection loss"), 0);
+    check_equal(connection->failure, ORM_STATUS_CONNECTION_ERROR);
+    drop(&first);
+    check_equal(checked_cancel_calls, 1u);
+  }
+  it("does not invalidate the connection for an ordinary checked cancellation error") {
+    use_checked_cancel = 1; cancel_error = ORM_STATUS_SQL_ERROR;
+    check_equal(open_rows(&first), ORM_STATUS_OK);
+    cflow_publisher_cancel(&first);
+    check_equal(connection->failure, ORM_STATUS_OK);
+    check_equal(orm_raw(connection, orm_view("select 1"), &extra, &error), ORM_STATUS_OK);
+    drop(&first);
+    check_equal(checked_cancel_calls, 1u);
+  }
+
 }

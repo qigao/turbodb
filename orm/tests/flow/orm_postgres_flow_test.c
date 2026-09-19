@@ -948,3 +948,62 @@ spec("ORM PostgreSQL connection failure classification") {
     orm_postgres_test_verify_mocks();
   }
 }
+
+/* Draining is an error-observation boundary even without a preceding next(). */
+static void postgres_check_cancel_error(const char *sqlstate, int connection_token,
+                                       int resume_first, orm_status_t expected) {
+  orm_postgres_test_result result = {
+      .status = ORM_POSTGRES_RESULT_ERROR, .error = "drained native error",
+      .sqlstate = sqlstate};
+  orm_postgres_driver driver = {
+      &orm_postgres_test_command_ops, &orm_postgres_test_result_ops, &connection_token};
+  orm_postgres_query_request request = {"select 1", 0, NULL, NULL, NULL, NULL, 0};
+  orm_error_t error, runtime_error;
+  orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+      1u, 1u, 64u, NULL, NULL, &runtime_error);
+  orm_row_cursor cursor = {0}; cserde_reader reader = {0};
+  orm_error_init(&error); orm_error_init(&runtime_error);
+  orm_postgres_test_reset_mocks();
+  orm_postgres_test_expect_start(&connection_token, &request);
+  if (sqlstate != NULL) {
+    mock_orm_postgres_test_next_result_expect(
+        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&result));
+    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&result));
+  }
+  mock_orm_postgres_test_next_result_expect(
+      TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
+  const orm_status_t started = orm_postgres_cursor_start(&cursor, &driver, &request,
+                                                        &config, &error);
+  if (started == ORM_STATUS_OK) {
+    if (resume_first) (void)cursor.ops->next(cursor.context, &reader);
+    cursor.ops->cancel(cursor.context);
+    cursor.ops->cancel(cursor.context);
+    cursor.ops->destroy(cursor.context);
+  }
+  check_equal(started, ORM_STATUS_OK);
+  check_equal(runtime_error.status, expected);
+  if (expected != ORM_STATUS_OK) check_true(runtime_error.message[0] != '\0');
+  orm_postgres_test_verify_mocks();
+}
+
+spec("ORM PostgreSQL cancellation drain diagnostics") {
+  (void)ttest_config__;
+  it("observes server termination while cancelling unconsumed results") {
+    postgres_check_cancel_error("57P01", 0, 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("observes connection exceptions while cancelling unconsumed results") {
+    postgres_check_cancel_error("08006", 0, 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("observes disconnected EOF while cancelling without a result") {
+    postgres_check_cancel_error(NULL, -1, 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("keeps ordinary drained SQL rejection distinct from connection loss") {
+    postgres_check_cancel_error("23505", 0, 0, ORM_STATUS_CONSTRAINT);
+  }
+  it("keeps a healthy empty drain successful") {
+    postgres_check_cancel_error(NULL, 0, 0, ORM_STATUS_OK);
+  }
+  it("preserves the operation error when cancellation later discovers disconnection") {
+    postgres_check_cancel_error("23505", -1, 1, ORM_STATUS_CONSTRAINT);
+  }
+}

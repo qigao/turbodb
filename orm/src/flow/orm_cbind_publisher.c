@@ -35,14 +35,38 @@ int orm_row_cursor_valid(const orm_row_cursor *cursor) {
          cursor->ops->cancel != NULL && cursor->ops->destroy != NULL;
 }
 
+/* Checked cancellation observes errors while the native context and all
+ * parent holds still exist. Ordinary backends retain their void cancel path. */
+static void orm_row_cursor_cancel_native(orm_row_cursor *cursor) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (cursor->cancel_checked != NULL) {
+    orm_error_t error;
+    orm_error_init(&error);
+    const orm_status_t status = cursor->cancel_checked(cursor->context, &error);
+    cursor->cancel_checked = NULL; /* Cancellation is consumed once by the host. */
+    if (cursor->report_owner_error != NULL)
+      cursor->report_owner_error(cursor->owner, status);
+    return;
+  }
+#endif
+  cursor->ops->cancel(cursor->context);
+}
+
 void orm_row_cursor_dispose(orm_row_cursor *cursor) {
   if (cursor == NULL)
     return;
   if (cursor->ops != NULL && cursor->context != NULL &&
       cursor->ops->struct_size >= sizeof(orm_row_cursor_ops) &&
       cursor->ops->abi_version == ORM_ROW_CURSOR_OPS_ABI_VERSION &&
-      cursor->ops->destroy != NULL)
+      cursor->ops->destroy != NULL) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    /* Also cover failed Publisher construction/direct cursor disposal. This
+     * optional callback is idempotent after an earlier Publisher cancel. */
+    if (cursor->cancel_checked != NULL)
+      orm_row_cursor_cancel_native(cursor);
+#endif
     cursor->ops->destroy(cursor->context);
+  }
   cursor->ops = NULL;
   cursor->context = NULL;
   cursor->wait_timeout_ns = 0u;
@@ -51,6 +75,7 @@ void orm_row_cursor_dispose(orm_row_cursor *cursor) {
   void (*release_owner)(void *) = cursor->release_owner;
   void *transaction_owner = cursor->transaction_owner;
   void (*release_transaction_owner)(void *) = cursor->release_transaction_owner;
+  cursor->cancel_checked = NULL;
   cursor->owner = NULL;
   cursor->release_owner = NULL;
   cursor->owner_status = NULL;
@@ -88,7 +113,7 @@ static void orm_cbind_publisher_cancel_cursor(orm_cbind_publisher_state *state) 
   if (state->cancelled)
     return;
   state->cancelled = 1;
-  state->cursor.ops->cancel(state->cursor.context);
+  orm_row_cursor_cancel_native(&state->cursor);
 }
 
 static cflow_step orm_cbind_publisher_fail(orm_cbind_publisher_state *state,
@@ -299,6 +324,7 @@ orm_status_t orm_cbind_publisher_init(cflow_publisher *out_publisher,
   cursor->context = NULL;
   cursor->wait_timeout_ns = 0u;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  cursor->cancel_checked = NULL;
   cursor->owner = NULL;
   cursor->release_owner = NULL;
   cursor->owner_status = NULL;

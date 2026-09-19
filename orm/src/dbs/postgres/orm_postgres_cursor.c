@@ -27,6 +27,7 @@ struct orm_postgres_cursor_state {
   size_t owned_column_count;
   uint64_t owned_affected_rows;
   orm_error_t owned_runtime_error;
+  orm_error_t drain_error;
   void *current_result;
   orm_postgres_reader_state reader;
   unsigned char *bytea_scratch;
@@ -143,15 +144,60 @@ static void orm_postgres_release_current(orm_postgres_cursor_state *state) {
   state->current_result = NULL;
 }
 
+/* Keep cancellation/drain failure separate from an already observed query
+ * result. In particular a later disconnect cannot erase a server rejection. */
+static void orm_postgres_record_drain_error(orm_postgres_cursor_state *state,
+                                           orm_status_t status,
+                                           const char *message) {
+  if (state->drain_error.status == ORM_STATUS_CONNECTION_ERROR ||
+      (state->drain_error.status != ORM_STATUS_OK &&
+       status != ORM_STATUS_CONNECTION_ERROR))
+    return;
+  orm_postgres_set_error(&state->drain_error, status, message);
+  if (state->config.runtime_error->status == ORM_STATUS_OK)
+    orm_postgres_set_error(state->config.runtime_error, status, message);
+}
+
+static void orm_postgres_observe_drained_result(orm_postgres_cursor_state *state,
+                                               const void *result) {
+  if (result == NULL ||
+      state->driver.result->status(result) != ORM_POSTGRES_RESULT_ERROR)
+    return;
+  const char *sqlstate = state->driver.result->sqlstate(result);
+  orm_status_t status = orm_postgres_sqlstate_status(sqlstate);
+  if ((sqlstate == NULL || strlen(sqlstate) != 5u) &&
+      !state->driver.command->connection_ok(state->driver.context))
+    status = ORM_STATUS_CONNECTION_ERROR;
+  const char *message = state->driver.result->error(result);
+  char diagnostic[ORM_C_ERROR_MESSAGE_CAPACITY];
+  if (sqlstate != NULL && strlen(sqlstate) == 5u) {
+    (void)snprintf(diagnostic, sizeof(diagnostic), "SQLSTATE=%s %s", sqlstate,
+                   message != NULL && *message != '\0'
+                       ? message : "PostgreSQL drain failed");
+    message = diagnostic;
+  }
+  orm_postgres_record_drain_error(state, status,
+      message != NULL && *message != '\0' ? message : "PostgreSQL drain failed");
+}
+
 static void orm_postgres_drain(orm_postgres_cursor_state *state) {
   void *result;
+  orm_postgres_observe_drained_result(state, state->current_result);
   orm_postgres_release_current(state);
   while (state->query_active) {
     result = state->driver.command->next_result(state->driver.context);
     if (result == NULL) {
       state->query_active = 0;
+      if (!state->driver.command->connection_ok(state->driver.context)) {
+        const char *message = state->driver.command->connection_error(state->driver.context);
+        orm_postgres_record_drain_error(state, ORM_STATUS_CONNECTION_ERROR,
+            message != NULL && *message != '\0' ? message
+                : "PostgreSQL connection lost while draining");
+      }
       break;
     }
+    /* Copy diagnostics before PQclear can invalidate borrowed error text. */
+    orm_postgres_observe_drained_result(state, result);
     state->driver.command->release_result(result);
   }
 }
@@ -555,6 +601,20 @@ static void orm_postgres_cursor_cancel(void *context) {
   state->terminal = 1;
 }
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+static orm_status_t orm_postgres_cursor_cancel_checked(void *context,
+                                                       orm_error_t *error) {
+  orm_postgres_cursor_state *state = (orm_postgres_cursor_state *)context;
+  if (state == NULL) {
+    orm_postgres_set_error(error, ORM_STATUS_INVALID_ARGUMENT, NULL);
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  orm_postgres_cursor_cancel(context);
+  orm_postgres_set_error(error, state->drain_error.status, state->drain_error.message);
+  return state->drain_error.status;
+}
+#endif
+
 static void orm_postgres_cursor_destroy(void *context) {
   orm_postgres_cursor_state *state =
       (orm_postgres_cursor_state *)context;
@@ -608,6 +668,7 @@ orm_status_t orm_postgres_cursor_start(
   state->driver = *driver;
   state->config = *config;
   orm_error_init(&state->owned_runtime_error);
+  orm_error_init(&state->drain_error);
   if (state->config.column_count == NULL)
     state->config.column_count = &state->owned_column_count;
   if (state->config.affected_rows == NULL)
@@ -659,6 +720,9 @@ orm_status_t orm_postgres_cursor_start(
   }
   out_cursor->ops = &orm_postgres_cursor_ops;
   out_cursor->context = state;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  out_cursor->cancel_checked = orm_postgres_cursor_cancel_checked;
+#endif
   orm_postgres_set_error(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }
