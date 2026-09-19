@@ -19,7 +19,7 @@ foreach(source IN LISTS owner_sources)
 endforeach()
 add_library(orm_owner_test_core STATIC ${owner_absolute_sources} ../../src/abi/orm_owner.c)
 foreach(property IN ITEMS INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
-                          COMPILE_FEATURES LINK_LIBRARIES)
+                          COMPILE_FEATURES LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
   get_target_property(value orm_c_test_static ${property})
   if(value)
     set_property(TARGET orm_owner_test_core PROPERTY ${property} "${value}")
