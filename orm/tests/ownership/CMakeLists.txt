@@ -32,7 +32,7 @@ set_target_properties(orm_owner_test_core PROPERTIES C_STANDARD 11 C_STANDARD_RE
 
 add_executable(orm_owner_regression_test orm_owner_regression_test.c)
 add_executable(orm_owner_state_test orm_owner_state_test.c)
-add_executable(orm_owner_checked_test orm_owner_test.c)
+add_executable(orm_owner_checked_test orm_owner_test.c orm_transaction_owner_test.c)
 add_executable(orm_owner_public_flow_test ../flow/orm_public_flow_test.c)
 add_executable(orm_owner_cpp_flow_test ../flow/orm_cpp_flow_test.cpp)
 foreach(group IN ITEMS regression state checked public_flow cpp_flow)
