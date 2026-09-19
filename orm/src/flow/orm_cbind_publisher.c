@@ -49,8 +49,14 @@ void orm_row_cursor_dispose(orm_row_cursor *cursor) {
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   void *owner = cursor->owner;
   void (*release_owner)(void *) = cursor->release_owner;
+  void *transaction_owner = cursor->transaction_owner;
+  void (*release_transaction_owner)(void *) = cursor->release_transaction_owner;
   cursor->owner = NULL;
   cursor->release_owner = NULL;
+  cursor->transaction_owner = NULL;
+  cursor->release_transaction_owner = NULL;
+  if (release_transaction_owner != NULL)
+    release_transaction_owner(transaction_owner);
   if (release_owner != NULL) release_owner(owner);
 #endif
 }
@@ -278,6 +284,8 @@ orm_status_t orm_cbind_publisher_init(cflow_publisher *out_publisher,
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   cursor->owner = NULL;
   cursor->release_owner = NULL;
+  cursor->transaction_owner = NULL;
+  cursor->release_transaction_owner = NULL;
 #endif
   orm_cbind_set_error(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;

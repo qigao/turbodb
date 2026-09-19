@@ -65,6 +65,8 @@ typedef struct orm_row_cursor {
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   void *owner;
   void (*release_owner)(void *);
+  void *transaction_owner;
+  void (*release_transaction_owner)(void *);
 #endif
 } orm_row_cursor;
 

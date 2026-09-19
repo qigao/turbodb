@@ -240,4 +240,32 @@ spec("real SQLite transaction Publisher ownership") {
     check_equal(nested_admission, ORM_STATUS_BUSY);
     check_false(cflow_publisher_valid(&second)); check_equal(commit_calls, 1u);
   }
+  it("rejects savepoint creation while a command Publisher exists") {
+    open_command(&first);
+    check_equal(orm_transaction_savepoint(transaction, orm_view("held"), &error),
+                ORM_STATUS_BUSY);
+    drop_publisher(&first);
+    check_equal(orm_transaction_savepoint(transaction, orm_view("held"), &error),
+                ORM_STATUS_OK);
+  }
+  it("rejects rollback to a savepoint while a command Publisher exists") {
+    check_equal(orm_transaction_savepoint(transaction, orm_view("held"), &error),
+                ORM_STATUS_OK);
+    open_command(&first);
+    check_equal(orm_transaction_rollback_to_savepoint(
+                    transaction, orm_view("held"), &error), ORM_STATUS_BUSY);
+    drop_publisher(&first);
+    check_equal(orm_transaction_rollback_to_savepoint(
+                    transaction, orm_view("held"), &error), ORM_STATUS_OK);
+  }
+  it("rejects savepoint release while a command Publisher exists") {
+    check_equal(orm_transaction_savepoint(transaction, orm_view("held"), &error),
+                ORM_STATUS_OK);
+    open_command(&first);
+    check_equal(orm_transaction_release_savepoint(
+                    transaction, orm_view("held"), &error), ORM_STATUS_BUSY);
+    drop_publisher(&first);
+    check_equal(orm_transaction_release_savepoint(
+                    transaction, orm_view("held"), &error), ORM_STATUS_OK);
+  }
 }

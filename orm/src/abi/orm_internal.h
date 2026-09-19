@@ -157,6 +157,11 @@ typedef enum orm_transaction_state {
 } orm_transaction_state;
 
 struct orm_transaction {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+  /* Protected by owner.mutex; native callbacks never hold that mutex. */
+  bool operation_active;
+#endif
   orm_connection_t *connection;
   orm_transaction_backend backend;
   orm_transaction_state state;
