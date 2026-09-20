@@ -100,6 +100,9 @@ jobs:
         shell: pwsh
         run: ./.github/scripts/windows-lock-trace.ps1 -Phase Start
       - name: Build real Salts package and test SDK on Windows
+        env:
+          # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
+          VCPKG_DISABLE_METRICS: '1'
         if: runner.os == 'Windows'
         shell: cmd
         run: |
@@ -154,6 +157,9 @@ jobs:
           ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
           ctest --preset "$profile" -R '^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ownership.log
       - name: Build and test native plan adapter on Windows
+        env:
+          # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
+          VCPKG_DISABLE_METRICS: '1'
         if: (github.ref_name == 'feat/runtime-driver-sdk-plan-view' || github.ref_name == 'feat/orm-native-ownership') && runner.os == 'Windows'
         shell: cmd
         run: |

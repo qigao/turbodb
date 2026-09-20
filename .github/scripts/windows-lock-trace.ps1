@@ -13,6 +13,7 @@ $pml = Join-Path $trace 'capture.pml'
 $csv = Join-Path $trace 'capture.csv'
 $probe = Join-Path $trace 'locked-probe.exe'
 $stateFile = Join-Path $evidence 'trace.json'
+$vcpkg = Join-Path $env:DRIVER_SDK_VCPKG_ROOT 'vcpkg.exe'
 New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 
 function Invoke-TraceCommand([string]$Arguments, [int]$Seconds) {
@@ -36,7 +37,6 @@ if ($Phase -eq 'Start') {
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation(?:,|$)') {
         throw 'Process Monitor must have a valid Microsoft Authenticode signature.'
     }
-    $vcpkg = Join-Path $env:DRIVER_SDK_VCPKG_ROOT 'vcpkg.exe'
     & $vcpkg version *> (Join-Path $evidence 'vcpkg-version.log')
     if ($LASTEXITCODE -ne 0) { throw 'Cannot identify vcpkg executable.' }
     $started = [DateTime]::UtcNow
@@ -75,7 +75,31 @@ if ($Phase -eq 'Start') {
     if ($state.probe_locked_exit -eq 0 -or $state.probe_unlocked_exit -ne 0) {
         throw 'The isolated locked/unlocked probe did not produce failure/success as expected.'
     }
-    Write-Host 'Trace active; controlled lock fails and unlocked control succeeds. Normal build follows unchanged.'
+    # Same executable/input, one flag changes. These are probes, not build retries.
+    # Record native PIDs so default telemetry self-opens can be separated from the build.
+    if (Test-Path Env:VCPKG_DISABLE_METRICS) { throw 'Default-metrics contrast requires the unmodified environment.' }
+    $samples = @()
+    foreach ($disabled in @($false, $true)) {
+        for ($index = 0; $index -lt 8; ++$index) {
+            $name = "metrics-$disabled-$index"
+            $arguments = "z-applocal --target-binary=`"$probe`" --installed-bin-dir=`"$empty`" --debug"
+            if ($disabled) { $arguments += ' --disable-metrics' }
+            $sample = Start-Process -FilePath $vcpkg -ArgumentList $arguments -PassThru -NoNewWindow `
+                -RedirectStandardOutput (Join-Path $evidence "$name-out.log") `
+                -RedirectStandardError (Join-Path $evidence "$name-err.log")
+            if (-not $sample.WaitForExit(30000)) { $sample.Kill(); throw 'Metrics contrast probe timed out.' }
+            $samples += [ordered]@{
+                name = $name; pid = $sample.Id; disabled = $disabled; exit_code = $sample.ExitCode
+                started_utc = $sample.StartTime.ToUniversalTime().ToString('o')
+                exited_utc = $sample.ExitTime.ToUniversalTime().ToString('o')
+            }
+            if ($sample.ExitCode -ne 0) { throw "Metrics contrast probe failed: $name" }
+        }
+    }
+    $state.metrics_samples = $samples
+    $state.probes_finished_utc = [DateTime]::UtcNow.ToString('o')
+    $state | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $stateFile -Encoding utf8
+    Write-Host 'Trace active; 8 default and 8 disabled-metrics native probes completed. Build commands are unchanged.'
     exit 0
 }
 
@@ -93,6 +117,9 @@ try {
     $roots = @($env:GITHUB_WORKSPACE, $env:DRIVER_SDK_VCPKG_ROOT, $trace) | ForEach-Object { $_.TrimEnd('\') + '\' }
     $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $processIds = [Collections.Generic.HashSet[string]]::new()
+    # Always retain self-executable history, including successful opens in a green build.
+    [void]$paths.Add($vcpkg)
+    foreach ($sample in $state.metrics_samples) { [void]$processIds.Add([string]$sample.pid) }
     $columns = @('Time of Day', 'Process Name', 'PID', 'Operation', 'Path', 'Result', 'Detail')
     $state.probe_sharing_events = 0
     $state.build_access_failures = 0
@@ -121,6 +148,19 @@ try {
         ($paths.Contains($_.Path) -and $_.Operation -match '^(CreateFile|CreateFileMapping|ReadFile|WriteFile|CloseFile|QueryOpen|FlushBuffersFile|Load Image|Set.*File|Query.*File)$') -or
         ($_.Operation -eq 'Process Exit' -and $processIds.Contains($_.PID))
     } | Select-Object -Property $columns | Export-Csv -LiteralPath (Join-Path $evidence 'failed-path-history.csv') -NoTypeInformation -Encoding utf8
+    $state.metrics_exclusive_opens = @()
+    $history = Join-Path $evidence 'failed-path-history.csv'
+    foreach ($sample in $state.metrics_samples) {
+        $exclusive = @(Import-Csv -LiteralPath $history | Where-Object {
+            $_.Path -eq $vcpkg -and $_.'Process Name' -eq 'vcpkg.exe' -and
+            $_.PID -eq [string]$sample.pid -and $_.Operation -eq 'CreateFile' -and
+            $_.Result -eq 'SUCCESS' -and $_.Detail -match 'ShareMode: None(?:,|$)'
+        })
+        $state.metrics_exclusive_opens += [ordered]@{
+            name = $sample.name; pid = $sample.pid; disabled = $sample.disabled; count = $exclusive.Count
+        }
+    }
+    # Contrasts are evidence. Do not turn an unexpected result into an assumed fix.
     $state.status = 'collected'
     if ($state.probe_sharing_events -lt 1) { throw 'Trace is invalid: the controlled vcpkg sharing violation was not observed.' }
     Write-Host "Observed probe sharing violations: $($state.probe_sharing_events); build access failures: $($state.build_access_failures)."
