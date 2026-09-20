@@ -17,7 +17,7 @@ env:
   TURBODB_COMMIT: 855e9c3eeb77d41fa1fc20fc44cc01ebe9c77a41
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_COMMIT: 2804c2eb809fed4cb89f917f0a8cd00f482abb64
-  SALTS_UTILS_COMMIT: 0b3876018e5bdaed70fecbc0d0863cb394dd6044
+  SALTS_UTILS_COMMIT: 47bdfdcfcbb64dc3dc25d6768dd2d3b74b7cc3f7
   ASAN_OPTIONS: detect_leaks=1:detect_odr_violation=2:halt_on_error=1
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
@@ -131,16 +131,25 @@ jobs:
           sudo mkdir -p /opt/salts
           sudo ln -sfn "$PROJECT_ROOT/external/pkgs/salts/debug" /opt/salts/debug
 
-      - name: Build and install pinned SaltsUtils SDK
+      - name: Build and install pinned SaltsUtils and DataBind SDKs
         shell: bash
         working-directory: .ci/deps/salts-utils
+        env:
+          SALTS_ROOT: /opt/salts/debug
         run: |
           set -euxo pipefail
-          cmake --preset linux-dev-user -DENABLE_SANITIZER_ADDRESS=OFF -DENABLE_SANITIZER_UNDEFINED=OFF -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$RUNNER_TEMP/host-lemon/lemon" -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdk/salts-utils-debug"
-          cmake --build build/linux-gcc-debug --target install -j2
-          test -d "$RUNNER_TEMP/sdk/salts-utils-debug/include"
-          sudo mkdir -p /opt/salts-utils
+          cmake --preset linux-dev-user -DENABLE_SANITIZER_ADDRESS=OFF -DENABLE_SANITIZER_UNDEFINED=OFF -DENABLE_TESTS=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$RUNNER_TEMP/host-lemon/lemon"
+          cmake --build build/linux-gcc-debug -j2
+          cmake --install build/linux-gcc-debug --prefix "$RUNNER_TEMP/sdk/salts-utils-debug" --component Unspecified
+          cmake --install build/linux-gcc-debug --prefix "$RUNNER_TEMP/sdk/databind-debug" --component DataBind
+          test -f "$RUNNER_TEMP/sdk/salts-utils-debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test ! -e "$RUNNER_TEMP/sdk/salts-utils-debug/lib/cmake/DataBind/DataBindConfig.cmake"
+          test -f "$RUNNER_TEMP/sdk/databind-debug/lib/cmake/DataBind/DataBindConfig.cmake"
+          test ! -e "$RUNNER_TEMP/sdk/databind-debug/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -x "$RUNNER_TEMP/sdk/databind-debug/bin/tbe_compiler"
+          sudo mkdir -p /opt/salts-utils /opt/databind
           sudo ln -sfn "$RUNNER_TEMP/sdk/salts-utils-debug" /opt/salts-utils/debug
+          sudo ln -sfn "$RUNNER_TEMP/sdk/databind-debug" /opt/databind/debug
 
       - name: Build and install pinned TurboDB SQLite SDK
         shell: bash
@@ -163,7 +172,7 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/turbodb-configure.log"
           cmake --build build/turbodb-sdk --target install -j2 2>&1 | tee "$RUNNER_TEMP/task4-runtime-evidence/turbodb-build.log"
           git -C .ci/deps/turbodb diff --exit-code
-          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/sdk/turbodb-debug/lib:/opt/salts/debug/lib:/opt/salts-utils/debug/lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/sdk/turbodb-debug/lib:/opt/salts/debug/lib:/opt/salts-utils/debug/lib:/opt/databind/debug/lib" >> "$GITHUB_ENV"
 
       - name: Apply focused Task 4 validation-only CMake assembly
         shell: bash
@@ -177,6 +186,7 @@ jobs:
         env:
           SALTS_ROOT: /opt/salts/debug
           SALTS_UTILS_ROOT: /opt/salts-utils/debug
+          DATABIND_ROOT: /opt/databind/debug
           TURBODB_ROOT: ${{ runner.temp }}/sdk/turbodb-debug
         run: |
           set -euxo pipefail
@@ -189,7 +199,7 @@ jobs:
             -DBUILD_EXAMPLES=OFF \
             -DBUILD_BENCHMARKS=OFF \
             -DTURBO_FLOW_BUILD_TURBODB_ADAPTER=ON \
-            -DTURBO_FLOW_TBE_COMPILER_HOST_EXECUTABLE="$RUNNER_TEMP/sdk/salts-utils-debug/bin/tbe_compiler" \
+            -DTURBO_FLOW_TBE_COMPILER_HOST_EXECUTABLE="$RUNNER_TEMP/sdk/databind-debug/bin/tbe_compiler" \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE" \
