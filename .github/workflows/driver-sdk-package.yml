@@ -196,6 +196,53 @@ jobs:
           cp "$build/compile_commands.json" evidence/core/postgres-compile-commands.json
           cmake --build --preset "$profile" --target orm_owner_postgres_test orm_owner_postgres_loss_test orm_postgres_live_test --parallel 4 2>&1 | tee evidence/core/postgres-build.log
           ctest --preset "$profile" -R '^(orm_owner_postgres|orm_owner_postgres_loss|orm_postgres_live)$' --verbose --no-tests=error 2>&1 | tee evidence/core/postgres-ctest.log
+      # Run the entire configured root suite after the unchanged focused checks.
+      # Linux keeps the live PostgreSQL service configured by the preceding step.
+      - name: Build and test full root suite on Linux
+        if: github.ref_name == 'feat/orm-native-ownership' && runner.os == 'Linux'
+        shell: bash
+        env:
+          TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
+        run: |
+          set -euo pipefail
+          profile=linux-release-user
+          build=build/linux-gcc-release
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            profile=linux-dev-user
+            build=build/linux-gcc-debug
+          fi
+          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+          cp "$build/CMakeCache.txt" evidence/core/full-CMakeCache.txt
+          cp "$build/compile_commands.json" evidence/core/full-compile-commands.json
+          ctest --preset "$profile" --show-only=json-v1 > evidence/core/full-test-inventory.json
+          cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/core/full-build.log
+          ctest --preset "$profile" --verbose --no-tests=error --output-junit "$GITHUB_WORKSPACE/evidence/core/full-ctest.xml" 2>&1 | tee evidence/core/full-ctest.log
+      - name: Build and test full root suite on Windows
+        if: github.ref_name == 'feat/orm-native-ownership' && runner.os == 'Windows'
+        env:
+          VCPKG_DISABLE_METRICS: '1'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
+          set "ASAN_OPTIONS=halt_on_error=1"
+          set "PROFILE=win-release-user"
+          set "BUILD=build\Msvc-Release"
+          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
+          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
+          copy "%BUILD%\CMakeCache.txt" evidence\core\full-CMakeCache.txt
+          if errorlevel 1 exit /b 1
+          copy "%BUILD%\compile_commands.json" evidence\core\full-compile-commands.json
+          if errorlevel 1 exit /b 1
+          ctest --preset "%PROFILE%" --show-only=json-v1 > evidence\core\full-test-inventory.json
+          if errorlevel 1 (type evidence\core\full-test-inventory.json & exit /b 1)
+          cmake --build --preset "%PROFILE%" --parallel 4 > evidence\core\full-build.log 2>&1
+          if errorlevel 1 (type evidence\core\full-build.log & exit /b 1)
+          ctest --preset "%PROFILE%" --verbose --no-tests=error --output-junit "%GITHUB_WORKSPACE%\evidence\core\full-ctest.xml" > evidence\core\full-ctest.log 2>&1
+          if errorlevel 1 (type evidence\core\full-ctest.log & exit /b 1)
+          type evidence\core\full-ctest.log
       - name: Save completed vcpkg binary packages
         if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
