@@ -349,11 +349,12 @@ spec("native owner cross-thread admission and callback completion") {
     require_rejected_admission();
     drop_transaction();
     check_equal(read_counter(&fixture.destroy_calls), 0u);
-    check_equal(parent_dependents(), (uint32_t)2u);
+    /* Query, transaction and the shared native-call completion hold. */
+    check_equal(parent_dependents(), (uint32_t)3u);
     signal_flag(&fixture.permit_native);
     check_true(await(&fixture.returned));
     check_equal(read_counter(&fixture.destroy_calls), 0u);
-    check_equal(parent_dependents(), (uint32_t)2u);
+    check_equal(parent_dependents(), (uint32_t)3u);
     signal_flag(&fixture.permit_return);
     check_true(await(&fixture.completed));
     check_equal(fixture.operation_status, ORM_STATUS_OK);
