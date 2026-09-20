@@ -126,9 +126,9 @@ static void orm_connection_release_child(orm_connection_t *connection) {
 
 /* Derive a bounded native-call hold from an existing query/transaction/creation
  * hold. RELEASE_PENDING is legal here: no new external handle is admitted.
- * Commands and transaction controls share this slot, without holding the mutex
- * across native callbacks. Cursor and unrelated finalizer dispatch remain
- * separate #28 integration boundaries, not covered by this reservation yet. */
+ * Commands, transaction controls and cursor construction share this slot,
+ * without holding the mutex across native callbacks. Post-construction cursor
+ * calls and unrelated finalizers remain separate #28 integration boundaries. */
 static orm_status_t orm_connection_begin_native(orm_connection_t *connection,
                                                   orm_error_t *error) {
   orm_owner *owner = &connection->owner;
@@ -804,6 +804,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   orm_status_t status;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   bool transaction_held = false;
+  bool native_held = false;
+  orm_connection_t *connection = NULL;
 #endif
   if (query == NULL || query->connection == NULL || config == NULL ||
       config->struct_size != sizeof(*config) ||
@@ -823,7 +825,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
     orm_error_set(error, status, "query cannot admit a row Publisher");
     return status;
   }
-  status = orm_connection_business_status(query->connection, error);
+  connection = query->connection;
+  status = orm_connection_business_status(connection, error);
   if (status != ORM_STATUS_OK) goto release_query;
   if (transaction != NULL) {
     status = orm_transaction_admit(transaction, error);
@@ -837,6 +840,13 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
     orm_error_set(error, status, "invalid ORM row Publisher open");
     goto release_query;
   }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  /* Cover native open, shape configuration and any failed-open teardown as one
+   * interval. The cached parent must survive teardown consuming the query. */
+  status = orm_connection_begin_native(connection, error);
+  if (status != ORM_STATUS_OK) goto release_query;
+  native_held = true;
+#endif
   status = database != NULL
                ? database->ops->open_cursor(
                      database->context, &query->plan,
@@ -845,7 +855,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                      transaction->backend.context, &query->plan,
                      &query->connection->limits, &cursor, error);
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  orm_connection_record_native_error(query->connection, status);
+  orm_connection_record_native_error(connection, status);
 #endif
   if (status != ORM_STATUS_OK)
     goto release_query;
@@ -870,8 +880,16 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
       config->max_container_items, config->max_buffer_bytes);
   wait_timeout_ns = cursor.wait_timeout_ns;
   status = orm_cbind_publisher_init(out_publisher, &cursor, &publisher_config, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  /* configure_shape is a native callback too; publish its terminal failure
+   * before disposing the cursor or releasing any of its parent holds. */
+  orm_connection_record_native_error(connection, status);
+#endif
   if (status != ORM_STATUS_OK) {
     orm_row_cursor_dispose(&cursor);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_end_native(connection, status);
+#endif
     return status;
   }
   if (wait_timeout_ns != 0u &&
@@ -881,14 +899,21 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
     memset(out_publisher, 0, sizeof(*out_publisher));
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
                   "allocate ORM row WAIT timeout source");
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    orm_connection_end_native(connection, ORM_STATUS_OUT_OF_MEMORY);
+#endif
     return ORM_STATUS_OUT_OF_MEMORY;
   }
   if (cflow_publisher_valid(&timed_publisher)) *out_publisher = timed_publisher;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_end_native(connection, status);
+#endif
   return status;
 release_query:
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   if (transaction_held) orm_transaction_release_execution(transaction);
   orm_query_release_execution(query);
+  if (native_held) orm_connection_end_native(connection, status);
 #endif
   return status;
 }
