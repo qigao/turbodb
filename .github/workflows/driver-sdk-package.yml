@@ -94,6 +94,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config '${{ matrix.config }}'
+      - name: Start bounded Windows Release file-lock trace
+        id: lock_trace
+        if: runner.os == 'Windows' && matrix.config == 'release' && github.ref_name == 'feat/orm-native-ownership'
+        shell: pwsh
+        run: ./.github/scripts/windows-lock-trace.ps1 -Phase Start
       - name: Build real Salts package and test SDK on Windows
         if: runner.os == 'Windows'
         shell: cmd
@@ -104,6 +109,11 @@ jobs:
           rem Keep the explicitly selected runner toolchain used by the cache key.
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
+      - name: Collect Windows Release file-lock evidence
+        if: always() && steps.lock_trace.outputs.started == 'true'
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./.github/scripts/windows-lock-trace.ps1 -Phase Stop
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
