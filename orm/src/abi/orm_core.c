@@ -124,12 +124,12 @@ static void orm_connection_release_child(orm_connection_t *connection) {
   orm_connection_action(connection, orm_owner_release_dependent(&connection->owner));
 }
 
-/* Derive a bounded native-command hold from the Publisher's existing query
+/* Derive a bounded native-call hold from an existing query/transaction/creation
  * hold. RELEASE_PENDING is legal here: no new external handle is admitted.
- * This lock is released before calling the backend, including reentrant code.
- * The reservation currently covers both ordinary and transaction lazy commands;
- * row/control/finalizer dispatch remains a distinct #28 integration boundary. */
-static orm_status_t orm_connection_begin_command(orm_connection_t *connection,
+ * Commands and transaction controls share this slot, without holding the mutex
+ * across native callbacks. Cursor and unrelated finalizer dispatch remain
+ * separate #28 integration boundaries, not covered by this reservation yet. */
+static orm_status_t orm_connection_begin_native(orm_connection_t *connection,
                                                   orm_error_t *error) {
   orm_owner *owner = &connection->owner;
   orm_status_t status = ORM_STATUS_OK;
@@ -137,12 +137,12 @@ static orm_status_t orm_connection_begin_command(orm_connection_t *connection,
   if (connection->failure != ORM_STATUS_OK ||
       (owner->phase != ORM_OWNER_OPEN && owner->phase != ORM_OWNER_RELEASE_PENDING))
     status = ORM_STATUS_INVALID_STATE;
-  else if (connection->command_active)
+  else if (connection->native_active)
     status = ORM_STATUS_BUSY;
   else if (owner->dependents >= owner->max_dependents)
     status = ORM_STATUS_LIMIT_EXCEEDED;
   else {
-    connection->command_active = true;
+    connection->native_active = true;
     ++owner->dependents;
   }
   salts_mutex_unlock(&owner->mutex);
@@ -150,18 +150,18 @@ static orm_status_t orm_connection_begin_command(orm_connection_t *connection,
       orm_connection_business_status(connection, error) != ORM_STATUS_OK)
     return status; /* Preserve the existing terminal-failure diagnostic. */
   orm_error_set(error, status, status == ORM_STATUS_BUSY
-      ? "connection native command is busy" : NULL);
+      ? "connection native operation is busy" : NULL);
   return status;
 }
 
-static void orm_connection_end_command(orm_connection_t *connection,
+static void orm_connection_end_native(orm_connection_t *connection,
                                         orm_status_t status) {
   salts_mutex_lock(&connection->owner.mutex);
-  if (!connection->command_active) abort();
-  /* Record failure before making the slot available to another command. */
+  if (!connection->native_active) abort();
+  /* Record failure before making the slot available to another native call. */
   if (status == ORM_STATUS_CONNECTION_ERROR && connection->failure == ORM_STATUS_OK)
     connection->failure = status;
-  connection->command_active = false;
+  connection->native_active = false;
   salts_mutex_unlock(&connection->owner.mutex);
   orm_connection_release_child(connection);
 }
@@ -318,16 +318,19 @@ static orm_status_t orm_transaction_begin_operation(
     orm_error_set(error, ORM_STATUS_INVALID_STATE, "ORM transaction is not active");
     return ORM_STATUS_INVALID_STATE;
   }
-  status = orm_connection_business_status(transaction->connection, error);
+  orm_connection_t *connection = transaction->connection;
+  status = orm_connection_begin_native(connection, error);
   if (status != ORM_STATUS_OK) return status;
   status = orm_owner_begin_write(&transaction->owner);
   if (status != ORM_STATUS_OK) {
+    orm_connection_end_native(connection, ORM_STATUS_OK);
     orm_error_set(error, status, "transaction control operation is not admitted");
     return status;
   }
   if (transaction->state != ORM_TRANSACTION_ACTIVE ||
       !orm_transaction_backend_valid(&transaction->backend)) {
     orm_owner_end_write(&transaction->owner);
+    orm_connection_end_native(connection, ORM_STATUS_OK);
     orm_error_set(error, ORM_STATUS_INVALID_STATE, "ORM transaction is not active");
     return ORM_STATUS_INVALID_STATE;
   }
@@ -343,10 +346,13 @@ static orm_status_t orm_transaction_begin_operation(
 static void orm_transaction_end_operation(orm_transaction_t *transaction,
                                           orm_status_t status,
                                           orm_transaction_state next_state) {
+  /* Completion may release the last transaction reference and free it. The
+   * connection reservation keeps the cached parent live through that cleanup. */
+  orm_connection_t *connection = transaction->connection;
   if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
-    orm_connection_mark_unknown(transaction->connection);
+    orm_connection_mark_unknown(connection);
   else
-    orm_connection_record_native_error(transaction->connection, status);
+    orm_connection_record_native_error(connection, status);
   salts_mutex_lock(&transaction->owner.mutex);
   if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
     transaction->state = ORM_TRANSACTION_COMMIT_UNKNOWN;
@@ -355,6 +361,9 @@ static void orm_transaction_end_operation(orm_transaction_t *transaction,
   transaction->operation_active = false;
   salts_mutex_unlock(&transaction->owner.mutex);
   orm_transaction_release_execution(transaction);
+  /* Publish the final state/error and finish callback-triggered cleanup before
+   * admitting another command or control operation on this connection. */
+  orm_connection_end_native(connection, status);
 }
 
 static void orm_query_action(orm_query_t *query, orm_owner_action action) {
@@ -676,7 +685,7 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
     return output;
   }
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  status = orm_connection_begin_command(state->query->connection, &error);
+  status = orm_connection_begin_native(state->query->connection, &error);
   if (status != ORM_STATUS_OK) {
     output.status = status;
     (void)snprintf(state->error_message, sizeof(state->error_message), "%s", error.message);
@@ -694,7 +703,7 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
         &state->query->connection->limits, &affected, &error);
   }
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  orm_connection_end_command(state->query->connection, status);
+  orm_connection_end_native(state->query->connection, status);
 #endif
   output.status = status;
   output.affected_rows = affected;
@@ -1063,6 +1072,12 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
     return status;
   }
   transaction->connection = connection;
+  status = orm_connection_begin_native(connection, error);
+  if (status != ORM_STATUS_OK) {
+    orm_transaction_action(transaction,
+                           orm_owner_release_reference(&transaction->owner));
+    return status;
+  }
 #endif
   status = connection->backend.ops->begin_transaction(
       connection->backend.context, isolation, &transaction->backend, error);
@@ -1074,6 +1089,7 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
     transaction->backend = (orm_transaction_backend){0};
     orm_transaction_action(transaction,
                            orm_owner_release_reference(&transaction->owner));
+    orm_connection_end_native(connection, status);
 #else
     free(transaction);
 #endif
@@ -1088,6 +1104,7 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
     transaction->backend = (orm_transaction_backend){0};
     orm_transaction_action(transaction,
                            orm_owner_release_reference(&transaction->owner));
+    orm_connection_end_native(connection, ORM_STATUS_INTERNAL_ERROR);
 #else
     free(transaction);
 #endif
@@ -1099,6 +1116,9 @@ orm_status_t ORM_C_CALL orm_transaction_begin(
   transaction->state = ORM_TRANSACTION_ACTIVE;
   *out_transaction = transaction;
   orm_error_set(error, ORM_STATUS_OK, NULL);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_connection_end_native(connection, ORM_STATUS_OK);
+#endif
   return ORM_STATUS_OK;
 }
 
