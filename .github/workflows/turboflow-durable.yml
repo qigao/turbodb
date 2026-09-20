@@ -16,7 +16,7 @@ env:
   TURBO_FLOW_COMMIT: fc308e542849e8c0486e0a568137f44882770b69
   TURBODB_COMMIT: 855e9c3eeb77d41fa1fc20fc44cc01ebe9c77a41
   VCPKG_COMMIT: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
-  SALTS_COMMIT: 456e0c0c96b0d18a12d7041c24ff4a8de906ae0f
+  SALTS_COMMIT: 801202e58c2d86b35202414d4812e79a2fd25bae
   SALTS_UTILS_COMMIT: 47bdfdcfcbb64dc3dc25d6768dd2d3b74b7cc3f7
   ASAN_OPTIONS: detect_leaks=1:detect_odr_violation=2:halt_on_error=1
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
