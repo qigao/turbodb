@@ -118,8 +118,12 @@ def main() -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     run(["git", "diff", "--exit-code"], salts, env, evidence / "source-before.log")
     run(["cmake", "--version"], root, env, evidence / "cmake-version.log")
-    run(["cmake", "--preset", salts_preset, "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
-        salts, env, evidence / "salts-configure.log")
+    salts_configure = ["cmake", "--preset", salts_preset,
+                       "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
+    if system == "linux":
+        # TurboDB's Redis runtime explicitly requires epoll in both profiles.
+        salts_configure.append("-DSALTS_ENABLE_EPOLL_READINESS=ON")
+    run(salts_configure, salts, env, evidence / "salts-configure.log")
     if vcpkg_identity(env) != identity:
         raise RuntimeError("vcpkg identity changed during configure")
     identity["configured_toolchain"] = configured_toolchain(

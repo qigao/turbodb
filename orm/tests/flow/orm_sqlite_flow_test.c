@@ -106,25 +106,25 @@ static const cmeta_type_desc orm_sqlite_test_text_row_type = {
 static const cmeta_data_buffer_shape orm_sqlite_test_owned_string_shape = {
     .ownership = CMETA_DATA_BUFFER_OWNED
 };
-static const cmeta_data_desc orm_sqlite_test_owned_string_data = {
+static cmeta_data_desc orm_sqlite_test_owned_string_data = {
     .struct_size = sizeof(cmeta_data_desc),
     .abi_version = CMETA_DATA_DESC_ABI_VERSION,
     .stable_id = "orm.test.owned-string",
     .display_name = "owned string",
     .kind = CMETA_DATA_STRING,
-    .storage_type = &salts_tstr_cmeta_type,
+    .storage_type = NULL,
     .shape = &orm_sqlite_test_owned_string_shape,
-    .buffer_ops = &salts_tstr_cmeta_buffer_ops
+    .buffer_ops = NULL
 };
-static const cmeta_data_desc orm_sqlite_test_owned_bytes_data = {
+static cmeta_data_desc orm_sqlite_test_owned_bytes_data = {
     .struct_size = sizeof(cmeta_data_desc),
     .abi_version = CMETA_DATA_DESC_ABI_VERSION,
     .stable_id = "orm.test.owned-bytes",
     .display_name = "owned bytes",
     .kind = CMETA_DATA_BYTES,
-    .storage_type = &salts_tstr_cmeta_type,
+    .storage_type = NULL,
     .shape = &orm_sqlite_test_owned_string_shape,
-    .buffer_ops = &salts_tstr_cmeta_buffer_ops
+    .buffer_ops = NULL
 };
 static const cmeta_data_field_desc orm_sqlite_test_text_row_fields[] = {
     {"orm.test.SqliteTextRow.id", "id", offsetof(orm_sqlite_test_text_row, id),
@@ -235,6 +235,14 @@ static void orm_sqlite_test_sink_done(void *context) {
 }
 
 spec("ORM SQLite CFlow cursor") {
+  before_each() {
+    /* DLL-imported data addresses are not C static initializer constants on MSVC. */
+    orm_sqlite_test_owned_string_data.storage_type = &salts_tstr_cmeta_type;
+    orm_sqlite_test_owned_string_data.buffer_ops = &salts_tstr_cmeta_buffer_ops;
+    orm_sqlite_test_owned_bytes_data.storage_type = &salts_tstr_cmeta_type;
+    orm_sqlite_test_owned_bytes_data.buffer_ops = &salts_tstr_cmeta_buffer_ops;
+  }
+
   it("completes an empty result without emitting a row") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;

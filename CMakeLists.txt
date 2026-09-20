@@ -101,6 +101,11 @@ endif()
 
 add_subdirectory(tidesdb)
 add_subdirectory(orm)
+# Root-enabled instrumentation also requires its runtime on consumer links.
+# Directory link options do not propagate through the Orm::C target.
+if(NOT MSVC AND SANITIZER_LINK_FLAGS)
+  target_link_options(turbo_orm INTERFACE ${SANITIZER_LINK_FLAGS})
+endif()
 if(ORM_BUILD_TESTS AND ORM_WITH_SQLITE)
   add_subdirectory(orm/tests/ownership)
 endif()
