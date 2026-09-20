@@ -124,6 +124,48 @@ static void orm_connection_release_child(orm_connection_t *connection) {
   orm_connection_action(connection, orm_owner_release_dependent(&connection->owner));
 }
 
+/* Derive a bounded native-command hold from the Publisher's existing query
+ * hold. RELEASE_PENDING is legal here: no new external handle is admitted.
+ * This lock is released before calling the backend, including reentrant code.
+ * The reservation currently covers both ordinary and transaction lazy commands;
+ * row/control/finalizer dispatch remains a distinct #28 integration boundary. */
+static orm_status_t orm_connection_begin_command(orm_connection_t *connection,
+                                                  orm_error_t *error) {
+  orm_owner *owner = &connection->owner;
+  orm_status_t status = ORM_STATUS_OK;
+  salts_mutex_lock(&owner->mutex);
+  if (connection->failure != ORM_STATUS_OK ||
+      (owner->phase != ORM_OWNER_OPEN && owner->phase != ORM_OWNER_RELEASE_PENDING))
+    status = ORM_STATUS_INVALID_STATE;
+  else if (connection->command_active)
+    status = ORM_STATUS_BUSY;
+  else if (owner->dependents >= owner->max_dependents)
+    status = ORM_STATUS_LIMIT_EXCEEDED;
+  else {
+    connection->command_active = true;
+    ++owner->dependents;
+  }
+  salts_mutex_unlock(&owner->mutex);
+  if (status == ORM_STATUS_INVALID_STATE &&
+      orm_connection_business_status(connection, error) != ORM_STATUS_OK)
+    return status; /* Preserve the existing terminal-failure diagnostic. */
+  orm_error_set(error, status, status == ORM_STATUS_BUSY
+      ? "connection native command is busy" : NULL);
+  return status;
+}
+
+static void orm_connection_end_command(orm_connection_t *connection,
+                                        orm_status_t status) {
+  salts_mutex_lock(&connection->owner.mutex);
+  if (!connection->command_active) abort();
+  /* Record failure before making the slot available to another command. */
+  if (status == ORM_STATUS_CONNECTION_ERROR && connection->failure == ORM_STATUS_OK)
+    connection->failure = status;
+  connection->command_active = false;
+  salts_mutex_unlock(&connection->owner.mutex);
+  orm_connection_release_child(connection);
+}
+
 /* Final release has no synchronous error receiver. The default policy cannot
  * silently continue; an explicit host handler may return, but cannot recover
  * or unload the quarantined native state. */
@@ -634,7 +676,7 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
     return output;
   }
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  status = orm_connection_business_status(state->query->connection, &error);
+  status = orm_connection_begin_command(state->query->connection, &error);
   if (status != ORM_STATUS_OK) {
     output.status = status;
     (void)snprintf(state->error_message, sizeof(state->error_message), "%s", error.message);
@@ -652,7 +694,7 @@ static orm_command_driver_result orm_lazy_command_execute(void *context) {
         &state->query->connection->limits, &affected, &error);
   }
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-  orm_connection_record_native_error(state->query->connection, status);
+  orm_connection_end_command(state->query->connection, status);
 #endif
   output.status = status;
   output.affected_rows = affected;

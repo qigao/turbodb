@@ -139,6 +139,9 @@ struct orm_connection {
   orm_owner owner;
   /* Terminal business failure, protected by owner.mutex; cleanup stays legal. */
   orm_status_t failure;
+  /* Private staged command dispatch exclusion; protected by owner.mutex.
+   * Cursor/control/finalizer lanes are separate remaining #28 work. */
+  bool command_active;
   orm_owner_cleanup_policy cleanup_policy;
   orm_error_t cleanup_error;
 #endif

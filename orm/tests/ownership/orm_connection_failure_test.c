@@ -41,6 +41,33 @@ static orm_status_t failed_begin(void *context, orm_isolation_t isolation,
 }
 static char diagnostic[ORM_C_ERROR_MESSAGE_CAPACITY];
 
+/* Reenter through another valid Publisher only; never share or recursively
+ * resume the same Publisher. Observers supply no exclusion or owner holds. */
+static orm_connection_t *independent_connection;
+static cflow_publisher *nested_command;
+static cflow_step_kind nested_kind;
+static unsigned command_depth, maximum_command_depth;
+static int release_during_execute;
+static orm_status_t close_during_execute;
+static void command_observe_entry(void) {
+  ++command_depth;
+  if (command_depth > maximum_command_depth) maximum_command_depth = command_depth;
+  if (nested_command != NULL) {
+    cflow_publisher *nested = nested_command;
+    nested_command = NULL;
+    close_during_execute = orm_connection_close(connection, &error);
+    if (release_during_execute) {
+      orm_query_destroy(rows); rows = NULL;
+      orm_query_destroy(command); command = NULL;
+      orm_query_destroy(extra); extra = NULL;
+      orm_connection_release(connection); connection = NULL;
+    }
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    nested_kind = cflow_publisher_resume(nested, NULL, &result).kind;
+  }
+}
+
+
 Struct(failure_row, (int, id));
 static const cmeta_type_identity row_identity = CMETA_TYPE_ID_ATOM_INIT("orm.failure.Row");
 static const cmeta_type_traits row_traits = {
@@ -69,11 +96,20 @@ static void observed_disconnect(void *context) {
 static orm_status_t observed_execute(void *context, const orm_query_plan *plan,
     const orm_limits *limits, uint64_t *affected, orm_error_t *out) {
   ++execute_calls;
+  command_observe_entry();
+  --command_depth;
   if (execute_error != ORM_STATUS_OK) {
     orm_error_set(out, execute_error, "native command connection lost");
     return execute_error;
   }
   return native_execute(context, plan, limits, affected, out);
+}
+static orm_status_t observed_transaction_command(void *context, const orm_query_plan *plan,
+    const orm_limits *limits, uint64_t *affected, orm_error_t *out) {
+  ++execute_calls;
+  command_observe_entry();
+  --command_depth;
+  return original_transaction_ops.execute_command(context, plan, limits, affected, out);
 }
 static orm_row_cursor_step observed_next(void *context, cserde_reader *out) {
   ++next_calls;
@@ -141,6 +177,9 @@ spec("native connection failure propagation") {
     orm_config_t config;
     const orm_option_t filename = {orm_view("filename"), orm_view(":memory:")};
     connection = NULL; rows = command = extra = NULL; transaction = NULL;
+    independent_connection = NULL; nested_command = NULL;
+    nested_kind = CFLOW_STEP_DONE; command_depth = maximum_command_depth = 0u;
+    release_during_execute = 0; close_during_execute = ORM_STATUS_OK;
     memset(&first, 0, sizeof(first)); memset(&second, 0, sizeof(second));
     execute_error = next_error = open_error = ORM_STATUS_OK;
     use_checked_cancel = 0; checked_cancel_calls = 0u; cancel_error = ORM_STATUS_OK;
@@ -164,6 +203,7 @@ spec("native connection failure propagation") {
     if (transaction != NULL && transaction->backend.ops == &failing_transaction_ops)
       transaction->backend.ops = &original_transaction_ops;
     orm_transaction_release(transaction); orm_connection_release(connection);
+    orm_connection_release(independent_connection);
   }
   it("blocks new queries after a native command connection failure") {
     fail_command();
@@ -315,6 +355,120 @@ spec("native connection failure propagation") {
     check_equal(orm_raw(connection, orm_view("select 1"), &extra, &error), ORM_STATUS_OK);
     drop(&first);
     check_equal(checked_cancel_calls, 1u);
+  }
+
+  it("rejects nested lazy commands on the same connection before native dispatch") {
+    check_equal(orm_raw(connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(command, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(extra, &second, &error), ORM_STATUS_OK);
+    nested_command = &second;
+    check_equal(run_command(&first).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(nested_kind, CFLOW_STEP_ERROR);
+    check_equal(execute_calls, 1u);
+    check_equal(maximum_command_depth, 1u);
+    check_equal(close_during_execute, ORM_STATUS_BUSY);
+    check_equal(connection->failure, ORM_STATUS_OK);
+  }
+  it("permits sequential native commands after the first callback returns") {
+    check_equal(orm_raw(connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(command, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(extra, &second, &error), ORM_STATUS_OK);
+    check_equal(run_command(&first).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(run_command(&second).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(execute_calls, 2u);
+    check_equal(maximum_command_depth, 1u);
+  }
+  it("does not serialize commands belonging to independent connections") {
+    orm_config_t config;
+    const orm_option_t filename = {orm_view("filename"), orm_view(":memory:")};
+    orm_config(&config); config.driver = orm_view("sqlite");
+    config.options = &filename; config.option_count = 1u;
+    check_equal(orm_connect(&config, &independent_connection, &error), ORM_STATUS_OK);
+    independent_connection->backend.ops = &backend_ops;
+    check_equal(orm_raw(independent_connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(command, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(extra, &second, &error), ORM_STATUS_OK);
+    nested_command = &second;
+    check_equal(run_command(&first).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(nested_kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(execute_calls, 2u);
+    check_equal(maximum_command_depth, 2u);
+  }
+  it("releases the command reservation after an ordinary SQL error") {
+    check_equal(orm_raw(connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(command, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(extra, &second, &error), ORM_STATUS_OK);
+    execute_error = ORM_STATUS_SQL_ERROR;
+    check_equal(run_command(&first).kind, CFLOW_STEP_ERROR);
+    execute_error = ORM_STATUS_OK;
+    check_equal(run_command(&second).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(execute_calls, 2u);
+    check_equal(connection->failure, ORM_STATUS_OK);
+  }
+  it("holds the executing command lane after external query and connection release") {
+    check_equal(orm_raw(connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(command, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(extra, &second, &error), ORM_STATUS_OK);
+    nested_command = &second; release_during_execute = 1;
+    check_equal(run_command(&first).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(nested_kind, CFLOW_STEP_ERROR);
+    check_equal(execute_calls, 1u);
+    check_equal(maximum_command_depth, 1u);
+    check_equal(disconnect_calls, 0u);
+    drop(&first); check_equal(disconnect_calls, 0u);
+    drop(&second); check_equal(disconnect_calls, 1u);
+  }
+
+  it("shares one command reservation across Publishers in a transaction") {
+    check_equal(orm_transaction_begin(connection, ORM_ISOLATION_SERIALIZABLE,
+                                     &transaction, &error), ORM_STATUS_OK);
+    original_transaction_ops = *transaction->backend.ops;
+    failing_transaction_ops = original_transaction_ops;
+    failing_transaction_ops.execute_command = observed_transaction_command;
+    transaction->backend.ops = &failing_transaction_ops;
+    check_equal(orm_raw(connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow_in_transaction(command, transaction,
+                                                          &first, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow_in_transaction(extra, transaction,
+                                                          &second, &error), ORM_STATUS_OK);
+    nested_command = &second;
+    check_equal(run_command(&first).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(nested_kind, CFLOW_STEP_ERROR);
+    check_equal(execute_calls, 1u);
+    check_equal(maximum_command_depth, 1u);
+    drop(&second); drop(&first);
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_OK);
+  }
+  it("does not reserve native command capacity for an unconsumed cancelled Publisher") {
+    check_equal(orm_raw(connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(command, &first, &error), ORM_STATUS_OK);
+    cflow_publisher_cancel(&first);
+    check_equal(orm_query_open_command_flow(extra, &second, &error), ORM_STATUS_OK);
+    check_equal(run_command(&second).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(execute_calls, 1u);
+  }
+  it("rejects exhausted native completion capacity without dispatch or a leaked reservation") {
+    check_equal(orm_raw(connection, orm_view("create table nested_probe(id integer)"),
+                        &extra, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(command, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(extra, &second, &error), ORM_STATUS_OK);
+    const uint32_t original_limit = connection->owner.max_dependents;
+    const uint32_t held = connection->owner.dependents;
+    connection->owner.max_dependents = held;
+    check_equal(run_command(&first).kind, CFLOW_STEP_ERROR);
+    check_equal(execute_calls, 0u);
+    check_equal(connection->owner.dependents, held);
+    connection->owner.max_dependents = original_limit;
+    check_equal(run_command(&second).kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(connection->owner.dependents, held);
+    check_equal(execute_calls, 1u);
   }
 
 }
