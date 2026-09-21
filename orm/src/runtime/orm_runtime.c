@@ -602,9 +602,13 @@ orm_runtime_connect(orm_runtime_t *runtime, const orm_config_t *config,
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
 
+  orm_config_t canonical_config = *config;
+  canonical_config.driver.data = driver->canonical.text;
+  canonical_config.driver.len = driver->canonical.size;
   orm_runtime_factory_context factory = {runtime, driver};
   return orm_connect_with_factory_context_v1(
-      config, runtime_backend_factory, &factory, out_connection, error);
+      &canonical_config, runtime_backend_factory, &factory,
+      out_connection, error);
 }
 
 orm_status_t ORM_C_CALL
