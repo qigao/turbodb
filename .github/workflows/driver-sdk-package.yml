@@ -39,6 +39,12 @@ jobs:
           ref: c4197712261a563ed7e238152b34cb50a2ef98a9
           path: .ci-salts
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 5c11f08d0d8e0428de513c6051b16989d1c2edd9
+          path: .ci-databind
+          persist-credentials: false
       - name: Check CI provenance regression
         shell: pwsh
         run: python -m unittest discover -s orm/tests/driver -p test_package_provenance.py -v
@@ -107,6 +113,62 @@ jobs:
           rem Keep the explicitly selected runner toolchain used by the cache key.
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
+      - name: Build pinned DataBind package on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          config='${{ matrix.config }}'
+          build_type=Release
+          if [[ "$config" == debug ]]; then build_type=Debug; fi
+          salts_root="$GITHUB_WORKSPACE/external/pkgs/salts/$config"
+          databind_root="$GITHUB_WORKSPACE/external/pkgs/databind/$config"
+          build="$GITHUB_WORKSPACE/.ci-databind-build/$config"
+          test "$(git -C .ci-databind rev-parse HEAD)" = 5c11f08d0d8e0428de513c6051b16989d1c2edd9
+          export SALTS_ROOT="$salts_root"
+          cmake -S .ci-databind -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE="$build_type" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF \
+            -DENABLE_SANITIZER_ADDRESS=OFF -DENABLE_SANITIZER_UNDEFINED=OFF
+          cmake --build "$build" --target tbe/all --parallel 4
+          rm -rf "$databind_root"
+          cmake --install "$build" --prefix "$databind_root" --component DataBind
+          test -f "$databind_root/lib/cmake/DataBind/DataBindConfig.cmake"
+          test -f "$databind_root/include/data_bind_native.h"
+          test ! -e "$databind_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          echo "DATABIND_ROOT=$databind_root" >> "$GITHUB_ENV"
+          mkdir -p evidence/core
+          git -C .ci-databind rev-parse HEAD > evidence/core/databind-head.txt
+
+      - name: Build pinned DataBind package on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
+          set "SALTS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts\${{ matrix.config }}"
+          set "DATABIND_ROOT=%GITHUB_WORKSPACE%\external\pkgs\databind\${{ matrix.config }}"
+          set "DATABIND_BUILD=%GITHUB_WORKSPACE%\.ci-databind-build\${{ matrix.config }}"
+          set "DATABIND_BUILD_TYPE=Release"
+          if "${{ matrix.config }}"=="debug" set "DATABIND_BUILD_TYPE=Debug"
+          for /f %%i in ('git -C .ci-databind rev-parse HEAD') do set "DATABIND_HEAD=%%i"
+          if not "%DATABIND_HEAD%"=="5c11f08d0d8e0428de513c6051b16989d1c2edd9" exit /b 1
+          cmake -S .ci-databind -B "%DATABIND_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%DATABIND_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=OFF -DENABLE_SANITIZER_UNDEFINED=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build "%DATABIND_BUILD%" --target tbe/all --parallel 4
+          if errorlevel 1 exit /b 1
+          if exist "%DATABIND_ROOT%" rmdir /s /q "%DATABIND_ROOT%"
+          cmake --install "%DATABIND_BUILD%" --prefix "%DATABIND_ROOT%" --component DataBind
+          if errorlevel 1 exit /b 1
+          if not exist "%DATABIND_ROOT%\lib\cmake\DataBind\DataBindConfig.cmake" exit /b 1
+          if not exist "%DATABIND_ROOT%\include\data_bind_native.h" exit /b 1
+          if exist "%DATABIND_ROOT%\lib\cmake\SaltsUtils\SaltsUtilsConfig.cmake" exit /b 1
+          echo DATABIND_ROOT=%DATABIND_ROOT%>>"%GITHUB_ENV%"
+          if not exist evidence\core mkdir evidence\core
+          echo %DATABIND_HEAD%>evidence\core\databind-head.txt
+
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
