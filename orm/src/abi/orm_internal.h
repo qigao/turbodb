@@ -1,7 +1,7 @@
 #ifndef ORM_INTERNAL_H
 #define ORM_INTERNAL_H
 
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 
 #include <orm.h>
 #include <cstl.h>
