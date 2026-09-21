@@ -1,4 +1,4 @@
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 #include "orm_tidesdb_cursor.h"
 
 #include <cmeta/struct.h>
@@ -82,7 +82,7 @@ spec("ORM TidesDB CFlow cursor") {
         ORM_TIDESDB_CURSOR_CONFIG_INIT(4u, 256u, 8u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config publisher_config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_tides_test_row_data, 1u, 1u, 2u, 1u);
     cflow_publisher source = {0};
     orm_tides_test_row row = {0};
@@ -97,7 +97,7 @@ spec("ORM TidesDB CFlow cursor") {
     check_equal(orm_tidesdb_cursor_start(&cursor, &driver, &cursor_config,
                                          &error), ORM_STATUS_OK);
     check_null(driver.ops);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config,
+    check_equal(orm_row_publisher_init(&source, &cursor, &publisher_config,
                                       &error), ORM_STATUS_OK);
     step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_VALUE);
@@ -120,7 +120,7 @@ spec("ORM TidesDB CFlow cursor") {
         ORM_TIDESDB_CURSOR_CONFIG_INIT(4u, 256u, 8u);
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config publisher_config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_tides_test_row_data, 1u, 1u, 2u, 1u);
     cflow_publisher source = {0};
     orm_tides_test_row row = {0};
@@ -134,7 +134,7 @@ spec("ORM TidesDB CFlow cursor") {
     mock_orm_tides_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_tidesdb_cursor_start(&cursor, &driver, &cursor_config,
                                          &error), ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config,
+    check_equal(orm_row_publisher_init(&source, &cursor, &publisher_config,
                                       &error), ORM_STATUS_OK);
     step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
