@@ -124,6 +124,12 @@ spec("runtime close and admission serialization") {
     check_equal(salts_thread_create(&worker_thread, load_worker, &worker),
                 0);
     check_true(control.wait_entered(RACE_TIMEOUT_MS));
+    orm_driver_info_t info;
+    check_equal(orm_runtime_driver_info(runtime, orm_view("race"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+    check_equal(orm_runtime_load_driver(runtime, &worker.load, &error),
+                ORM_STATUS_BUSY);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
     control.release();
     check_equal(salts_thread_join(&worker_thread), 0);
