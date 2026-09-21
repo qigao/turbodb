@@ -112,7 +112,7 @@ static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
       if (!fixture_connections[i].live) {
         fixture_connections[i].module = module;
         fixture_connections[i].live = 1;
-        ++fixture_context.live_connections;
+        ++module->live_connections;
         out->header =
             (orm_driver_header_v1)FIXTURE_HEADER(orm_driver_connection_v1);
         out->context = &fixture_connections[i];
