@@ -110,7 +110,7 @@ jobs:
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
-        if: (github.ref_name == 'feat/runtime-driver-sdk-plan-view' || github.ref_name == 'feat/orm-native-ownership')
+        if: (github.ref_name == 'feat/runtime-driver-sdk-plan-view' || github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -127,7 +127,7 @@ jobs:
           git diff -- CMakeUserPresets.json > evidence/core/ci-paths.diff
           if ($LASTEXITCODE -ne 0) { throw 'cannot record CI path adaptation' }
       - name: Build and test native plan adapter on Linux
-        if: (github.ref_name == 'feat/runtime-driver-sdk-plan-view' || github.ref_name == 'feat/orm-native-ownership') && runner.os == 'Linux'
+        if: (github.ref_name == 'feat/runtime-driver-sdk-plan-view' || github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -150,7 +150,7 @@ jobs:
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
           VCPKG_DISABLE_METRICS: '1'
-        if: (github.ref_name == 'feat/runtime-driver-sdk-plan-view' || github.ref_name == 'feat/orm-native-ownership') && runner.os == 'Windows'
+        if: (github.ref_name == 'feat/runtime-driver-sdk-plan-view' || github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
         shell: cmd
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
@@ -178,7 +178,7 @@ jobs:
           if errorlevel 1 (type evidence\core\ownership.log & exit /b 1)
           type evidence\core\ownership.log
       - name: Verify native ownership against real PostgreSQL
-        if: github.ref_name == 'feat/orm-native-ownership' && runner.os == 'Linux'
+        if: (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
         shell: bash
         env:
           TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
@@ -199,7 +199,7 @@ jobs:
       # Run the entire configured root suite after the unchanged focused checks.
       # Linux keeps the live PostgreSQL service configured by the preceding step.
       - name: Build and test full root suite on Linux
-        if: github.ref_name == 'feat/orm-native-ownership' && runner.os == 'Linux'
+        if: (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
         shell: bash
         env:
           TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
@@ -219,7 +219,7 @@ jobs:
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/core/full-build.log
           ctest --preset "$profile" --verbose --no-tests=error --output-junit "$GITHUB_WORKSPACE/evidence/core/full-ctest.xml" 2>&1 | tee evidence/core/full-ctest.log
       - name: Build and test full root suite on Windows
-        if: github.ref_name == 'feat/orm-native-ownership' && runner.os == 'Windows'
+        if: (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
         env:
           VCPKG_DISABLE_METRICS: '1'
         shell: cmd
