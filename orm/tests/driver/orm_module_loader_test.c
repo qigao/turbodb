@@ -1,4 +1,5 @@
 #include "orm_module_loader.h"
+#include <orm_driver_abi.h>
 
 #include <tinytest.h>
 
