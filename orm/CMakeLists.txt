@@ -790,6 +790,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_runtime_race_fixture PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
+add_library(orm_runtime_race_fixture_two MODULE
+  tests/driver/orm_runtime_race_fixture.c)
+target_compile_features(orm_runtime_race_fixture_two PRIVATE c_std_11)
+target_compile_definitions(orm_runtime_race_fixture_two PRIVATE
+  ORM_DRIVER_MODULE_BUILD ORM_RUNTIME_RACE_DRIVER_ID="race2")
+target_include_directories(orm_runtime_race_fixture_two PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_runtime_race_fixture_two PRIVATE
+  Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_runtime_race_fixture_two PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_runtime_race_fixture_two)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(orm_runtime_race_fixture_two PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 add_executable(orm_runtime_race_test
   tests/driver/orm_runtime_race_test.c)
 target_compile_features(orm_runtime_race_test PRIVATE c_std_11)
@@ -798,7 +814,8 @@ target_include_directories(orm_runtime_race_test PRIVATE
   ${ORM_INCLUDE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 orm_link_internal_test(orm_runtime_race_test
   Salts::TinyTest ${CMAKE_DL_LIBS})
-add_dependencies(orm_runtime_race_test orm_runtime_race_fixture)
+add_dependencies(orm_runtime_race_test
+  orm_runtime_race_fixture orm_runtime_race_fixture_two)
 set_target_properties(orm_runtime_race_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_runtime_race_test)
@@ -809,7 +826,8 @@ else()
 endif()
 add_test(NAME orm_runtime_race COMMAND orm_runtime_race_test)
 set_tests_properties(orm_runtime_race PROPERTIES
-  ENVIRONMENT "ORM_RUNTIME_RACE_FIXTURE=$<TARGET_FILE:orm_runtime_race_fixture>")
+  ENVIRONMENT
+    "ORM_RUNTIME_RACE_FIXTURE=$<TARGET_FILE:orm_runtime_race_fixture>;ORM_RUNTIME_RACE_FIXTURE_TWO=$<TARGET_FILE:orm_runtime_race_fixture_two>")
 
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
