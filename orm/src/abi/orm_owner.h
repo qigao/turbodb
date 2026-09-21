@@ -43,6 +43,22 @@ typedef struct orm_owner_cleanup_policy {
   void *context;
 } orm_owner_cleanup_policy;
 
+/* Embedded in an already owned Publisher/transaction. Its parent hold is
+ * transferred with a queued request, never recreated at final release.
+ * Queue fields are protected by the connection owner mutex. run/finish/context
+ * are immutable while queued; finish runs only after unlinking and may free
+ * the enclosing object. CANCEL and DESTROY coalesce, including during run. */
+enum { ORM_NATIVE_CLEANUP_CANCEL = 1u, ORM_NATIVE_CLEANUP_DESTROY = 2u };
+typedef struct orm_native_cleanup {
+  struct orm_native_cleanup *next;
+  void (*run)(void *, unsigned);
+  void (*finish)(void *, unsigned);
+  void *context;
+  unsigned requested;
+  unsigned completed;
+  bool queued;
+} orm_native_cleanup;
+
 typedef struct orm_owner {
   salts_mutex_t mutex;
   uint32_t references;

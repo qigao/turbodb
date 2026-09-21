@@ -139,9 +139,14 @@ struct orm_connection {
   orm_owner owner;
   /* Terminal business failure, protected by owner.mutex; cleanup stays legal. */
   orm_status_t failure;
-  /* Shared command/control dispatch exclusion; protected by owner.mutex.
-   * Cursor and unrelated finalizer lanes remain separate #28 work. */
+  /* One native interval, including its deferred cleanup; owner.mutex protects
+   * admission and the intrusive FIFO, never a native callback. */
   bool native_active;
+  orm_native_cleanup *cleanup_head;
+  orm_native_cleanup *cleanup_tail;
+  /* An idle cleanup interval transfers existing holds instead of allocating
+   * another dependent. Final connection release waits for that interval. */
+  orm_owner_action native_final_action;
   orm_owner_cleanup_policy cleanup_policy;
   orm_error_t cleanup_error;
 #endif
@@ -172,6 +177,7 @@ struct orm_transaction {
   /* Protected by owner.mutex; native callbacks never hold that mutex. */
   bool operation_active;
   orm_error_t cleanup_error;
+  orm_native_cleanup native_cleanup;
 #endif
   orm_connection_t *connection;
   orm_transaction_backend backend;

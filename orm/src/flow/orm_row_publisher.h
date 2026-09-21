@@ -57,6 +57,10 @@ typedef struct orm_row_cursor_ops {
   orm_row_cursor_column_count_fn column_count;
 } orm_row_cursor_ops;
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+struct orm_native_cleanup;
+#endif
+
 typedef struct orm_row_cursor {
   const orm_row_cursor_ops *ops;
   void *context;
@@ -79,6 +83,9 @@ typedef struct orm_row_cursor {
    * callback (including cancel). No mutex is held across Publisher work. */
   orm_status_t (*begin_execution)(void *, orm_error_t *);
   void (*end_execution)(void *);
+  /* Only stable Publisher storage is queued. Failed construction still owns
+   * a stack cursor and disposes it synchronously inside its opening interval. */
+  void (*request_cleanup)(void *, struct orm_native_cleanup *, unsigned);
   void *transaction_owner;
   void (*release_transaction_owner)(void *);
 #endif

@@ -108,6 +108,17 @@ static orm_status_t orm_connection_admit_business(orm_connection_t *connection) 
 
 static void orm_connection_action(orm_connection_t *connection,
                                   orm_owner_action action) {
+  if (action == ORM_OWNER_KEEP) return;
+  salts_mutex_lock(&connection->owner.mutex);
+  if (connection->native_active) {
+    /* Final cleanup can consume the last inherited parent hold. The exclusive
+     * CLOSING/CLOSED action keeps this allocation alive until the lane exits. */
+    if (connection->native_final_action != ORM_OWNER_KEEP) abort();
+    connection->native_final_action = action;
+    salts_mutex_unlock(&connection->owner.mutex);
+    return;
+  }
+  salts_mutex_unlock(&connection->owner.mutex);
   if (action == ORM_OWNER_CLOSE_RESOURCES) {
     if (connection->backend.ops != NULL && connection->backend.context != NULL)
       connection->backend.ops->destroy(connection->backend.context);
@@ -124,11 +135,77 @@ static void orm_connection_release_child(orm_connection_t *connection) {
   orm_connection_action(connection, orm_owner_release_dependent(&connection->owner));
 }
 
+/* The active native caller is the sole drainer. Keep the lane occupied through
+ * run AND finish: finishing a cursor can enqueue its transaction finalizer.
+ * Each node has at most two coalesced operations. Queue storage is bounded by
+ * existing query/transaction/Publisher admission budgets, not allocated here. */
+static void orm_connection_drain_cleanup(orm_connection_t *connection) {
+  for (;;) {
+    salts_mutex_lock(&connection->owner.mutex);
+    if (!connection->native_active) abort();
+    orm_native_cleanup *node = connection->cleanup_head;
+    if (node == NULL) {
+      const orm_owner_action final_action = connection->native_final_action;
+      connection->native_final_action = ORM_OWNER_KEEP;
+      connection->native_active = false;
+      salts_mutex_unlock(&connection->owner.mutex);
+      orm_connection_action(connection, final_action); /* May free connection. */
+      return;
+    }
+    const unsigned pending = node->requested & ~node->completed;
+    void *context = node->context;
+    if (pending != 0u) {
+      void (*run)(void *, unsigned) = node->run;
+      node->completed |= pending;
+      salts_mutex_unlock(&connection->owner.mutex);
+      run(context, pending);
+      /* Still linked and live. Reentrant requests may have added DESTROY to
+       * a CANCEL in progress; consume those before unqueuing or freeing it. */
+      continue;
+    }
+    const unsigned completed = node->completed;
+    void (*finish)(void *, unsigned) = node->finish;
+    connection->cleanup_head = node->next;
+    if (connection->cleanup_head == NULL) connection->cleanup_tail = NULL;
+    node->next = NULL;
+    node->queued = false;
+    node->requested = node->completed = 0u;
+    salts_mutex_unlock(&connection->owner.mutex);
+    finish(context, completed); /* May free node and release every parent hold. */
+  }
+}
+
+static void orm_connection_request_cleanup(orm_connection_t *connection,
+                                            orm_native_cleanup *node,
+                                            unsigned request) {
+  if (node == NULL || node->run == NULL || node->finish == NULL ||
+      request == 0u ||
+      (request & ~(ORM_NATIVE_CLEANUP_CANCEL | ORM_NATIVE_CLEANUP_DESTROY)) != 0u)
+    abort();
+  salts_mutex_lock(&connection->owner.mutex);
+  node->requested |= request;
+  if (!node->queued) {
+    node->queued = true;
+    node->next = NULL;
+    if (connection->cleanup_tail != NULL)
+      connection->cleanup_tail->next = node;
+    else
+      connection->cleanup_head = node;
+    connection->cleanup_tail = node;
+  }
+  const bool drain = !connection->native_active;
+  if (drain) connection->native_active = true;
+  salts_mutex_unlock(&connection->owner.mutex);
+  /* Cleanup is legal after business failure and at a full dependent budget.
+   * Its already admitted object holds survive until finish, and native_active
+   * defers the final connection action if finishing consumes the last hold. */
+  if (drain) orm_connection_drain_cleanup(connection);
+}
+
 /* Derive a bounded native-call hold from an existing query/transaction/creation
  * hold. RELEASE_PENDING is legal here: no new external handle is admitted.
- * Commands, transaction controls, cursor construction and row resumes share
- * this slot without holding the mutex across native callbacks. Independent
- * cancel/dispose and unrelated finalizers remain separate #28 boundaries. */
+ * Commands, controls, construction, row resumes and native cleanup share this
+ * slot. No mutex is held across a native callback or cleanup completion. */
 static orm_status_t orm_connection_begin_native(orm_connection_t *connection,
                                                   orm_error_t *error) {
   orm_owner *owner = &connection->owner;
@@ -161,8 +238,9 @@ static void orm_connection_end_native(orm_connection_t *connection,
   /* Record failure before making the slot available to another native call. */
   if (status == ORM_STATUS_CONNECTION_ERROR && connection->failure == ORM_STATUS_OK)
     connection->failure = status;
-  connection->native_active = false;
   salts_mutex_unlock(&connection->owner.mutex);
+  /* The admitted completion hold keeps the parent alive throughout the drain. */
+  orm_connection_drain_cleanup(connection);
   orm_connection_release_child(connection);
 }
 
@@ -178,6 +256,13 @@ static orm_status_t orm_query_begin_row_execution(void *context,
 static void orm_query_end_row_execution(void *context) {
   const orm_query_t *query = context;
   orm_connection_end_native(query->connection, ORM_STATUS_OK);
+}
+
+static void orm_query_request_row_cleanup(void *context,
+                                           orm_native_cleanup *node,
+                                           unsigned request) {
+  const orm_query_t *query = context;
+  orm_connection_request_cleanup(query->connection, node, request);
 }
 
 /* Final release has no synchronous error receiver. The default policy cannot
@@ -215,35 +300,61 @@ static void orm_transaction_quarantine(orm_transaction_t *transaction,
     orm_cleanup_fail_fast(&transaction->cleanup_error);
 }
 
-/* Publishers/native calls have already returned before this action is claimed.
- * A failed final rollback stops BEFORE native destroy and parent-hold release;
- * native destroy's void ABI cannot report or prove successful error recovery. */
+static void orm_transaction_action(orm_transaction_t *, orm_owner_action);
+
+/* CLOSING preserves transaction memory while native cleanup is queued/running.
+ * A failed rollback still quarantines BEFORE destroy or parent-hold release. */
+static void orm_transaction_run_cleanup(void *context, unsigned request) {
+  orm_transaction_t *transaction = context;
+  (void)request;
+  if (transaction->state == ORM_TRANSACTION_ACTIVE &&
+      orm_transaction_backend_valid(&transaction->backend)) {
+    orm_error_t cleanup_error;
+    orm_error_init(&cleanup_error);
+    const orm_status_t status = transaction->backend.ops->rollback(
+        transaction->backend.context, &cleanup_error);
+    if (status != ORM_STATUS_OK) {
+      /* The returned status is authoritative even when a backend leaves the
+       * optional error buffer unfilled. The host owns and bounds this copy. */
+      cleanup_error.struct_size = sizeof(cleanup_error);
+      cleanup_error.status = status;
+      cleanup_error.message[sizeof(cleanup_error.message) - 1u] = '\0';
+      if (cleanup_error.message[0] == '\0')
+        orm_error_set(&cleanup_error, status, NULL);
+      orm_transaction_quarantine(transaction, &cleanup_error);
+      return;
+    }
+  }
+  if (transaction->backend.ops != NULL &&
+      transaction->backend.ops->destroy != NULL &&
+      transaction->backend.context != NULL)
+    transaction->backend.ops->destroy(transaction->backend.context);
+  memset(&transaction->backend, 0, sizeof(transaction->backend));
+}
+
+static void orm_transaction_finish_cleanup(void *context, unsigned completed) {
+  orm_transaction_t *transaction = context;
+  (void)completed;
+  salts_mutex_lock(&transaction->owner.mutex);
+  const bool failed = transaction->owner.phase == ORM_OWNER_CLOSE_FAILED;
+  salts_mutex_unlock(&transaction->owner.mutex);
+  if (!failed)
+    orm_transaction_action(transaction, orm_owner_finish_close(&transaction->owner));
+}
+
 static void orm_transaction_action(orm_transaction_t *transaction,
                                    orm_owner_action action) {
   if (action == ORM_OWNER_CLOSE_RESOURCES) {
-    if (transaction->state == ORM_TRANSACTION_ACTIVE &&
-        orm_transaction_backend_valid(&transaction->backend)) {
-      orm_error_t cleanup_error;
-      orm_error_init(&cleanup_error);
-      const orm_status_t status = transaction->backend.ops->rollback(
-          transaction->backend.context, &cleanup_error);
-      if (status != ORM_STATUS_OK) {
-        /* The returned status is authoritative even when a backend leaves the
-         * optional error buffer unfilled. The host owns and bounds this copy. */
-        cleanup_error.struct_size = sizeof(cleanup_error);
-        cleanup_error.status = status;
-        cleanup_error.message[sizeof(cleanup_error.message) - 1u] = '\0';
-        if (cleanup_error.message[0] == '\0')
-          orm_error_set(&cleanup_error, status, NULL);
-        orm_transaction_quarantine(transaction, &cleanup_error);
-        return;
-      }
+    if (transaction->backend.ops != NULL && transaction->backend.context != NULL) {
+      orm_native_cleanup *node = &transaction->native_cleanup;
+      node->run = orm_transaction_run_cleanup;
+      node->finish = orm_transaction_finish_cleanup;
+      node->context = transaction;
+      orm_connection_request_cleanup(transaction->connection, node,
+                                      ORM_NATIVE_CLEANUP_DESTROY);
+      return; /* May already have completed and freed transaction. */
     }
-    if (transaction->backend.ops != NULL &&
-        transaction->backend.ops->destroy != NULL &&
-        transaction->backend.context != NULL)
-      transaction->backend.ops->destroy(transaction->backend.context);
-    memset(&transaction->backend, 0, sizeof(transaction->backend));
+    /* A refused/failed BEGIN owns no native state and needs no deferred work. */
     action = orm_owner_finish_close(&transaction->owner);
   }
   if (action == ORM_OWNER_FREE_MEMORY) {
@@ -265,13 +376,15 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   orm_owner *owner = &transaction->owner;
+  orm_connection_t *connection = transaction->connection;
+  salts_mutex_lock(&connection->owner.mutex);
   salts_mutex_lock(&owner->mutex);
   if (owner->phase == ORM_OWNER_CLOSE_FAILED) {
     status = ORM_OWNER_STATUS_CLEANUP_FAILED;
   } else if (owner->phase == ORM_OWNER_CLOSED) {
     /* A closed handle can still be held; close does not consume its reference. */
   } else if (owner->dependents != 0u || transaction->operation_active ||
-             owner->phase == ORM_OWNER_CLOSING) {
+             owner->phase == ORM_OWNER_CLOSING || connection->native_active) {
     status = ORM_STATUS_BUSY;
   } else if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u ||
              (transaction->state != ORM_TRANSACTION_COMMITTED &&
@@ -281,9 +394,14 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
   } else {
     owner->phase = ORM_OWNER_CLOSING;
     action = ORM_OWNER_CLOSE_RESOURCES;
+    connection->native_active = true; /* Reserve close before releasing either lock. */
   }
   salts_mutex_unlock(&owner->mutex);
-  if (status == ORM_STATUS_OK) orm_transaction_action(transaction, action);
+  salts_mutex_unlock(&connection->owner.mutex);
+  if (action == ORM_OWNER_CLOSE_RESOURCES) {
+    orm_transaction_action(transaction, action); /* Enqueues under our reservation. */
+    orm_connection_drain_cleanup(connection);
+  }
   orm_error_set(error, status, status == ORM_OWNER_STATUS_CLEANUP_FAILED
       ? transaction->cleanup_error.message : NULL);
   return status;
@@ -887,6 +1005,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   cursor.report_owner_error = orm_query_report_native_error;
   cursor.begin_execution = orm_query_begin_row_execution;
   cursor.end_execution = orm_query_end_row_execution;
+  cursor.request_cleanup = orm_query_request_row_cleanup;
   cursor.transaction_owner = transaction;
   cursor.release_transaction_owner = transaction != NULL
       ? orm_transaction_release_execution : NULL;

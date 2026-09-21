@@ -1,5 +1,9 @@
 #include "orm_row_publisher.h"
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+#include "orm_owner.h"
+#endif
+
 #include <data_bind_native.h>
 
 #include <stdio.h>
@@ -13,6 +17,9 @@ typedef struct orm_row_publisher_state {
   void *scratch;
   cflow_publisher_terminal terminal;
   int cancelled;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_native_cleanup native_cleanup;
+#endif
   char error_message[ORM_C_ERROR_MESSAGE_CAPACITY];
 } orm_row_publisher_state;
 
@@ -87,6 +94,7 @@ void orm_row_cursor_dispose(orm_row_cursor *cursor) {
   cursor->report_owner_error = NULL;
   cursor->begin_execution = NULL;
   cursor->end_execution = NULL;
+  cursor->request_cleanup = NULL;
   cursor->transaction_owner = NULL;
   cursor->release_transaction_owner = NULL;
   if (release_transaction_owner != NULL)
@@ -268,9 +276,35 @@ static cflow_step orm_row_publisher_resume(void *state_, cflow_publish_context *
   return orm_row_publisher_resume_admitted(state_, ctx, out_value);
 }
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+static void orm_row_publisher_run_cleanup(void *context, unsigned request) {
+  orm_row_publisher_state *state = context;
+  if ((request & ORM_NATIVE_CLEANUP_CANCEL) != 0u)
+    orm_row_publisher_cancel_cursor(state);
+  if ((request & ORM_NATIVE_CLEANUP_DESTROY) != 0u)
+    orm_row_cursor_dispose(&state->cursor);
+}
+
+static void orm_row_publisher_finish_cleanup(void *context, unsigned completed) {
+  orm_row_publisher_state *state = context;
+  if ((completed & ORM_NATIVE_CLEANUP_DESTROY) != 0u) {
+    free(state->scratch);
+    free(state);
+  }
+}
+#endif
+
 static void orm_row_publisher_cancel(void *state_) {
   orm_row_publisher_state *state = (orm_row_publisher_state *)state_;
   if (state->terminal == CFLOW_PUBLISHER_OPEN) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+    if (state->cursor.request_cleanup != NULL) {
+      state->terminal = CFLOW_PUBLISHER_DONE;
+      state->cursor.request_cleanup(state->cursor.owner, &state->native_cleanup,
+                                      ORM_NATIVE_CLEANUP_CANCEL);
+      return;
+    }
+#endif
     orm_row_publisher_cancel_cursor(state);
     state->terminal = CFLOW_PUBLISHER_DONE;
   }
@@ -280,6 +314,18 @@ static void orm_row_publisher_destroy(void *state_) {
   orm_row_publisher_state *state = (orm_row_publisher_state *)state_;
   if (state == NULL)
     return;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (state->cursor.request_cleanup != NULL) {
+    const unsigned request = ORM_NATIVE_CLEANUP_DESTROY |
+        (state->terminal == CFLOW_PUBLISHER_OPEN ? ORM_NATIVE_CLEANUP_CANCEL : 0u);
+    /* Destruction consumes the public Publisher, not its pending-cleanup hold.
+     * The embedded node, cursor, scratch and parents survive through finish. */
+    state->terminal = CFLOW_PUBLISHER_DONE;
+    state->cursor.request_cleanup(state->cursor.owner, &state->native_cleanup,
+                                    request);
+    return; /* It may have completed synchronously and freed state. */
+  }
+#endif
   if (state->terminal == CFLOW_PUBLISHER_OPEN)
     orm_row_publisher_cancel_cursor(state);
   orm_row_cursor_dispose(&state->cursor);
@@ -350,6 +396,11 @@ orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
     }
   }
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  state->native_cleanup.run = orm_row_publisher_run_cleanup;
+  state->native_cleanup.finish = orm_row_publisher_finish_cleanup;
+  state->native_cleanup.context = state;
+#endif
   state->cursor = *cursor;
   state->row_shape = config->row_shape;
   state->terminal = CFLOW_PUBLISHER_OPEN;
@@ -372,6 +423,7 @@ orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
   cursor->report_owner_error = NULL;
   cursor->begin_execution = NULL;
   cursor->end_execution = NULL;
+  cursor->request_cleanup = NULL;
   cursor->transaction_owner = NULL;
   cursor->release_transaction_owner = NULL;
 #endif
