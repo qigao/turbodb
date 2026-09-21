@@ -357,7 +357,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     status = ORM_STATUS_ABI_MISMATCH;
     runtime_result(error, status,
                    "driver initialize returned no module context");
-    goto fail_initialized;
+    goto fail_module;
   }
 
   const uint32_t index = runtime->driver_count;
@@ -384,12 +384,6 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   ++runtime->driver_count;
   return runtime_result(error, ORM_STATUS_OK, NULL);
 
-fail_initialized:
-  {
-    orm_error_t ignored;
-    orm_error_init(&ignored);
-    (void)module_ops.finalize(module_context, &ignored);
-  }
 fail_module:
   orm_module_close(&module);
   return status;
