@@ -245,7 +245,9 @@ ORM_C_API orm_status_t ORM_C_CALL orm_transaction_release_savepoint(
  * dependent Publisher/native operation remains active and does not consume the
  * caller hold. retain/release follow the same opaque-handle rules as
  * connections. Legacy destroy consumes one caller hold and preserves automatic
- * rollback-on-final-release compatibility for an ACTIVE transaction.
+ * rollback-on-final-release compatibility for an ACTIVE transaction. If that
+ * mandatory final rollback fails, the owner is quarantined and the default
+ * no-handler policy fails fast rather than pretending cleanup succeeded.
  */
 ORM_C_API orm_status_t ORM_C_CALL
 orm_transaction_close(orm_transaction_t *transaction, orm_error_t *error);
