@@ -106,7 +106,8 @@ set(ORM_FLOW_SOURCES src/flow/orm_cbind_publisher.c
                      src/dbs/mongo/orm_mongo_cursor.c
                      src/dbs/tidesdb/orm_tidesdb_cursor.c)
 if(ORM_WITH_SQLITE)
-  list(APPEND ORM_C_SOURCES src/dbs/sqlite/backend.c)
+  list(APPEND ORM_C_SOURCES src/dbs/sqlite/backend.c
+                            src/dbs/sqlite/maintenance.c)
   list(APPEND ORM_FLOW_SOURCES src/dbs/sqlite/orm_sqlite_cursor.c)
 endif()
 if(ORM_WITH_REDIS)
@@ -944,6 +945,11 @@ include(GNUInstallDirs)
 cmake_install_headers(
   FILES include/orm/orm.h include/orm/orm.hpp
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+if(ORM_WITH_SQLITE)
+  cmake_install_headers(
+    FILES include/orm/orm_sqlite.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+endif()
 if(ORM_WITH_PGSQL)
   cmake_install_headers(
     FILES include/orm/orm_postgresql.h include/orm/orm_postgresql.hpp
