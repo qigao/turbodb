@@ -858,6 +858,32 @@ set_target_properties(orm_cpp_flow_test
 orm_enable_strict_warnings(orm_cpp_flow_test)
 add_test(NAME orm_cpp_flow COMMAND orm_cpp_flow_test)
 
+add_executable(orm_public_ownership_test
+               tests/flow/orm_public_ownership_test.c)
+target_compile_features(orm_public_ownership_test PRIVATE c_std_11)
+target_include_directories(orm_public_ownership_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_public_ownership_test
+                      PRIVATE turbo_orm Salts::CFlow Salts::TinyTest)
+set_target_properties(orm_public_ownership_test
+                      PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_public_ownership_test)
+if(MSVC)
+  target_compile_options(orm_public_ownership_test
+                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+add_test(NAME orm_public_ownership COMMAND orm_public_ownership_test)
+
+add_executable(orm_public_ownership_cpp_test
+               tests/flow/orm_public_ownership_cpp_test.cpp)
+target_compile_features(orm_public_ownership_cpp_test PRIVATE cxx_std_17)
+target_include_directories(orm_public_ownership_cpp_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_public_ownership_cpp_test
+                      PRIVATE orm_cpp Salts::TinyTest)
+set_target_properties(orm_public_ownership_cpp_test
+                      PROPERTIES CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_public_ownership_cpp_test)
+add_test(NAME orm_public_ownership_cpp COMMAND orm_public_ownership_cpp_test)
+
 endif()
 
 if(ORM_WITH_REDIS)
@@ -908,7 +934,8 @@ if(WIN32)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
     list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_public_flow
-                                  orm_sqlite_provider_atomicity orm_cpp_flow)
+                                  orm_sqlite_provider_atomicity orm_cpp_flow
+                                  orm_public_ownership orm_public_ownership_cpp)
   endif()
   if(ORM_WITH_PGSQL)
     string(APPEND ORM_TEST_RUNTIME_PATH
