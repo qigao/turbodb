@@ -1,6 +1,7 @@
 #include <orm_runtime.h>
 
 #include "orm_module_loader.h"
+#include "../abi/orm_internal.h"
 #include "../driver/orm_driver_contract.h"
 #include "../driver/orm_driver_owner_bridge.h"
 #include "../driver/orm_driver_plan_view.h"
