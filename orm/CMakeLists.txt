@@ -788,6 +788,24 @@ if(MSVC)
 endif()
 add_test(NAME orm_public_flow COMMAND orm_public_flow_test)
 
+add_executable(orm_sqlite_provider_atomicity_test
+               tests/integration/sqlite_provider_atomicity_test.c)
+target_compile_features(orm_sqlite_provider_atomicity_test PRIVATE c_std_11)
+target_compile_definitions(orm_sqlite_provider_atomicity_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_sqlite_provider_atomicity_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_sqlite_provider_atomicity_test
+                      PRIVATE turbo_orm Salts::TinyTest)
+set_target_properties(
+  orm_sqlite_provider_atomicity_test
+  PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_sqlite_provider_atomicity_test)
+if(MSVC)
+  target_compile_options(orm_sqlite_provider_atomicity_test
+                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+add_test(NAME orm_sqlite_provider_atomicity
+         COMMAND orm_sqlite_provider_atomicity_test)
+
 add_executable(orm_cpp_flow_test tests/flow/orm_cpp_flow_test.cpp)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_cpp_flow_test PRIVATE ORM_C_STATIC)
@@ -849,7 +867,7 @@ if(WIN32)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
-    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_public_flow orm_cpp_flow)
+    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_public_flow\n                                  orm_sqlite_provider_atomicity orm_cpp_flow)
   endif()
   if(ORM_WITH_PGSQL)
     string(APPEND ORM_TEST_RUNTIME_PATH
