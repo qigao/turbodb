@@ -209,7 +209,7 @@ ORM_C_API orm_status_t ORM_C_CALL orm_connect(
  * close() is checked and does not consume the caller hold. It returns BUSY
  * without changing state while dependent Query/Transaction/Publisher/native
  * work exists. On success, native resources are closed and the held handle
- * remains valid only for close/release; no new business work is admitted.
+ * remains valid for retain/close/release only; no new business work is admitted.
  *
  * Legacy orm_disconnect() remains source/binary compatible and is equivalent
  * to releasing one caller hold. Cleanup may therefore be deferred until
@@ -280,7 +280,7 @@ ORM_C_API orm_status_t ORM_C_CALL orm_raw(
 /*
  * Checked Query close returns BUSY while an admitted Publisher/cursor still
  * owns the Query. retain/release are explicit caller holds. A successful close
- * leaves the held opaque handle available only for close/release.
+ * leaves the held opaque handle available for retain/close/release only.
  * Legacy destroy consumes one caller hold and may defer final cleanup.
  */
 ORM_C_API orm_status_t ORM_C_CALL
