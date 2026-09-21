@@ -30,6 +30,8 @@ typedef struct orm_runtime_driver {
   const orm_driver_api_v1 *api;
   uint32_t api_bytes;
   orm_driver_module_ops_v1 module_ops;
+  orm_driver_create_fn create_connection;
+  orm_driver_connection_ops_v1 connection_ops;
   orm_runtime_id canonical;
   uint32_t alias_count;
   uint64_t capabilities;
@@ -44,6 +46,7 @@ struct orm_runtime {
   orm_runtime_driver *drivers;
   orm_runtime_id *aliases;
   uint32_t driver_count;
+  uint32_t dependents;
 };
 
 static const uint8_t runtime_bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
@@ -122,6 +125,155 @@ static orm_runtime_driver *runtime_find_driver(orm_runtime_t *runtime,
     }
   }
   return NULL;
+}
+
+static orm_status_t runtime_acquire_dependent(
+    orm_runtime_t *runtime, orm_error_t *error) {
+  if (runtime->closed != 0u)
+    return runtime_result(error, ORM_STATUS_INVALID_STATE,
+                          "runtime is closed");
+  if (runtime->dependents == runtime->config.max_connections)
+    return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
+                          "runtime connection budget is full");
+  ++runtime->dependents;
+  orm_runtime_retain(runtime);
+  return ORM_STATUS_OK;
+}
+
+static void runtime_release_dependent(orm_runtime_t *runtime) {
+  if (runtime == NULL || runtime->dependents == 0u)
+    abort();
+  --runtime->dependents;
+  orm_runtime_release(runtime);
+}
+
+static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
+  orm_driver_limits_v1 out;
+  memset(&out, 0, sizeof(out));
+  out.header.struct_size = (uint32_t)sizeof(out);
+  out.header.abi_version = ORM_DRIVER_ABI_VERSION;
+  out.max_parameters = (uint64_t)limits->max_parameters;
+  out.max_columns = (uint64_t)limits->max_columns;
+  out.max_predicates = (uint64_t)limits->max_predicates;
+  out.max_assignments = (uint64_t)limits->max_assignments;
+  out.max_query_bytes = (uint64_t)limits->max_query_bytes;
+  out.max_parameter_bytes = (uint64_t)limits->max_parameter_bytes;
+  out.max_result_rows = limits->max_result_rows;
+  out.max_result_bytes = limits->max_result_bytes;
+  return out;
+}
+
+typedef struct orm_runtime_backend {
+  orm_runtime_t *runtime;
+  orm_runtime_driver *driver;
+  orm_driver_connection_v1 native;
+  orm_driver_connection_ops_v1 ops;
+} orm_runtime_backend;
+
+static void runtime_backend_destroy(void *context) {
+  orm_runtime_backend *backend = context;
+  if (backend == NULL) return;
+  if (backend->native.context != NULL)
+    backend->ops.destroy(backend->native.context);
+  orm_runtime_t *runtime = backend->runtime;
+  free(backend);
+  runtime_release_dependent(runtime);
+}
+
+static orm_status_t runtime_backend_open_cursor(
+    void *context, const orm_query_plan *plan, const orm_limits *limits,
+    orm_row_cursor *out_cursor, orm_error_t *error) {
+  (void)context;
+  (void)plan;
+  (void)limits;
+  if (out_cursor != NULL) memset(out_cursor, 0, sizeof(*out_cursor));
+  orm_error_set(error, ORM_STATUS_UNSUPPORTED,
+                "runtime driver cursor adapter is not implemented");
+  return ORM_STATUS_UNSUPPORTED;
+}
+
+static orm_status_t runtime_backend_execute_command(
+    void *context, const orm_query_plan *plan, const orm_limits *limits,
+    uint64_t *affected_rows, orm_error_t *error) {
+  (void)context;
+  (void)plan;
+  (void)limits;
+  if (affected_rows != NULL) *affected_rows = 0u;
+  orm_error_set(error, ORM_STATUS_UNSUPPORTED,
+                "runtime driver command adapter is not implemented");
+  return ORM_STATUS_UNSUPPORTED;
+}
+
+static orm_status_t runtime_backend_begin_transaction(
+    void *context, orm_isolation_t isolation,
+    orm_transaction_backend *out_transaction, orm_error_t *error) {
+  (void)context;
+  (void)isolation;
+  if (out_transaction != NULL)
+    memset(out_transaction, 0, sizeof(*out_transaction));
+  orm_error_set(error, ORM_STATUS_UNSUPPORTED,
+                "runtime driver transaction adapter is not implemented");
+  return ORM_STATUS_UNSUPPORTED;
+}
+
+static const orm_backend_ops runtime_backend_ops = {
+    sizeof(orm_backend_ops), ORM_BACKEND_OPS_ABI_VERSION,
+    runtime_backend_destroy, runtime_backend_open_cursor,
+    runtime_backend_execute_command, runtime_backend_begin_transaction};
+
+typedef struct orm_runtime_factory_context {
+  orm_runtime_t *runtime;
+  orm_runtime_driver *driver;
+} orm_runtime_factory_context;
+
+static orm_status_t runtime_backend_factory(
+    const orm_config_t *config, const orm_limits *limits, void *context,
+    orm_backend *out_backend, orm_error_t *error) {
+  if (out_backend != NULL) memset(out_backend, 0, sizeof(*out_backend));
+  if (config == NULL || limits == NULL || context == NULL ||
+      out_backend == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver connection factory");
+
+  orm_runtime_factory_context *factory = context;
+  orm_status_t status = runtime_acquire_dependent(factory->runtime, error);
+  if (status != ORM_STATUS_OK) return status;
+
+  orm_driver_connection_v1 native;
+  memset(&native, 0, sizeof(native));
+  const orm_driver_limits_v1 driver_limits = runtime_driver_limits(limits);
+  status = factory->driver->create_connection(
+      factory->driver->module_context, config, &driver_limits, &native, error);
+  if (status != ORM_STATUS_OK) {
+    runtime_release_dependent(factory->runtime);
+    return status;
+  }
+
+  status = orm_driver_validate_connection_v1(
+      &native, (uint32_t)sizeof(native), factory->driver->capabilities, error);
+  if (status != ORM_STATUS_OK) {
+    if (native.context != NULL)
+      factory->driver->connection_ops.destroy(native.context);
+    runtime_release_dependent(factory->runtime);
+    return status;
+  }
+
+  orm_runtime_backend *backend =
+      (orm_runtime_backend *)calloc(1u, sizeof(*backend));
+  if (backend == NULL) {
+    factory->driver->connection_ops.destroy(native.context);
+    runtime_release_dependent(factory->runtime);
+    return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                          "allocate runtime driver connection adapter");
+  }
+
+  backend->runtime = factory->runtime;
+  backend->driver = factory->driver;
+  backend->native = native;
+  memcpy(&backend->ops, native.ops.data, sizeof(backend->ops));
+  out_backend->ops = &runtime_backend_ops;
+  out_backend->context = backend;
+  return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
 static orm_driver_host_v1 runtime_host(void) {
@@ -368,6 +520,9 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   entry->api = api;
   entry->api_bytes = api_bytes;
   entry->module_ops = module_ops;
+  entry->create_connection = api->create_connection;
+  memcpy(&entry->connection_ops, api->connection_ops.data,
+         sizeof(entry->connection_ops));
   runtime_copy_id(&entry->canonical, canonical);
   entry->alias_count = api->alias_count;
   entry->capabilities = api->capabilities;
@@ -418,12 +573,37 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
 }
 
 orm_status_t ORM_C_CALL
+orm_runtime_connect(orm_runtime_t *runtime, const orm_config_t *config,
+                    orm_connection_t **out_connection, orm_error_t *error) {
+  if (out_connection != NULL) *out_connection = NULL;
+  if (runtime == NULL || config == NULL || out_connection == NULL ||
+      !runtime_id_valid(config->driver))
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime connect request");
+  if (runtime->closed != 0u)
+    return runtime_result(error, ORM_STATUS_INVALID_STATE,
+                          "runtime is closed");
+
+  orm_runtime_driver *driver = runtime_find_driver(runtime, config->driver);
+  if (driver == NULL)
+    return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
+                          "driver is not registered");
+
+  orm_runtime_factory_context factory = {runtime, driver};
+  return orm_connect_with_factory_context_v1(
+      config, runtime_backend_factory, &factory, out_connection, error);
+}
+
+orm_status_t ORM_C_CALL
 orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
   if (runtime == NULL)
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "runtime is required");
   if (runtime->closed == 1u)
     return runtime_result(error, ORM_STATUS_OK, NULL);
+  if (runtime->dependents != 0u)
+    return runtime_result(error, ORM_STATUS_BUSY,
+                          "runtime has active connections");
   if (runtime->closed != 0u)
     return runtime_result(error, ORM_STATUS_CLEANUP_FAILED,
                           "runtime cleanup is quarantined");
