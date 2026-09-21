@@ -904,7 +904,8 @@ if(WIN32)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
-    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_public_flow\n                                  orm_sqlite_provider_atomicity orm_cpp_flow)
+    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_public_flow
+                                  orm_sqlite_provider_atomicity orm_cpp_flow)
   endif()
   if(ORM_WITH_PGSQL)
     string(APPEND ORM_TEST_RUNTIME_PATH
