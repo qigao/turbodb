@@ -1,7 +1,7 @@
 name: Driver SDK installed package
 on:
   push:
-    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership]
+    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-publisher]
   workflow_dispatch:
 permissions:
   contents: read
@@ -39,6 +39,14 @@ jobs:
           ref: c4197712261a563ed7e238152b34cb50a2ef98a9
           path: .ci-salts
           persist-credentials: false
+      - name: Checkout pinned DataBind source
+        if: github.ref_name == 'refactor/orm-databind-publisher'
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 5c11f08d0d8e0428de513c6051b16989d1c2edd9
+          path: .ci-salts-utils
+          persist-credentials: false
       - name: Check CI provenance regression
         shell: pwsh
         run: python -m unittest discover -s orm/tests/driver -p test_package_provenance.py -v
@@ -65,6 +73,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
           "VSINSTALL=$vs" >> $env:GITHUB_ENV
           "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+      - name: Install pinned DataBind re2c 4.6
+        if: github.ref_name == 'refactor/orm-databind-publisher'
+        shell: bash
+        run: bash .ci-salts-utils/cmake/ci/install-re2c.sh
       - name: Record exact dependency cache identity
         id: identity
         shell: pwsh
@@ -107,6 +119,81 @@ jobs:
           rem Keep the explicitly selected runner toolchain used by the cache key.
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
+      - name: Build pinned DataBind SDK on Linux
+        if: github.ref_name == 'refactor/orm-databind-publisher' && runner.os == 'Linux'
+        shell: bash
+        env:
+          SALTS_ROOT: ${{ github.workspace }}/external/pkgs/salts/${{ matrix.config }}
+          VCPKG_ROOT: ${{ env.DRIVER_SDK_VCPKG_ROOT }}
+        run: |
+          set -euxo pipefail
+          test "$(git -C .ci-salts-utils rev-parse HEAD)" = "5c11f08d0d8e0428de513c6051b16989d1c2edd9"
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          build_type=Release
+          if [[ '${{ matrix.config }}' == debug ]]; then build_type=Debug; fi
+          host="$RUNNER_TEMP/databind-host-lemon-${{ matrix.config }}"
+          build="$RUNNER_TEMP/databind-build-${{ matrix.config }}"
+          prefix="$RUNNER_TEMP/databind-${{ matrix.config }}"
+          rm -rf "$host" "$build" "$prefix"
+          cmake -S .ci-salts-utils/tools/lemon -B "$host" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$host" --target lemon --parallel 2
+          test -x "$host/lemon"
+          cmake -S .ci-salts-utils -B "$build" -G Ninja             -DCMAKE_BUILD_TYPE="$build_type"             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/.ci-salts-utils/vcpkg_installed"             -DENABLE_SANITIZER_ADDRESS=OFF             -DENABLE_SANITIZER_UNDEFINED=OFF             -DENABLE_TESTS=OFF -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF             -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="$host/lemon"             -DDATABIND_HOST_LEMON_EXECUTABLE="$host/lemon"
+          cmake --build "$build" --parallel 4 --target             data_bind_core data_bind data_bind_cmeta data_bind_cflow             data_bind_json_adapter data_bind_yaml_adapter data_bind_csv_adapter             data_bind_xml_adapter data_bind_temporal_adapter tbe_schema tbe_compiler
+          cmake --install "$build" --prefix "$prefix" --component DataBind
+          test -f "$prefix/lib/cmake/DataBind/DataBindConfig.cmake"
+          test -f "$prefix/include/data_bind_native.h"
+          test ! -e "$prefix/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          printf 'DATABIND_ROOT=%s\n' "$prefix" >> "$GITHUB_ENV"
+          mkdir -p evidence/core
+          printf '%s\n' "5c11f08d0d8e0428de513c6051b16989d1c2edd9" > evidence/core/databind-head.txt
+      - name: Build pinned DataBind SDK on Windows
+        if: github.ref_name == 'refactor/orm-databind-publisher' && runner.os == 'Windows'
+        shell: cmd
+        env:
+          VCPKG_DISABLE_METRICS: '1'
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
+          set "SALTS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts\${{ matrix.config }}"
+          set "HOST=%RUNNER_TEMP%\databind-host-lemon-${{ matrix.config }}"
+          set "BUILD=%RUNNER_TEMP%\databind-build-${{ matrix.config }}"
+          set "PREFIX=%RUNNER_TEMP%\databind-${{ matrix.config }}"
+          if "${{ matrix.config }}"=="debug" (set "BUILD_TYPE=Debug") else (set "BUILD_TYPE=Release")
+          git -C .ci-salts-utils rev-parse HEAD > "%RUNNER_TEMP%\databind-head.txt"
+          if errorlevel 1 exit /b 1
+          findstr /x "5c11f08d0d8e0428de513c6051b16989d1c2edd9" "%RUNNER_TEMP%\databind-head.txt" >nul
+          if errorlevel 1 exit /b 1
+          if not exist "%SALTS_ROOT%\lib\cmake\Salts\SaltsConfig.cmake" exit /b 1
+          if exist "%HOST%" rmdir /s /q "%HOST%"
+          if exist "%BUILD%" rmdir /s /q "%BUILD%"
+          if exist "%PREFIX%" rmdir /s /q "%PREFIX%"
+          cmake -S .ci-salts-utils\tools\lemon -B "%HOST%" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          if errorlevel 1 exit /b 1
+          cmake --build "%HOST%" --target lemon --parallel 2
+          if errorlevel 1 exit /b 1
+          cmake -S .ci-salts-utils -B "%BUILD%" -G Ninja ^
+            -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
+            -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows ^
+            -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\.ci-salts-utils\vcpkg_installed" ^
+            -DENABLE_SANITIZER_ADDRESS=OFF ^
+            -DENABLE_SANITIZER_UNDEFINED=OFF ^
+            -DENABLE_TESTS=OFF -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF ^
+            -DSALTS_UTILS_HOST_LEMON_EXECUTABLE="%HOST%\lemon.exe" ^
+            -DDATABIND_HOST_LEMON_EXECUTABLE="%HOST%\lemon.exe"
+          if errorlevel 1 exit /b 1
+          cmake --build "%BUILD%" --parallel 4 --target data_bind_core data_bind data_bind_cmeta data_bind_cflow data_bind_json_adapter data_bind_yaml_adapter data_bind_csv_adapter data_bind_xml_adapter data_bind_temporal_adapter tbe_schema tbe_compiler
+          if errorlevel 1 exit /b 1
+          cmake --install "%BUILD%" --prefix "%PREFIX%" --component DataBind
+          if errorlevel 1 exit /b 1
+          if not exist "%PREFIX%\lib\cmake\DataBind\DataBindConfig.cmake" exit /b 1
+          if not exist "%PREFIX%\include\data_bind_native.h" exit /b 1
+          if exist "%PREFIX%\lib\cmake\SaltsUtils\SaltsUtilsConfig.cmake" exit /b 1
+          echo DATABIND_ROOT=%PREFIX%>>"%GITHUB_ENV%"
+          if not exist evidence\core mkdir evidence\core
+          copy /y "%RUNNER_TEMP%\databind-head.txt" evidence\core\databind-head.txt >nul
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
