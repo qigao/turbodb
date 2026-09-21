@@ -121,7 +121,7 @@ if(ORM_WITH_PGSQL)
   add_test(NAME orm_postgres_connection COMMAND orm_postgres_connection_test)
   set_tests_properties(orm_postgres_connection PROPERTIES TIMEOUT 30)
   if(WIN32)
-    set_tests_properties(orm_postgres_connection_test PROPERTIES ENVIRONMENT_MODIFICATION
+    set_tests_properties(orm_postgres_connection PROPERTIES ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>")
   endif()
 endif()
