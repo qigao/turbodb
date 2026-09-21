@@ -1,7 +1,7 @@
 #ifndef ORM_MONGO_CURSOR_H
 #define ORM_MONGO_CURSOR_H
 
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 
 #include <stdbool.h>
 #include <stddef.h>
