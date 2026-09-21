@@ -508,23 +508,30 @@ jobs:
         with:
           path: .ci-vcpkg-cache
           key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Record runtime loader ELF evidence
+        if: github.ref_name == 'feat/runtime-driver-registry-concurrency' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=build/linux-gcc-release
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            build=build/linux-gcc-debug
+          fi
+          readelf -d "$build/bin/orm_module_loader_fixture.so" | tee evidence/core/module-loader-elf.txt
+          readelf -d "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-elf.txt
+          readelf -d "$build/bin/libturbo_orm.so" | tee evidence/core/runtime-core-elf.txt
+          ldd "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-ldd.txt
+          if grep -Eq 'FLAGS_1.*NOOPEN' evidence/core/module-loader-elf.txt evidence/core/runtime-race-module-elf.txt; then
+            echo "Runtime-loadable MODULE was linked with DF_1_NOOPEN" >&2
+            exit 1
+          fi
       - name: Keep complete package evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: driver-package-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
           path: evidence/
-          if-no-files-found: warn --verbose --no-tests=error 2>&1 | tee evidence/core/ownership.log
-          if [[ '${{ github.ref_name }}' == 'feat/runtime-driver-registry-concurrency' ]]; then
-            readelf -d "$build/bin/orm_module_loader_fixture.so" | tee evidence/core/module-loader-elf.txt
-            readelf -d "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-elf.txt
-            readelf -d "$build/bin/libturbo_orm.so" | tee evidence/core/runtime-core-elf.txt
-            ldd "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-ldd.txt
-            if grep -Eq 'FLAGS_1.*NOOPEN' evidence/core/module-loader-elf.txt evidence/core/runtime-race-module-elf.txt; then
-              echo "Runtime-loadable MODULE was linked with DF_1_NOOPEN" >&2
-              exit 1
-            fi
-          fi
+          if-no-files-found: warn
       - name: Build and test native plan adapter on Windows
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
