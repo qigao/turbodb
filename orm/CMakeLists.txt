@@ -111,11 +111,13 @@ set(ORM_ABI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/abi)
 set(ORM_FLOW_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/flow)
 set(ORM_SQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
 set(ORM_DRIVER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/driver)
+set(ORM_RUNTIME_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime)
 set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
 set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
                   src/abi/orm_result.c src/driver/orm_driver_owner_bridge.c
+                  src/runtime/orm_module_loader.c
                   src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
@@ -158,11 +160,11 @@ target_include_directories(
   PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
          $<INSTALL_INTERFACE:include/shared/orm>
   PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR}
-          ${ORM_DRIVER_SOURCE_DIR})
+          ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 target_link_libraries(
   turbo_orm PUBLIC Salts::Core
   PRIVATE Salts::CSerde Salts::Databind Salts::CFlow
-          Salts::CSTL Salts::Platform)
+          Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
 
 if(ORM_WITH_SQLITE)
   target_compile_definitions(turbo_orm PRIVATE ORM_WITH_SQLITE)
@@ -453,11 +455,12 @@ if(ORM_BUILD_TESTS)
   target_include_directories(
     orm_c_test_static
     PUBLIC ${ORM_INCLUDE_DIR}
-    PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
+    PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR}
+            ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
   target_link_libraries(
     orm_c_test_static PUBLIC Salts::Core
     PRIVATE Salts::CSerde Salts::Databind Salts::CFlow
-            Salts::CSTL Salts::Platform)
+            Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
     target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
@@ -713,6 +716,43 @@ else()
 endif()
 add_test(NAME orm_driver_owner_bridge COMMAND orm_driver_owner_bridge_test)
 
+# Qualify the private OS loader with a real MODULE target. The fixture exports
+# only the Driver ABI bootstrap name and has no database dependency.
+add_library(orm_module_loader_fixture MODULE
+  tests/driver/orm_module_loader_fixture.c)
+target_compile_features(orm_module_loader_fixture PRIVATE c_std_11)
+target_compile_definitions(orm_module_loader_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
+target_include_directories(orm_module_loader_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_module_loader_fixture PRIVATE
+  Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_module_loader_fixture PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_module_loader_fixture)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(orm_module_loader_fixture PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
+add_executable(orm_module_loader_test tests/driver/orm_module_loader_test.c)
+target_compile_features(orm_module_loader_test PRIVATE c_std_11)
+target_compile_definitions(orm_module_loader_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_module_loader_test PRIVATE
+  ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR}
+  ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
+orm_link_internal_test(orm_module_loader_test Salts::TinyTest ${CMAKE_DL_LIBS})
+add_dependencies(orm_module_loader_test orm_module_loader_fixture)
+set_target_properties(orm_module_loader_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_module_loader_test)
+if(MSVC)
+  target_compile_options(orm_module_loader_test PRIVATE /WX)
+else()
+  target_compile_options(orm_module_loader_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_module_loader COMMAND orm_module_loader_test)
+set_tests_properties(orm_module_loader PROPERTIES
+  ENVIRONMENT "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>")
+
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
 add_executable(orm_postgres_flow_test ${ORM_POSTGRES_FLOW_TEST_SOURCES})
@@ -953,7 +993,8 @@ if(WIN32)
   set(ORM_TEST_RUNTIME_PATH
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Databind>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
-                        orm_row_publisher orm_pure_c_build orm_sql_render orm_driver_plan_view
+                        orm_row_publisher orm_pure_c_build orm_sql_render
+                        orm_driver_plan_view orm_driver_owner_bridge orm_module_loader
                         orm_postgres_flow orm_backend_profile)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
