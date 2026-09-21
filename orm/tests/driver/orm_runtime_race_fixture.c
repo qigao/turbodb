@@ -52,8 +52,13 @@ static void race_error(orm_error_t *error, orm_status_t status) {
 static int race_gate_ensure(void) {
   if (gate.initialized != 0u) return 1;
   salts_mutex_init(&gate.mutex);
+  if (gate.mutex == NULL) return 0;
   salts_cond_init(&gate.condition);
-  if (gate.mutex == NULL || gate.condition == NULL) return 0;
+  if (gate.condition == NULL) {
+    salts_mutex_destroy(&gate.mutex);
+    gate.mutex = NULL;
+    return 0;
+  }
   gate.initialized = 1u;
   return 1;
 }
