@@ -1,4 +1,5 @@
 #include <orm_runtime.h>
+#include <salts/thread.h>
 
 #include "orm_module_loader.h"
 #include "../abi/orm_internal.h"
@@ -42,7 +43,15 @@ typedef struct orm_runtime_driver {
   uint8_t bundle_id[ORM_DRIVER_BUNDLE_ID_BYTES];
 } orm_runtime_driver;
 
+enum {
+  ORM_RUNTIME_OPEN = 0u,
+  ORM_RUNTIME_CLOSED = 1u,
+  ORM_RUNTIME_FAILED = 2u,
+  ORM_RUNTIME_CLOSING = 3u
+};
+
 struct orm_runtime {
+  salts_mutex_t mutex;
   uint32_t refs;
   uint32_t closed;
   orm_runtime_config_t config;
@@ -50,6 +59,8 @@ struct orm_runtime {
   orm_runtime_id *aliases;
   uint32_t driver_count;
   uint32_t dependents;
+  uint32_t pending_operations;
+  uint32_t load_active;
 };
 
 static const uint8_t runtime_bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
@@ -142,22 +153,53 @@ static int runtime_path_registered(orm_runtime_t *runtime, const char *path) {
 
 static orm_status_t runtime_acquire_dependent(
     orm_runtime_t *runtime, orm_error_t *error) {
-  if (runtime->closed != 0u)
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->closed != ORM_RUNTIME_OPEN) {
+    salts_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
-  if (runtime->dependents == runtime->config.max_connections)
+  }
+  if (runtime->dependents == runtime->config.max_connections) {
+    salts_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "runtime connection budget is full");
+  }
+  if (runtime->refs == UINT32_MAX) {
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
+                          "runtime reference budget is full");
+  }
   ++runtime->dependents;
-  orm_runtime_retain(runtime);
+  ++runtime->refs;
+  salts_mutex_unlock(&runtime->mutex);
   return ORM_STATUS_OK;
 }
 
-static void runtime_release_dependent(orm_runtime_t *runtime) {
-  if (runtime == NULL || runtime->dependents == 0u)
+static int runtime_release_dependent_ref(orm_runtime_t *runtime) {
+  int last = 0;
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->dependents == 0u || runtime->refs == 0u) {
+    salts_mutex_unlock(&runtime->mutex);
     abort();
+  }
   --runtime->dependents;
-  orm_runtime_release(runtime);
+  --runtime->refs;
+  last = runtime->refs == 0u;
+  salts_mutex_unlock(&runtime->mutex);
+  return last;
+}
+
+static void runtime_finish_pending(
+    orm_runtime_t *runtime, int load_operation) {
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->pending_operations == 0u ||
+      (load_operation && runtime->load_active == 0u)) {
+    salts_mutex_unlock(&runtime->mutex);
+    abort();
+  }
+  --runtime->pending_operations;
+  if (load_operation) runtime->load_active = 0u;
+  salts_mutex_unlock(&runtime->mutex);
 }
 
 static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
