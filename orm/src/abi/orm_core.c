@@ -798,7 +798,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                                   cflow_publisher *out_publisher,
                                   orm_error_t *error) {
   orm_row_cursor cursor = {0};
-  orm_cbind_publisher_config publisher_config;
+  orm_row_publisher_config publisher_config;
   cflow_publisher timed_publisher = {0};
   uint64_t wait_timeout_ns;
   orm_status_t status;
@@ -875,11 +875,11 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   cursor.release_transaction_owner = transaction != NULL
       ? orm_transaction_release_execution : NULL;
 #endif
-  publisher_config = (orm_cbind_publisher_config)ORM_CBIND_PUBLISHER_CONFIG_INIT(
+  publisher_config = (orm_row_publisher_config)ORM_ROW_PUBLISHER_CONFIG_INIT(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
   wait_timeout_ns = cursor.wait_timeout_ns;
-  status = orm_cbind_publisher_init(out_publisher, &cursor, &publisher_config, error);
+  status = orm_row_publisher_init(out_publisher, &cursor, &publisher_config, error);
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   /* configure_shape is a native callback too; publish its terminal failure
    * before disposing the cursor or releasing any of its parent holds. */
