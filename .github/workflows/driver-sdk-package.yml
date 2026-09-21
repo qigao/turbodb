@@ -114,39 +114,66 @@ jobs:
           rem Keep the explicitly selected runner toolchain used by the cache key.
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
+      - name: Adapt pinned SaltsUtils preset paths for this runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:GITHUB_WORKSPACE '.ci-salts-utils'
+          $evidence = Join-Path $env:GITHUB_WORKSPACE 'evidence/salts-utils'
+          $head = git -C $source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $head -cne '05453ea6802de5d78a2e3a992f7373b3bf348c34') { throw 'SaltsUtils revision mismatch' }
+          git -C $source diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'SaltsUtils checkout is not clean before path adaptation' }
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $path = Join-Path $source 'CMakeUserPresets.json'
+          $presets = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable
+          foreach ($name in @('win-toolchain', 'linux-paths')) {
+            $matches = @($presets.configurePresets | Where-Object { $_.name -eq $name })
+            if ($matches.Count -ne 1) { throw "Missing or duplicate upstream path preset: $name" }
+            $item = $matches[0]
+            $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
+            $item.environment.VCPKG_ROOT = $env:DRIVER_SDK_VCPKG_ROOT
+            if ($name -eq 'win-toolchain') {
+              $item.environment.PROJECT_ROOT = $env:GITHUB_WORKSPACE
+              $item.environment.RE2C_ROOT = "$env:RUNNER_TEMP/re2c-4.6"
+            }
+          }
+          $presets | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $path -Encoding utf8NoBOM
+          git -C $source diff -- CMakeUserPresets.json > "$evidence/ci-paths.diff"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot record SaltsUtils path adaptation' }
+          Copy-Item -LiteralPath $path -Destination "$evidence/CMakeUserPresets.json"
+          $head | Set-Content -LiteralPath "$evidence/head.txt" -Encoding utf8NoBOM
       - name: Build pinned SaltsUtils package on Linux
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euxo pipefail
           config='${{ matrix.config }}'
-          build_type=Release
+          profile=linux-release-user
           salts_utils_asan=OFF
           if [[ "$config" == debug ]]; then
-            build_type=Debug
+            profile=linux-dev-user
             salts_utils_asan=ON
           fi
-          salts_root="$GITHUB_WORKSPACE/external/pkgs/salts/$config"
           salts_utils_root="$GITHUB_WORKSPACE/external/pkgs/salts-utils/$config"
-          build="$GITHUB_WORKSPACE/.ci-salts-utils-build/$config"
+          evidence="$GITHUB_WORKSPACE/evidence/salts-utils"
           test "$(git -C .ci-salts-utils rev-parse HEAD)" = 05453ea6802de5d78a2e3a992f7373b3bf348c34
-          export SALTS_ROOT="$salts_root"
-          mkdir -p evidence/salts-utils
-          cmake -S .ci-salts-utils -B "$build" -G Ninja \
-            -DCMAKE_BUILD_TYPE="$build_type" \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF \
+          cd .ci-salts-utils
+          # Keep the existing dependency test/sanitizer policy; inherit package
+          # features, toolchain, compiler flags and tool runtime paths upstream.
+          cmake --preset "$profile" \
+            -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_TESTS=ON \
             -DENABLE_SANITIZER_ADDRESS="$salts_utils_asan" -DENABLE_SANITIZER_UNDEFINED=OFF \
-            2>&1 | tee evidence/salts-utils/configure.log
-          cmake --build "$build" --parallel 4 2>&1 | tee evidence/salts-utils/build.log
+            2>&1 | tee "$evidence/configure.log"
+          cmake --build --preset "$profile" --parallel 4 2>&1 | tee "$evidence/build.log"
           rm -rf "$salts_utils_root"
-          cmake --install "$build" --prefix "$salts_utils_root" 2>&1 | tee evidence/salts-utils/install.log
+          cmake --build --preset "install-$profile" --parallel 4 2>&1 | tee "$evidence/install.log"
           test -f "$salts_utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
           test -f "$salts_utils_root/include/data_bind_native.h"
           test ! -e "$salts_utils_root/lib/cmake/DataBind"
           echo "SALTS_UTILS_ROOT=$salts_utils_root" >> "$GITHUB_ENV"
-          mkdir -p evidence/core
-          git -C .ci-salts-utils rev-parse HEAD > evidence/core/salts-utils-head.txt
+          mkdir -p "$GITHUB_WORKSPACE/evidence/core"
+          git rev-parse HEAD > "$GITHUB_WORKSPACE/evidence/core/salts-utils-head.txt"
 
       - name: Build pinned SaltsUtils package on Windows
         env:
@@ -159,10 +186,9 @@ jobs:
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           set "SALTS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts\${{ matrix.config }}"
           set "SALTS_UTILS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts-utils\${{ matrix.config }}"
-          set "SALTS_UTILS_BUILD=%GITHUB_WORKSPACE%\.ci-salts-utils-build\${{ matrix.config }}"
-          set "SALTS_UTILS_BUILD_TYPE=Release"
+          set "SALTS_UTILS_PROFILE=win-release-user"
           set "SALTS_UTILS_ASAN=OFF"
-          if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_BUILD_TYPE=Debug"
+          if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_PROFILE=win-dev-user"
           if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_ASAN=ON"
           rem Keep bootstrap linear: no nested CMD block or interactive subprocess.
           if not defined RUNNER_TEMP exit /b 1
@@ -211,13 +237,20 @@ jobs:
           for /f %%i in ('git -C .ci-salts-utils rev-parse HEAD') do set "SALTS_UTILS_HEAD=%%i"
           if not "%SALTS_UTILS_HEAD%"=="05453ea6802de5d78a2e3a992f7373b3bf348c34" exit /b 1
           if not exist evidence\salts-utils mkdir evidence\salts-utils
-          cmake -S .ci-salts-utils -B "%SALTS_UTILS_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%SALTS_UTILS_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_MANIFEST_FEATURES=capture -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%SALTS_UTILS_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF > evidence\salts-utils\configure.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\configure.log & exit /b 1)
-          cmake --build "%SALTS_UTILS_BUILD%" --parallel 4 > evidence\salts-utils\build.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\build.log & exit /b 1)
+          rem Use upstream configure/build/install presets as a unit: build
+          rem presets inherit the Salts/vcpkg DLL paths used by tbe_compiler.
+          set "SALTS_UTILS_EVIDENCE=%GITHUB_WORKSPACE%\evidence\salts-utils"
+          cd /d "%GITHUB_WORKSPACE%\.ci-salts-utils"
+          if errorlevel 1 exit /b 1
+          cmake --preset "%SALTS_UTILS_PROFILE%" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_TESTS=ON -DENABLE_SANITIZER_ADDRESS=%SALTS_UTILS_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF > "%SALTS_UTILS_EVIDENCE%\configure.log" 2>&1
+          if errorlevel 1 (type "%SALTS_UTILS_EVIDENCE%\configure.log" & exit /b 1)
+          cmake --build --preset "%SALTS_UTILS_PROFILE%" --parallel 4 > "%SALTS_UTILS_EVIDENCE%\build.log" 2>&1
+          if errorlevel 1 (type "%SALTS_UTILS_EVIDENCE%\build.log" & exit /b 1)
           if exist "%SALTS_UTILS_ROOT%" rmdir /s /q "%SALTS_UTILS_ROOT%"
-          cmake --install "%SALTS_UTILS_BUILD%" --prefix "%SALTS_UTILS_ROOT%" > evidence\salts-utils\install.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\install.log & exit /b 1)
+          cmake --build --preset "install-%SALTS_UTILS_PROFILE%" --parallel 4 > "%SALTS_UTILS_EVIDENCE%\install.log" 2>&1
+          if errorlevel 1 (type "%SALTS_UTILS_EVIDENCE%\install.log" & exit /b 1)
+          cd /d "%GITHUB_WORKSPACE%"
+          if errorlevel 1 exit /b 1
           if not exist "%SALTS_UTILS_ROOT%\lib\cmake\SaltsUtils\SaltsUtilsConfig.cmake" exit /b 1
           if not exist "%SALTS_UTILS_ROOT%\include\data_bind_native.h" exit /b 1
           if exist "%SALTS_UTILS_ROOT%\lib\cmake\DataBind" exit /b 1
