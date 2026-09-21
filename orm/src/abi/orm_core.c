@@ -526,8 +526,8 @@ orm_status_t orm_query_acquire_driver_lease(
                   "invalid driver lifetime parent");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
-  query = (orm_query_t *)((unsigned char *)(uintptr_t)plan -
-                          offsetof(orm_query_t, plan));
+  query = (orm_query_t *)(void *)((const unsigned char *)plan -
+                                   offsetof(orm_query_t, plan));
   status = orm_owner_admit(&query->owner);
   if (status == ORM_STATUS_OK)
     *out_lease = query;
