@@ -113,8 +113,8 @@ set(ORM_SQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
 set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
-set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_plan.c src/abi/orm_result.c
-                  src/dbs/sql/orm_sql_render.c)
+set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
+                  src/abi/orm_result.c src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
                      src/flow/orm_text_token.c
@@ -149,7 +149,8 @@ endforeach()
 add_library(turbo_orm SHARED ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
 add_library(orm_cpp INTERFACE)
 target_compile_features(turbo_orm PRIVATE c_std_11)
-target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD)
+target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD
+                                             ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(
   turbo_orm
   PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -230,7 +231,8 @@ if(ORM_WITH_PGSQL)
   add_library(orm_postgresql SHARED ${ORM_POSTGRESQL_SOURCES})
   target_compile_features(orm_postgresql PRIVATE c_std_11)
   target_compile_definitions(orm_postgresql PRIVATE ORM_WITH_PGSQL
-                                                     ORM_POSTGRESQL_BUILD)
+                                                     ORM_POSTGRESQL_BUILD
+                                                     ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_postgresql
     PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -440,6 +442,11 @@ if(ORM_BUILD_TESTS)
   add_library(orm_c_test_static STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
   target_compile_features(orm_c_test_static PRIVATE c_std_11)
   target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC)
+  # Internal tests that compile cursor/backend sources directly must see the
+  # same opaque-handle layout as the static core. This definition is not part
+  # of the installed Orm::C/Orm::Cpp interface.
+  target_compile_definitions(orm_c_test_static
+                             PUBLIC ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_c_test_static
     PUBLIC ${ORM_INCLUDE_DIR}
@@ -855,6 +862,32 @@ set_target_properties(orm_cpp_flow_test
 orm_enable_strict_warnings(orm_cpp_flow_test)
 add_test(NAME orm_cpp_flow COMMAND orm_cpp_flow_test)
 
+add_executable(orm_public_ownership_test
+               tests/flow/orm_public_ownership_test.c)
+target_compile_features(orm_public_ownership_test PRIVATE c_std_11)
+target_include_directories(orm_public_ownership_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_public_ownership_test
+                      PRIVATE turbo_orm Salts::CFlow Salts::TinyTest)
+set_target_properties(orm_public_ownership_test
+                      PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_public_ownership_test)
+if(MSVC)
+  target_compile_options(orm_public_ownership_test
+                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+add_test(NAME orm_public_ownership COMMAND orm_public_ownership_test)
+
+add_executable(orm_public_ownership_cpp_test
+               tests/flow/orm_public_ownership_cpp_test.cpp)
+target_compile_features(orm_public_ownership_cpp_test PRIVATE cxx_std_17)
+target_include_directories(orm_public_ownership_cpp_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_public_ownership_cpp_test
+                      PRIVATE orm_cpp Salts::TinyTest)
+set_target_properties(orm_public_ownership_cpp_test
+                      PROPERTIES CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_public_ownership_cpp_test)
+add_test(NAME orm_public_ownership_cpp COMMAND orm_public_ownership_cpp_test)
+
 endif()
 
 if(ORM_WITH_REDIS)
@@ -905,7 +938,8 @@ if(WIN32)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
     list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_public_flow
-                                  orm_sqlite_provider_atomicity orm_cpp_flow)
+                                  orm_sqlite_provider_atomicity orm_cpp_flow
+                                  orm_public_ownership orm_public_ownership_cpp)
   endif()
   if(ORM_WITH_PGSQL)
     string(APPEND ORM_TEST_RUNTIME_PATH

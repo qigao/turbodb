@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(OrmSharedPackageConsumer LANGUAGES C)
+project(OrmSharedPackageConsumer LANGUAGES C CXX)
 
 find_package(Orm CONFIG REQUIRED)
 
@@ -25,3 +25,7 @@ endif()
 
 add_executable(orm_shared_package_consumer main.c)
 target_link_libraries(orm_shared_package_consumer PRIVATE Orm::C)
+
+add_executable(orm_shared_package_cpp_consumer main.cpp)
+target_compile_features(orm_shared_package_cpp_consumer PRIVATE cxx_std_17)
+target_link_libraries(orm_shared_package_cpp_consumer PRIVATE Orm::Cpp)
