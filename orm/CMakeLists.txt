@@ -772,6 +772,44 @@ add_test(NAME orm_runtime_registry COMMAND orm_runtime_registry_test)
 set_tests_properties(orm_runtime_registry PROPERTIES
   ENVIRONMENT "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>")
 
+# Dedicated race fixture intentionally exports test-only gate symbols in
+# addition to the Driver ABI bootstrap. It is not the export-surface fixture.
+add_library(orm_runtime_race_fixture MODULE
+  tests/driver/orm_runtime_race_fixture.c)
+target_compile_features(orm_runtime_race_fixture PRIVATE c_std_11)
+target_compile_definitions(orm_runtime_race_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
+target_include_directories(orm_runtime_race_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_runtime_race_fixture PRIVATE
+  Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_runtime_race_fixture PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_runtime_race_fixture)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(orm_runtime_race_fixture PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
+add_executable(orm_runtime_race_test
+  tests/driver/orm_runtime_race_test.c)
+target_compile_features(orm_runtime_race_test PRIVATE c_std_11)
+target_compile_definitions(orm_runtime_race_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_runtime_race_test PRIVATE
+  ${ORM_INCLUDE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
+target_link_libraries(orm_runtime_race_test PRIVATE
+  turbo_orm Salts::TinyTest ${CMAKE_DL_LIBS})
+add_dependencies(orm_runtime_race_test orm_runtime_race_fixture)
+set_target_properties(orm_runtime_race_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_runtime_race_test)
+if(MSVC)
+  target_compile_options(orm_runtime_race_test PRIVATE /WX)
+else()
+  target_compile_options(orm_runtime_race_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_runtime_race COMMAND orm_runtime_race_test)
+set_tests_properties(orm_runtime_race PROPERTIES
+  ENVIRONMENT "ORM_RUNTIME_RACE_FIXTURE=$<TARGET_FILE:orm_runtime_race_fixture>")
+
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
 add_executable(orm_postgres_flow_test ${ORM_POSTGRES_FLOW_TEST_SOURCES})
