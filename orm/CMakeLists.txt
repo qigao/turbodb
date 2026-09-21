@@ -811,7 +811,8 @@ add_executable(orm_runtime_race_test
 target_compile_features(orm_runtime_race_test PRIVATE c_std_11)
 target_compile_definitions(orm_runtime_race_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_runtime_race_test PRIVATE
-  ${ORM_INCLUDE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
+  ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
+  ${ORM_FLOW_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 orm_link_internal_test(orm_runtime_race_test
   Salts::TinyTest ${CMAKE_DL_LIBS})
 add_dependencies(orm_runtime_race_test
