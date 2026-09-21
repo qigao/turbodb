@@ -1,4 +1,4 @@
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 
 #include <cmeta/struct.h>
 #include "tinytest.h"
@@ -176,7 +176,7 @@ static void orm_flow_test_sink_done(void *context) {
   ++state->done_count;
 }
 
-spec("ORM CBind CFlow publisher") {
+spec("ORM DataBind CFlow publisher") {
   it("disposes a partially initialized cursor from a failed backend contract") {
     orm_flow_test_cursor_state state = {0};
     orm_row_cursor cursor = {.ops = &orm_flow_test_partial_cursor_ops,
@@ -211,7 +211,7 @@ spec("ORM CBind CFlow publisher") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -219,7 +219,7 @@ spec("ORM CBind CFlow publisher") {
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     check_equal(error.status, ORM_STATUS_OK);
     check_equal(error.message[0], '\0');
@@ -245,7 +245,7 @@ spec("ORM CBind CFlow publisher") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -253,7 +253,7 @@ spec("ORM CBind CFlow publisher") {
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
     step = cflow_publisher_resume(&source, NULL, &row);
@@ -276,7 +276,7 @@ spec("ORM CBind CFlow publisher") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -284,7 +284,7 @@ spec("ORM CBind CFlow publisher") {
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_WAIT);
@@ -308,13 +308,13 @@ spec("ORM CBind CFlow publisher") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 0u, 64u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
 
     orm_error_init(&error);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_INVALID_ARGUMENT);
     check_not_null(cursor.ops);
     check_not_null(cursor.context);
@@ -342,7 +342,7 @@ spec("ORM CBind CFlow publisher") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -350,7 +350,7 @@ spec("ORM CBind CFlow publisher") {
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_ERROR);
@@ -373,7 +373,7 @@ spec("ORM CBind CFlow publisher") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -382,7 +382,7 @@ spec("ORM CBind CFlow publisher") {
     cflow_step step;
 
     orm_error_init(&error);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     cflow_publisher_cancel(&source);
     cflow_publisher_cancel(&source);
@@ -418,7 +418,7 @@ spec("ORM CBind CFlow publisher") {
     orm_row_cursor cursor = {.ops = &orm_flow_test_cursor_ops,
                              .context = &cursor_state,
                              .wait_timeout_ns = 0u};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_flow_test_row_data, 1u, 1u, 64u, 1u);
     orm_flow_test_sink_state sink_state = {0};
     cflow_subscriber_callbacks callbacks = {
@@ -437,7 +437,7 @@ spec("ORM CBind CFlow publisher") {
     cflow_graph_init(&surface, &orm_flow_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
     check_true(cflow_scheduler_test_init(&scheduler));
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     check_true(cflow_subscribe(&run, &normalized, &source, &scheduler, &sink));
     check_null(source.self);
@@ -457,5 +457,84 @@ spec("ORM CBind CFlow publisher") {
     cflow_scheduler_destroy(&scheduler);
     cflow_graph_destroy(&normalized);
     cflow_graph_destroy(&surface);
+  }
+}
+
+static size_t orm_budget_configure_calls;
+static orm_status_t orm_budget_configure_status;
+static orm_status_t orm_budget_configure(void *context,
+    const cmeta_data_desc *shape, orm_error_t *error) {
+  (void)context; (void)shape; (void)error;
+  ++orm_budget_configure_calls;
+  return orm_budget_configure_status;
+}
+
+spec("ORM row budgets are checked before native shape configuration") {
+  before_each() {
+    orm_budget_configure_calls = 0u;
+    orm_budget_configure_status = ORM_STATUS_OK;
+  }
+  it("rejects one-byte-short field scratch without any native callback") {
+    orm_flow_test_cursor_state state = {0};
+    orm_row_cursor_ops ops = orm_flow_test_cursor_ops;
+    ops.configure_shape = orm_budget_configure;
+    orm_row_cursor cursor = {.ops = &ops, .context = &state};
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_test_row_data, 0u, 1u, 0u, 0u);
+    cflow_publisher source = {0};
+    orm_error_t error;
+    orm_error_init(&error);
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error), ORM_STATUS_LIMIT_EXCEEDED);
+    check_equal(orm_budget_configure_calls, 0u);
+    check_equal(state.next_count, 0u);
+    check_equal(state.cancel_count, 0u);
+    check_equal(state.destroy_count, 0u);
+    check_null(source.self);
+    check_true(cursor.context == &state);
+    orm_row_cursor_dispose(&cursor);
+    check_equal(state.destroy_count, 1u);
+  }
+  it("rejects native-depth addition overflow before allocating or configuring") {
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_test_row_data, 1u, SIZE_MAX, 0u, 0u);
+    orm_row_publisher_prepared *prepared = NULL;
+    orm_error_t error;
+    orm_error_init(&error);
+    check_equal(orm_row_publisher_prepare(&config, &prepared, &error), ORM_STATUS_LIMIT_EXCEEDED);
+    check_null(prepared);
+    check_equal(orm_budget_configure_calls, 0u);
+  }
+  it("does not treat static Struct fields as dynamically collected items") {
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_test_row_data, 1u, 1u, 0u, 0u);
+    orm_row_publisher_prepared *prepared = NULL;
+    orm_error_t error;
+    orm_error_init(&error);
+    check_equal(orm_row_publisher_prepare(&config, &prepared, &error), ORM_STATUS_OK);
+    check_not_null(prepared);
+    check_equal(orm_budget_configure_calls, 0u);
+    orm_row_publisher_prepared_destroy(prepared);
+  }
+  it("keeps preparation and cursor caller-owned when native configuration fails") {
+    orm_flow_test_cursor_state state = {0};
+    orm_row_cursor_ops ops = orm_flow_test_cursor_ops;
+    ops.configure_shape = orm_budget_configure;
+    orm_row_cursor cursor = {.ops = &ops, .context = &state};
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_test_row_data, 1u, 1u, 0u, 0u);
+    orm_row_publisher_prepared *prepared = NULL;
+    cflow_publisher source = {0};
+    orm_error_t error;
+    orm_error_init(&error);
+    check_equal(orm_row_publisher_prepare(&config, &prepared, &error), ORM_STATUS_OK);
+    orm_budget_configure_status = ORM_STATUS_TYPE_ERROR;
+    check_equal(orm_row_publisher_publish(&source, &cursor, prepared, &error), ORM_STATUS_TYPE_ERROR);
+    check_equal(orm_budget_configure_calls, 1u);
+    check_equal(state.destroy_count, 0u);
+    check_true(cursor.context == &state);
+    check_null(source.self);
+    orm_row_publisher_prepared_destroy(prepared);
+    orm_row_cursor_dispose(&cursor);
+    check_equal(state.destroy_count, 1u);
   }
 }

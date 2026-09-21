@@ -1,7 +1,7 @@
-#ifndef ORM_CBIND_PUBLISHER_H
-#define ORM_CBIND_PUBLISHER_H
+#ifndef ORM_ROW_PUBLISHER_H
+#define ORM_ROW_PUBLISHER_H
 
-#include <cbind/cbind.h>
+#include <cserde/cserde.h>
 #include <cflow/cflow.h>
 #include <orm.h>
 
@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 enum { ORM_ROW_CURSOR_OPS_ABI_VERSION = 3u };
-enum { ORM_CBIND_PUBLISHER_CONFIG_ABI_VERSION = 1u };
+enum { ORM_ROW_PUBLISHER_CONFIG_ABI_VERSION = 1u };
 
 typedef enum orm_row_cursor_step_kind {
   ORM_ROW_CURSOR_ROW = 0,
@@ -57,11 +57,38 @@ typedef struct orm_row_cursor_ops {
   orm_row_cursor_column_count_fn column_count;
 } orm_row_cursor_ops;
 
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+struct orm_native_cleanup;
+#endif
+
 typedef struct orm_row_cursor {
   const orm_row_cursor_ops *ops;
   void *context;
   /* Zero disables CFlow WAIT timeout wrapping for this backend cursor. */
   uint64_t wait_timeout_ns;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  /* Optional idempotent cancellation with an observable result. It finishes
+   * native draining before returning; error is copied into caller storage.
+   * A successful cancel does not release any owner or prove query completion. */
+  orm_status_t (*cancel_checked)(void *, orm_error_t *);
+  void *owner;
+  void (*release_owner)(void *);
+  /* Host-only hooks borrow owner for the cursor lifetime. They do not touch
+   * native I/O or consume its hold. A terminal native connection failure must
+   * block sibling execution before the next Publisher resume. */
+  orm_status_t (*owner_status)(void *, orm_error_t *);
+  void (*report_owner_error)(void *, orm_status_t);
+  /* Paired host-only admission hooks. Success reserves connection completion
+   * through next() AND synchronous reader decoding; failure enters no native
+   * callback (including cancel). No mutex is held across Publisher work. */
+  orm_status_t (*begin_execution)(void *, orm_error_t *);
+  void (*end_execution)(void *);
+  /* Only stable Publisher storage is queued. Failed construction still owns
+   * a stack cursor and disposes it synchronously inside its opening interval. */
+  void (*request_cleanup)(void *, struct orm_native_cleanup *, unsigned);
+  void *transaction_owner;
+  void (*release_transaction_owner)(void *);
+#endif
 } orm_row_cursor;
 
 /*
@@ -74,7 +101,7 @@ typedef struct orm_row_cursor {
 int orm_row_cursor_valid(const orm_row_cursor *cursor);
 void orm_row_cursor_dispose(orm_row_cursor *cursor);
 
-typedef struct orm_cbind_publisher_config {
+typedef struct orm_row_publisher_config {
   size_t struct_size;
   uint32_t abi_version;
   const cmeta_data_desc *row_shape;
@@ -82,18 +109,18 @@ typedef struct orm_cbind_publisher_config {
   size_t max_depth;
   size_t max_container_items;
   size_t max_buffer_bytes;
-} orm_cbind_publisher_config;
+} orm_row_publisher_config;
 
-#define ORM_CBIND_PUBLISHER_CONFIG_INIT(row_shape_, scratch_bytes_, max_depth_, \
+#define ORM_ROW_PUBLISHER_CONFIG_INIT(row_shape_, scratch_bytes_, max_depth_, \
                                      max_container_items_, max_buffer_bytes_) \
-  { sizeof(orm_cbind_publisher_config), ORM_CBIND_PUBLISHER_CONFIG_ABI_VERSION,     \
+  { sizeof(orm_row_publisher_config), ORM_ROW_PUBLISHER_CONFIG_ABI_VERSION,     \
     (row_shape_), (scratch_bytes_), (max_depth_), (max_container_items_),    \
     (max_buffer_bytes_) }
 
 /*
  * On success, moves cursor into out_publisher and clears cursor. On failure,
  * out_publisher stays zero and cursor remains caller-owned. The Publisher owns its
- * CBind scratch storage and destroys the moved cursor exactly once.
+ * DataBind native workspace and destroys the moved cursor exactly once.
  *
  * next() initializes out_row only for ROW/ROW_AND_DONE. The reader, its
  * context, and transient token slices remain valid until the enclosing Publisher
@@ -102,9 +129,21 @@ typedef struct orm_cbind_publisher_config {
  * until CFlow arms/cancels it or the cursor is cancelled. row_shape and all
  * metadata reachable from it are borrowed through Publisher destruction.
  */
-orm_status_t orm_cbind_publisher_init(cflow_publisher *out_publisher,
+typedef struct orm_row_publisher_state orm_row_publisher_prepared;
+
+/* prepare does no native I/O and owns only private workspace. publish consumes
+ * it only on success; failure leaves both preparation and cursor caller-owned. */
+orm_status_t orm_row_publisher_prepare(
+    const orm_row_publisher_config *config,
+    orm_row_publisher_prepared **out_prepared, orm_error_t *error);
+void orm_row_publisher_prepared_destroy(orm_row_publisher_prepared *prepared);
+orm_status_t orm_row_publisher_publish(
+    cflow_publisher *out_publisher, orm_row_cursor *cursor,
+    orm_row_publisher_prepared *prepared, orm_error_t *error);
+
+orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
                                    orm_row_cursor *cursor,
-                                   const orm_cbind_publisher_config *config,
+                                   const orm_row_publisher_config *config,
                                    orm_error_t *error);
 
 #ifdef __cplusplus

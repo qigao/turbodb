@@ -1,7 +1,7 @@
 #ifndef ORM_TIDESDB_CURSOR_H
 #define ORM_TIDESDB_CURSOR_H
 
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 
 #include <stddef.h>
 #include <stdint.h>

@@ -1,7 +1,7 @@
 #ifndef ORM_INTERNAL_H
 #define ORM_INTERNAL_H
 
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 
 #include <orm.h>
 #include <cstl.h>
@@ -9,6 +9,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+#include "orm_owner.h"
+#endif
 
 enum {
   ORM_BACKEND_OPS_ABI_VERSION = 1u,
@@ -131,11 +135,29 @@ struct orm_backend {
 };
 
 struct orm_connection {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+  /* Terminal business failure, protected by owner.mutex; cleanup stays legal. */
+  orm_status_t failure;
+  /* One native interval, including its deferred cleanup; owner.mutex protects
+   * admission and the intrusive FIFO, never a native callback. */
+  bool native_active;
+  orm_native_cleanup *cleanup_head;
+  orm_native_cleanup *cleanup_tail;
+  /* An idle cleanup interval transfers existing holds instead of allocating
+   * another dependent. Final connection release waits for that interval. */
+  orm_owner_action native_final_action;
+  orm_owner_cleanup_policy cleanup_policy;
+  orm_error_t cleanup_error;
+#endif
   orm_limits limits;
   orm_backend backend;
 };
 
 struct orm_query {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+#endif
   orm_connection_t *connection;
   orm_query_plan plan;
 };
@@ -143,10 +165,20 @@ struct orm_query {
 typedef enum orm_transaction_state {
   ORM_TRANSACTION_ACTIVE = 0,
   ORM_TRANSACTION_COMMITTED,
-  ORM_TRANSACTION_ROLLED_BACK
+  ORM_TRANSACTION_ROLLED_BACK,
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  ORM_TRANSACTION_COMMIT_UNKNOWN
+#endif
 } orm_transaction_state;
 
 struct orm_transaction {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_owner owner;
+  /* Protected by owner.mutex; native callbacks never hold that mutex. */
+  bool operation_active;
+  orm_error_t cleanup_error;
+  orm_native_cleanup native_cleanup;
+#endif
   orm_connection_t *connection;
   orm_transaction_backend backend;
   orm_transaction_state state;

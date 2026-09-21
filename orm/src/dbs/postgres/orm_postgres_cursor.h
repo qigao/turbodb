@@ -1,7 +1,7 @@
 #ifndef ORM_POSTGRES_CURSOR_H
 #define ORM_POSTGRES_CURSOR_H
 
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define ORM_POSTGRES_COMMAND_OPS_ABI_VERSION 1u
+#define ORM_POSTGRES_COMMAND_OPS_ABI_VERSION 2u
 #define ORM_POSTGRES_RESULT_OPS_ABI_VERSION 2u
 #define ORM_POSTGRES_CURSOR_CONFIG_ABI_VERSION 1u
 
@@ -40,6 +40,8 @@ typedef struct orm_postgres_command_ops {
   void *(*next_result)(void *context);
   void (*release_result)(void *result);
   const char *(*connection_error)(void *context);
+  /* Health of the same native connection; diagnostic text is not a status. */
+  int (*connection_ok)(void *context);
 } orm_postgres_command_ops;
 
 typedef struct orm_postgres_result_ops {
