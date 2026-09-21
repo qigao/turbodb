@@ -112,11 +112,11 @@ spec("runtime close and admission serialization") {
 
     check_equal(control.arm(RACE_GATE_INITIALIZE), ORM_STATUS_OK);
     check_equal(salts_thread_create(&worker_thread, load_worker, &worker),
-                SALTS_OK);
+                0);
     check_true(control.wait_entered(RACE_TIMEOUT_MS));
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
     control.release();
-    check_equal(salts_thread_join(&worker_thread), SALTS_OK);
+    check_equal(salts_thread_join(&worker_thread), 0);
     salts_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
 
@@ -146,11 +146,11 @@ spec("runtime close and admission serialization") {
 
     check_equal(control.arm(RACE_GATE_CONNECT), ORM_STATUS_OK);
     check_equal(salts_thread_create(&worker_thread, connect_worker, &worker),
-                SALTS_OK);
+                0);
     check_true(control.wait_entered(RACE_TIMEOUT_MS));
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
     control.release();
-    check_equal(salts_thread_join(&worker_thread), SALTS_OK);
+    check_equal(salts_thread_join(&worker_thread), 0);
     salts_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
     check_not_null(worker.connection);
@@ -184,7 +184,7 @@ spec("runtime close and admission serialization") {
 
     check_equal(control.arm(RACE_GATE_FINALIZE), ORM_STATUS_OK);
     check_equal(salts_thread_create(&worker_thread, close_worker, &worker),
-                SALTS_OK);
+                0);
     check_true(control.wait_entered(RACE_TIMEOUT_MS));
 
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
@@ -200,7 +200,7 @@ spec("runtime close and admission serialization") {
                 ORM_STATUS_INVALID_STATE);
 
     control.release();
-    check_equal(salts_thread_join(&worker_thread), SALTS_OK);
+    check_equal(salts_thread_join(&worker_thread), 0);
     salts_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
