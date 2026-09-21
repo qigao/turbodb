@@ -1,7 +1,7 @@
 name: Driver descriptor source contract
 on:
   push:
-    branches: [feat/runtime-driver-sdk-descriptors]
+    branches: [feat/runtime-driver-sdk-descriptors, feat/storage-capability-descriptor]
   workflow_dispatch:
 permissions:
   contents: read
