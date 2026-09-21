@@ -99,6 +99,22 @@ spec("runtime driver registry") {
     orm_runtime_release(runtime);
   }
 
+  it("rejects a repeated explicit module path before reopening it") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_load_config_t first = load_config("fixture");
+    orm_driver_load_config_t second = load_config("other");
+
+    orm_runtime_config_init(&config);
+    check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &second, &error),
+                ORM_STATUS_DRIVER_ALREADY_REGISTERED);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
   it("enforces the configured bounded driver registry") {
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
