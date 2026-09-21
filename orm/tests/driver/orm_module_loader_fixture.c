@@ -5,7 +5,16 @@
 #define FIXTURE_HEADER(T) {(uint32_t)sizeof(T), ORM_DRIVER_ABI_VERSION}
 #define FIXTURE_TABLE(p) {(p), (uint32_t)sizeof(*(p)), 0u}
 
-static int fixture_context;
+typedef struct fixture_module_context {
+  uint32_t live_connections;
+} fixture_module_context;
+typedef struct fixture_connection_context {
+  fixture_module_context *module;
+  int live;
+} fixture_connection_context;
+
+static fixture_module_context fixture_context;
+static fixture_connection_context fixture_connections[4];
 static const uint8_t fixture_bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
     ORM_DRIVER_BUNDLE_ID_INIT;
 static const char fixture_id[] = "fixture";
@@ -36,9 +45,11 @@ static orm_status_t ORM_DRIVER_CALL fixture_initialize(
 
 static orm_status_t ORM_DRIVER_CALL fixture_finalize(
     void *context, orm_error_t *error) {
-  const orm_status_t status =
-      context == &fixture_context ? ORM_STATUS_OK
-                                  : ORM_STATUS_INVALID_ARGUMENT;
+  orm_status_t status = ORM_STATUS_INVALID_ARGUMENT;
+  if (context == &fixture_context)
+    status = fixture_context.live_connections == 0u
+                 ? ORM_STATUS_OK
+                 : ORM_STATUS_BUSY;
   if (error != NULL) {
     memset(error, 0, sizeof(*error));
     error->struct_size = (uint32_t)sizeof(*error);
@@ -48,23 +59,48 @@ static orm_status_t ORM_DRIVER_CALL fixture_finalize(
 }
 
 static void ORM_DRIVER_CALL fixture_destroy_connection(void *context) {
-  (void)context;
+  fixture_connection_context *connection = context;
+  if (connection == NULL || !connection->live || connection->module == NULL)
+    return;
+  --connection->module->live_connections;
+  connection->module = NULL;
+  connection->live = 0;
 }
 
 static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
     void *context, const orm_config_t *config,
     const orm_driver_limits_v1 *limits, orm_driver_connection_v1 *out,
     orm_error_t *error) {
-  (void)context;
-  (void)config;
-  (void)limits;
   if (out != NULL) memset(out, 0, sizeof(*out));
+  orm_status_t status = ORM_STATUS_INVALID_ARGUMENT;
+  if (context == &fixture_context && config != NULL && limits != NULL &&
+      out != NULL && config->driver.data != NULL &&
+      (config->driver.len == sizeof(fixture_id) - 1u ||
+       config->driver.len == sizeof(fixture_alias) - 1u)) {
+    for (size_t i = 0u;
+         i < sizeof(fixture_connections) / sizeof(fixture_connections[0]);
+         ++i) {
+      if (!fixture_connections[i].live) {
+        fixture_connections[i].module = &fixture_context;
+        fixture_connections[i].live = 1;
+        ++fixture_context.live_connections;
+        out->header =
+            (orm_driver_header_v1)FIXTURE_HEADER(orm_driver_connection_v1);
+        out->context = &fixture_connections[i];
+        out->ops = (orm_driver_table_v1)FIXTURE_TABLE(&fixture_connection_ops);
+        status = ORM_STATUS_OK;
+        break;
+      }
+    }
+    if (status != ORM_STATUS_OK)
+      status = ORM_STATUS_LIMIT_EXCEEDED;
+  }
   if (error != NULL) {
     memset(error, 0, sizeof(*error));
     error->struct_size = (uint32_t)sizeof(*error);
-    error->status = ORM_STATUS_UNSUPPORTED;
+    error->status = status;
   }
-  return ORM_STATUS_UNSUPPORTED;
+  return status;
 }
 
 static const orm_driver_module_ops_v1 fixture_module_ops = {
