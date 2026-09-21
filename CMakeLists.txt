@@ -83,6 +83,22 @@ unset(Salts_DIR CACHE)
 unset(Salts_DIR)
 find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
              NO_DEFAULT_PATH)
+
+if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
+  message(FATAL_ERROR "SALTS_UTILS_ROOT must name the installed SaltsUtils profile")
+endif()
+file(TO_CMAKE_PATH "$ENV{SALTS_UTILS_ROOT}" SALTS_UTILS_ROOT_PATH)
+if(NOT IS_DIRECTORY "${SALTS_UTILS_ROOT_PATH}")
+  message(FATAL_ERROR "SALTS_UTILS_ROOT is not a directory: $ENV{SALTS_UTILS_ROOT}")
+endif()
+unset(SaltsUtils_DIR CACHE)
+unset(SaltsUtils_DIR)
+find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
+             NO_DEFAULT_PATH)
+if(NOT TARGET Salts::Databind)
+  message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::Databind")
+endif()
+
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(zstd CONFIG REQUIRED)
@@ -101,6 +117,14 @@ endif()
 
 add_subdirectory(tidesdb)
 add_subdirectory(orm)
+# Root-enabled instrumentation also requires its runtime on consumer links.
+# Directory link options do not propagate through the Orm::C target.
+if(NOT MSVC AND SANITIZER_LINK_FLAGS)
+  target_link_options(turbo_orm INTERFACE ${SANITIZER_LINK_FLAGS})
+endif()
+if(ORM_BUILD_TESTS AND ORM_WITH_SQLITE)
+  add_subdirectory(orm/tests/ownership)
+endif()
 
 if(TURBODB_BUILD_REDIS)
   cmake_config_package(

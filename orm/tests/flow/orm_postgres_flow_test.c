@@ -6,6 +6,7 @@
 #include <locale.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 typedef struct orm_postgres_test_result {
@@ -95,11 +96,15 @@ static const char *orm_postgres_test_result_sqlstate(const void *result) {
                                  : typed->error != NULL ? "23505" : NULL;
 }
 
+static int orm_postgres_test_connection_ok(void *context) {
+  return *(const int *)context >= 0;
+}
+
 static const orm_postgres_command_ops orm_postgres_test_command_ops = {
     sizeof(orm_postgres_command_ops), ORM_POSTGRES_COMMAND_OPS_ABI_VERSION,
     orm_postgres_test_send, orm_postgres_test_single_row,
     orm_postgres_test_next_result, orm_postgres_test_release_result,
-    orm_postgres_test_connection_error};
+    orm_postgres_test_connection_error, orm_postgres_test_connection_ok};
 
 static const orm_postgres_result_ops orm_postgres_test_result_ops = {
     sizeof(orm_postgres_result_ops), ORM_POSTGRES_RESULT_OPS_ABI_VERSION,
@@ -273,11 +278,11 @@ spec("ORM PostgreSQL single-row cursor") {
     static const uint8_t nulls[] = {0u};
     orm_postgres_test_result first = {
         ORM_POSTGRES_RESULT_SINGLE_ROW, 1u, names, types, values, lengths,
-        nulls, NULL, NULL};
+        nulls, NULL, NULL, NULL};
     orm_postgres_test_result second = first;
     orm_postgres_test_result terminal = {
         ORM_POSTGRES_RESULT_TUPLES_DONE, 1u, names, types, NULL, NULL, NULL,
-        NULL, NULL};
+        NULL, NULL, NULL};
     int connection_token = 0;
     orm_postgres_driver driver = {
         &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
@@ -363,10 +368,10 @@ spec("ORM PostgreSQL single-row cursor") {
     static const uint8_t nulls[] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
     orm_postgres_test_result row = {
         ORM_POSTGRES_RESULT_SINGLE_ROW, 8u, names, types, values, lengths,
-        nulls, NULL, NULL};
+        nulls, NULL, NULL, NULL};
     orm_postgres_test_result terminal = {
         ORM_POSTGRES_RESULT_TUPLES_DONE, 8u, names, types, NULL, NULL, NULL,
-        NULL, NULL};
+        NULL, NULL, NULL};
     int connection_token = 0;
     orm_postgres_driver driver = {
         &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
@@ -439,10 +444,10 @@ spec("ORM PostgreSQL single-row cursor") {
     static const unsigned char expected[] = {0x00u, 0x01u, 0xffu};
     orm_postgres_test_result row = {
         ORM_POSTGRES_RESULT_SINGLE_ROW, 2u, names, types, values, lengths,
-        nulls, NULL, NULL};
+        nulls, NULL, NULL, NULL};
     orm_postgres_test_result terminal = {
         ORM_POSTGRES_RESULT_TUPLES_DONE, 2u, names, types, NULL, NULL, NULL,
-        NULL, NULL};
+        NULL, NULL, NULL};
     int connection_token = 0;
     orm_postgres_driver driver = {
         &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
@@ -500,13 +505,13 @@ spec("ORM PostgreSQL single-row cursor") {
     static const uint8_t nulls[] = {0u};
     orm_postgres_test_result first = {
         ORM_POSTGRES_RESULT_SINGLE_ROW, 1u, names, types, first_values,
-        lengths, nulls, NULL, NULL};
+        lengths, nulls, NULL, NULL, NULL};
     orm_postgres_test_result second = {
         ORM_POSTGRES_RESULT_SINGLE_ROW, 1u, names, types, second_values,
-        lengths, nulls, NULL, NULL};
+        lengths, nulls, NULL, NULL, NULL};
     orm_postgres_test_result terminal = {
         ORM_POSTGRES_RESULT_TUPLES_DONE, 1u, names, types, NULL, NULL, NULL,
-        NULL, NULL};
+        NULL, NULL, NULL};
     int connection_token = 0;
     orm_postgres_driver driver = {
         &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
@@ -559,10 +564,10 @@ spec("ORM PostgreSQL single-row cursor") {
     static const uint8_t nulls[] = {0u};
     orm_postgres_test_result row = {
         ORM_POSTGRES_RESULT_SINGLE_ROW, 1u, names, types, values, lengths,
-        nulls, NULL, NULL};
+        nulls, NULL, NULL, NULL};
     orm_postgres_test_result fatal = {
         ORM_POSTGRES_RESULT_ERROR, 0u, NULL, NULL, NULL, NULL, NULL, NULL,
-        "forced error after one row"};
+        "forced error after one row", NULL};
     int connection_token = 0;
     orm_postgres_driver driver = {
         &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
@@ -659,7 +664,7 @@ spec("ORM PostgreSQL single-row cursor") {
   it("reports affected rows only after command completion") {
     orm_postgres_test_result command = {
         ORM_POSTGRES_RESULT_COMMAND_DONE, 0u, NULL, NULL, NULL, NULL, NULL,
-        "42", NULL};
+        "42", NULL, NULL};
     int connection_token = 0;
     orm_postgres_driver driver = {
         &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
@@ -698,7 +703,7 @@ spec("ORM PostgreSQL single-row cursor") {
   it("rejects signed affected-row text") {
     orm_postgres_test_result command = {
         ORM_POSTGRES_RESULT_COMMAND_DONE, 0u, NULL, NULL, NULL, NULL, NULL,
-        "-1", NULL};
+        "-1", NULL, NULL};
     int connection_token = 0;
     orm_postgres_driver driver = {
         &orm_postgres_test_command_ops, &orm_postgres_test_result_ops,
@@ -733,5 +738,272 @@ spec("ORM PostgreSQL single-row cursor") {
     }
     cursor.ops->destroy(cursor.context);
     orm_postgres_test_verify_mocks();
+  }
+}
+
+
+/* These scripted native responses exercise the real cursor implementation.
+ * They are not a live-server/network-loss or native ownership proof. */
+static void postgres_check_failure(const char *sqlstate, int token,
+                                   orm_status_t expected) {
+  orm_postgres_test_result fatal = {
+      .status = ORM_POSTGRES_RESULT_ERROR,
+      .error = "native diagnostic preserved",
+      .sqlstate = sqlstate};
+  orm_postgres_driver driver = {
+      &orm_postgres_test_command_ops, &orm_postgres_test_result_ops, &token};
+  orm_postgres_query_request request = {
+      "select 1", 0, NULL, NULL, NULL, NULL, 0};
+  orm_error_t error, runtime_error;
+  orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+      1u, 1u, 64u, NULL, NULL, &runtime_error);
+  orm_row_cursor cursor = {0};
+  cserde_reader reader = {0};
+  orm_error_init(&error); orm_error_init(&runtime_error);
+  orm_postgres_test_reset_mocks();
+  orm_postgres_test_expect_start(&token, &request);
+  mock_orm_postgres_test_next_result_expect(
+      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)&fatal));
+  mock_orm_postgres_test_next_result_expect(
+      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)NULL));
+  mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&fatal));
+  check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
+                                       &error), ORM_STATUS_OK);
+  const orm_row_cursor_step step = cursor.ops->next(cursor.context, &reader);
+  char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+  (void)snprintf(message, sizeof(message), "%s", step.message != NULL ? step.message : "");
+  cursor.ops->destroy(cursor.context);
+  check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
+  check_equal(step.status, expected);
+  check_not_null(strstr(message, "native diagnostic preserved"));
+  check_equal(runtime_error.status, expected);
+  /* The caller-owned diagnostic survives the native result and cursor. */
+  check_not_null(strstr(runtime_error.message, "native diagnostic preserved"));
+  orm_postgres_test_verify_mocks();
+}
+
+static void postgres_check_eof(int token, orm_status_t expected) {
+  orm_postgres_driver driver = {
+      &orm_postgres_test_command_ops, &orm_postgres_test_result_ops, &token};
+  orm_postgres_query_request request = {
+      "select 1", 0, NULL, NULL, NULL, NULL, 0};
+  orm_error_t error, runtime_error;
+  orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+      1u, 1u, 64u, NULL, NULL, &runtime_error);
+  orm_row_cursor cursor = {0};
+  cserde_reader reader = {0};
+  orm_error_init(&error); orm_error_init(&runtime_error);
+  orm_postgres_test_reset_mocks();
+  orm_postgres_test_expect_start(&token, &request);
+  mock_orm_postgres_test_next_result_expect(
+      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)NULL));
+  check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
+                                       &error), ORM_STATUS_OK);
+  const orm_row_cursor_step step = cursor.ops->next(cursor.context, &reader);
+  const orm_row_cursor_step_kind repeated = cursor.ops->next(cursor.context, &reader).kind;
+  cursor.ops->destroy(cursor.context);
+  check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
+  check_equal(step.status, expected);
+  check_equal(runtime_error.status, expected);
+  check_equal(repeated, ORM_ROW_CURSOR_DONE);
+  orm_postgres_test_verify_mocks();
+}
+
+static void postgres_check_send_failure(int token, orm_status_t expected) {
+  orm_postgres_driver driver = {
+      &orm_postgres_test_command_ops, &orm_postgres_test_result_ops, &token};
+  orm_postgres_query_request request = {
+      "select 1", 0, NULL, NULL, NULL, NULL, 0};
+  orm_error_t error;
+  orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+      1u, 1u, 64u, NULL, NULL, NULL);
+  orm_row_cursor cursor = {0};
+  orm_error_init(&error); orm_postgres_test_reset_mocks();
+  mock_orm_postgres_test_send_mock_expect(
+      TINYMOCk_ARG((void *)&token), TINYMOCk_ARG((void *)&request), TINYMOCk_RETURN(0));
+  check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
+                                       &error), expected);
+  check_equal(error.status, expected);
+  check_null(cursor.context); check_null(cursor.ops);
+  orm_postgres_test_verify_mocks();
+}
+
+static int postgres_unexpected_send(void *context,
+                                     const orm_postgres_query_request *request) {
+  (void)request;
+  ++*(int *)context;
+  return 0;
+}
+
+static void postgres_check_completion(orm_postgres_result_status result_status) {
+  static const char *const names[] = {"id"};
+  static const uint32_t types[] = {23u};
+  static const char *const values[] = {"7"};
+  static const size_t lengths[] = {1u};
+  static const uint8_t nulls[] = {0u};
+  const int is_row = result_status == ORM_POSTGRES_RESULT_SINGLE_ROW;
+  orm_postgres_test_result result = {
+      .status = result_status, .columns = is_row ? 1u : 0u,
+      .names = names, .types = types, .values = values,
+      .lengths = lengths, .nulls = nulls, .affected_rows = "1"};
+  int token = 0;
+  orm_postgres_driver driver = {
+      &orm_postgres_test_command_ops, &orm_postgres_test_result_ops, &token};
+  orm_postgres_query_request request = {"select 7 as id", 0, NULL, NULL, NULL, NULL, 0};
+  orm_error_t error, runtime_error;
+  orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+      1u, 1u, 64u, NULL, NULL, &runtime_error);
+  orm_row_cursor cursor = {0}; cserde_reader reader = {0};
+  cserde_token value = {0}; cserde_status decoded = CSERDE_OK;
+  orm_error_init(&error); orm_error_init(&runtime_error);
+  orm_postgres_test_reset_mocks(); orm_postgres_test_expect_start(&token, &request);
+  mock_orm_postgres_test_next_result_expect(
+      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)&result));
+  mock_orm_postgres_test_next_result_expect(
+      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)NULL));
+  mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&result));
+  check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
+                                       &error), ORM_STATUS_OK);
+  /* A completed command is a known result, even if EOF arrives after loss. */
+  if (!is_row) token = -1;
+  const orm_row_cursor_step first_step = cursor.ops->next(cursor.context, &reader);
+  orm_row_cursor_step last_step = first_step;
+  if (is_row && first_step.kind == ORM_ROW_CURSOR_ROW) {
+    for (int i = 0; i < 3 && decoded == CSERDE_OK; ++i)
+      decoded = cserde_reader_next(&reader, &value);
+    token = -1;
+    last_step = cursor.ops->next(cursor.context, &reader);
+  }
+  cursor.ops->destroy(cursor.context);
+  if (is_row) {
+    check_equal(first_step.kind, ORM_ROW_CURSOR_ROW);
+    check_equal(decoded, CSERDE_OK);
+    check_equal(value.kind, CSERDE_SINT); check_equal(value.value.sint, INT64_C(7));
+    check_equal(last_step.kind, ORM_ROW_CURSOR_ERROR);
+    check_equal(last_step.status, ORM_STATUS_CONNECTION_ERROR);
+    check_equal(runtime_error.status, ORM_STATUS_CONNECTION_ERROR);
+  } else {
+    check_equal(last_step.kind, ORM_ROW_CURSOR_DONE);
+    check_equal(runtime_error.status, ORM_STATUS_OK);
+  }
+  orm_postgres_test_verify_mocks();
+}
+
+spec("ORM PostgreSQL connection failure classification") {
+  (void)ttest_config__;
+  it("classifies connection-exception SQLSTATEs without treating them as BUSY") {
+    static const char *const states[] = {"08000", "08003", "08006", "08007"};
+    for (size_t i = 0u; i < sizeof(states) / sizeof(states[0]); ++i)
+      postgres_check_failure(states[i], 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("classifies server shutdown while the cached connection status is still OK") {
+    postgres_check_failure("57P01", 0, ORM_STATUS_CONNECTION_ERROR);
+    postgres_check_failure("57P02", 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("uses native connection health when a fatal result has no SQLSTATE") {
+    postgres_check_failure("", -1, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("keeps an unclassified healthy-connection error as SQL_ERROR") {
+    postgres_check_failure("", 0, ORM_STATUS_SQL_ERROR);
+  }
+  it("preserves an explicit server rejection even when the connection later fails") {
+    postgres_check_failure("23505", -1, ORM_STATUS_CONSTRAINT);
+  }
+  it("does not silently finish an unacknowledged query on a healthy connection") {
+    postgres_check_eof(0, ORM_STATUS_DATASTORE_ERROR);
+  }
+  it("does not silently finish an unacknowledged query on a broken connection") {
+    postgres_check_eof(-1, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("classifies failed dispatch on a broken connection and leaves no cursor") {
+    postgres_check_send_failure(-1, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("does not infer a connection failure from a healthy-connection send rejection") {
+    postgres_check_send_failure(0, ORM_STATUS_SQL_ERROR);
+  }
+  it("reports connection loss after an already decoded partial row") {
+    postgres_check_completion(ORM_POSTGRES_RESULT_SINGLE_ROW);
+  }
+  it("accepts a confirmed empty query completion instead of mistaking it for truncation") {
+    postgres_check_completion(ORM_POSTGRES_RESULT_TUPLES_DONE);
+  }
+  it("does not reclassify a confirmed command as unknown after connection loss") {
+    postgres_check_completion(ORM_POSTGRES_RESULT_COMMAND_DONE);
+  }
+  it("requires the native health callback before dispatch") {
+    int token = 0;
+    orm_postgres_command_ops incomplete = orm_postgres_test_command_ops;
+    incomplete.connection_ok = NULL;
+    incomplete.send_query = postgres_unexpected_send;
+    orm_postgres_driver driver = {&incomplete, &orm_postgres_test_result_ops, &token};
+    orm_postgres_query_request request = {"select 1", 0, NULL, NULL, NULL, NULL, 0};
+    orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+        1u, 1u, 64u, NULL, NULL, NULL);
+    orm_row_cursor cursor = {0}; orm_error_t error;
+    orm_error_init(&error); orm_postgres_test_reset_mocks();
+    check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
+                                         &error), ORM_STATUS_INVALID_ARGUMENT);
+    check_null(cursor.context); check_null(cursor.ops);
+    check_equal(token, 0);
+    orm_postgres_test_verify_mocks();
+  }
+}
+
+/* Draining is an error-observation boundary even without a preceding next(). */
+static void postgres_check_cancel_error(const char *sqlstate, int connection_token,
+                                       int resume_first, orm_status_t expected) {
+  orm_postgres_test_result result = {
+      .status = ORM_POSTGRES_RESULT_ERROR, .error = "drained native error",
+      .sqlstate = sqlstate};
+  orm_postgres_driver driver = {
+      &orm_postgres_test_command_ops, &orm_postgres_test_result_ops, &connection_token};
+  orm_postgres_query_request request = {"select 1", 0, NULL, NULL, NULL, NULL, 0};
+  orm_error_t error, runtime_error;
+  orm_postgres_cursor_config config = ORM_POSTGRES_CURSOR_CONFIG_INIT(
+      1u, 1u, 64u, NULL, NULL, &runtime_error);
+  orm_row_cursor cursor = {0}; cserde_reader reader = {0};
+  orm_error_init(&error); orm_error_init(&runtime_error);
+  orm_postgres_test_reset_mocks();
+  orm_postgres_test_expect_start(&connection_token, &request);
+  if (sqlstate != NULL) {
+    mock_orm_postgres_test_next_result_expect(
+        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&result));
+    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&result));
+  }
+  mock_orm_postgres_test_next_result_expect(
+      TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
+  const orm_status_t started = orm_postgres_cursor_start(&cursor, &driver, &request,
+                                                        &config, &error);
+  if (started == ORM_STATUS_OK) {
+    if (resume_first) (void)cursor.ops->next(cursor.context, &reader);
+    cursor.ops->cancel(cursor.context);
+    cursor.ops->cancel(cursor.context);
+    cursor.ops->destroy(cursor.context);
+  }
+  check_equal(started, ORM_STATUS_OK);
+  check_equal(runtime_error.status, expected);
+  if (expected != ORM_STATUS_OK) check_true(runtime_error.message[0] != '\0');
+  orm_postgres_test_verify_mocks();
+}
+
+spec("ORM PostgreSQL cancellation drain diagnostics") {
+  (void)ttest_config__;
+  it("observes server termination while cancelling unconsumed results") {
+    postgres_check_cancel_error("57P01", 0, 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("observes connection exceptions while cancelling unconsumed results") {
+    postgres_check_cancel_error("08006", 0, 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("observes disconnected EOF while cancelling without a result") {
+    postgres_check_cancel_error(NULL, -1, 0, ORM_STATUS_CONNECTION_ERROR);
+  }
+  it("keeps ordinary drained SQL rejection distinct from connection loss") {
+    postgres_check_cancel_error("23505", 0, 0, ORM_STATUS_CONSTRAINT);
+  }
+  it("keeps a healthy empty drain successful") {
+    postgres_check_cancel_error(NULL, 0, 0, ORM_STATUS_OK);
+  }
+  it("preserves the operation error when cancellation later discovers disconnection") {
+    postgres_check_cancel_error("23505", -1, 1, ORM_STATUS_CONSTRAINT);
   }
 }

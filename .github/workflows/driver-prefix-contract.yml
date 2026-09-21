@@ -1,0 +1,50 @@
+name: Driver prefix source contract
+on:
+  push:
+    branches: [feat/runtime-driver-sdk-prefix]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-contract:
+    name: Source contract (${{ matrix.compiler }}, ${{ matrix.config }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang, gcc]
+        config: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          path: .ci-salts
+          persist-credentials: false
+      - name: Compile and execute exact-source TinyTest contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          if [ '${{ matrix.compiler }}' = clang ]; then
+            export CC=clang CXX=clang++
+          else
+            export CC=gcc CXX=g++
+          fi
+          git rev-parse HEAD | tee evidence/head.txt
+          python3 orm/tests/driver/run_source_contract.py \
+            --salts-source .ci-salts \
+            --contract-source orm/src/driver/orm_driver_contract.c \
+            --build-dir build/source-contract \
+            --config '${{ matrix.config }}' 2>&1 | tee evidence/source-contract.log
+      - name: Keep actual test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: driver-prefix-${{ matrix.compiler }}-${{ matrix.config }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error

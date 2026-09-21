@@ -1,0 +1,122 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "sdk-linux-debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/sdk-linux-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "sdk-linux-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/sdk-linux-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "sdk-windows-debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/sdk-windows-debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "sdk-windows-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../../build/sdk-windows-release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "sdk-linux-debug",
+      "configurePreset": "sdk-linux-debug"
+    },
+    {
+      "name": "sdk-linux-release",
+      "configurePreset": "sdk-linux-release"
+    },
+    {
+      "name": "sdk-windows-debug",
+      "configurePreset": "sdk-windows-debug"
+    },
+    {
+      "name": "sdk-windows-release",
+      "configurePreset": "sdk-windows-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "sdk-linux-debug",
+      "configurePreset": "sdk-linux-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "sdk-linux-release",
+      "configurePreset": "sdk-linux-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "sdk-windows-debug",
+      "configurePreset": "sdk-windows-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "sdk-windows-release",
+      "configurePreset": "sdk-windows-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ]
+}
