@@ -208,7 +208,7 @@ spec("SQLite external provider checkpoint and restore") {
                 ORM_STATUS_OK);
     check_equal(result.publication_state,
                 ORM_SQLITE_PUBLICATION_PUBLISHED_DURABLE);
-    check_equal(tt_file_exists(restore_stage), 0);
+    check_equal(sqlite_maintenance_file_exists(restore_stage), 0);
     check_equal(sqlite_maintenance_read(destination), INT64_C(77));
 
     sqlite_maintenance_cleanup(checkpoint, checkpoint_stage, source);
