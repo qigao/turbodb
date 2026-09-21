@@ -141,6 +141,34 @@ static orm_runtime_driver *runtime_find_driver(orm_runtime_t *runtime,
   return NULL;
 }
 
+static orm_status_t runtime_begin_connect(
+    orm_runtime_t *runtime, orm_string_view_t id,
+    orm_runtime_driver **out_driver, orm_error_t *error) {
+  *out_driver = NULL;
+  orm_status_t status = ORM_STATUS_OK;
+  const char *message = NULL;
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->closed != ORM_RUNTIME_OPEN) {
+    status = ORM_STATUS_INVALID_STATE;
+    message = "runtime is closed";
+  } else if (runtime->pending_operations >=
+             runtime->config.max_pending_operations) {
+    status = ORM_STATUS_LIMIT_EXCEEDED;
+    message = "runtime pending-operation budget is full";
+  } else {
+    orm_runtime_driver *driver = runtime_find_driver(runtime, id);
+    if (driver == NULL) {
+      status = ORM_STATUS_DRIVER_NOT_REGISTERED;
+      message = "driver is not registered";
+    } else {
+      ++runtime->pending_operations;
+      *out_driver = driver;
+    }
+  }
+  salts_mutex_unlock(&runtime->mutex);
+  return runtime_result(error, status, message);
+}
+
 static int runtime_path_registered(orm_runtime_t *runtime, const char *path) {
   if (path == NULL) return 0;
   for (uint32_t i = 0u; i < runtime->driver_count; ++i) {
@@ -1053,13 +1081,18 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
   if (runtime == NULL || out_info == NULL || !runtime_id_valid(id))
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid driver info request");
-  if (runtime->closed != 0u)
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->closed != ORM_RUNTIME_OPEN) {
+    salts_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
+  }
   orm_runtime_driver *driver = runtime_find_driver(runtime, id);
-  if (driver == NULL)
+  if (driver == NULL) {
+    salts_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
+  }
 
   out_info->struct_size = (uint32_t)sizeof(*out_info);
   out_info->abi_version = ORM_RUNTIME_ABI_VERSION;
@@ -1070,6 +1103,7 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
   out_info->execution_models = driver->execution_models;
   memcpy(out_info->bundle_id, driver->bundle_id,
          sizeof(out_info->bundle_id));
+  salts_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
@@ -1087,22 +1121,20 @@ orm_runtime_connect(orm_runtime_t *runtime, const orm_config_t *config,
   if (!runtime_id_valid(config->driver))
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid runtime driver ID");
-  if (runtime->closed != 0u)
-    return runtime_result(error, ORM_STATUS_INVALID_STATE,
-                          "runtime is closed");
-
-  orm_runtime_driver *driver = runtime_find_driver(runtime, config->driver);
-  if (driver == NULL)
-    return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
-                          "driver is not registered");
+  orm_runtime_driver *driver = NULL;
+  orm_status_t status =
+      runtime_begin_connect(runtime, config->driver, &driver, error);
+  if (status != ORM_STATUS_OK) return status;
 
   orm_config_t canonical_config = *config;
   canonical_config.driver.data = driver->canonical.text;
   canonical_config.driver.len = driver->canonical.size;
   orm_runtime_factory_context factory = {runtime, driver};
-  return orm_connect_with_factory_context_v1(
+  status = orm_connect_with_factory_context_v1(
       &canonical_config, runtime_backend_factory, &factory,
       out_connection, error);
+  runtime_finish_pending(runtime, 0);
+  return status;
 }
 
 orm_status_t ORM_C_CALL
