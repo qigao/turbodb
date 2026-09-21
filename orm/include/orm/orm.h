@@ -202,6 +202,10 @@ ORM_C_API orm_status_t ORM_C_CALL orm_connect(
 /*
  * Retained ownership for opaque connection handles.
  *
+ * Every ownership operation requires the caller already to own a valid hold.
+ * The API does not validate stale/freed pointers; each concurrent participant
+ * must keep its own hold, and double release is a caller contract violation.
+ *
  * retain() adds one caller hold and returns a status instead of terminating the
  * process when the handle cannot accept another hold. release() consumes one
  * previously owned caller hold; NULL release is a no-op.
@@ -280,6 +284,7 @@ ORM_C_API orm_status_t ORM_C_CALL orm_raw(
     orm_connection_t *connection, orm_string_view_t sql,
     orm_query_t **out_query, orm_error_t *error);
 /*
+ * As with connections, these functions require an existing valid caller hold.
  * Checked Query close returns BUSY while an admitted Publisher/cursor still
  * owns the Query. retain/release are explicit caller holds. A successful close
  * leaves the held opaque handle available for retain/close/release only.
