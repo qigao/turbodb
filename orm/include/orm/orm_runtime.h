@@ -86,6 +86,14 @@ ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
                         orm_driver_info_t *out_info, orm_error_t *error);
 
+/* Creates one ORM connection from an already registered driver ID/alias.
+ * This never loads modules implicitly. Success holds a runtime/module lease
+ * until the connection's final release; failure clears *out_connection and
+ * publishes no lease. */
+ORM_C_API orm_status_t ORM_C_CALL
+orm_runtime_connect(orm_runtime_t *runtime, const orm_config_t *config,
+                    orm_connection_t **out_connection, orm_error_t *error);
+
 /* Checked close finalizes modules in reverse registration order and unloads
  * them only after all runtime dependents/admissions are gone. BUSY changes no
  * state. Repeated close on a held closed runtime returns OK. */
