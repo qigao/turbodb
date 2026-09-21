@@ -441,8 +441,12 @@ set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
 if(ORM_BUILD_TESTS)
   add_library(orm_c_test_static STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
   target_compile_features(orm_c_test_static PRIVATE c_std_11)
-  target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC
-                                                  ORM_NATIVE_OWNER_CANDIDATE)
+  target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC)
+  # Internal tests that compile cursor/backend sources directly must see the
+  # same opaque-handle layout as the static core. This definition is not part
+  # of the installed Orm::C/Orm::Cpp interface.
+  target_compile_definitions(orm_c_test_static
+                             PUBLIC ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_c_test_static
     PUBLIC ${ORM_INCLUDE_DIR}
