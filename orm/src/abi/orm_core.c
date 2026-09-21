@@ -39,8 +39,8 @@ void orm_error_set(orm_error_t *error, orm_status_t status,
 
 
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
-/* This candidate is compiled only into the non-installed native test core.
- * Resource cleanup runs after the control lock is released. */
+/* The retained-owner implementation is shared by the installed core and the
+ * ownership regression clone. Resource cleanup runs after the control lock. */
 /* Failure is terminal for business operations, but never consumes a hold or
  * closes resources. A query/Pub can outlive its application's connection ref. */
 static orm_status_t orm_connection_business_status(orm_connection_t *connection,
@@ -407,9 +407,9 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
   return status;
 }
 
-void ORM_C_CALL orm_transaction_retain(orm_transaction_t *transaction) {
-  if (transaction == NULL ||
-      orm_owner_try_retain(&transaction->owner) != ORM_STATUS_OK) abort();
+orm_status_t ORM_C_CALL orm_transaction_retain(orm_transaction_t *transaction) {
+  if (transaction == NULL) return ORM_STATUS_INVALID_ARGUMENT;
+  return orm_owner_try_retain(&transaction->owner);
 }
 
 void ORM_C_CALL orm_transaction_release(orm_transaction_t *transaction) {
@@ -528,9 +528,9 @@ orm_status_t ORM_C_CALL orm_connection_close(orm_connection_t *connection,
   return status;
 }
 
-void ORM_C_CALL orm_connection_retain(orm_connection_t *connection) {
-  if (connection == NULL || orm_owner_try_retain(&connection->owner) != ORM_STATUS_OK)
-    abort();
+orm_status_t ORM_C_CALL orm_connection_retain(orm_connection_t *connection) {
+  if (connection == NULL) return ORM_STATUS_INVALID_ARGUMENT;
+  return orm_owner_try_retain(&connection->owner);
 }
 
 void ORM_C_CALL orm_connection_release(orm_connection_t *connection) {
@@ -547,8 +547,9 @@ orm_status_t ORM_C_CALL orm_query_close(orm_query_t *query, orm_error_t *error) 
   return status;
 }
 
-void ORM_C_CALL orm_query_retain(orm_query_t *query) {
-  if (query == NULL || orm_owner_try_retain(&query->owner) != ORM_STATUS_OK) abort();
+orm_status_t ORM_C_CALL orm_query_retain(orm_query_t *query) {
+  if (query == NULL) return ORM_STATUS_INVALID_ARGUMENT;
+  return orm_owner_try_retain(&query->owner);
 }
 
 void ORM_C_CALL orm_query_release(orm_query_t *query) {
@@ -1063,10 +1064,8 @@ uint32_t ORM_C_CALL orm_c_abi_version(void) { return ORM_C_ABI_VERSION; }
 
 const char *ORM_C_CALL orm_status_message(orm_status_t status) {
   switch (status) {
-#if defined(ORM_NATIVE_OWNER_CANDIDATE)
-    case ORM_OWNER_STATUS_COMMIT_UNKNOWN: return "commit outcome unknown";
-    case ORM_OWNER_STATUS_CLEANUP_FAILED: return "cleanup failed";
-#endif
+    case ORM_STATUS_COMMIT_UNKNOWN: return "commit outcome unknown";
+    case ORM_STATUS_CLEANUP_FAILED: return "cleanup failed";
     case ORM_STATUS_OK: return "ok";
     case ORM_STATUS_INVALID_ARGUMENT: return "invalid argument";
     case ORM_STATUS_ABI_MISMATCH: return "ABI mismatch";

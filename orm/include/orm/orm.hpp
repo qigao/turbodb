@@ -136,6 +136,13 @@ public:
   }
   ~query() { orm_query_destroy(handle_); }
 
+  void close() {
+    if (handle_ == nullptr) return;
+    orm_error_t error;
+    orm_error_init(&error);
+    detail::check(orm_query_close(handle_, &error), error);
+  }
+
   query &column(std::string_view name) {
     call([&](orm_error_t *e) {
       return orm_query_add_column(handle_, detail::view(name), e);
@@ -254,6 +261,13 @@ public:
     return *this;
   }
   ~connection() { orm_disconnect(handle_); }
+  void close() {
+    if (handle_ == nullptr) return;
+    orm_error_t error;
+    orm_error_init(&error);
+    detail::check(orm_connection_close(handle_, &error), error);
+  }
+  [[nodiscard]] orm_connection_t *native_handle() noexcept { return handle_; }
   [[nodiscard]] query select(std::string_view table) {
     return make(orm_query_create, table);
   }
@@ -298,6 +312,7 @@ public:
   ~transaction() { orm_transaction_destroy(handle_); }
   void commit() { invoke(orm_transaction_commit); }
   void rollback() { invoke(orm_transaction_rollback); }
+  void close() { invoke(orm_transaction_close); }
   [[nodiscard]] orm_transaction_t *native_handle() noexcept { return handle_; }
 private:
   friend class connection;
