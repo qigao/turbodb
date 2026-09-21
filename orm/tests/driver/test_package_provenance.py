@@ -35,8 +35,8 @@ class PackageProvenanceTest(unittest.TestCase):
             self.git(root, 'add', '.')
             self.git(root, '-c', 'user.name=Provenance Test',
                      '-c', 'user.email=test@localhost', 'commit', '-qm', 'fixture')
+            self.git(root, 'branch', '-M', 'master')
         self.revision = self.git(self.vcpkg, 'rev-parse', 'HEAD').strip()
-        self.salts_revision = self.git(self.salts, 'rev-parse', 'HEAD').strip()
         self.env = dict(os.environ, VCPKG_ROOT=str(self.vcpkg),
                         DRIVER_SDK_VCPKG_ROOT=str(self.vcpkg),
                         DRIVER_SDK_VCPKG_REVISION=self.revision)
@@ -65,7 +65,6 @@ class PackageProvenanceTest(unittest.TestCase):
             stack.enter_context(mock.patch.dict(os.environ, self.env, clear=True))
             stack.enter_context(mock.patch.object(runner, '__file__',
                 str(self.root / 'orm/tests/driver/run_package_contract.py')))
-            stack.enter_context(mock.patch.object(runner, 'SALTS_COMMIT', self.salts_revision))
             stack.enter_context(mock.patch.object(runner.platform, 'system', return_value='Linux'))
             stack.enter_context(mock.patch.object(runner.platform, 'machine', return_value='x86_64'))
             stack.enter_context(mock.patch.object(runner, 'run', side_effect=self.command_boundary))
@@ -102,6 +101,10 @@ class PackageProvenanceTest(unittest.TestCase):
     def test_rejects_missing_toolchain_before_configure(self):
         self.toolchain.unlink()
         self.assert_rejected('vcpkg toolchain is missing')
+
+    def test_rejects_non_master_salts_checkout(self):
+        self.git(self.salts, 'checkout', '-qb', 'feature')
+        self.assert_rejected('Salts source must be checked out at master')
 
     def test_records_matching_identity_before_configure(self):
         with self.assertRaises(BuildBoundaryReached):
