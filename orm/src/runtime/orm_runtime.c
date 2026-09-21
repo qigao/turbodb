@@ -609,10 +609,16 @@ orm_status_t ORM_C_CALL
 orm_runtime_connect(orm_runtime_t *runtime, const orm_config_t *config,
                     orm_connection_t **out_connection, orm_error_t *error) {
   if (out_connection != NULL) *out_connection = NULL;
-  if (runtime == NULL || config == NULL || out_connection == NULL ||
-      !runtime_id_valid(config->driver))
+  if (runtime == NULL || config == NULL || out_connection == NULL)
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid runtime connect request");
+  if (config->struct_size != sizeof(*config) ||
+      config->abi_version != ORM_C_ABI_VERSION)
+    return runtime_result(error, ORM_STATUS_ABI_MISMATCH,
+                          "ORM configuration ABI does not match this build");
+  if (!runtime_id_valid(config->driver))
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver ID");
   if (runtime->closed != 0u)
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
