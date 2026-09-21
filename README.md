@@ -21,18 +21,9 @@ Not every TurboDB executable links every Salts subsystem. Standalone DDL tools i
 
 ## Ecosystem role
 
-```text
-Salts
-  ├── salts-utils
-  ├── salts-net
-  └── DataBind
-        ↓
-      TurboDB
-        ↓
- durable storage providers / application data infrastructure
-        ↓
- TurboFlow and other higher-level systems
-```
+Salts provides the systems foundation. [SaltsUtils](https://github.com/qigao/salts-utils) contains DataBind as one of its components; [salts-net](https://github.com/qigao/salts-net) provides networking components.
+
+TurboDB supplies durable storage providers and application data infrastructure for [TurboFlow](https://github.com/qigao/turbo-flow) and other higher-level systems.
 
 TurboDB is the **storage/data infrastructure layer**. It owns database-specific behavior. Salts owns the shared systems semantics underneath it.
 
