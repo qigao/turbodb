@@ -115,4 +115,79 @@ spec("runtime driver registry") {
                 ORM_STATUS_LIMIT_EXCEEDED);
     orm_runtime_release(runtime);
   }
+
+  it("holds the runtime open while a driver connection exists") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_not_null(connection);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+    orm_disconnect(connection);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("does not publish a module lease when connect fails") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = (orm_connection_t *)(uintptr_t)1u;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("missing");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+    check_null(connection);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps two runtimes using the same module independent") {
+    orm_runtime_config_t config;
+    orm_runtime_t *first = NULL;
+    orm_runtime_t *second = NULL;
+    orm_connection_t *connection = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture-alias");
+    check_equal(orm_runtime_create(&config, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_create(&config, &second, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(first, &load, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(second, &load, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(first, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_close(first, &error), ORM_STATUS_BUSY);
+    check_equal(orm_runtime_close(second, &error), ORM_STATUS_OK);
+    orm_runtime_release(second);
+    orm_disconnect(connection);
+    check_equal(orm_runtime_close(first, &error), ORM_STATUS_OK);
+    orm_runtime_release(first);
+  }
 }
