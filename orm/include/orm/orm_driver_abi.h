@@ -2,6 +2,7 @@
 #define ORM_DRIVER_ABI_H
 
 #include "orm_driver_ops.h"
+#include "orm_driver_storage.h"
 
 #if defined(ORM_DRIVER_MODULE_BUILD) && defined(_WIN32)
 #define ORM_DRIVER_EXPORT __declspec(dllexport)
@@ -27,6 +28,8 @@ struct orm_driver_api_v1 {
   orm_driver_table_v1 module_ops;
   orm_driver_create_fn create_connection;
   orm_driver_table_v1 connection_ops;
+  /* Optional tail table. Absence advertises no replicated-state storage facts. */
+  orm_driver_table_v1 storage_capabilities;
 };
 struct orm_driver_host_v1 {
   orm_driver_header_v1 header;
