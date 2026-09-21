@@ -37,10 +37,13 @@ typedef struct race_connection {
 
 static race_gate gate;
 static race_module module_context;
-static race_connection connection_context;
+static race_connection connection_contexts[4];
 static const uint8_t bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
     ORM_DRIVER_BUNDLE_ID_INIT;
-static const char driver_id[] = "race";
+#ifndef ORM_RUNTIME_RACE_DRIVER_ID
+#define ORM_RUNTIME_RACE_DRIVER_ID "race"
+#endif
+static const char driver_id[] = ORM_RUNTIME_RACE_DRIVER_ID;
 
 static void race_error(orm_error_t *error, orm_status_t status) {
   if (error == NULL) return;
@@ -165,7 +168,7 @@ static orm_status_t ORM_DRIVER_CALL race_finalize(
 
 static void ORM_DRIVER_CALL race_destroy_connection(void *context) {
   race_connection *connection = context;
-  if (connection != &connection_context || connection->live == 0u ||
+  if (connection == NULL || connection->live == 0u ||
       connection->module == NULL)
     return;
   --connection->module->live_connections;
@@ -187,20 +190,33 @@ static orm_status_t ORM_DRIVER_CALL race_create_connection(
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   race_gate_pause(ORM_RUNTIME_RACE_GATE_CONNECT);
-  if (connection_context.live != 0u) {
-    race_error(error, ORM_STATUS_BUSY);
-    return ORM_STATUS_BUSY;
+  if (config->option_count != 0u && config->options != NULL &&
+      config->options[0].keyword.data != NULL &&
+      config->options[0].keyword.len == sizeof("fail_create") - 1u &&
+      memcmp(config->options[0].keyword.data, "fail_create",
+             sizeof("fail_create") - 1u) == 0) {
+    race_error(error, ORM_STATUS_OUT_OF_MEMORY);
+    return ORM_STATUS_OUT_OF_MEMORY;
   }
-  memset(&connection_context, 0, sizeof(connection_context));
-  connection_context.module = &module_context;
-  connection_context.live = 1u;
-  ++module_context.live_connections;
-  out->header =
-      (orm_driver_header_v1)RACE_HEADER(orm_driver_connection_v1);
-  out->context = &connection_context;
-  out->ops = (orm_driver_table_v1)RACE_TABLE(&connection_ops);
-  race_error(error, ORM_STATUS_OK);
-  return ORM_STATUS_OK;
+
+  for (size_t i = 0u;
+       i < sizeof(connection_contexts) / sizeof(connection_contexts[0]);
+       ++i) {
+    if (connection_contexts[i].live == 0u) {
+      memset(&connection_contexts[i], 0, sizeof(connection_contexts[i]));
+      connection_contexts[i].module = &module_context;
+      connection_contexts[i].live = 1u;
+      ++module_context.live_connections;
+      out->header =
+          (orm_driver_header_v1)RACE_HEADER(orm_driver_connection_v1);
+      out->context = &connection_contexts[i];
+      out->ops = (orm_driver_table_v1)RACE_TABLE(&connection_ops);
+      race_error(error, ORM_STATUS_OK);
+      return ORM_STATUS_OK;
+    }
+  }
+  race_error(error, ORM_STATUS_LIMIT_EXCEEDED);
+  return ORM_STATUS_LIMIT_EXCEEDED;
 }
 
 static const orm_driver_module_ops_v1 module_ops = {
