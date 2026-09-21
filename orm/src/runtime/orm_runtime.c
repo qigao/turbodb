@@ -271,7 +271,13 @@ static orm_status_t runtime_backend_factory(
   backend->runtime = factory->runtime;
   backend->driver = factory->driver;
   backend->native = native;
-  memcpy(&backend->ops, native.ops.data, sizeof(backend->ops));
+  memset(&backend->ops, 0, sizeof(backend->ops));
+  {
+    size_t connection_ops_bytes = native.ops.bytes;
+    if (connection_ops_bytes > sizeof(backend->ops))
+      connection_ops_bytes = sizeof(backend->ops);
+    memcpy(&backend->ops, native.ops.data, connection_ops_bytes);
+  }
   out_backend->ops = &runtime_backend_ops;
   out_backend->context = backend;
   return runtime_result(error, ORM_STATUS_OK, NULL);
@@ -522,8 +528,14 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   entry->api_bytes = api_bytes;
   entry->module_ops = module_ops;
   entry->create_connection = api->create_connection;
-  memcpy(&entry->connection_ops, api->connection_ops.data,
-         sizeof(entry->connection_ops));
+  memset(&entry->connection_ops, 0, sizeof(entry->connection_ops));
+  {
+    size_t connection_ops_bytes = api->connection_ops.bytes;
+    if (connection_ops_bytes > sizeof(entry->connection_ops))
+      connection_ops_bytes = sizeof(entry->connection_ops);
+    memcpy(&entry->connection_ops, api->connection_ops.data,
+           connection_ops_bytes);
+  }
   runtime_copy_id(&entry->canonical, canonical);
   entry->alias_count = api->alias_count;
   entry->capabilities = api->capabilities;
