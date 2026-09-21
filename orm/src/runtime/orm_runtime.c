@@ -202,6 +202,8 @@ static void runtime_finish_pending(
   salts_mutex_unlock(&runtime->mutex);
 }
 
+static void runtime_release_last(orm_runtime_t *runtime);
+
 static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
   orm_driver_limits_v1 out;
   memset(&out, 0, sizeof(out));
@@ -232,7 +234,8 @@ static void runtime_backend_destroy(void *context) {
     backend->ops.destroy(backend->native.context);
   orm_runtime_t *runtime = backend->runtime;
   free(backend);
-  runtime_release_dependent(runtime);
+  if (runtime_release_dependent_ref(runtime))
+    runtime_release_last(runtime);
 }
 
 typedef struct orm_runtime_cursor {
@@ -769,6 +772,13 @@ orm_runtime_create(const orm_runtime_config_t *config,
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime");
 
+  salts_mutex_init(&runtime->mutex);
+  if (runtime->mutex == NULL) {
+    free(runtime);
+    return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                          "initialize runtime mutex");
+  }
+
   runtime->drivers = (orm_runtime_driver *)calloc(
       config->max_drivers, sizeof(*runtime->drivers));
   const size_t alias_count =
@@ -779,6 +789,7 @@ orm_runtime_create(const orm_runtime_config_t *config,
             alias_count, sizeof(*runtime->aliases))) == NULL)) {
     free(runtime->aliases);
     free(runtime->drivers);
+    salts_mutex_destroy(&runtime->mutex);
     free(runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime registry");
