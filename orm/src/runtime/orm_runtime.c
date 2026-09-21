@@ -33,6 +33,7 @@ typedef struct orm_runtime_driver {
   orm_driver_module_ops_v1 module_ops;
   orm_driver_create_fn create_connection;
   orm_driver_connection_ops_v1 connection_ops;
+  char *module_path;
   orm_runtime_id canonical;
   uint32_t alias_count;
   uint64_t capabilities;
@@ -126,6 +127,16 @@ static orm_runtime_driver *runtime_find_driver(orm_runtime_t *runtime,
     }
   }
   return NULL;
+}
+
+static int runtime_path_registered(orm_runtime_t *runtime, const char *path) {
+  if (path == NULL) return 0;
+  for (uint32_t i = 0u; i < runtime->driver_count; ++i) {
+    const char *registered = runtime->drivers[i].module_path;
+    if (registered != NULL && strcmp(registered, path) == 0)
+      return 1;
+  }
+  return 0;
 }
 
 static orm_status_t runtime_acquire_dependent(
@@ -428,11 +439,18 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   if (status != ORM_STATUS_OK)
     return status;
 
+  if (runtime_path_registered(runtime, path)) {
+    free(path);
+    return runtime_result(error, ORM_STATUS_DRIVER_ALREADY_REGISTERED,
+                          "driver module path is already registered");
+  }
+
   orm_module_handle module = {0};
   status = orm_module_open_absolute(path, &module, error);
-  free(path);
-  if (status != ORM_STATUS_OK)
+  if (status != ORM_STATUS_OK) {
+    free(path);
     return status;
+  }
 
   orm_runtime_bootstrap_fn bootstrap = NULL;
   status = orm_module_symbol(&module, "orm_driver_get_api_v1",
@@ -524,6 +542,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   memset(entry, 0, sizeof(*entry));
   entry->module = module;
   entry->module_context = module_context;
+  entry->module_path = path;
   entry->api = api;
   entry->api_bytes = api_bytes;
   entry->module_ops = module_ops;
@@ -554,6 +573,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
 
 fail_module:
   orm_module_close(&module);
+  free(path);
   return status;
 }
 
@@ -640,6 +660,8 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     }
     driver->module_context = NULL;
     orm_module_close(&driver->module);
+    free(driver->module_path);
+    driver->module_path = NULL;
   }
   runtime->closed = 1u;
   return runtime_result(error, ORM_STATUS_OK, NULL);
