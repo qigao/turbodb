@@ -745,6 +745,7 @@ if(TIDESDB_BUILD_TESTS) # enable building tests and benchmarks
     add_executable(local_cache_tests test/local_cache__tests.c)
     add_executable(objstore_tests test/objstore__tests.c)
     add_executable(tidesdb_tests test/tidesdb__tests.c)
+    add_executable(provider_atomicity_tests test/provider_atomicity__tests.c)
 
     # The library's codec definitions are private because public headers do not expose third-party
     # types. Tests still need the same feature set so they register only scenarios supported by the
@@ -856,7 +857,7 @@ if(TIDESDB_BUILD_TESTS) # enable building tests and benchmarks
     set(TIDESDB_TEST_LINK_TARGETS
             block_manager_tests skip_list_tests bloom_filter_tests
             manifest_tests clock_cache_tests queue_tests btree_tests local_cache_tests
-            objstore_tests tidesdb_tests tidesdb_bench)
+            objstore_tests tidesdb_tests provider_atomicity_tests tidesdb_bench)
     if(TARGET compress_tests)
         list(APPEND TIDESDB_TEST_LINK_TARGETS compress_tests)
     endif()
@@ -885,6 +886,7 @@ if(TIDESDB_BUILD_TESTS) # enable building tests and benchmarks
         add_test(NAME hmac_sha256_tests COMMAND hmac_sha256_tests)
     endif()
     add_test(NAME tidesdb_tests COMMAND tidesdb_tests)
+    add_test(NAME provider_atomicity_tests COMMAND provider_atomicity_tests)
 
 endif()
 
