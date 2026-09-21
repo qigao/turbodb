@@ -1,4 +1,4 @@
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 #include "orm_sqlite_cursor.h"
 
 #include <cmeta/struct.h>
@@ -247,7 +247,7 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -271,7 +271,7 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     cflow_graph_init(&surface, &orm_sqlite_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
@@ -302,7 +302,7 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config publisher_config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -326,7 +326,7 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &publisher_config, &error),
                 ORM_STATUS_OK);
     cflow_graph_init(&surface, &orm_sqlite_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
@@ -358,7 +358,7 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -381,7 +381,7 @@ spec("ORM SQLite CFlow cursor") {
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
     check_null(statement);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
     cflow_graph_init(&surface, &orm_sqlite_test_row_type);
     check_true(cflow_graph_normalize(&normalized, &surface));
@@ -422,7 +422,7 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_text_row_data, 1u, 1u, 2u, 16u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -437,7 +437,7 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
     step = cflow_publisher_resume(&source, NULL, &first);
@@ -461,7 +461,7 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_text_row_data, 1u, 1u, 2u, 4u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -477,7 +477,7 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
     step = cflow_publisher_resume(&source, NULL, &row);
@@ -498,7 +498,7 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_blob_row_data, 1u, 1u, 2u, 16u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -513,7 +513,7 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
     step = cflow_publisher_resume(&source, NULL, &first);
@@ -537,7 +537,7 @@ spec("ORM SQLite CFlow cursor") {
     sqlite3 *database = NULL;
     sqlite3_stmt *statement = NULL;
     orm_row_cursor cursor = {0};
-    orm_cbind_publisher_config config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_sqlite_test_row_data, 1u, 1u, 2u, 1u);
     orm_error_t error;
     cflow_publisher source = {0};
@@ -552,7 +552,7 @@ spec("ORM SQLite CFlow cursor") {
     check_equal(orm_sqlite_cursor_from_statement(
                     &cursor, &statement, &orm_sqlite_test_cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &config, &error),
                 ORM_STATUS_OK);
 
     cflow_publisher_cancel(&source);
