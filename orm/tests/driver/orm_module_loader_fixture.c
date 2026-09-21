@@ -1,5 +1,6 @@
 #include <orm_driver_abi.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 #define FIXTURE_HEADER(T) {(uint32_t)sizeof(T), ORM_DRIVER_ABI_VERSION}
