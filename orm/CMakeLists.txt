@@ -110,11 +110,13 @@ set(ORM_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/orm)
 set(ORM_ABI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/abi)
 set(ORM_FLOW_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/flow)
 set(ORM_SQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
+set(ORM_DRIVER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/driver)
 set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
 set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
-                  src/abi/orm_result.c src/dbs/sql/orm_sql_render.c)
+                  src/abi/orm_result.c src/driver/orm_driver_owner_bridge.c
+                  src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
                      src/flow/orm_text_token.c
@@ -155,7 +157,8 @@ target_include_directories(
   turbo_orm
   PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
          $<INSTALL_INTERFACE:include/shared/orm>
-  PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
+  PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR}
+          ${ORM_DRIVER_SOURCE_DIR})
 target_link_libraries(
   turbo_orm PUBLIC Salts::Core
   PRIVATE Salts::CSerde Salts::Databind Salts::CFlow
@@ -691,6 +694,24 @@ else()
   target_compile_options(orm_driver_plan_view_test PRIVATE -Werror)
 endif()
 add_test(NAME orm_driver_plan_view COMMAND orm_driver_plan_view_test)
+
+add_executable(orm_driver_owner_bridge_test
+  tests/driver/orm_driver_owner_bridge_test.c)
+target_compile_features(orm_driver_owner_bridge_test PRIVATE c_std_11)
+target_compile_definitions(orm_driver_owner_bridge_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_driver_owner_bridge_test PRIVATE
+  ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR}
+  ${ORM_DRIVER_SOURCE_DIR})
+orm_link_internal_test(orm_driver_owner_bridge_test Salts::TinyTest)
+set_target_properties(orm_driver_owner_bridge_test
+  PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_driver_owner_bridge_test)
+if(MSVC)
+  target_compile_options(orm_driver_owner_bridge_test PRIVATE /WX)
+else()
+  target_compile_options(orm_driver_owner_bridge_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_driver_owner_bridge COMMAND orm_driver_owner_bridge_test)
 
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
