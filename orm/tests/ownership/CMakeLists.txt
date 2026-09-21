@@ -17,6 +17,17 @@ foreach(source IN LISTS owner_sources)
   get_filename_component(source "${source}" ABSOLUTE BASE_DIR "${owner_source_dir}")
   list(APPEND owner_absolute_sources "${source}")
 endforeach()
+# Fault injection is private to this non-installed clone. The probe includes
+# the unchanged production row TU and redirects only its allocation call sites.
+# Other modules and the shared/static public ORM builds keep their real allocators.
+set(owner_row_source "${owner_source_dir}/src/flow/orm_row_publisher.c")
+list(FIND owner_absolute_sources "${owner_row_source}" owner_row_index)
+if(owner_row_index LESS 0)
+  message(FATAL_ERROR "Row allocation probe requires the real row publisher source")
+endif()
+list(REMOVE_AT owner_absolute_sources ${owner_row_index})
+list(INSERT owner_absolute_sources ${owner_row_index}
+     "${CMAKE_CURRENT_SOURCE_DIR}/orm_row_allocator_probe.c")
 add_library(orm_owner_test_core STATIC ${owner_absolute_sources} ../../src/abi/orm_owner.c)
 foreach(property IN ITEMS INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
                           COMPILE_FEATURES LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
@@ -34,7 +45,8 @@ add_executable(orm_owner_regression_test orm_owner_regression_test.c)
 add_executable(orm_owner_state_test orm_owner_state_test.c)
 add_executable(orm_owner_checked_test orm_owner_test.c orm_transaction_owner_test.c
   orm_connection_control_test.c orm_cursor_open_owner_test.c
-  orm_cursor_execution_owner_test.c orm_row_storage_cutover_test.c)
+  orm_cursor_execution_owner_test.c orm_row_storage_cutover_test.c
+  orm_row_budget_owner_test.c)
 add_executable(orm_owner_public_flow_test ../flow/orm_public_flow_test.c)
 add_executable(orm_owner_cpp_flow_test ../flow/orm_cpp_flow_test.cpp)
 add_executable(orm_owner_cleanup_test orm_cleanup_failure_test.c)
