@@ -83,6 +83,19 @@ unset(Salts_DIR CACHE)
 unset(Salts_DIR)
 find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
              NO_DEFAULT_PATH)
+
+if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
+  message(FATAL_ERROR "DATABIND_ROOT must name the installed DataBind profile")
+endif()
+file(TO_CMAKE_PATH "$ENV{DATABIND_ROOT}" DATABIND_ROOT_PATH)
+if(NOT IS_DIRECTORY "${DATABIND_ROOT_PATH}")
+  message(FATAL_ERROR "DATABIND_ROOT is not a directory: $ENV{DATABIND_ROOT}")
+endif()
+unset(DataBind_DIR CACHE)
+unset(DataBind_DIR)
+find_package(DataBind CONFIG REQUIRED PATHS "${DATABIND_ROOT_PATH}"
+             NO_DEFAULT_PATH)
+
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(zstd CONFIG REQUIRED)
