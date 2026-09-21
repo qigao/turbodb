@@ -2,7 +2,7 @@
 #define ORM_OWNER_H
 
 #ifndef ORM_NATIVE_OWNER_CANDIDATE
-#error "Native owner candidate is private to the non-installed test core (#28)"
+#error "Retained owner internals require ORM_NATIVE_OWNER_CANDIDATE"
 #endif
 
 #include <orm.h>
@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* #28 staged native control state. No registry and no per-lease allocation.
+/* #28 retained native control state. No registry and no per-lease allocation.
  * The enclosing native object owns this mutex and releases it with its memory.
  * Callers must already own a reference or dependent hold; this cannot validate
  * arbitrary/stale pointers. Budgets are supplied before publication. */
