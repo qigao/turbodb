@@ -796,8 +796,8 @@ target_compile_features(orm_runtime_race_test PRIVATE c_std_11)
 target_compile_definitions(orm_runtime_race_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_runtime_race_test PRIVATE
   ${ORM_INCLUDE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
-target_link_libraries(orm_runtime_race_test PRIVATE
-  turbo_orm Salts::TinyTest ${CMAKE_DL_LIBS})
+orm_link_internal_test(orm_runtime_race_test
+  Salts::TinyTest ${CMAKE_DL_LIBS})
 add_dependencies(orm_runtime_race_test orm_runtime_race_fixture)
 set_target_properties(orm_runtime_race_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
