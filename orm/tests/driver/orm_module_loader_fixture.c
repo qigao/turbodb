@@ -112,8 +112,9 @@ static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
   }
   if (module != NULL && config != NULL && limits != NULL &&
       out != NULL && config->driver.data != NULL &&
-      (config->driver.len == sizeof(fixture_id) - 1u ||
-       config->driver.len == sizeof(fixture_alias) - 1u)) {
+      config->driver.len == sizeof(fixture_id) - 1u &&
+      memcmp(config->driver.data, fixture_id,
+             sizeof(fixture_id) - 1u) == 0) {
     for (size_t i = 0u;
          i < sizeof(fixture_connections) / sizeof(fixture_connections[0]);
          ++i) {
