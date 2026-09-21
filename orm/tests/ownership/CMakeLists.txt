@@ -34,7 +34,7 @@ add_executable(orm_owner_regression_test orm_owner_regression_test.c)
 add_executable(orm_owner_state_test orm_owner_state_test.c)
 add_executable(orm_owner_checked_test orm_owner_test.c orm_transaction_owner_test.c
   orm_connection_control_test.c orm_cursor_open_owner_test.c
-  orm_cursor_execution_owner_test.c)
+  orm_cursor_execution_owner_test.c orm_row_storage_cutover_test.c)
 add_executable(orm_owner_public_flow_test ../flow/orm_public_flow_test.c)
 add_executable(orm_owner_cpp_flow_test ../flow/orm_cpp_flow_test.cpp)
 add_executable(orm_owner_cleanup_test orm_cleanup_failure_test.c)
