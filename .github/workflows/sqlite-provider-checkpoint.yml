@@ -98,6 +98,7 @@ jobs:
             -DSALTS_ENABLE_EPOLL_READINESS=ON \
             -DENABLE_SANITIZER_ADDRESS="$sanitizer" \
             -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
+            -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF \
             2>&1 | tee evidence/salts-configure.log
           cmake --build .ci/build/salts --target install --parallel 4 \
             2>&1 | tee evidence/salts-build-install.log
@@ -121,6 +122,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="%SALTS_ROOT%" ^
             -DENABLE_SANITIZER_ADDRESS="%SANITIZER%" ^
             -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF ^
+            -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF ^
             > evidence\salts-configure.log 2>&1
           if errorlevel 1 (type evidence\salts-configure.log & exit /b 1)
           cmake --build .ci\build\salts --target install --parallel 4 > evidence\salts-build-install.log 2>&1
