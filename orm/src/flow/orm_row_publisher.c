@@ -31,6 +31,9 @@ static void orm_row_set_error(orm_error_t *error, orm_status_t status,
 
 int orm_row_cursor_valid(const orm_row_cursor *cursor) {
   return cursor != NULL && cursor->ops != NULL && cursor->context != NULL &&
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+         ((cursor->begin_execution == NULL) == (cursor->end_execution == NULL)) &&
+#endif
          cursor->ops->struct_size >= sizeof(orm_row_cursor_ops) &&
          cursor->ops->abi_version == ORM_ROW_CURSOR_OPS_ABI_VERSION &&
          cursor->ops->name != NULL && cursor->ops->next != NULL &&
@@ -82,6 +85,8 @@ void orm_row_cursor_dispose(orm_row_cursor *cursor) {
   cursor->release_owner = NULL;
   cursor->owner_status = NULL;
   cursor->report_owner_error = NULL;
+  cursor->begin_execution = NULL;
+  cursor->end_execution = NULL;
   cursor->transaction_owner = NULL;
   cursor->release_transaction_owner = NULL;
   if (release_transaction_owner != NULL)
@@ -157,8 +162,8 @@ static orm_status_t orm_row_status_to_orm(DataBindStatus status) {
   }
 }
 
-static cflow_step orm_row_publisher_resume(void *state_, cflow_publish_context *ctx,
-                                          void *out_value) {
+static cflow_step orm_row_publisher_resume_admitted(
+    void *state_, cflow_publish_context *ctx, void *out_value) {
   orm_row_publisher_state *state = (orm_row_publisher_state *)state_;
   cserde_reader reader = {0};
   orm_row_cursor_step cursor_step;
@@ -231,6 +236,36 @@ static cflow_step orm_row_publisher_resume(void *state_, cflow_publish_context *
     return (cflow_step){CFLOW_STEP_VALUE_AND_DONE, {0}, NULL};
   }
   return (cflow_step){CFLOW_STEP_VALUE, {0}, NULL};
+}
+
+static cflow_step orm_row_publisher_resume(void *state_, cflow_publish_context *ctx,
+                                          void *out_value) {
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  orm_row_publisher_state *state = (orm_row_publisher_state *)state_;
+  if (state->terminal == CFLOW_PUBLISHER_OPEN &&
+      state->cursor.begin_execution != NULL) {
+    orm_error_t error;
+    orm_error_init(&error);
+    const orm_status_t status = state->cursor.begin_execution(
+        state->cursor.owner, &error);
+    if (status != ORM_STATUS_OK) {
+      /* Admission refusal is not a native failure. In particular, BUSY and
+       * exhausted completion capacity must not reenter native cancellation.
+       * Keep the cursor and all parent holds for its later explicit disposal. */
+      state->terminal = CFLOW_PUBLISHER_ERROR;
+      (void)snprintf(state->error_message, sizeof(state->error_message), "%s",
+                     error.message[0] != '\0' ? error.message
+                                              : orm_status_message(status));
+      return (cflow_step){CFLOW_STEP_ERROR, {0}, state->error_message};
+    }
+    /* Every admitted return, including WAIT/DONE/bind errors, ends here after
+     * the borrowed reader and any error message have been consumed. */
+    const cflow_step result = orm_row_publisher_resume_admitted(state_, ctx, out_value);
+    state->cursor.end_execution(state->cursor.owner);
+    return result;
+  }
+#endif
+  return orm_row_publisher_resume_admitted(state_, ctx, out_value);
 }
 
 static void orm_row_publisher_cancel(void *state_) {
@@ -335,6 +370,8 @@ orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
   cursor->release_owner = NULL;
   cursor->owner_status = NULL;
   cursor->report_owner_error = NULL;
+  cursor->begin_execution = NULL;
+  cursor->end_execution = NULL;
   cursor->transaction_owner = NULL;
   cursor->release_transaction_owner = NULL;
 #endif

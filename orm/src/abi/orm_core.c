@@ -126,9 +126,9 @@ static void orm_connection_release_child(orm_connection_t *connection) {
 
 /* Derive a bounded native-call hold from an existing query/transaction/creation
  * hold. RELEASE_PENDING is legal here: no new external handle is admitted.
- * Commands, transaction controls and cursor construction share this slot,
- * without holding the mutex across native callbacks. Post-construction cursor
- * calls and unrelated finalizers remain separate #28 integration boundaries. */
+ * Commands, transaction controls, cursor construction and row resumes share
+ * this slot without holding the mutex across native callbacks. Independent
+ * cancel/dispose and unrelated finalizers remain separate #28 boundaries. */
 static orm_status_t orm_connection_begin_native(orm_connection_t *connection,
                                                   orm_error_t *error) {
   orm_owner *owner = &connection->owner;
@@ -164,6 +164,20 @@ static void orm_connection_end_native(orm_connection_t *connection,
   connection->native_active = false;
   salts_mutex_unlock(&connection->owner.mutex);
   orm_connection_release_child(connection);
+}
+
+/* The Publisher keeps its query hold; only the bounded connection completion
+ * hold is acquired/released here. End follows the full reader decode, not next.
+ * Native failures have already been recorded by report_owner_error. */
+static orm_status_t orm_query_begin_row_execution(void *context,
+                                                    orm_error_t *error) {
+  const orm_query_t *query = context;
+  return orm_connection_begin_native(query->connection, error);
+}
+
+static void orm_query_end_row_execution(void *context) {
+  const orm_query_t *query = context;
+  orm_connection_end_native(query->connection, ORM_STATUS_OK);
 }
 
 /* Final release has no synchronous error receiver. The default policy cannot
@@ -871,6 +885,8 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   cursor.release_owner = orm_query_release_execution;
   cursor.owner_status = orm_query_execution_status;
   cursor.report_owner_error = orm_query_report_native_error;
+  cursor.begin_execution = orm_query_begin_row_execution;
+  cursor.end_execution = orm_query_end_row_execution;
   cursor.transaction_owner = transaction;
   cursor.release_transaction_owner = transaction != NULL
       ? orm_transaction_release_execution : NULL;

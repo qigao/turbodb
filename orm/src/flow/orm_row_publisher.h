@@ -74,6 +74,11 @@ typedef struct orm_row_cursor {
    * block sibling execution before the next Publisher resume. */
   orm_status_t (*owner_status)(void *, orm_error_t *);
   void (*report_owner_error)(void *, orm_status_t);
+  /* Paired host-only admission hooks. Success reserves connection completion
+   * through next() AND synchronous reader decoding; failure enters no native
+   * callback (including cancel). No mutex is held across Publisher work. */
+  orm_status_t (*begin_execution)(void *, orm_error_t *);
+  void (*end_execution)(void *);
   void *transaction_owner;
   void (*release_transaction_owner)(void *);
 #endif
