@@ -121,7 +121,11 @@ jobs:
           set -euxo pipefail
           config='${{ matrix.config }}'
           build_type=Release
-          if [[ "$config" == debug ]]; then build_type=Debug; fi
+          databind_asan=OFF
+          if [[ "$config" == debug ]]; then
+            build_type=Debug
+            databind_asan=ON
+          fi
           salts_root="$GITHUB_WORKSPACE/external/pkgs/salts/$config"
           databind_root="$GITHUB_WORKSPACE/external/pkgs/databind/$config"
           build="$GITHUB_WORKSPACE/.ci-databind-build/$config"
@@ -131,7 +135,7 @@ jobs:
             -DCMAKE_BUILD_TYPE="$build_type" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF \
-            -DENABLE_SANITIZER_ADDRESS=OFF -DENABLE_SANITIZER_UNDEFINED=OFF
+            -DENABLE_SANITIZER_ADDRESS="$databind_asan" -DENABLE_SANITIZER_UNDEFINED=OFF
           cmake --build "$build" --target tbe/all --parallel 4
           rm -rf "$databind_root"
           cmake --install "$build" --prefix "$databind_root" --component DataBind
@@ -153,7 +157,9 @@ jobs:
           set "DATABIND_ROOT=%GITHUB_WORKSPACE%\external\pkgs\databind\${{ matrix.config }}"
           set "DATABIND_BUILD=%GITHUB_WORKSPACE%\.ci-databind-build\${{ matrix.config }}"
           set "DATABIND_BUILD_TYPE=Release"
+          set "DATABIND_ASAN=OFF"
           if "${{ matrix.config }}"=="debug" set "DATABIND_BUILD_TYPE=Debug"
+          if "${{ matrix.config }}"=="debug" set "DATABIND_ASAN=ON"
           set "RE2C_VERSION=4.6"
           set "RE2C_ROOT=%RUNNER_TEMP%\re2c-4.6"
           set "RE2C_WORK=%RUNNER_TEMP%\re2c-4.6-src"
@@ -180,7 +186,7 @@ jobs:
           if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_categories.re" exit /b 1
           for /f %%i in ('git -C .ci-databind rev-parse HEAD') do set "DATABIND_HEAD=%%i"
           if not "%DATABIND_HEAD%"=="5c11f08d0d8e0428de513c6051b16989d1c2edd9" exit /b 1
-          cmake -S .ci-databind -B "%DATABIND_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%DATABIND_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=OFF -DENABLE_SANITIZER_UNDEFINED=OFF
+          cmake -S .ci-databind -B "%DATABIND_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%DATABIND_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%DATABIND_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF
           if errorlevel 1 exit /b 1
           cmake --build "%DATABIND_BUILD%" --target tbe/all --parallel 4
           if errorlevel 1 exit /b 1
