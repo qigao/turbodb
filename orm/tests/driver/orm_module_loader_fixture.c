@@ -220,6 +220,34 @@ static orm_status_t ORM_DRIVER_CALL fixture_open_cursor(
   return ORM_STATUS_OK;
 }
 
+static orm_status_t ORM_DRIVER_CALL fixture_execute_command(
+    void *context, const orm_driver_plan_view_v1 *plan,
+    const orm_driver_limits_v1 *limits, uint64_t *affected_rows,
+    orm_error_t *error) {
+  if (affected_rows != NULL) *affected_rows = 0u;
+  fixture_connection_context *connection = context;
+  if (connection == NULL || !connection->live ||
+      connection->module == NULL || plan == NULL || limits == NULL ||
+      affected_rows == NULL) {
+    fixture_error(error, ORM_STATUS_INVALID_ARGUMENT);
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  orm_driver_plan_meta_v1 meta;
+  memset(&meta, 0, sizeof(meta));
+  meta.header =
+      (orm_driver_header_v1)FIXTURE_HEADER(orm_driver_plan_meta_v1);
+  const orm_status_t status =
+      connection->module->metadata.describe(plan->context, &meta, error);
+  if (status != ORM_STATUS_OK) return status;
+  if (meta.kind != ORM_DRIVER_PLAN_INSERT) {
+    fixture_error(error, ORM_STATUS_UNSUPPORTED);
+    return ORM_STATUS_UNSUPPORTED;
+  }
+  *affected_rows = UINT64_C(3);
+  fixture_error(error, ORM_STATUS_OK);
+  return ORM_STATUS_OK;
+}
+
 static void ORM_DRIVER_CALL fixture_destroy_connection(void *context) {
   fixture_connection_context *connection = context;
   if (connection == NULL || !connection->live || connection->module == NULL)
@@ -231,7 +259,8 @@ static void ORM_DRIVER_CALL fixture_destroy_connection(void *context) {
 
 static const orm_driver_connection_ops_v1 fixture_connection_ops = {
     FIXTURE_HEADER(orm_driver_connection_ops_v1),
-    fixture_destroy_connection, fixture_open_cursor, NULL, NULL};
+    fixture_destroy_connection, fixture_open_cursor,
+    fixture_execute_command, NULL};
 
 static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
     void *context, const orm_config_t *config,
@@ -288,7 +317,8 @@ static const orm_driver_api_v1 fixture_api = {
     fixture_aliases,
     1u,
     0u,
-    ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_INCREMENTAL_ROWS,
+    ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_INSERT |
+        ORM_DRIVER_CAP_INCREMENTAL_ROWS,
     ORM_DRIVER_EXEC_CALLER_BLOCKING,
     FIXTURE_TABLE(&fixture_module_ops),
     fixture_create_connection,
