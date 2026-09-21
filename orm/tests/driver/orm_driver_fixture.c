@@ -396,7 +396,7 @@ static orm_status_t ORM_DRIVER_CALL open_cursor(void *context,
 static const orm_driver_module_ops_v1 module_ops = {
     HEADER(orm_driver_module_ops_v1), initialize, finalize};
 static const orm_driver_api_v1 api = {
-    HEADER(orm_driver_api_v1), {17u, 29u, 43u},
+    HEADER(orm_driver_api_v1), ORM_DRIVER_BUNDLE_ID_INIT,
     {ORM_DRIVER_FIXTURE_ID, sizeof(ORM_DRIVER_FIXTURE_ID)-1u}, NULL, 0u, 0u,
     ORM_DRIVER_FIXTURE_CAPS, ORM_DRIVER_EXEC_CALLER_BLOCKING,
     TABLE(&module_ops), create_connection, TABLE(&connection_ops)};
