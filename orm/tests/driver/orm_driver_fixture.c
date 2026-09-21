@@ -13,7 +13,7 @@
  * test allocations, not core ownership; #28 remains the production owner. */
 static orm_driver_fixture_stats stats;
 static uint32_t failure_point;
-static const uint8_t bundle[ORM_DRIVER_BUNDLE_ID_BYTES] = {17u, 29u, 43u};
+static const uint8_t bundle[ORM_DRIVER_BUNDLE_ID_BYTES] = ORM_DRIVER_BUNDLE_ID_INIT;
 static const unsigned char column_name[] = ORM_DRIVER_FIXTURE_OPTION;
 
 typedef struct fixture_ticket { void *parent; } fixture_ticket;
@@ -378,7 +378,7 @@ static orm_status_t ORM_DRIVER_CALL open_cursor(void *context,
     return result(error, ORM_STATUS_LIMIT_EXCEEDED);
   fixture_cursor *cursor = allocate(sizeof(*cursor));
   if (cursor == NULL) return result(error, ORM_STATUS_OUT_OF_MEMORY);
-  status = c->module->lifetime.acquire(c, &cursor->ticket, error);
+  status = c->module->lifetime.acquire((void *)plan->context, &cursor->ticket, error);
   if (status != ORM_STATUS_OK) { deallocate(cursor); return status; }
   cursor->connection = c;
   cursor->tokens[0].kind = CSERDE_MAP_BEGIN;
