@@ -21,9 +21,16 @@ env:
   VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.ci/vcpkg-bincache,readwrite
 
 jobs:
-  linux-release:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+  contract:
+    name: SQLite checkpoint (${{ matrix.os }}, ${{ matrix.config }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+        config: [debug, release]
+
     steps:
       - name: Checkout TurboDB
         uses: actions/checkout@v4
@@ -38,7 +45,8 @@ jobs:
           path: .ci/src/salts
           persist-credentials: false
 
-      - name: Install host tools
+      - name: Set up Linux tools
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -49,41 +57,95 @@ jobs:
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
           mkdir -p .ci/vcpkg-bincache .ci/vcpkg_installed evidence
 
+      - name: Set up Windows tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install re2c nasm -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'host tool installation failed' }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force -Path .ci/vcpkg-bincache,.ci/vcpkg_installed,evidence | Out-Null
+
       - name: Restore vcpkg binary cache
         id: cache
         uses: actions/cache/restore@v4
         with:
           path: .ci/vcpkg-bincache
-          key: sqlite-checkpoint-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.SALTS_REF }}-${{ env.VCPKG_BASELINE }}
+          key: sqlite-checkpoint-v2-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ env.SALTS_REF }}-${{ env.VCPKG_BASELINE }}
 
-      - name: Build and install pinned Salts
+      - name: Build and install pinned Salts on Linux
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
+          build_type=Release
+          sanitizer=OFF
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            build_type=Debug
+            sanitizer=ON
+          fi
           cmake -S .ci/src/salts -B .ci/build/salts -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_TYPE="$build_type" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DCMAKE_INSTALL_PREFIX="$SALTS_ROOT" \
             -DSALTS_ENABLE_EPOLL_READINESS=ON \
+            -DENABLE_SANITIZER_ADDRESS="$sanitizer" \
             -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
             2>&1 | tee evidence/salts-configure.log
           cmake --build .ci/build/salts --target install --parallel 4 \
             2>&1 | tee evidence/salts-build-install.log
           test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
 
-      - name: Configure focused SQLite checkpoint build
+      - name: Build and install pinned Salts on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "BUILD_TYPE=Release"
+          set "SANITIZER=OFF"
+          if "${{ matrix.config }}"=="debug" set "BUILD_TYPE=Debug"
+          if "${{ matrix.config }}"=="debug" set "SANITIZER=ON"
+          cmake -S .ci\src\salts -B .ci\build\salts -G Ninja ^
+            -DCMAKE_BUILD_TYPE="%BUILD_TYPE%" ^
+            -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
+            -DVCPKG_INSTALLED_DIR="%VCPKG_INSTALLED_DIR%" ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows ^
+            -DCMAKE_INSTALL_PREFIX="%SALTS_ROOT%" ^
+            -DENABLE_SANITIZER_ADDRESS="%SANITIZER%" ^
+            -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF ^
+            > evidence\salts-configure.log 2>&1
+          if errorlevel 1 (type evidence\salts-configure.log & exit /b 1)
+          cmake --build .ci\build\salts --target install --parallel 4 > evidence\salts-build-install.log 2>&1
+          if errorlevel 1 (type evidence\salts-build-install.log & exit /b 1)
+          if not exist "%SALTS_ROOT%\lib\cmake\Salts\SaltsConfig.cmake" exit /b 1
+
+      - name: Configure focused SQLite checkpoint build on Linux
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
+          build_type=Release
+          sanitizer=OFF
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            build_type=Debug
+            sanitizer=ON
+          fi
           cmake -S . -B .ci/build/turbodb -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_TYPE="$build_type" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DVCPKG_MANIFEST_MODE=ON \
             -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DORM_BUILD_TESTS=ON \
+            -DENABLE_SANITIZER_ADDRESS="$sanitizer" \
             -DORM_WITH_SQLITE=ON \
             -DORM_WITH_PGSQL=OFF -DORM_WITH_MONGODB=OFF -DORM_WITH_REDIS=OFF \
             -DTURBODB_BUILD_REDIS=OFF \
@@ -95,7 +157,38 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             2>&1 | tee evidence/turbodb-configure.log
 
-      - name: Build checkpoint contract test
+      - name: Configure focused SQLite checkpoint build on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "BUILD_TYPE=Release"
+          set "SANITIZER=OFF"
+          if "${{ matrix.config }}"=="debug" set "BUILD_TYPE=Debug"
+          if "${{ matrix.config }}"=="debug" set "SANITIZER=ON"
+          cmake -S . -B .ci\build\turbodb -G Ninja ^
+            -DCMAKE_BUILD_TYPE="%BUILD_TYPE%" ^
+            -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
+            -DVCPKG_INSTALLED_DIR="%VCPKG_INSTALLED_DIR%" ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows ^
+            -DVCPKG_MANIFEST_MODE=ON ^
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DORM_BUILD_TESTS=ON ^
+            -DENABLE_SANITIZER_ADDRESS="%SANITIZER%" ^
+            -DORM_WITH_SQLITE=ON ^
+            -DORM_WITH_PGSQL=OFF -DORM_WITH_MONGODB=OFF -DORM_WITH_REDIS=OFF ^
+            -DTURBODB_BUILD_REDIS=OFF ^
+            -DTURBODB_BUILD_DBTOOLS=OFF ^
+            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF ^
+            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF ^
+            -DTIDESDB_BUILD_TESTS=OFF ^
+            -DTIDESDB_WITH_SNAPPY=OFF -DTIDESDB_WITH_LZ4=OFF ^
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ^
+            > evidence\turbodb-configure.log 2>&1
+          if errorlevel 1 (type evidence\turbodb-configure.log & exit /b 1)
+
+      - name: Build checkpoint contract test on Linux
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -103,10 +196,22 @@ jobs:
             --target orm_sqlite_provider_checkpoint_test \
             --parallel 4 2>&1 | tee evidence/sqlite-build.log
 
-      - name: Run checkpoint contract
+      - name: Build checkpoint contract test on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          cmake --build .ci\build\turbodb --target orm_sqlite_provider_checkpoint_test --parallel 4 > evidence\sqlite-build.log 2>&1
+          if errorlevel 1 (type evidence\sqlite-build.log & exit /b 1)
+
+      - name: Run checkpoint contract on Linux
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
+          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.ci/build/turbodb/bin:$SALTS_ROOT/lib:$VCPKG_INSTALLED_DIR/x64-linux/lib:${LD_LIBRARY_PATH:-}"
           git rev-parse HEAD | tee evidence/head.txt
           git -C .ci/src/salts rev-parse HEAD | tee evidence/salts-head.txt
@@ -114,6 +219,20 @@ jobs:
             -R '^orm_sqlite_provider_checkpoint$' \
             --verbose --no-tests=error \
             2>&1 | tee evidence/sqlite-ctest.log
+
+      - name: Run checkpoint contract on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "ASAN_OPTIONS=halt_on_error=1"
+          set "PATH=%GITHUB_WORKSPACE%\.ci\build\turbodb\bin;%SALTS_ROOT%\bin;%VCPKG_INSTALLED_DIR%\x64-windows\bin;%PATH%"
+          git rev-parse HEAD > evidence\head.txt
+          git -C .ci\src\salts rev-parse HEAD > evidence\salts-head.txt
+          ctest --test-dir .ci\build\turbodb -R "^orm_sqlite_provider_checkpoint$" --verbose --no-tests=error > evidence\sqlite-ctest.log 2>&1
+          if errorlevel 1 (type evidence\sqlite-ctest.log & exit /b 1)
+          type evidence\sqlite-ctest.log
 
       - name: Save vcpkg binary cache
         if: always() && steps.cache.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
@@ -126,6 +245,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sqlite-provider-checkpoint-${{ github.sha }}
+          name: sqlite-provider-checkpoint-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
           path: evidence/
           if-no-files-found: warn
