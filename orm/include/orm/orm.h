@@ -68,7 +68,13 @@ enum {
   ORM_STATUS_BUSY = 12,
   ORM_STATUS_UNSUPPORTED = 13,
   ORM_STATUS_DATASTORE_ERROR = 14,
-  ORM_STATUS_CONSTRAINT = 15
+  ORM_STATUS_CONSTRAINT = 15,
+  /* A dispatched commit may have reached the datastore, but acknowledgement
+   * was lost. The transaction/connection is quarantined and must not replay. */
+  ORM_STATUS_COMMIT_UNKNOWN = 16,
+  /* Final native cleanup failed. The owner is quarantined; this is not a
+   * retryable close result and resources may remain pinned until process exit. */
+  ORM_STATUS_CLEANUP_FAILED = 17
 };
 
 typedef int32_t orm_value_kind_t;
@@ -192,6 +198,29 @@ ORM_C_API void ORM_C_CALL orm_flow_config(orm_flow_config_t *config,
 ORM_C_API orm_status_t ORM_C_CALL orm_connect(
     const orm_config_t *config, orm_connection_t **out_connection,
     orm_error_t *error);
+
+/*
+ * Retained ownership for opaque connection handles.
+ *
+ * retain() adds one caller hold and returns a status instead of terminating the
+ * process when the handle cannot accept another hold. release() consumes one
+ * previously owned caller hold; NULL release is a no-op.
+ *
+ * close() is checked and does not consume the caller hold. It returns BUSY
+ * without changing state while dependent Query/Transaction/Publisher/native
+ * work exists. On success, native resources are closed and the held handle
+ * remains valid only for close/release; no new business work is admitted.
+ *
+ * Legacy orm_disconnect() remains source/binary compatible and is equivalent
+ * to releasing one caller hold. Cleanup may therefore be deferred until
+ * already-admitted dependents complete.
+ */
+ORM_C_API orm_status_t ORM_C_CALL
+orm_connection_close(orm_connection_t *connection, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL
+orm_connection_retain(orm_connection_t *connection);
+ORM_C_API void ORM_C_CALL orm_connection_release(
+    orm_connection_t *connection);
 ORM_C_API void ORM_C_CALL orm_disconnect(orm_connection_t *connection);
 
 ORM_C_API orm_status_t ORM_C_CALL orm_transaction_begin(
@@ -210,6 +239,20 @@ ORM_C_API orm_status_t ORM_C_CALL orm_transaction_rollback_to_savepoint(
 ORM_C_API orm_status_t ORM_C_CALL orm_transaction_release_savepoint(
     orm_transaction_t *transaction, orm_string_view_t name,
     orm_error_t *error);
+/*
+ * Checked transaction close is valid only after commit/rollback (or an
+ * explicitly recorded COMMIT_UNKNOWN outcome). It returns BUSY while a
+ * dependent Publisher/native operation remains active and does not consume the
+ * caller hold. retain/release follow the same opaque-handle rules as
+ * connections. Legacy destroy consumes one caller hold and preserves automatic
+ * rollback-on-final-release compatibility for an ACTIVE transaction.
+ */
+ORM_C_API orm_status_t ORM_C_CALL
+orm_transaction_close(orm_transaction_t *transaction, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL
+orm_transaction_retain(orm_transaction_t *transaction);
+ORM_C_API void ORM_C_CALL orm_transaction_release(
+    orm_transaction_t *transaction);
 ORM_C_API void ORM_C_CALL orm_transaction_destroy(
     orm_transaction_t *transaction);
 
@@ -234,6 +277,16 @@ ORM_C_API orm_status_t ORM_C_CALL orm_delete(
 ORM_C_API orm_status_t ORM_C_CALL orm_raw(
     orm_connection_t *connection, orm_string_view_t sql,
     orm_query_t **out_query, orm_error_t *error);
+/*
+ * Checked Query close returns BUSY while an admitted Publisher/cursor still
+ * owns the Query. retain/release are explicit caller holds. A successful close
+ * leaves the held opaque handle available only for close/release.
+ * Legacy destroy consumes one caller hold and may defer final cleanup.
+ */
+ORM_C_API orm_status_t ORM_C_CALL
+orm_query_close(orm_query_t *query, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_query_retain(orm_query_t *query);
+ORM_C_API void ORM_C_CALL orm_query_release(orm_query_t *query);
 ORM_C_API void ORM_C_CALL orm_query_destroy(orm_query_t *query);
 
 ORM_C_API orm_status_t ORM_C_CALL orm_query_select_all(
