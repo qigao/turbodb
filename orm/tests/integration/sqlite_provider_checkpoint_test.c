@@ -8,6 +8,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int sqlite_maintenance_file_exists(const char *path) {
+  FILE *file = fopen(path, "rb");
+  if (file == NULL)
+    return 0;
+  (void)fclose(file);
+  return 1;
+}
+
 static char *sqlite_maintenance_unused_path(const char *prefix) {
   char *path = tt_make_temp_file(prefix, ".db");
   if (path != NULL)
@@ -150,7 +158,7 @@ spec("SQLite external provider checkpoint and restore") {
     check_equal(result.publication_state,
                 ORM_SQLITE_PUBLICATION_PUBLISHED_DURABLE);
     check_greater(result.pages_copied, UINT64_C(0));
-    check_equal(tt_file_exists(staging), 0);
+    check_equal(sqlite_maintenance_file_exists(staging), 0);
     check_equal(sqlite_maintenance_read(checkpoint), INT64_C(41));
 
     sqlite_maintenance_update(source, 99);
@@ -278,7 +286,7 @@ spec("SQLite external provider checkpoint and restore") {
     check_equal(result.publication_state,
                 ORM_SQLITE_PUBLICATION_NOT_PUBLISHED);
     check_equal(sqlite_maintenance_read(destination), INT64_C(21));
-    check_equal(tt_file_exists(staging), 1);
+    check_equal(sqlite_maintenance_file_exists(staging), 1);
 
     sqlite_maintenance_cleanup(source, staging, destination);
   }
