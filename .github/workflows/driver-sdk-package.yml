@@ -211,7 +211,7 @@ jobs:
           for /f %%i in ('git -C .ci-salts-utils rev-parse HEAD') do set "SALTS_UTILS_HEAD=%%i"
           if not "%SALTS_UTILS_HEAD%"=="05453ea6802de5d78a2e3a992f7373b3bf348c34" exit /b 1
           if not exist evidence\salts-utils mkdir evidence\salts-utils
-          cmake -S .ci-salts-utils -B "%SALTS_UTILS_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%SALTS_UTILS_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%SALTS_UTILS_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF > evidence\salts-utils\configure.log 2>&1
+          cmake -S .ci-salts-utils -B "%SALTS_UTILS_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%SALTS_UTILS_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_MANIFEST_FEATURES=capture -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%SALTS_UTILS_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF > evidence\salts-utils\configure.log 2>&1
           if errorlevel 1 (type evidence\salts-utils\configure.log & exit /b 1)
           cmake --build "%SALTS_UTILS_BUILD%" --parallel 4 > evidence\salts-utils\build.log 2>&1
           if errorlevel 1 (type evidence\salts-utils\build.log & exit /b 1)
