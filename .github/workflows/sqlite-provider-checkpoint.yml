@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SALTS_REF: 3a97d484c46b03bd0c1a083aa2cb551ed22d9c50
+  SALTS_REF: bd4377bde504193ec85cec4b4d8020793d5c5984
   VCPKG_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   SALTS_ROOT: ${{ github.workspace }}/.ci/pkgs/salts
   VCPKG_INSTALLED_DIR: ${{ github.workspace }}/.ci/vcpkg_installed
