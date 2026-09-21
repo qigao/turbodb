@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 1faaf21cb3b66ef359892d1d67117cabc00ea4ed
+          ref: 05453ea6802de5d78a2e3a992f7373b3bf348c34
           path: .ci-salts-utils
           persist-credentials: false
       - name: Check CI provenance regression
@@ -129,7 +129,7 @@ jobs:
           salts_root="$GITHUB_WORKSPACE/external/pkgs/salts/$config"
           salts_utils_root="$GITHUB_WORKSPACE/external/pkgs/salts-utils/$config"
           build="$GITHUB_WORKSPACE/.ci-salts-utils-build/$config"
-          test "$(git -C .ci-salts-utils rev-parse HEAD)" = 1faaf21cb3b66ef359892d1d67117cabc00ea4ed
+          test "$(git -C .ci-salts-utils rev-parse HEAD)" = 05453ea6802de5d78a2e3a992f7373b3bf348c34
           export SALTS_ROOT="$salts_root"
           mkdir -p evidence/salts-utils
           cmake -S .ci-salts-utils -B "$build" -G Ninja \
@@ -189,7 +189,7 @@ jobs:
           if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_properties.re" exit /b 1
           if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_categories.re" exit /b 1
           for /f %%i in ('git -C .ci-salts-utils rev-parse HEAD') do set "SALTS_UTILS_HEAD=%%i"
-          if not "%SALTS_UTILS_HEAD%"=="1faaf21cb3b66ef359892d1d67117cabc00ea4ed" exit /b 1
+          if not "%SALTS_UTILS_HEAD%"=="05453ea6802de5d78a2e3a992f7373b3bf348c34" exit /b 1
           if not exist evidence\salts-utils mkdir evidence\salts-utils
           cmake -S .ci-salts-utils -B "%SALTS_UTILS_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%SALTS_UTILS_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%SALTS_UTILS_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF > evidence\salts-utils\configure.log 2>&1
           if errorlevel 1 (type evidence\salts-utils\configure.log & exit /b 1)

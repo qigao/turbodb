@@ -15,6 +15,7 @@ typedef struct orm_row_publisher_state {
   const cmeta_data_desc *row_shape;
   DataBindNativeOptions bind_options;
   void *scratch;
+  size_t max_buffer_bytes;
   cflow_publisher_terminal terminal;
   int cancelled;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
@@ -226,9 +227,9 @@ static cflow_step orm_row_publisher_resume_admitted(
       &state->bind_options, state->row_shape, out_value,
       state->row_shape->storage_type->size, &bind_error);
   if (bind_status == DATA_BIND_OK)
-    bind_status = data_bind_native_decode(
+    bind_status = data_bind_native_decode_bounded(
         &state->bind_options, state->row_shape, &reader, out_value,
-        state->row_shape->storage_type->size, &bind_error);
+        state->row_shape->storage_type->size, state->max_buffer_bytes, &bind_error);
   if (bind_status != DATA_BIND_OK) {
     char message[ORM_C_ERROR_MESSAGE_CAPACITY];
     (void)snprintf(message, sizeof(message),
@@ -359,57 +360,118 @@ CMETA_IMPLEMENTS(cflow_publisher, orm_row_publisher,
     .poll_terminal = orm_row_publisher_poll_terminal
 );
 
-orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
-                                   orm_row_cursor *cursor,
-                                   const orm_row_publisher_config *config,
-                                   orm_error_t *error) {
-  orm_row_publisher_state *state;
-  cflow_publisher source;
-  orm_status_t status;
+void orm_row_publisher_prepared_destroy(orm_row_publisher_prepared *prepared) {
+  if (prepared != NULL) {
+    free(prepared->scratch);
+    free(prepared);
+  }
+}
 
-  if (out_publisher == NULL || out_publisher->self != NULL ||
-      !orm_row_cursor_valid(cursor) ||
+orm_status_t orm_row_publisher_prepare(
+    const orm_row_publisher_config *config,
+    orm_row_publisher_prepared **out_prepared, orm_error_t *error) {
+  DataBindNativeOptions options = DATA_BIND_NATIVE_OPTIONS_INIT;
+  DataBindNativeRequirements required = DATA_BIND_NATIVE_REQUIREMENTS_INIT;
+  DataBindNativeDiagnostic diagnostic = DATA_BIND_NATIVE_DIAGNOSTIC_INIT;
+  DataBindStatus status;
+  orm_row_publisher_state *state;
+  size_t probe_bytes, allocation_bytes, padding;
+  void *probe;
+  if (out_prepared == NULL || *out_prepared != NULL ||
       !orm_row_publisher_config_valid(config)) {
     orm_row_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
-                        "invalid DataBind source configuration");
+                      "invalid DataBind source configuration");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
-
-  if (cursor->ops->configure_shape != NULL) {
-    status = cursor->ops->configure_shape(cursor->context, config->row_shape,
-                                          error);
-    if (status != ORM_STATUS_OK)
-      return status;
+  /* Native depth counts scalar leaves; ORM depth counts containers. The
+   * measured container depth separately rejects an extra empty Struct. */
+  if (config->max_depth == SIZE_MAX) {
+    orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED, "row depth overflow");
+    return ORM_STATUS_LIMIT_EXCEEDED;
   }
-
+  options.max_depth = config->max_depth + 1u;
+  /* Static Struct fields were never collection items. The supported native
+   * graph has no dynamic collections: unsupported kinds still fail preflight.
+   * Tighten the whole-graph traversal count to the measured canonical graph. */
+  options.max_items = SIZE_MAX;
+  options.max_owned_bytes = SIZE_MAX; /* Per-value bound is enforced at decode. */
+  status = data_bind_native_probe_workspace_size(options.max_depth, &probe_bytes);
+  if (status != DATA_BIND_OK) {
+    orm_row_set_error(error, orm_row_status_to_orm(status), "row traversal size overflow");
+    return orm_row_status_to_orm(status);
+  }
+  probe = malloc(probe_bytes);
+  if (probe == NULL) {
+    orm_row_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+  options.workspace = probe;
+  options.workspace_bytes = probe_bytes;
+  status = data_bind_native_measure(&options, config->row_shape, &required, &diagnostic);
+  free(probe);
+  if (status != DATA_BIND_OK) {
+    orm_row_set_error(error, orm_row_status_to_orm(status), diagnostic.error.message);
+    return orm_row_status_to_orm(status);
+  }
+  if (required.container_depth > config->max_depth ||
+      required.field_tracking_bytes > config->scratch_bytes) {
+    orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED,
+                      "row container depth or field bitmap exceeds caller budget");
+    return ORM_STATUS_LIMIT_EXCEEDED;
+  }
+  if (required.workspace_alignment == 0u ||
+      required.decode_bytes > SIZE_MAX - (required.workspace_alignment - 1u)) {
+    orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED, "row workspace size overflow");
+    return ORM_STATUS_LIMIT_EXCEEDED;
+  }
+  allocation_bytes = required.decode_bytes + required.workspace_alignment - 1u;
   state = (orm_row_publisher_state *)calloc(1u, sizeof(*state));
   if (state == NULL) {
     orm_row_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
     return ORM_STATUS_OUT_OF_MEMORY;
   }
-  if (config->scratch_bytes != 0u) {
-    state->scratch = malloc(config->scratch_bytes);
-    if (state->scratch == NULL) {
-      free(state);
-      orm_row_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
-      return ORM_STATUS_OUT_OF_MEMORY;
-    }
+  state->scratch = malloc(allocation_bytes);
+  if (state->scratch == NULL) {
+    free(state);
+    orm_row_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
+    return ORM_STATUS_OUT_OF_MEMORY;
   }
-
+  padding = (uintptr_t)state->scratch % required.workspace_alignment;
+  if (padding != 0u) padding = required.workspace_alignment - padding;
+  options.workspace = (unsigned char *)state->scratch + padding;
+  options.workspace_bytes = required.decode_bytes;
+  options.max_items = required.descriptor_nodes;
+  state->bind_options = options;
+  state->max_buffer_bytes = config->max_buffer_bytes;
+  state->row_shape = config->row_shape;
+  state->terminal = CFLOW_PUBLISHER_OPEN;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   state->native_cleanup.run = orm_row_publisher_run_cleanup;
   state->native_cleanup.finish = orm_row_publisher_finish_cleanup;
   state->native_cleanup.context = state;
 #endif
+  *out_prepared = state;
+  orm_row_set_error(error, ORM_STATUS_OK, NULL);
+  return ORM_STATUS_OK;
+}
+
+orm_status_t orm_row_publisher_publish(
+    cflow_publisher *out_publisher, orm_row_cursor *cursor,
+    orm_row_publisher_prepared *prepared, orm_error_t *error) {
+  orm_row_publisher_state *state = prepared;
+  cflow_publisher source;
+  if (state == NULL || out_publisher == NULL || out_publisher->self != NULL ||
+      !orm_row_cursor_valid(cursor)) {
+    orm_row_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
+                      "invalid prepared row Publisher");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  if (cursor->ops->configure_shape != NULL) {
+    const orm_status_t status = cursor->ops->configure_shape(
+        cursor->context, state->row_shape, error);
+    if (status != ORM_STATUS_OK) return status;
+  }
   state->cursor = *cursor;
-  state->row_shape = config->row_shape;
-  state->terminal = CFLOW_PUBLISHER_OPEN;
-  state->bind_options = (DataBindNativeOptions)DATA_BIND_NATIVE_OPTIONS_INIT;
-  state->bind_options.workspace = state->scratch;
-  state->bind_options.workspace_bytes = config->scratch_bytes;
-  state->bind_options.max_depth = config->max_depth;
-  state->bind_options.max_items = config->max_container_items;
-  state->bind_options.max_owned_bytes = config->max_buffer_bytes;
   source = orm_row_publisher_as_cflow_publisher(state);
   *out_publisher = source;
   cursor->ops = NULL;
@@ -429,4 +491,24 @@ orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
 #endif
   orm_row_set_error(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
+}
+
+
+orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
+                                   orm_row_cursor *cursor,
+                                   const orm_row_publisher_config *config,
+                                   orm_error_t *error) {
+  orm_row_publisher_prepared *prepared = NULL;
+  orm_status_t status;
+  if (out_publisher == NULL || out_publisher->self != NULL ||
+      !orm_row_cursor_valid(cursor)) {
+    orm_row_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
+                      "invalid DataBind source configuration");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  status = orm_row_publisher_prepare(config, &prepared, error);
+  if (status != ORM_STATUS_OK) return status;
+  status = orm_row_publisher_publish(out_publisher, cursor, prepared, error);
+  if (status != ORM_STATUS_OK) orm_row_publisher_prepared_destroy(prepared);
+  return status;
 }

@@ -9,6 +9,7 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define ORM_SQLITE_TEST_DATA_PREFIX_SIZE \
   (offsetof(cmeta_data_desc, shape) + sizeof(((cmeta_data_desc *)0)->shape))
@@ -126,6 +127,9 @@ static cmeta_data_desc orm_sqlite_test_owned_bytes_data = {
     .shape = &orm_sqlite_test_owned_string_shape,
     .buffer_ops = NULL
 };
+static cmeta_field_desc orm_sqlite_test_canonical_text_fields[2];
+static cmeta_struct_desc orm_sqlite_test_canonical_text_layout;
+
 static const cmeta_data_field_desc orm_sqlite_test_text_row_fields[] = {
     {"orm.test.SqliteTextRow.id", "id", offsetof(orm_sqlite_test_text_row, id),
      &cmeta_data_int},
@@ -134,7 +138,7 @@ static const cmeta_data_field_desc orm_sqlite_test_text_row_fields[] = {
      &orm_sqlite_test_owned_string_data}
 };
 static const cmeta_data_struct_shape orm_sqlite_test_text_row_shape = {
-    .layout = StructMeta(orm_sqlite_test_text_row),
+    .layout = &orm_sqlite_test_canonical_text_layout,
     .fields = orm_sqlite_test_text_row_fields,
     .field_count = sizeof(orm_sqlite_test_text_row_fields) /
                    sizeof(orm_sqlite_test_text_row_fields[0])
@@ -156,7 +160,7 @@ static const cmeta_data_field_desc orm_sqlite_test_blob_row_fields[] = {
      &orm_sqlite_test_owned_bytes_data}
 };
 static const cmeta_data_struct_shape orm_sqlite_test_blob_row_shape = {
-    .layout = StructMeta(orm_sqlite_test_text_row),
+    .layout = &orm_sqlite_test_canonical_text_layout,
     .fields = orm_sqlite_test_blob_row_fields,
     .field_count = sizeof(orm_sqlite_test_blob_row_fields) /
                    sizeof(orm_sqlite_test_blob_row_fields[0])
@@ -241,6 +245,13 @@ spec("ORM SQLite CFlow cursor") {
     orm_sqlite_test_owned_string_data.buffer_ops = &salts_tstr_cmeta_buffer_ops;
     orm_sqlite_test_owned_bytes_data.storage_type = &salts_tstr_cmeta_type;
     orm_sqlite_test_owned_bytes_data.buffer_ops = &salts_tstr_cmeta_buffer_ops;
+    /* tstr's owned identity is not a generic char-pointer reflection identity. */
+    orm_sqlite_test_canonical_text_layout = *StructMeta(orm_sqlite_test_text_row);
+    memcpy(orm_sqlite_test_canonical_text_fields,
+           orm_sqlite_test_canonical_text_layout.fields,
+           sizeof(orm_sqlite_test_canonical_text_fields));
+    orm_sqlite_test_canonical_text_fields[1].type = &salts_tstr_cmeta_type;
+    orm_sqlite_test_canonical_text_layout.fields = orm_sqlite_test_canonical_text_fields;
   }
 
   it("completes an empty result without emitting a row") {

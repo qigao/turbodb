@@ -931,6 +931,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
                                   orm_error_t *error) {
   orm_row_cursor cursor = {0};
   orm_row_publisher_config publisher_config;
+  orm_row_publisher_prepared *prepared = NULL;
   cflow_publisher timed_publisher = {0};
   uint64_t wait_timeout_ns;
   orm_status_t status;
@@ -979,6 +980,11 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   if (status != ORM_STATUS_OK) goto release_query;
   native_held = true;
 #endif
+  publisher_config = (orm_row_publisher_config)ORM_ROW_PUBLISHER_CONFIG_INIT(
+      config->row_shape, config->scratch_bytes, config->max_depth,
+      config->max_container_items, config->max_buffer_bytes);
+  status = orm_row_publisher_prepare(&publisher_config, &prepared, error);
+  if (status != ORM_STATUS_OK) goto release_query;
   status = database != NULL
                ? database->ops->open_cursor(
                      database->context, &query->plan,
@@ -1010,17 +1016,16 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   cursor.release_transaction_owner = transaction != NULL
       ? orm_transaction_release_execution : NULL;
 #endif
-  publisher_config = (orm_row_publisher_config)ORM_ROW_PUBLISHER_CONFIG_INIT(
-      config->row_shape, config->scratch_bytes, config->max_depth,
-      config->max_container_items, config->max_buffer_bytes);
   wait_timeout_ns = cursor.wait_timeout_ns;
-  status = orm_row_publisher_init(out_publisher, &cursor, &publisher_config, error);
+  status = orm_row_publisher_publish(out_publisher, &cursor, prepared, error);
+  if (status == ORM_STATUS_OK) prepared = NULL;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   /* configure_shape is a native callback too; publish its terminal failure
    * before disposing the cursor or releasing any of its parent holds. */
   orm_connection_record_native_error(connection, status);
 #endif
   if (status != ORM_STATUS_OK) {
+    orm_row_publisher_prepared_destroy(prepared);
     orm_row_cursor_dispose(&cursor);
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
     orm_connection_end_native(connection, status);
@@ -1045,6 +1050,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
 #endif
   return status;
 release_query:
+  orm_row_publisher_prepared_destroy(prepared);
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   if (transaction_held) orm_transaction_release_execution(transaction);
   orm_query_release_execution(query);

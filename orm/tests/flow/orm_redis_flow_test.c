@@ -5,6 +5,7 @@
 #include "tinymock.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #define ORM_REDIS_TEST_DATA_PREFIX_SIZE                                      \
   (offsetof(cmeta_data_desc, shape) + sizeof(((cmeta_data_desc *)0)->shape))
@@ -28,6 +29,9 @@ static const cmeta_type_desc orm_redis_test_row_type = {
     .kind = CMETA_T_OBJECT,
     .traits = &orm_redis_test_row_traits,
     .identity = &orm_redis_test_row_identity};
+static cmeta_field_desc orm_redis_test_canonical_fields[5];
+static cmeta_struct_desc orm_redis_test_canonical_layout;
+
 static const cmeta_data_field_desc orm_redis_test_row_fields[] = {
     {"orm.test.RedisRow.id", "id", offsetof(orm_redis_test_row, id),
      &cmeta_data_int},
@@ -40,7 +44,7 @@ static const cmeta_data_field_desc orm_redis_test_row_fields[] = {
     {"orm.test.RedisRow.ratio", "ratio", offsetof(orm_redis_test_row, ratio),
      &cmeta_data_double}};
 static const cmeta_data_struct_shape orm_redis_test_row_shape = {
-    .layout = StructMeta(orm_redis_test_row),
+    .layout = &orm_redis_test_canonical_layout,
     .fields = orm_redis_test_row_fields,
     .field_count = 5u};
 static const cmeta_data_desc orm_redis_test_row_data = {
@@ -210,6 +214,15 @@ static void orm_redis_test_reject_integer_for_shape(
 }
 
 spec("ORM Redis CFlow cursor") {
+  before_each() {
+    /* size_t has a canonical semantic identity outside the default type list. */
+    orm_redis_test_canonical_layout = *StructMeta(orm_redis_test_row);
+    memcpy(orm_redis_test_canonical_fields, orm_redis_test_canonical_layout.fields,
+           sizeof(orm_redis_test_canonical_fields));
+    orm_redis_test_canonical_fields[3].type = &cmeta_type_size;
+    orm_redis_test_canonical_layout.fields = orm_redis_test_canonical_fields;
+  }
+
   it("rejects RESP integers outside declared boolean and unsigned domains") {
     static const unsigned char enabled_name[] = "enabled";
     static const unsigned char count_name[] = "count";

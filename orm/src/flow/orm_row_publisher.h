@@ -129,6 +129,18 @@ typedef struct orm_row_publisher_config {
  * until CFlow arms/cancels it or the cursor is cancelled. row_shape and all
  * metadata reachable from it are borrowed through Publisher destruction.
  */
+typedef struct orm_row_publisher_state orm_row_publisher_prepared;
+
+/* prepare does no native I/O and owns only private workspace. publish consumes
+ * it only on success; failure leaves both preparation and cursor caller-owned. */
+orm_status_t orm_row_publisher_prepare(
+    const orm_row_publisher_config *config,
+    orm_row_publisher_prepared **out_prepared, orm_error_t *error);
+void orm_row_publisher_prepared_destroy(orm_row_publisher_prepared *prepared);
+orm_status_t orm_row_publisher_publish(
+    cflow_publisher *out_publisher, orm_row_cursor *cursor,
+    orm_row_publisher_prepared *prepared, orm_error_t *error);
+
 orm_status_t orm_row_publisher_init(cflow_publisher *out_publisher,
                                    orm_row_cursor *cursor,
                                    const orm_row_publisher_config *config,
