@@ -84,17 +84,20 @@ unset(Salts_DIR)
 find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
              NO_DEFAULT_PATH)
 
-if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
-  message(FATAL_ERROR "DATABIND_ROOT must name the installed DataBind profile")
+if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
+  message(FATAL_ERROR "SALTS_UTILS_ROOT must name the installed SaltsUtils profile")
 endif()
-file(TO_CMAKE_PATH "$ENV{DATABIND_ROOT}" DATABIND_ROOT_PATH)
-if(NOT IS_DIRECTORY "${DATABIND_ROOT_PATH}")
-  message(FATAL_ERROR "DATABIND_ROOT is not a directory: $ENV{DATABIND_ROOT}")
+file(TO_CMAKE_PATH "$ENV{SALTS_UTILS_ROOT}" SALTS_UTILS_ROOT_PATH)
+if(NOT IS_DIRECTORY "${SALTS_UTILS_ROOT_PATH}")
+  message(FATAL_ERROR "SALTS_UTILS_ROOT is not a directory: $ENV{SALTS_UTILS_ROOT}")
 endif()
-unset(DataBind_DIR CACHE)
-unset(DataBind_DIR)
-find_package(DataBind CONFIG REQUIRED PATHS "${DATABIND_ROOT_PATH}"
+unset(SaltsUtils_DIR CACHE)
+unset(SaltsUtils_DIR)
+find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
              NO_DEFAULT_PATH)
+if(NOT TARGET Salts::Databind)
+  message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::Databind")
+endif()
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)

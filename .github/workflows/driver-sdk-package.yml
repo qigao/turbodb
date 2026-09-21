@@ -42,8 +42,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 5c11f08d0d8e0428de513c6051b16989d1c2edd9
-          path: .ci-databind
+          ref: 1faaf21cb3b66ef359892d1d67117cabc00ea4ed
+          path: .ci-salts-utils
           persist-credentials: false
       - name: Check CI provenance regression
         shell: pwsh
@@ -57,7 +57,7 @@ jobs:
           sudo apt-get install -y nasm curl xz-utils
           test -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
-          bash .ci-databind/cmake/ci/install-re2c.sh
+          bash .ci-salts-utils/cmake/ci/install-re2c.sh
       - name: Set up Windows tools
         if: runner.os == 'Windows'
         shell: pwsh
@@ -114,39 +114,43 @@ jobs:
           rem Keep the explicitly selected runner toolchain used by the cache key.
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
-      - name: Build pinned DataBind package on Linux
+      - name: Build pinned SaltsUtils package on Linux
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euxo pipefail
           config='${{ matrix.config }}'
           build_type=Release
-          databind_asan=OFF
+          salts_utils_asan=OFF
           if [[ "$config" == debug ]]; then
             build_type=Debug
-            databind_asan=ON
+            salts_utils_asan=ON
           fi
           salts_root="$GITHUB_WORKSPACE/external/pkgs/salts/$config"
-          databind_root="$GITHUB_WORKSPACE/external/pkgs/databind/$config"
-          build="$GITHUB_WORKSPACE/.ci-databind-build/$config"
-          test "$(git -C .ci-databind rev-parse HEAD)" = 5c11f08d0d8e0428de513c6051b16989d1c2edd9
+          salts_utils_root="$GITHUB_WORKSPACE/external/pkgs/salts-utils/$config"
+          build="$GITHUB_WORKSPACE/.ci-salts-utils-build/$config"
+          test "$(git -C .ci-salts-utils rev-parse HEAD)" = 1faaf21cb3b66ef359892d1d67117cabc00ea4ed
           export SALTS_ROOT="$salts_root"
-          cmake -S .ci-databind -B "$build" -G Ninja \
+          mkdir -p evidence/salts-utils
+          cmake -S .ci-salts-utils -B "$build" -G Ninja \
             -DCMAKE_BUILD_TYPE="$build_type" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF \
-            -DENABLE_SANITIZER_ADDRESS="$databind_asan" -DENABLE_SANITIZER_UNDEFINED=OFF
-          cmake --build "$build" --target tbe/all --parallel 4
-          rm -rf "$databind_root"
-          cmake --install "$build" --prefix "$databind_root" --component DataBind
-          test -f "$databind_root/lib/cmake/DataBind/DataBindConfig.cmake"
-          test -f "$databind_root/include/data_bind_native.h"
-          test ! -e "$databind_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
-          echo "DATABIND_ROOT=$databind_root" >> "$GITHUB_ENV"
+            -DENABLE_SANITIZER_ADDRESS="$salts_utils_asan" -DENABLE_SANITIZER_UNDEFINED=OFF \
+            2>&1 | tee evidence/salts-utils/configure.log
+          cmake --build "$build" --parallel 4 2>&1 | tee evidence/salts-utils/build.log
+          rm -rf "$salts_utils_root"
+          cmake --install "$build" --prefix "$salts_utils_root" 2>&1 | tee evidence/salts-utils/install.log
+          test -f "$salts_utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -f "$salts_utils_root/include/data_bind_native.h"
+          test ! -e "$salts_utils_root/lib/cmake/DataBind"
+          echo "SALTS_UTILS_ROOT=$salts_utils_root" >> "$GITHUB_ENV"
           mkdir -p evidence/core
-          git -C .ci-databind rev-parse HEAD > evidence/core/databind-head.txt
+          git -C .ci-salts-utils rev-parse HEAD > evidence/core/salts-utils-head.txt
 
-      - name: Build pinned DataBind package on Windows
+      - name: Build pinned SaltsUtils package on Windows
+        env:
+          VCPKG_DISABLE_METRICS: '1'
         if: runner.os == 'Windows'
         shell: cmd
         run: |
@@ -154,12 +158,12 @@ jobs:
           if errorlevel 1 exit /b 1
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           set "SALTS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts\${{ matrix.config }}"
-          set "DATABIND_ROOT=%GITHUB_WORKSPACE%\external\pkgs\databind\${{ matrix.config }}"
-          set "DATABIND_BUILD=%GITHUB_WORKSPACE%\.ci-databind-build\${{ matrix.config }}"
-          set "DATABIND_BUILD_TYPE=Release"
-          set "DATABIND_ASAN=OFF"
-          if "${{ matrix.config }}"=="debug" set "DATABIND_BUILD_TYPE=Debug"
-          if "${{ matrix.config }}"=="debug" set "DATABIND_ASAN=ON"
+          set "SALTS_UTILS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts-utils\${{ matrix.config }}"
+          set "SALTS_UTILS_BUILD=%GITHUB_WORKSPACE%\.ci-salts-utils-build\${{ matrix.config }}"
+          set "SALTS_UTILS_BUILD_TYPE=Release"
+          set "SALTS_UTILS_ASAN=OFF"
+          if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_BUILD_TYPE=Debug"
+          if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_ASAN=ON"
           set "RE2C_VERSION=4.6"
           set "RE2C_ROOT=%RUNNER_TEMP%\re2c-4.6"
           set "RE2C_WORK=%RUNNER_TEMP%\re2c-4.6-src"
@@ -184,21 +188,22 @@ jobs:
           if errorlevel 1 exit /b 1
           if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_properties.re" exit /b 1
           if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_categories.re" exit /b 1
-          for /f %%i in ('git -C .ci-databind rev-parse HEAD') do set "DATABIND_HEAD=%%i"
-          if not "%DATABIND_HEAD%"=="5c11f08d0d8e0428de513c6051b16989d1c2edd9" exit /b 1
-          cmake -S .ci-databind -B "%DATABIND_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%DATABIND_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%DATABIND_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF
-          if errorlevel 1 exit /b 1
-          cmake --build "%DATABIND_BUILD%" --target tbe/all --parallel 4
-          if errorlevel 1 exit /b 1
-          if exist "%DATABIND_ROOT%" rmdir /s /q "%DATABIND_ROOT%"
-          cmake --install "%DATABIND_BUILD%" --prefix "%DATABIND_ROOT%" --component DataBind
-          if errorlevel 1 exit /b 1
-          if not exist "%DATABIND_ROOT%\lib\cmake\DataBind\DataBindConfig.cmake" exit /b 1
-          if not exist "%DATABIND_ROOT%\include\data_bind_native.h" exit /b 1
-          if exist "%DATABIND_ROOT%\lib\cmake\SaltsUtils\SaltsUtilsConfig.cmake" exit /b 1
-          echo DATABIND_ROOT=%DATABIND_ROOT%>>"%GITHUB_ENV%"
+          for /f %%i in ('git -C .ci-salts-utils rev-parse HEAD') do set "SALTS_UTILS_HEAD=%%i"
+          if not "%SALTS_UTILS_HEAD%"=="1faaf21cb3b66ef359892d1d67117cabc00ea4ed" exit /b 1
+          if not exist evidence\salts-utils mkdir evidence\salts-utils
+          cmake -S .ci-salts-utils -B "%SALTS_UTILS_BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=%SALTS_UTILS_BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DBUILD_TESTING=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%SALTS_UTILS_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF > evidence\salts-utils\configure.log 2>&1
+          if errorlevel 1 (type evidence\salts-utils\configure.log & exit /b 1)
+          cmake --build "%SALTS_UTILS_BUILD%" --parallel 4 > evidence\salts-utils\build.log 2>&1
+          if errorlevel 1 (type evidence\salts-utils\build.log & exit /b 1)
+          if exist "%SALTS_UTILS_ROOT%" rmdir /s /q "%SALTS_UTILS_ROOT%"
+          cmake --install "%SALTS_UTILS_BUILD%" --prefix "%SALTS_UTILS_ROOT%" > evidence\salts-utils\install.log 2>&1
+          if errorlevel 1 (type evidence\salts-utils\install.log & exit /b 1)
+          if not exist "%SALTS_UTILS_ROOT%\lib\cmake\SaltsUtils\SaltsUtilsConfig.cmake" exit /b 1
+          if not exist "%SALTS_UTILS_ROOT%\include\data_bind_native.h" exit /b 1
+          if exist "%SALTS_UTILS_ROOT%\lib\cmake\DataBind" exit /b 1
+          echo SALTS_UTILS_ROOT=%SALTS_UTILS_ROOT%>>"%GITHUB_ENV%"
           if not exist evidence\core mkdir evidence\core
-          echo %DATABIND_HEAD%>evidence\core\databind-head.txt
+          echo %SALTS_UTILS_HEAD%>evidence\core\salts-utils-head.txt
 
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
