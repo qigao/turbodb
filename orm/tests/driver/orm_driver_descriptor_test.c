@@ -1,4 +1,5 @@
 #include <orm_driver_abi.h>
+#include <orm_driver_storage.h>
 #include <tinytest.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -135,6 +136,7 @@ typedef struct descriptor_fixture {
   orm_driver_plan_value_ops_v1 values;
   orm_driver_lifetime_ops_v1 lifetime;
   orm_driver_execution_ops_v1 execution;
+  orm_driver_storage_capabilities_v1 storage;
   orm_driver_bytes_v1 aliases[2];
 } descriptor_fixture;
 
@@ -159,6 +161,14 @@ static void setup(descriptor_fixture *f) {
       trap_acquire, trap_void};
   f->execution = (orm_driver_execution_ops_v1){HEADER(orm_driver_execution_ops_v1),
       trap_submit, trap_void, trap_void};
+  f->storage = (orm_driver_storage_capabilities_v1){
+      HEADER(orm_driver_storage_capabilities_v1),
+      ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA |
+          ORM_DRIVER_STORAGE_CAP_ORDERED_REPLAY_CLASSIFICATION |
+          ORM_DRIVER_STORAGE_CAP_AMBIGUOUS_COMMIT |
+          ORM_DRIVER_STORAGE_CAP_BOUNDED_BATCH |
+          ORM_DRIVER_STORAGE_CAP_RECONCILE,
+      16u, 65536u, 256u, 0u, 0u};
   f->api.header = (orm_driver_header_v1)HEADER(orm_driver_api_v1);
   memcpy(f->api.bundle_id, bundle, sizeof(bundle));
   f->api.canonical_id = driver_id;
@@ -171,6 +181,7 @@ static void setup(descriptor_fixture *f) {
   f->api.module_ops = TABLE(&f->module);
   f->api.create_connection = trap_create;
   f->api.connection_ops = TABLE(&f->connection);
+  f->api.storage_capabilities = TABLE(&f->storage);
   f->host.header = (orm_driver_header_v1)HEADER(orm_driver_host_v1);
   memcpy(f->host.bundle_id, bundle, sizeof(bundle));
   f->host.plan_metadata = TABLE(&f->metadata);
@@ -198,6 +209,95 @@ spec("driver descriptor validation") {
     descriptor_fixture f; setup(&f);
     API(ORM_STATUS_OK);
     HOST(ORM_STATUS_OK);
+  }
+  it("accepts a legacy descriptor ending before storage capabilities") {
+    descriptor_fixture f; setup(&f);
+    const uint32_t legacy = END(orm_driver_api_v1, connection_ops);
+    f.api.header.struct_size = legacy;
+    EXPECT(orm_driver_validate_api_v1(&f.api, legacy, bundle, driver_id, 2u, NULL),
+           ORM_STATUS_OK);
+  }
+  it("accepts an explicitly absent storage capability table") {
+    descriptor_fixture f; setup(&f);
+    f.api.storage_capabilities = (orm_driver_table_v1){NULL, 0u, 0u};
+    API(ORM_STATUS_OK);
+  }
+  it("accepts a valid storage capability descriptor") {
+    descriptor_fixture f; setup(&f);
+    API(ORM_STATUS_OK);
+  }
+  it("rejects unknown storage capability bits") {
+    descriptor_fixture f; setup(&f);
+    f.storage.capabilities |= UINT64_C(1) << 63;
+    API(ORM_STATUS_UNSUPPORTED);
+  }
+  it("requires reconcile for ambiguous commit and ordered replay for reconcile") {
+    descriptor_fixture f; setup(&f);
+    f.storage.capabilities &= ~ORM_DRIVER_STORAGE_CAP_RECONCILE;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.storage.capabilities &= ~ORM_DRIVER_STORAGE_CAP_ORDERED_REPLAY_CLASSIFICATION;
+    API(ORM_STATUS_ABI_MISMATCH);
+  }
+  it("requires bounded batch limits exactly when bounded batch is declared") {
+    descriptor_fixture f; setup(&f);
+    f.storage.max_batch_operations = 0u;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.storage.max_batch_bytes = 0u;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.storage.capabilities &= ~ORM_DRIVER_STORAGE_CAP_BOUNDED_BATCH;
+    API(ORM_STATUS_ABI_MISMATCH);
+  }
+  it("requires a progress metadata limit exactly for atomic state metadata") {
+    descriptor_fixture f; setup(&f);
+    f.storage.max_progress_metadata_bytes = 0u;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.storage.capabilities &= ~ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA;
+    API(ORM_STATUS_ABI_MISMATCH);
+  }
+  it("validates checkpoint and restore chunk limits independently") {
+    descriptor_fixture f; setup(&f);
+    f.storage.capabilities |= ORM_DRIVER_STORAGE_CAP_STREAMING_CHECKPOINT;
+    f.storage.max_checkpoint_chunk_bytes = 4096u;
+    API(ORM_STATUS_OK);
+    f.storage.max_checkpoint_chunk_bytes = 0u;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.storage.capabilities |= ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE;
+    f.storage.max_restore_chunk_bytes = 4096u;
+    API(ORM_STATUS_OK);
+    f.storage.max_restore_chunk_bytes = 0u;
+    API(ORM_STATUS_ABI_MISMATCH);
+  }
+  it("rejects storage limits when the corresponding capability is absent") {
+    descriptor_fixture f; setup(&f);
+    f.storage.max_checkpoint_chunk_bytes = 1u;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.storage.max_restore_chunk_bytes = 1u;
+    API(ORM_STATUS_ABI_MISMATCH);
+  }
+  it("allows file backed checkpoints without a streaming chunk limit") {
+    descriptor_fixture f; setup(&f);
+    f.storage.capabilities |= ORM_DRIVER_STORAGE_CAP_FILE_BACKED_CHECKPOINT;
+    API(ORM_STATUS_OK);
+  }
+  it("rejects malformed present storage tables") {
+    descriptor_fixture f; setup(&f);
+    f.api.storage_capabilities.reserved = 1u;
+    API(ORM_STATUS_INVALID_ARGUMENT);
+    setup(&f);
+    f.storage.header.abi_version = ORM_DRIVER_ABI_VERSION + 1u;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.api.storage_capabilities.bytes = ORM_DRIVER_HEADER_BYTES - 1u;
+    API(ORM_STATUS_ABI_MISMATCH);
+    setup(&f);
+    f.api.storage_capabilities.data = NULL;
+    API(ORM_STATUS_INVALID_ARGUMENT);
   }
   it("allows absent host execution services for a blocking consumer") {
     descriptor_fixture f; setup(&f);

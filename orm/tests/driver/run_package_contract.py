@@ -15,7 +15,7 @@ SALTS_COMMIT = "c4197712261a563ed7e238152b34cb50a2ef98a9"
 EXPECTED_TESTS = {"orm_driver_prefix", "orm_driver_layout",
                   "orm_driver_descriptor", "orm_driver_descriptor_layout",
                   "orm_driver_handshake", "orm_driver_c_consumer", "orm_driver_cpp_consumer"}
-EXPECTED_CASES = {"prefix": 18, "descriptor": 46, "handshake": 19}
+EXPECTED_CASES = {"prefix": 18, "descriptor": 57, "handshake": 19}
 
 
 def run(argv: list[str], cwd: Path, env: dict[str, str], log: Path) -> str:

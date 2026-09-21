@@ -81,6 +81,57 @@ static orm_status_t driver_check_capabilities(uint64_t caps) {
   return ORM_STATUS_OK;
 }
 
+static orm_status_t driver_check_storage_capabilities(
+    orm_driver_table_v1 table) {
+  orm_driver_storage_capabilities_v1 storage = {0};
+  uint32_t declared = 0u;
+  uint64_t caps;
+  orm_status_t status;
+
+  if (table.data == NULL && table.bytes == 0u)
+    return table.reserved == 0u ? ORM_STATUS_OK : ORM_STATUS_INVALID_ARGUMENT;
+  if (table.data == NULL || table.bytes == 0u || table.reserved != 0u)
+    return ORM_STATUS_INVALID_ARGUMENT;
+
+  status = driver_copy_table(
+      table,
+      DRIVER_FIELD_END(orm_driver_storage_capabilities_v1,
+                       max_restore_chunk_bytes),
+      &storage, &declared);
+  if (status != ORM_STATUS_OK)
+    return status;
+
+  caps = storage.capabilities;
+  if ((caps & ~ORM_DRIVER_STORAGE_CAP_KNOWN_MASK) != 0u)
+    return ORM_STATUS_UNSUPPORTED;
+  if ((caps & ORM_DRIVER_STORAGE_CAP_AMBIGUOUS_COMMIT) != 0u &&
+      (caps & ORM_DRIVER_STORAGE_CAP_RECONCILE) == 0u)
+    return ORM_STATUS_ABI_MISMATCH;
+  if ((caps & ORM_DRIVER_STORAGE_CAP_RECONCILE) != 0u &&
+      (caps & ORM_DRIVER_STORAGE_CAP_ORDERED_REPLAY_CLASSIFICATION) == 0u)
+    return ORM_STATUS_ABI_MISMATCH;
+
+  if (((caps & ORM_DRIVER_STORAGE_CAP_BOUNDED_BATCH) != 0u) !=
+      (storage.max_batch_operations != 0u &&
+       storage.max_batch_bytes != 0u))
+    return ORM_STATUS_ABI_MISMATCH;
+  if ((caps & ORM_DRIVER_STORAGE_CAP_BOUNDED_BATCH) == 0u &&
+      (storage.max_batch_operations != 0u || storage.max_batch_bytes != 0u))
+    return ORM_STATUS_ABI_MISMATCH;
+
+  if (((caps & ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA) != 0u) !=
+      (storage.max_progress_metadata_bytes != 0u))
+    return ORM_STATUS_ABI_MISMATCH;
+  if (((caps & ORM_DRIVER_STORAGE_CAP_STREAMING_CHECKPOINT) != 0u) !=
+      (storage.max_checkpoint_chunk_bytes != 0u))
+    return ORM_STATUS_ABI_MISMATCH;
+  if (((caps & ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE) != 0u) !=
+      (storage.max_restore_chunk_bytes != 0u))
+    return ORM_STATUS_ABI_MISMATCH;
+
+  return ORM_STATUS_OK;
+}
+
 static orm_status_t driver_check_id(orm_driver_bytes_v1 id) {
   const unsigned char *text;
   orm_status_t status = orm_driver_check_bytes(id, ORM_DRIVER_ID_MAX_BYTES);
@@ -112,7 +163,7 @@ static orm_driver_bytes_v1 driver_alias_at(const orm_driver_api_v1 *api, uint32_
 
 static orm_status_t driver_check_aliases(const orm_driver_api_v1 *api,
                                          uint32_t max_aliases) {
-  uint64_t used = sizeof(*api) + api->canonical_id.size +
+  uint64_t used = api->header.struct_size + api->canonical_id.size +
       (uint64_t)api->alias_count * sizeof(orm_driver_bytes_v1);
   if (api->alias_count > max_aliases || used > ORM_DRIVER_DESCRIPTOR_MAX_BYTES)
     return ORM_STATUS_LIMIT_EXCEEDED;
@@ -257,12 +308,14 @@ static orm_status_t driver_check_api(const void *buffer, uint32_t bytes,
     orm_driver_bytes_v1 expected_id, uint32_t max_aliases) {
   orm_driver_api_v1 api = {0};
   orm_driver_module_ops_v1 module = {0};
+  uint32_t api_declared = 0u;
   uint32_t declared = 0u;
   orm_status_t status;
   if (expected_bundle == NULL)
     return ORM_STATUS_INVALID_ARGUMENT;
   status = driver_copy_prefix(buffer, bytes,
-      DRIVER_FIELD_END(orm_driver_api_v1, connection_ops), &api, &declared);
+      DRIVER_FIELD_END(orm_driver_api_v1, connection_ops), &api,
+      &api_declared);
   if (status != ORM_STATUS_OK)
     return status;
   if (memcmp(api.bundle_id, expected_bundle, sizeof(api.bundle_id)) != 0)
@@ -291,9 +344,22 @@ static orm_status_t driver_check_api(const void *buffer, uint32_t bytes,
       DRIVER_FIELD_END(orm_driver_module_ops_v1, finalize), &module, &declared);
   if (status != ORM_STATUS_OK)
     return status;
-  if (module.initialize == NULL || module.finalize == NULL || api.create_connection == NULL)
+  if (module.initialize == NULL || module.finalize == NULL ||
+      api.create_connection == NULL)
     return ORM_STATUS_ABI_MISMATCH;
-  return driver_check_connection_ops(api.connection_ops, api.capabilities);
+  status = driver_check_connection_ops(api.connection_ops, api.capabilities);
+  if (status != ORM_STATUS_OK)
+    return status;
+  if (api_declared >=
+      DRIVER_FIELD_END(orm_driver_api_v1, storage_capabilities)) {
+    orm_driver_table_v1 storage_table;
+    memcpy(&storage_table,
+           (const unsigned char *)buffer +
+               offsetof(orm_driver_api_v1, storage_capabilities),
+           sizeof(storage_table));
+    return driver_check_storage_capabilities(storage_table);
+  }
+  return ORM_STATUS_OK;
 }
 
 static orm_status_t driver_result(orm_error_t *error, orm_status_t status) {
@@ -304,7 +370,7 @@ static orm_status_t driver_result(orm_error_t *error, orm_status_t status) {
   case ORM_STATUS_OK: break;
   case ORM_STATUS_ABI_MISMATCH: message = "driver ABI or callback contract mismatch"; break;
   case ORM_STATUS_LIMIT_EXCEEDED: message = "driver descriptor budget exceeded"; break;
-  case ORM_STATUS_UNSUPPORTED: message = "unknown driver capability or execution model"; break;
+  case ORM_STATUS_UNSUPPORTED: message = "unknown driver/storage capability or execution model"; break;
   default: message = "invalid driver descriptor argument"; break;
   }
   /* Error storage is caller-owned and disjoint from immutable input buffers. */
