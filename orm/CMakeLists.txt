@@ -753,6 +753,24 @@ add_test(NAME orm_module_loader COMMAND orm_module_loader_test)
 set_tests_properties(orm_module_loader PROPERTIES
   ENVIRONMENT "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>")
 
+add_executable(orm_runtime_registry_test
+  tests/driver/orm_runtime_registry_test.c)
+target_compile_features(orm_runtime_registry_test PRIVATE c_std_11)
+target_include_directories(orm_runtime_registry_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_runtime_registry_test PRIVATE turbo_orm Salts::TinyTest)
+add_dependencies(orm_runtime_registry_test orm_module_loader_fixture)
+set_target_properties(orm_runtime_registry_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_runtime_registry_test)
+if(MSVC)
+  target_compile_options(orm_runtime_registry_test PRIVATE /WX)
+else()
+  target_compile_options(orm_runtime_registry_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_runtime_registry COMMAND orm_runtime_registry_test)
+set_tests_properties(orm_runtime_registry PROPERTIES
+  ENVIRONMENT "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>")
+
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
 add_executable(orm_postgres_flow_test ${ORM_POSTGRES_FLOW_TEST_SOURCES})
