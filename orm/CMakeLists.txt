@@ -113,8 +113,8 @@ set(ORM_SQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
 set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
-set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_plan.c src/abi/orm_result.c
-                  src/dbs/sql/orm_sql_render.c)
+set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
+                  src/abi/orm_result.c src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
                      src/flow/orm_text_token.c
@@ -149,7 +149,8 @@ endforeach()
 add_library(turbo_orm SHARED ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
 add_library(orm_cpp INTERFACE)
 target_compile_features(turbo_orm PRIVATE c_std_11)
-target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD)
+target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD
+                                             ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(
   turbo_orm
   PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -230,7 +231,8 @@ if(ORM_WITH_PGSQL)
   add_library(orm_postgresql SHARED ${ORM_POSTGRESQL_SOURCES})
   target_compile_features(orm_postgresql PRIVATE c_std_11)
   target_compile_definitions(orm_postgresql PRIVATE ORM_WITH_PGSQL
-                                                     ORM_POSTGRESQL_BUILD)
+                                                     ORM_POSTGRESQL_BUILD
+                                                     ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_postgresql
     PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -439,7 +441,8 @@ set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
 if(ORM_BUILD_TESTS)
   add_library(orm_c_test_static STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
   target_compile_features(orm_c_test_static PRIVATE c_std_11)
-  target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC)
+  target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC
+                                                  ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_c_test_static
     PUBLIC ${ORM_INCLUDE_DIR}
