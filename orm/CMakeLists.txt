@@ -116,7 +116,8 @@ set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
 set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
-                  src/abi/orm_result.c src/driver/orm_driver_owner_bridge.c
+                  src/abi/orm_result.c src/driver/orm_driver_contract.c
+                  src/driver/orm_driver_owner_bridge.c
                   src/driver/orm_driver_plan_view.c
                   src/runtime/orm_module_loader.c
                   src/runtime/orm_runtime.c
