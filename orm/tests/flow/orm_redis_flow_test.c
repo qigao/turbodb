@@ -1,4 +1,4 @@
-#include "orm_cbind_publisher.h"
+#include "orm_row_publisher.h"
 #include "orm_redis_cursor.h"
 
 #include <cmeta/struct.h>
@@ -315,7 +315,7 @@ spec("ORM Redis CFlow cursor") {
         ORM_REDIS_CURSOR_CONFIG_INIT(4u, 32u, UINT64_C(5000000000));
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config publisher_config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_redis_test_row_data, 1u, 1u, 5u, 1u);
     cflow_publisher source = {0};
     orm_redis_test_row first = {0};
@@ -336,7 +336,7 @@ spec("ORM Redis CFlow cursor") {
                 ORM_STATUS_OK);
     check_null(driver.context);
     check_equal(cursor.wait_timeout_ns, UINT64_C(5000000000));
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &publisher_config, &error),
                 ORM_STATUS_OK);
     check_equal(cursor.wait_timeout_ns, 0u);
 
@@ -422,7 +422,7 @@ spec("ORM Redis CFlow cursor") {
         ORM_REDIS_CURSOR_CONFIG_INIT(1u, 1u, UINT64_C(5000000000));
     orm_row_cursor cursor = {0};
     orm_error_t error;
-    orm_cbind_publisher_config publisher_config = ORM_CBIND_PUBLISHER_CONFIG_INIT(
+    orm_row_publisher_config publisher_config = ORM_ROW_PUBLISHER_CONFIG_INIT(
         &orm_redis_test_row_data, 1u, 1u, 2u, 1u);
     cflow_publisher source = {0};
     orm_redis_test_row row = {0};
@@ -436,7 +436,7 @@ spec("ORM Redis CFlow cursor") {
     check_equal(orm_redis_cursor_start(&cursor, &driver, NULL, 0u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
-    check_equal(orm_cbind_publisher_init(&source, &cursor, &publisher_config, &error),
+    check_equal(orm_row_publisher_init(&source, &cursor, &publisher_config, &error),
                 ORM_STATUS_OK);
 
     step = cflow_publisher_resume(&source, NULL, &row);
