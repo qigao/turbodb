@@ -1,0 +1,101 @@
+name: TidesDB provider atomicity qualification
+
+on:
+  push:
+    branches:
+      - ci/tidesdb-provider-atomicity
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidesdb-provider-atomicity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: TidesDB provider atomicity (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Linux tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential ninja-build
+          mkdir -p evidence
+
+      - name: Set up Windows tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+
+      - name: Configure, build, and test on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD | tee evidence/head.txt
+          cmake -S tidesdb -B build/tidesdb-provider -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DTIDESDB_BUILD_TESTS=ON \
+            -DTIDESDB_WITH_SANITIZER=ON \
+            -DTIDESDB_WITH_SNAPPY=OFF \
+            -DTIDESDB_WITH_LZ4=OFF \
+            -DTIDESDB_WITH_ZSTD=OFF \
+            2>&1 | tee evidence/configure.log
+          cmake --build build/tidesdb-provider --target provider_atomicity_tests --parallel 4 \
+            2>&1 | tee evidence/build.log
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+          ctest --test-dir build/tidesdb-provider \
+            -R '^provider_atomicity_tests$' --verbose --no-tests=error \
+            2>&1 | tee evidence/ctest.log
+
+      - name: Configure, build, and test on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          git rev-parse HEAD > evidence\head.txt
+          cmake -S tidesdb -B build\tidesdb-provider -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Debug ^
+            -DTIDESDB_BUILD_TESTS=ON ^
+            -DTIDESDB_WITH_SANITIZER=ON ^
+            -DTIDESDB_WITH_SNAPPY=OFF ^
+            -DTIDESDB_WITH_LZ4=OFF ^
+            -DTIDESDB_WITH_ZSTD=OFF ^
+            > evidence\configure.log 2>&1
+          if errorlevel 1 (type evidence\configure.log & exit /b 1)
+          cmake --build build\tidesdb-provider --target provider_atomicity_tests --parallel 4 > evidence\build.log 2>&1
+          if errorlevel 1 (type evidence\build.log & exit /b 1)
+          ctest --test-dir build\tidesdb-provider -R "^provider_atomicity_tests$" --verbose --no-tests=error > evidence\ctest.log 2>&1
+          if errorlevel 1 (type evidence\ctest.log & exit /b 1)
+          type evidence\ctest.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidesdb-provider-atomicity-${{ matrix.os }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: warn
