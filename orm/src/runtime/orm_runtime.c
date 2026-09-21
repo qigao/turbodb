@@ -392,13 +392,23 @@ static orm_status_t runtime_backend_open_cursor(
 static orm_status_t runtime_backend_execute_command(
     void *context, const orm_query_plan *plan, const orm_limits *limits,
     uint64_t *affected_rows, orm_error_t *error) {
-  (void)context;
-  (void)plan;
-  (void)limits;
   if (affected_rows != NULL) *affected_rows = 0u;
-  orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                "runtime driver command adapter is not implemented");
-  return ORM_STATUS_UNSUPPORTED;
+  orm_runtime_backend *backend = context;
+  if (backend == NULL || plan == NULL || limits == NULL ||
+      affected_rows == NULL || backend->ops.execute_command == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver command execution");
+
+  orm_driver_plan_view_v1 view;
+  memset(&view, 0, sizeof(view));
+  orm_status_t status = orm_driver_plan_borrow(plan, &view, error);
+  if (status != ORM_STATUS_OK) return status;
+
+  const orm_driver_limits_v1 driver_limits = runtime_driver_limits(limits);
+  status = backend->ops.execute_command(
+      backend->native.context, &view, &driver_limits, affected_rows, error);
+  if (status != ORM_STATUS_OK) *affected_rows = 0u;
+  return status;
 }
 
 static orm_status_t runtime_backend_begin_transaction(
