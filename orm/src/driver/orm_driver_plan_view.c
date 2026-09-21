@@ -209,6 +209,14 @@ static const orm_driver_plan_metadata_ops_v1 metadata_ops = {
 static const orm_driver_plan_value_ops_v1 value_ops = {
     VIEW_HEADER(orm_driver_plan_value_ops_v1), view_assignment, view_predicate, view_parameter};
 
+const orm_driver_plan_metadata_ops_v1 *orm_driver_plan_metadata_services_v1(void) {
+  return &metadata_ops;
+}
+
+const orm_driver_plan_value_ops_v1 *orm_driver_plan_value_services_v1(void) {
+  return &value_ops;
+}
+
 orm_status_t orm_driver_plan_borrow(const orm_query_plan *plan,
     orm_driver_plan_view_v1 *out, orm_error_t *error) {
   uint32_t kind;
