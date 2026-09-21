@@ -63,6 +63,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          choco install re2c -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 're2c installation failed' }
           $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
           if (-not (Test-Path -LiteralPath $toolchain)) { throw 'vcpkg toolchain is missing' }
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
