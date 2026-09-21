@@ -1,5 +1,5 @@
-# Keep the incomplete ABI 5 owner candidate out of installed ABI 4 artifacts.
-# Reuse the real static core's exact source/dependency selection, not a backend stub.
+# Reuse the installed retained-owner core's exact source/dependency selection,
+# replacing only the row allocation call sites for private fault injection.
 if(NOT TARGET orm_c_test_static)
   message(FATAL_ERROR "Native ownership tests require the real ORM test library")
 endif()
@@ -28,7 +28,7 @@ endif()
 list(REMOVE_AT owner_absolute_sources ${owner_row_index})
 list(INSERT owner_absolute_sources ${owner_row_index}
      "${CMAKE_CURRENT_SOURCE_DIR}/orm_row_allocator_probe.c")
-add_library(orm_owner_test_core STATIC ${owner_absolute_sources} ../../src/abi/orm_owner.c)
+add_library(orm_owner_test_core STATIC ${owner_absolute_sources})
 foreach(property IN ITEMS INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
                           COMPILE_FEATURES LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
   get_target_property(value orm_c_test_static ${property})
