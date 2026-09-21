@@ -1,0 +1,153 @@
+name: Redis replicated-state contract
+
+on:
+  push:
+    branches:
+      - ci/redis-external-provider-contract
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: redis-provider-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SALTS_REF: c4197712261a563ed7e238152b34cb50a2ef98a9
+  VCPKG_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+  SALTS_ROOT: ${{ github.workspace }}/.ci/pkgs/salts
+  VCPKG_INSTALLED_DIR: ${{ github.workspace }}/.ci/vcpkg_installed
+  VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.ci/vcpkg-bincache,readwrite
+
+jobs:
+  redis-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379/tcp
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - name: Checkout TurboDB
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_REF }}
+          path: .ci/src/salts
+          persist-credentials: false
+
+      - name: Install host tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake build-essential libtool nasm ninja-build pkg-config re2c
+          test -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+          mkdir -p .ci/vcpkg-bincache .ci/vcpkg_installed evidence
+
+      - name: Record Redis service identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "service_container=${{ job.services.redis.id }}"
+            docker inspect --format='image={{.Image}} repo_digests={{json .RepoDigests}}' "${{ job.services.redis.id }}"
+            docker exec "${{ job.services.redis.id }}" redis-server --version
+          } | tee evidence/redis-identity.txt
+
+      - name: Restore vcpkg binary cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci/vcpkg-bincache
+          key: redis-provider-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.SALTS_REF }}-${{ env.VCPKG_BASELINE }}
+
+      - name: Build and install pinned Salts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S .ci/src/salts -B .ci/build/salts -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DCMAKE_INSTALL_PREFIX="$SALTS_ROOT" \
+            -DSALTS_ENABLE_EPOLL_READINESS=ON \
+            -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
+            2>&1 | tee evidence/salts-configure.log
+          cmake --build .ci/build/salts --target install --parallel 4 \
+            2>&1 | tee evidence/salts-build-install.log
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+
+      - name: Configure focused TurboDB Redis build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B .ci/build/turbodb -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DVCPKG_MANIFEST_MODE=ON \
+            -DTURBODB_BUILD_REDIS=ON \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON \
+            -DORM_BUILD_TESTS=OFF \
+            -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_WITH_MONGODB=OFF \
+            -DTURBODB_BUILD_DBTOOLS=OFF \
+            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
+            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF \
+            -DTIDESDB_BUILD_TESTS=OFF \
+            -DTIDESDB_WITH_SNAPPY=OFF -DTIDESDB_WITH_LZ4=OFF \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            2>&1 | tee evidence/turbodb-configure.log
+
+      - name: Build existing ordered-apply tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build .ci/build/turbodb \
+            --target test_redis_lua_apply test_redis_lua_apply_batch \
+            --parallel 4 2>&1 | tee evidence/redis-build.log
+
+      - name: Run live ordered-apply and reconciliation contract
+        shell: bash
+        env:
+          TURBODB_REDIS_TEST_PORT: ${{ job.services.redis.ports['6379'] }}
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.ci/build/turbodb/bin:$SALTS_ROOT/lib:$VCPKG_INSTALLED_DIR/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          git rev-parse HEAD | tee evidence/head.txt
+          git -C .ci/src/salts rev-parse HEAD | tee evidence/salts-head.txt
+          ctest --test-dir .ci/build/turbodb \
+            -R '^test_redis_lua_apply(_batch)?$' \
+            --verbose --no-tests=error \
+            2>&1 | tee evidence/redis-ctest.log
+
+      - name: Save vcpkg binary cache
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci/vcpkg-bincache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Upload exact-head evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redis-provider-contract-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
