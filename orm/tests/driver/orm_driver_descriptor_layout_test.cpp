@@ -7,6 +7,7 @@
   static_assert(offsetof(T, header) == 0u, #T " prefix")
 LAYOUT(orm_driver_api_v1);
 LAYOUT(orm_driver_storage_capabilities_v1);
+LAYOUT(orm_driver_storage_capabilities_v1);
 LAYOUT(orm_driver_host_v1);
 LAYOUT(orm_driver_connection_v1);
 LAYOUT(orm_driver_transaction_v1);
