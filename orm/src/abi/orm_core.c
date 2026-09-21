@@ -516,6 +516,32 @@ static void orm_query_release_execution(void *context) {
   orm_query_action(query, orm_owner_release_dependent(&query->owner));
 }
 
+orm_status_t orm_query_acquire_driver_lease(
+    const orm_query_plan *plan, void **out_lease, orm_error_t *error) {
+  orm_query_t *query;
+  orm_status_t status;
+  if (out_lease != NULL) *out_lease = NULL;
+  if (plan == NULL || out_lease == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                  "invalid driver lifetime parent");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  query = (orm_query_t *)((unsigned char *)(uintptr_t)plan -
+                          offsetof(orm_query_t, plan));
+  status = orm_owner_admit(&query->owner);
+  if (status == ORM_STATUS_OK)
+    *out_lease = query;
+  orm_error_set(error, status,
+                status == ORM_STATUS_OK ? NULL :
+                "query cannot admit a driver operation lease");
+  return status;
+}
+
+void orm_query_release_driver_lease(void *lease) {
+  if (lease != NULL)
+    orm_query_release_execution(lease);
+}
+
 orm_status_t ORM_C_CALL orm_connection_close(orm_connection_t *connection,
                                              orm_error_t *error) {
   orm_owner_action action = ORM_OWNER_KEEP;
