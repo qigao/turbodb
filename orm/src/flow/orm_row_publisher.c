@@ -1,5 +1,7 @@
 #include "orm_row_publisher.h"
 
+#include <data_bind_native.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
