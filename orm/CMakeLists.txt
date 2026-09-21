@@ -117,6 +117,7 @@ set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
 set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
                   src/abi/orm_result.c src/driver/orm_driver_owner_bridge.c
+                  src/driver/orm_driver_plan_view.c
                   src/runtime/orm_module_loader.c
                   src/runtime/orm_runtime.c
                   src/dbs/sql/orm_sql_render.c)
@@ -680,8 +681,7 @@ add_test(NAME orm_sql_render COMMAND orm_sql_render_test)
 
 # Candidate plan adapter is exercised against the real core, not the SDK fixture.
 add_executable(orm_driver_plan_view_test
-  tests/driver/orm_driver_plan_view_test.c
-  src/driver/orm_driver_plan_view.c)
+  tests/driver/orm_driver_plan_view_test.c)
 target_compile_features(orm_driver_plan_view_test PRIVATE c_std_11)
 target_compile_definitions(orm_driver_plan_view_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_driver_plan_view_test PRIVATE
