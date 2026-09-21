@@ -1,4 +1,4 @@
-"""Build real pinned Salts packages, then run SDK contracts through CMake/CTest."""
+"""Build or reuse Salts master, then run SDK contracts through CMake/CTest."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,6 @@ import re
 import subprocess
 import sys
 
-SALTS_COMMIT = "c4197712261a563ed7e238152b34cb50a2ef98a9"
 EXPECTED_TESTS = {"orm_driver_prefix", "orm_driver_layout",
                   "orm_driver_descriptor", "orm_driver_descriptor_layout",
                   "orm_driver_handshake", "orm_driver_c_consumer", "orm_driver_cpp_consumer"}
@@ -73,6 +72,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--salts-source", required=True, type=Path)
     parser.add_argument("--config", choices=("debug", "release"), required=True)
+    parser.add_argument("--reuse-salts-install", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[3]
     salts = args.salts_source.resolve(strict=True)
@@ -87,10 +87,10 @@ def main() -> int:
     print("vcpkg_identity=" + json.dumps(identity), flush=True)
     head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
                                    text=True).strip()
-    salts_head = subprocess.check_output(
-        ["git", "-C", str(salts), "rev-parse", "HEAD"], text=True).strip()
-    if salts_head != SALTS_COMMIT:
-        parser.error(f"Salts head mismatch: {salts_head}")
+    salts_ref = subprocess.check_output(
+        ["git", "-C", str(salts), "branch", "--show-current"], text=True).strip()
+    if salts_ref != "master":
+        parser.error(f"Salts source must be checked out at master, got {salts_ref or 'detached'}")
     env["ASAN_OPTIONS"] = ("halt_on_error=1" if system == "windows" else
                            "detect_leaks=1:halt_on_error=1")
     env["UBSAN_OPTIONS"] = "halt_on_error=1:print_stacktrace=1"
@@ -108,8 +108,10 @@ def main() -> int:
     else:
         salts_build = salts / "build" / f"linux-gcc-{args.config}"
     manifest = {
-        "head": head, "salts_head": salts_head, "system": platform.platform(),
-        "arch": platform.machine(), "profile": args.config,
+        "head": head, "salts_ref": "master",
+        "salts_source_digest": env.get("SALTS_SOURCE_DIGEST", ""),
+        "system": platform.platform(), "arch": platform.machine(),
+        "profile": args.config,
         "salts_preset": salts_preset, "sdk_preset": sdk_preset,
         "mode": "installed-package", "status": "not-completed",
         "vcpkg": identity,
@@ -118,24 +120,30 @@ def main() -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     run(["git", "diff", "--exit-code"], salts, env, evidence / "source-before.log")
     run(["cmake", "--version"], root, env, evidence / "cmake-version.log")
-    salts_configure = ["cmake", "--preset", salts_preset,
-                       "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
-    if system == "linux":
-        # TurboDB's Redis runtime explicitly requires epoll in both profiles.
-        salts_configure.append("-DSALTS_ENABLE_EPOLL_READINESS=ON")
-    run(salts_configure, salts, env, evidence / "salts-configure.log")
-    if vcpkg_identity(env) != identity:
-        raise RuntimeError("vcpkg identity changed during configure")
-    identity["configured_toolchain"] = configured_toolchain(
-        salts_build / "CMakeCache.txt", identity["toolchain"])
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    run(["cmake", "--build", "--preset", salts_preset, "--parallel", "4"],
-        salts, env, evidence / "salts-build.log")
-    run(["cmake", "--install", str(salts_build), "--prefix", str(prefix)],
-        salts, env, evidence / "salts-install.log")
-    run(["git", "diff", "--exit-code"], salts, env, evidence / "source-after.log")
-    if not (prefix / "lib/cmake/Salts/SaltsConfig.cmake").is_file():
-        raise RuntimeError("normal upstream install did not produce SaltsConfig.cmake")
+    if args.reuse_salts_install:
+        manifest["salts_cache"] = "hit"
+        if not (prefix / "lib/cmake/Salts/SaltsConfig.cmake").is_file():
+            raise RuntimeError("cached Salts master install is incomplete")
+    else:
+        manifest["salts_cache"] = "miss"
+        salts_configure = ["cmake", "--preset", salts_preset,
+                           "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
+        if system == "linux":
+            # TurboDB's Redis runtime explicitly requires epoll in both profiles.
+            salts_configure.append("-DSALTS_ENABLE_EPOLL_READINESS=ON")
+        run(salts_configure, salts, env, evidence / "salts-configure.log")
+        if vcpkg_identity(env) != identity:
+            raise RuntimeError("vcpkg identity changed during configure")
+        identity["configured_toolchain"] = configured_toolchain(
+            salts_build / "CMakeCache.txt", identity["toolchain"])
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        run(["cmake", "--build", "--preset", salts_preset, "--parallel", "4"],
+            salts, env, evidence / "salts-build.log")
+        run(["cmake", "--install", str(salts_build), "--prefix", str(prefix)],
+            salts, env, evidence / "salts-install.log")
+        run(["git", "diff", "--exit-code"], salts, env, evidence / "source-after.log")
+        if not (prefix / "lib/cmake/Salts/SaltsConfig.cmake").is_file():
+            raise RuntimeError("normal upstream install did not produce SaltsConfig.cmake")
     installed = {str(p.relative_to(prefix)): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in sorted(prefix.rglob("*")) if p.is_file()}
     (evidence / "installed-sha256.json").write_text(
