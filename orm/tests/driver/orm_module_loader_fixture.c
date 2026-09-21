@@ -45,7 +45,11 @@ static orm_status_t ORM_DRIVER_CALL fixture_initialize(
     }
   }
   if (*out == NULL) {
-    if (error != NULL) error->status = ORM_STATUS_LIMIT_EXCEEDED;
+    if (error != NULL) {
+      memset(error, 0, sizeof(*error));
+      error->struct_size = (uint32_t)sizeof(*error);
+      error->status = ORM_STATUS_LIMIT_EXCEEDED;
+    }
     return ORM_STATUS_LIMIT_EXCEEDED;
   }
   if (error != NULL) {
@@ -87,6 +91,10 @@ static void ORM_DRIVER_CALL fixture_destroy_connection(void *context) {
   connection->module = NULL;
   connection->live = 0;
 }
+
+static const orm_driver_connection_ops_v1 fixture_connection_ops = {
+    FIXTURE_HEADER(orm_driver_connection_ops_v1),
+    fixture_destroy_connection, NULL, NULL, NULL};
 
 static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
     void *context, const orm_config_t *config,
@@ -135,9 +143,6 @@ static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
 static const orm_driver_module_ops_v1 fixture_module_ops = {
     FIXTURE_HEADER(orm_driver_module_ops_v1),
     fixture_initialize, fixture_finalize};
-static const orm_driver_connection_ops_v1 fixture_connection_ops = {
-    FIXTURE_HEADER(orm_driver_connection_ops_v1),
-    fixture_destroy_connection, NULL, NULL, NULL};
 static const orm_driver_bytes_v1 fixture_aliases[] = {
     {fixture_alias, sizeof(fixture_alias) - 1u}};
 static const orm_driver_api_v1 fixture_api = {
