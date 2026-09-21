@@ -399,7 +399,8 @@ static const orm_driver_api_v1 api = {
     HEADER(orm_driver_api_v1), {17u, 29u, 43u},
     {ORM_DRIVER_FIXTURE_ID, sizeof(ORM_DRIVER_FIXTURE_ID)-1u}, NULL, 0u, 0u,
     ORM_DRIVER_FIXTURE_CAPS, ORM_DRIVER_EXEC_CALLER_BLOCKING,
-    TABLE(&module_ops), create_connection, TABLE(&connection_ops)};
+    TABLE(&module_ops), create_connection, TABLE(&connection_ops),
+    {NULL, 0u, 0u}};
 
 ORM_DRIVER_EXPORT int32_t ORM_DRIVER_CALL orm_driver_get_api_v1(
     const orm_driver_host_v1 *host, uint32_t bytes,
