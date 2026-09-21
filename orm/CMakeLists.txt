@@ -68,6 +68,14 @@ if(NOT TARGET Salts::Core)
                NO_DEFAULT_PATH)
 endif()
 
+if(NOT TARGET Salts::DataBindCore)
+  if(NOT DEFINED ENV{DATABIND_ROOT} OR "$ENV{DATABIND_ROOT}" STREQUAL "")
+    message(FATAL_ERROR "ORM requires an explicit DATABIND_ROOT")
+  endif()
+  find_package(DataBind CONFIG REQUIRED PATHS "$ENV{DATABIND_ROOT}"
+               NO_DEFAULT_PATH)
+endif()
+
 # Find backend-specific dependencies based on enabled options
 if(ORM_WITH_SQLITE)
   find_package(SQLite3 REQUIRED)
@@ -99,7 +107,7 @@ set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
 set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_plan.c src/abi/orm_result.c
                   src/dbs/sql/orm_sql_render.c)
-set(ORM_FLOW_SOURCES src/flow/orm_cbind_publisher.c
+set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
                      src/flow/orm_text_token.c
                      src/dbs/redis/orm_redis_cursor.c
@@ -141,7 +149,7 @@ target_include_directories(
   PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
 target_link_libraries(
   turbo_orm PUBLIC Salts::Core
-  PRIVATE Salts::CSerde Salts::CBind Salts::CFlow
+  PRIVATE Salts::CSerde Salts::DataBindCore Salts::CFlow
           Salts::CSTL Salts::Platform)
 
 if(ORM_WITH_SQLITE)
@@ -224,7 +232,7 @@ if(ORM_WITH_PGSQL)
   target_link_libraries(
     orm_postgresql
     PUBLIC turbo_orm
-    PRIVATE PostgreSQL::PostgreSQL Salts::CSerde Salts::CBind
+    PRIVATE PostgreSQL::PostgreSQL Salts::CSerde
             Salts::CFlow Salts::CSTL)
   # Some libpq packages close static BoringSSL archives through the C++
   # runtime. This changes only final linkage; every implementation source in
@@ -430,7 +438,7 @@ if(ORM_BUILD_TESTS)
     PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR})
   target_link_libraries(
     orm_c_test_static PUBLIC Salts::Core
-    PRIVATE Salts::CSerde Salts::CBind Salts::CFlow
+    PRIVATE Salts::CSerde Salts::DataBindCore Salts::CFlow
             Salts::CSTL Salts::Platform)
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
@@ -584,22 +592,22 @@ endif()
 
 endif()
 
-add_executable(orm_cbind_publisher_test tests/flow/orm_cbind_publisher_test.c)
-target_compile_features(orm_cbind_publisher_test PRIVATE c_std_11)
-target_compile_definitions(orm_cbind_publisher_test PRIVATE ORM_C_STATIC)
+add_executable(orm_row_publisher_test tests/flow/orm_row_publisher_test.c)
+target_compile_features(orm_row_publisher_test PRIVATE c_std_11)
+target_compile_definitions(orm_row_publisher_test PRIVATE ORM_C_STATIC)
 target_include_directories(
-  orm_cbind_publisher_test PRIVATE ${ORM_INCLUDE_DIR}
+  orm_row_publisher_test PRIVATE ${ORM_INCLUDE_DIR}
                                  ${ORM_FLOW_SOURCE_DIR})
-orm_link_internal_test(orm_cbind_publisher_test Salts::CBind
+orm_link_internal_test(orm_row_publisher_test Salts::DataBindCore
                        Salts::CFlow Salts::TinyTest)
-set_target_properties(orm_cbind_publisher_test PROPERTIES C_STANDARD_REQUIRED ON
+set_target_properties(orm_row_publisher_test PROPERTIES C_STANDARD_REQUIRED ON
                                                         FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_cbind_publisher_test)
+orm_enable_strict_warnings(orm_row_publisher_test)
 if(MSVC)
-  target_compile_options(orm_cbind_publisher_test
+  target_compile_options(orm_row_publisher_test
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
-add_test(NAME orm_cbind_publisher COMMAND orm_cbind_publisher_test)
+add_test(NAME orm_row_publisher COMMAND orm_row_publisher_test)
 
 add_executable(orm_pure_c_build_test tests/flow/orm_pure_c_build_test.c)
 target_compile_features(orm_pure_c_build_test PRIVATE c_std_11)
@@ -694,7 +702,7 @@ target_compile_definitions(orm_redis_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_redis_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/redis)
-orm_link_internal_test(orm_redis_flow_test Salts::CBind
+orm_link_internal_test(orm_redis_flow_test Salts::DataBindCore
                        Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_redis_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -711,7 +719,7 @@ target_compile_definitions(orm_mongo_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_mongo_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
-orm_link_internal_test(orm_mongo_flow_test Salts::CBind
+orm_link_internal_test(orm_mongo_flow_test Salts::DataBindCore
                        Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_mongo_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -746,7 +754,7 @@ target_compile_definitions(orm_tidesdb_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_tidesdb_flow_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_FLOW_SOURCE_DIR}
                                 ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/tidesdb)
-orm_link_internal_test(orm_tidesdb_flow_test Salts::CBind
+orm_link_internal_test(orm_tidesdb_flow_test Salts::DataBindCore
                        Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -763,7 +771,7 @@ target_compile_features(orm_tidesdb_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_tidesdb_public_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_tidesdb_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(
-  orm_tidesdb_public_flow_test PRIVATE turbo_orm Salts::CBind
+  orm_tidesdb_public_flow_test PRIVATE turbo_orm
                                        Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_public_flow_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -782,7 +790,7 @@ target_include_directories(
   orm_sqlite_flow_test PRIVATE ${ORM_INCLUDE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sqlite)
-orm_link_internal_test(orm_sqlite_flow_test SQLite::SQLite3 Salts::CBind
+orm_link_internal_test(orm_sqlite_flow_test SQLite::SQLite3 Salts::DataBindCore
                        Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_sqlite_flow_test PROPERTIES C_STANDARD_REQUIRED ON
                                                        FOLDER "orm/tests")
@@ -797,7 +805,7 @@ add_executable(orm_public_flow_test tests/flow/orm_public_flow_test.c)
 target_compile_features(orm_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_public_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_public_flow_test PRIVATE turbo_orm Salts::CBind
+target_link_libraries(orm_public_flow_test PRIVATE turbo_orm
                                                    Salts::CFlow
                                                    Salts::TinyTest)
 set_target_properties(orm_public_flow_test
@@ -813,7 +821,7 @@ add_executable(orm_cpp_flow_test tests/flow/orm_cpp_flow_test.cpp)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_cpp_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_cpp_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_cpp_flow_test PRIVATE turbo_orm Salts::CBind
+target_link_libraries(orm_cpp_flow_test PRIVATE turbo_orm
                                                 Salts::CFlow
                                                 Salts::TinyTest)
 set_target_properties(orm_cpp_flow_test
@@ -865,7 +873,7 @@ if(WIN32)
   set(ORM_TEST_RUNTIME_PATH
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
-                        orm_cbind_publisher orm_pure_c_build orm_sql_render orm_driver_plan_view
+                        orm_row_publisher orm_pure_c_build orm_sql_render orm_driver_plan_view
                         orm_postgres_flow orm_backend_profile)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
