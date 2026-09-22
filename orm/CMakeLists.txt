@@ -733,6 +733,8 @@ add_library(orm_module_bad_abi_fixture MODULE
 target_compile_features(orm_module_bad_abi_fixture PRIVATE c_std_11)
 target_compile_definitions(orm_module_bad_abi_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
 target_include_directories(orm_module_bad_abi_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_module_bad_abi_fixture PRIVATE
+  Salts::Core Salts::CSerde Salts::CFlow)
 set_target_properties(orm_module_bad_abi_fixture PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
