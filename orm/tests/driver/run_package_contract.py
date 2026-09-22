@@ -90,7 +90,8 @@ def main() -> int:
     salts_ref = subprocess.check_output(
         ["git", "-C", str(salts), "branch", "--show-current"], text=True).strip()
     if salts_ref != "master":
-        parser.error(f"Salts source must be checked out at master, got {salts_ref or 'detached'}")
+        raise RuntimeError(
+            f"Salts source must be checked out at master, got {salts_ref or 'detached'}")
     env["ASAN_OPTIONS"] = ("halt_on_error=1" if system == "windows" else
                            "detect_leaks=1:halt_on_error=1")
     env["UBSAN_OPTIONS"] = "halt_on_error=1:print_stacktrace=1"
