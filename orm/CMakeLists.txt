@@ -729,6 +729,7 @@ target_include_directories(orm_driver_backend_adapter_test PRIVATE
   ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
   ${ORM_FLOW_SOURCE_DIR} ${ORM_DRIVER_SOURCE_DIR})
 target_link_libraries(orm_driver_backend_adapter_test PRIVATE
+  ${ORM_INTERNAL_TEST_LIBRARY}
   Salts::Core Salts::CSTL Salts::CSerde Salts::TinyTest)
 set_target_properties(orm_driver_backend_adapter_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
