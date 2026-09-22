@@ -720,6 +720,26 @@ add_test(NAME orm_driver_owner_bridge COMMAND orm_driver_owner_bridge_test)
 
 # Qualify the private OS loader with a real MODULE target. The fixture exports
 # only the Driver ABI bootstrap name and has no database dependency.
+add_library(orm_module_no_entry_fixture MODULE
+  tests/driver/orm_module_no_entry_fixture.c)
+target_compile_features(orm_module_no_entry_fixture PRIVATE c_std_11)
+set_target_properties(orm_module_no_entry_fixture PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_module_no_entry_fixture)
+
+add_library(orm_module_bad_abi_fixture MODULE
+  tests/driver/orm_module_bad_abi_fixture.c)
+target_compile_features(orm_module_bad_abi_fixture PRIVATE c_std_11)
+target_compile_definitions(orm_module_bad_abi_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
+target_include_directories(orm_module_bad_abi_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_module_bad_abi_fixture PRIVATE
+  Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_module_bad_abi_fixture PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_module_bad_abi_fixture)
+
 add_library(orm_module_loader_fixture MODULE
   tests/driver/orm_module_loader_fixture.c)
 target_compile_features(orm_module_loader_fixture PRIVATE c_std_11)
@@ -753,14 +773,17 @@ else()
 endif()
 add_test(NAME orm_module_loader COMMAND orm_module_loader_test)
 set_tests_properties(orm_module_loader PROPERTIES
-  ENVIRONMENT "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>")
+  ENVIRONMENT
+    "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>;ORM_INVALID_MODULE_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/driver/orm_module_loader_test.c")
 
 add_executable(orm_runtime_registry_test
   tests/driver/orm_runtime_registry_test.c)
 target_compile_features(orm_runtime_registry_test PRIVATE c_std_11)
 target_include_directories(orm_runtime_registry_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_registry_test PRIVATE turbo_orm Salts::TinyTest)
-add_dependencies(orm_runtime_registry_test orm_module_loader_fixture)
+add_dependencies(orm_runtime_registry_test
+  orm_module_loader_fixture orm_module_no_entry_fixture
+  orm_module_bad_abi_fixture)
 set_target_properties(orm_runtime_registry_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_runtime_registry_test)
@@ -771,7 +794,8 @@ else()
 endif()
 add_test(NAME orm_runtime_registry COMMAND orm_runtime_registry_test)
 set_tests_properties(orm_runtime_registry PROPERTIES
-  ENVIRONMENT "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>")
+  ENVIRONMENT
+    "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>;ORM_MODULE_NO_ENTRY_FIXTURE=$<TARGET_FILE:orm_module_no_entry_fixture>;ORM_MODULE_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_module_bad_abi_fixture>")
 
 # Dedicated race fixture intentionally exports test-only gate symbols in
 # addition to the Driver ABI bootstrap. It is not the export-surface fixture.
