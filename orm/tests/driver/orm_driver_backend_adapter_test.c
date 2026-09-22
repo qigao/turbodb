@@ -2,6 +2,8 @@
 
 #include <tinytest.h>
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define H(T) {(uint32_t)sizeof(T), ORM_DRIVER_ABI_VERSION}
