@@ -262,7 +262,8 @@ static void runtime_finish_pending(
 static void runtime_release_last(orm_runtime_t *runtime);
 
 static void runtime_drop_dependent(orm_runtime_t *runtime) {
-  runtime_drop_dependent(runtime);
+  if (runtime_release_dependent_ref(runtime))
+    runtime_release_last(runtime);
 }
 
 static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
