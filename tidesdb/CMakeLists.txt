@@ -398,9 +398,9 @@ elseif(WIN32)
         target_link_libraries(tidesdb PUBLIC pthread)
     else()
         if(TIDESDB_WITH_ZSTD)
-            # The repo pins zstd to the static-only vcpkg overlay
-            # (vcpkg-overlays/zstd); link its exported target directly instead
-            # of preferring a shared build that the overlay never produces.
+            # The shared qigao/vcpkg-cache registry pins zstd to a static-only
+            # port; link its exported target directly instead of preferring a
+            # shared build that the centralized port never produces.
             target_link_libraries(tidesdb PUBLIC zstd::libzstd)
         endif()
         if(TIDESDB_WITH_SNAPPY)
