@@ -387,7 +387,7 @@ PostgreSQL feature 会通过 libpq 引入 BoringSSL。确认 Ubuntu 容器安装
 
 ### libpq 构建报告缺少 `bison`、`flex` 或 `perl`
 
-仓库 overlay 的 `vcpkg-overlays/libpq/portfile.cmake` 明确要求这三个 host
+中央 `qigao/vcpkg-cache/ports/libpq/portfile.cmake` 明确要求这三个 host
 工具；vcpkg 的 `vcpkg_configure_make()` 还会调用 Autotools。runbook 在
 configure 前逐一执行 `command -v`；preflight 失败时先修正 builder 依赖集，
 不要反复尝试不完整镜像。
