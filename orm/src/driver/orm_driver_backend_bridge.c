@@ -40,12 +40,12 @@ static orm_status_t bridge_size(uint64_t value, size_t *out,
 static orm_status_t bridge_limits(const orm_driver_limits_v1 *input,
                                   orm_limits *out,
                                   orm_error_t *error) {
-  size_t max_parameters;
-  size_t max_columns;
-  size_t max_predicates;
-  size_t max_assignments;
-  size_t max_query_bytes;
-  size_t max_parameter_bytes;
+  size_t max_parameters = 0u;
+  size_t max_columns = 0u;
+  size_t max_predicates = 0u;
+  size_t max_assignments = 0u;
+  size_t max_query_bytes = 0u;
+  size_t max_parameter_bytes = 0u;
   orm_status_t status;
 
   if (input == NULL || out == NULL ||
