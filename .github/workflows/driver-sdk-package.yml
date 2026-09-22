@@ -69,20 +69,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-          echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+          test -n "${VCPKG_ROOT:-}"
+          test -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
       - name: Set up Windows toolchain identity
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
+          if ([string]::IsNullOrWhiteSpace($env:VCPKG_ROOT)) { throw 'canonical VCPKG_ROOT is missing' }
+          $toolchain = Join-Path $env:VCPKG_ROOT 'scripts/buildsystems/vcpkg.cmake'
           if (-not (Test-Path -LiteralPath $toolchain)) { throw 'vcpkg toolchain is missing' }
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
           $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
           "VSINSTALL=$vs" >> $env:GITHUB_ENV
-          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
       - name: Verify master dependencies and compute content identity
         id: deps
         shell: pwsh
