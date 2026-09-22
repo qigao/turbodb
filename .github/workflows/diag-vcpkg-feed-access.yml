@@ -1,0 +1,57 @@
+name: Diagnose shared vcpkg feed access
+
+on:
+  push:
+    branches: [diag/vcpkg-feed-access]
+    paths:
+      - ".github/workflows/diag-vcpkg-feed-access.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Probe NuGet V3 visibility with repository GITHUB_TOKEN
+        shell: python
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          import base64
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ["GITHUB_TOKEN"]
+          auth = base64.b64encode(f"qigao:{token}".encode()).decode()
+          headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+
+          def get_json(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.load(r)
+
+          index = get_json("https://nuget.pkg.github.com/qigao/index.json")
+          search = next(
+              item["@id"]
+              for item in index["resources"]
+              if "SearchQueryService" in item.get("@type", "")
+          )
+
+          for query in ("libpq", "zstd", "boringssl"):
+              url = search + "?" + urllib.parse.urlencode(
+                  {"q": query, "prerelease": "true", "take": "100"}
+              )
+              result = get_json(url)
+              rows = []
+              for item in result.get("data", []):
+                  rows.append({
+                      "id": item.get("id"),
+                      "version": item.get("version"),
+                      "versions": [v.get("version") for v in item.get("versions", [])[-5:]],
+                  })
+              print(json.dumps({"query": query, "totalHits": result.get("totalHits"), "packages": rows}, indent=2))
