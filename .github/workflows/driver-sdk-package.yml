@@ -86,7 +86,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "$name master checkout is dirty" }
           }
           function Get-TrackedContentDigest([string]$repo) {
-            $files = @(git -C $repo ls-files | Sort-Object)
+            $files = @(git -c core.quotepath=false -C $repo ls-files | Sort-Object)
             if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) {
               throw "cannot enumerate tracked dependency files"
             }
