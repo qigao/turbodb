@@ -1,0 +1,113 @@
+name: vcpkg registry contract
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "vcpkg.json"
+      - "vcpkg-configuration.json"
+      - "tidesdb/vcpkg.json"
+      - "tidesdb/vcpkg-configuration.json"
+      - "presets/Options.json"
+      - ".github/workflows/vcpkg-registry-contract.yml"
+  push:
+    branches: [master]
+    paths:
+      - "vcpkg.json"
+      - "vcpkg-configuration.json"
+      - "tidesdb/vcpkg.json"
+      - "tidesdb/vcpkg-configuration.json"
+      - "presets/Options.json"
+      - ".github/workflows/vcpkg-registry-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turbodb-vcpkg-registry-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  registry-contract:
+    name: ${{ matrix.os }} central registry
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            triplet: x64-linux
+          - os: windows-2022
+            triplet: x64-windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure canonical vcpkg tool and shared cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Set up Go for BoringSSL
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+
+      - name: Prepare Linux host dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake bison flex libtool nasm ninja-build pkg-config perl
+
+      - name: Prepare Windows host dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nasm ninja -y --no-progress
+
+      - name: Resolve TurboDB PostgreSQL through central registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset VCPKG_OVERLAY_PORTS
+          install_root="$RUNNER_TEMP/turbodb-vcpkg-registry"
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$GITHUB_WORKSPACE" \
+            --x-install-root="$install_root" \
+            --triplet="${{ matrix.triplet }}" \
+            --x-feature=postgresql
+          status="$install_root/vcpkg/status"
+          test -f "$status"
+          grep -F "Package: libpq" "$status"
+          grep -F "Package: zstd" "$status"
+          grep -F "Package: boringssl" "$status"
+
+      - name: Resolve TidesDB zstd through central registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset VCPKG_OVERLAY_PORTS
+          install_root="$RUNNER_TEMP/tidesdb-vcpkg-registry"
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$GITHUB_WORKSPACE/tidesdb" \
+            --x-install-root="$install_root" \
+            --triplet="${{ matrix.triplet }}"
+          status="$install_root/vcpkg/status"
+          test -f "$status"
+          grep -F "Package: zstd" "$status"
+
+      - name: Verify exact tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git diff --exit-code
