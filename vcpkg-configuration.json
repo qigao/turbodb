@@ -3,8 +3,9 @@
     {
       "kind": "git",
       "repository": "https://github.com/qigao/vcpkg-cache",
-      "baseline": "9a3d7d837009cbcbd02be80d7b004d7b59ae21c5",
+      "baseline": "abca898740629005f56046667ab32c4af7044d3f",
       "packages": [
+        "libpq",
         "zstd"
       ]
     }
