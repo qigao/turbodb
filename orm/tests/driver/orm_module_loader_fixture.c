@@ -16,8 +16,16 @@ typedef struct fixture_module_context {
 typedef struct fixture_connection_context {
   fixture_module_context *module;
   uint32_t active_cursors;
+  uint32_t active_transactions;
   int live;
 } fixture_connection_context;
+
+typedef struct fixture_transaction_context {
+  fixture_connection_context *connection;
+  int committed;
+  int rolled_back;
+  int live;
+} fixture_transaction_context;
 
 typedef struct fixture_cursor_context {
   fixture_connection_context *connection;
@@ -28,6 +36,7 @@ typedef struct fixture_cursor_context {
 
 static fixture_module_context fixture_modules[4];
 static fixture_connection_context fixture_connections[4];
+static fixture_transaction_context fixture_transactions[4];
 static fixture_cursor_context fixture_cursors[8];
 static const uint8_t fixture_bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
     ORM_DRIVER_BUNDLE_ID_INIT;
@@ -248,11 +257,106 @@ static orm_status_t ORM_DRIVER_CALL fixture_execute_command(
   return ORM_STATUS_OK;
 }
 
+static void ORM_DRIVER_CALL fixture_transaction_destroy(void *context) {
+  fixture_transaction_context *transaction = context;
+  if (transaction == NULL || !transaction->live ||
+      transaction->connection == NULL) return;
+  if (transaction->connection->active_transactions == 0u) abort();
+  --transaction->connection->active_transactions;
+  memset(transaction, 0, sizeof(*transaction));
+}
+
+static orm_status_t ORM_DRIVER_CALL fixture_transaction_open_cursor(
+    void *context, const orm_driver_plan_view_v1 *plan,
+    const orm_driver_limits_v1 *limits, orm_driver_cursor_v1 *out,
+    orm_error_t *error) {
+  fixture_transaction_context *transaction = context;
+  if (transaction == NULL || !transaction->live)
+    return ORM_STATUS_INVALID_ARGUMENT;
+  return fixture_open_cursor(transaction->connection, plan, limits, out, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL fixture_transaction_execute_command(
+    void *context, const orm_driver_plan_view_v1 *plan,
+    const orm_driver_limits_v1 *limits, uint64_t *affected_rows,
+    orm_error_t *error) {
+  fixture_transaction_context *transaction = context;
+  if (transaction == NULL || !transaction->live)
+    return ORM_STATUS_INVALID_ARGUMENT;
+  return fixture_execute_command(
+      transaction->connection, plan, limits, affected_rows, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL fixture_transaction_commit(
+    void *context, orm_error_t *error) {
+  fixture_transaction_context *transaction = context;
+  if (transaction == NULL || !transaction->live ||
+      transaction->committed || transaction->rolled_back) {
+    fixture_error(error, ORM_STATUS_INVALID_STATE);
+    return ORM_STATUS_INVALID_STATE;
+  }
+  transaction->committed = 1;
+  fixture_error(error, ORM_STATUS_OK);
+  return ORM_STATUS_OK;
+}
+
+static orm_status_t ORM_DRIVER_CALL fixture_transaction_rollback(
+    void *context, orm_error_t *error) {
+  fixture_transaction_context *transaction = context;
+  if (transaction == NULL || !transaction->live ||
+      transaction->committed || transaction->rolled_back) {
+    fixture_error(error, ORM_STATUS_INVALID_STATE);
+    return ORM_STATUS_INVALID_STATE;
+  }
+  transaction->rolled_back = 1;
+  fixture_error(error, ORM_STATUS_OK);
+  return ORM_STATUS_OK;
+}
+
+static const orm_driver_transaction_ops_v1 fixture_transaction_ops = {
+    FIXTURE_HEADER(orm_driver_transaction_ops_v1),
+    fixture_transaction_destroy,
+    fixture_transaction_open_cursor,
+    fixture_transaction_execute_command,
+    fixture_transaction_commit,
+    fixture_transaction_rollback,
+    NULL, NULL, NULL};
+
+static orm_status_t ORM_DRIVER_CALL fixture_begin_transaction(
+    void *context, orm_isolation_t isolation,
+    orm_driver_transaction_v1 *out, orm_error_t *error) {
+  (void)isolation;
+  if (out != NULL) memset(out, 0, sizeof(*out));
+  fixture_connection_context *connection = context;
+  if (connection == NULL || !connection->live || out == NULL) {
+    fixture_error(error, ORM_STATUS_INVALID_ARGUMENT);
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  for (size_t i = 0u;
+       i < sizeof(fixture_transactions) / sizeof(fixture_transactions[0]);
+       ++i) {
+    if (!fixture_transactions[i].live) {
+      fixture_transactions[i].connection = connection;
+      fixture_transactions[i].live = 1;
+      ++connection->active_transactions;
+      out->header =
+          (orm_driver_header_v1)FIXTURE_HEADER(orm_driver_transaction_v1);
+      out->context = &fixture_transactions[i];
+      out->ops = (orm_driver_table_v1)FIXTURE_TABLE(&fixture_transaction_ops);
+      fixture_error(error, ORM_STATUS_OK);
+      return ORM_STATUS_OK;
+    }
+  }
+  fixture_error(error, ORM_STATUS_LIMIT_EXCEEDED);
+  return ORM_STATUS_LIMIT_EXCEEDED;
+}
+
 static void ORM_DRIVER_CALL fixture_destroy_connection(void *context) {
   fixture_connection_context *connection = context;
   if (connection == NULL || !connection->live || connection->module == NULL)
     return;
-  if (connection->active_cursors != 0u) abort();
+  if (connection->active_cursors != 0u ||
+      connection->active_transactions != 0u) abort();
   --connection->module->live_connections;
   memset(connection, 0, sizeof(*connection));
 }
@@ -260,7 +364,7 @@ static void ORM_DRIVER_CALL fixture_destroy_connection(void *context) {
 static const orm_driver_connection_ops_v1 fixture_connection_ops = {
     FIXTURE_HEADER(orm_driver_connection_ops_v1),
     fixture_destroy_connection, fixture_open_cursor,
-    fixture_execute_command, NULL};
+    fixture_execute_command, fixture_begin_transaction};
 
 static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
     void *context, const orm_config_t *config,
@@ -318,7 +422,7 @@ static const orm_driver_api_v1 fixture_api = {
     1u,
     0u,
     ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_INSERT |
-        ORM_DRIVER_CAP_INCREMENTAL_ROWS,
+        ORM_DRIVER_CAP_TRANSACTION | ORM_DRIVER_CAP_INCREMENTAL_ROWS,
     ORM_DRIVER_EXEC_CALLER_BLOCKING,
     FIXTURE_TABLE(&fixture_module_ops),
     fixture_create_connection,

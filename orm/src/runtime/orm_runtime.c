@@ -332,13 +332,14 @@ static const orm_row_cursor_ops runtime_cursor_ops = {
     runtime_cursor_destroy, runtime_cursor_configure_shape,
     runtime_cursor_column_count};
 
-static orm_status_t runtime_backend_open_cursor(
-    void *context, const orm_query_plan *plan, const orm_limits *limits,
-    orm_row_cursor *out_cursor, orm_error_t *error) {
+static orm_status_t runtime_driver_open_cursor(
+    void *native_context, orm_driver_open_cursor_fn open_cursor,
+    orm_runtime_driver *driver, const orm_query_plan *plan,
+    const orm_limits *limits, orm_row_cursor *out_cursor,
+    orm_error_t *error) {
   if (out_cursor != NULL) memset(out_cursor, 0, sizeof(*out_cursor));
-  orm_runtime_backend *backend = context;
-  if (backend == NULL || plan == NULL || limits == NULL ||
-      out_cursor == NULL || backend->ops.open_cursor == NULL)
+  if (native_context == NULL || open_cursor == NULL || driver == NULL ||
+      plan == NULL || limits == NULL || out_cursor == NULL)
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid runtime driver cursor open");
 
@@ -359,15 +360,15 @@ static orm_status_t runtime_backend_open_cursor(
   const orm_driver_limits_v1 driver_limits = runtime_driver_limits(limits);
   orm_driver_cursor_v1 native;
   memset(&native, 0, sizeof(native));
-  status = backend->ops.open_cursor(
-      backend->native.context, &view, &driver_limits, &native, error);
+  status = open_cursor(
+      native_context, &view, &driver_limits, &native, error);
   if (status != ORM_STATUS_OK) {
     free(cursor);
     return status;
   }
 
   status = orm_driver_validate_cursor_v1(
-      &native, (uint32_t)sizeof(native), backend->driver->capabilities, error);
+      &native, (uint32_t)sizeof(native), driver->capabilities, error);
   if (status != ORM_STATUS_OK) {
     /* A driver that reports successful creation with an invalid ownership
      * descriptor has violated the ABI. No unvalidated callback is invoked. */
@@ -376,7 +377,7 @@ static orm_status_t runtime_backend_open_cursor(
   }
 
   cursor->native = native;
-  cursor->execution_models = backend->driver->execution_models;
+  cursor->execution_models = driver->execution_models;
   {
     size_t cursor_ops_bytes = native.ops.bytes;
     if (cursor_ops_bytes > sizeof(cursor->ops))
@@ -389,13 +390,25 @@ static orm_status_t runtime_backend_open_cursor(
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
-static orm_status_t runtime_backend_execute_command(
+static orm_status_t runtime_backend_open_cursor(
     void *context, const orm_query_plan *plan, const orm_limits *limits,
+    orm_row_cursor *out_cursor, orm_error_t *error) {
+  orm_runtime_backend *backend = context;
+  if (backend == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver backend");
+  return runtime_driver_open_cursor(
+      backend->native.context, backend->ops.open_cursor, backend->driver,
+      plan, limits, out_cursor, error);
+}
+
+static orm_status_t runtime_driver_execute_command(
+    void *native_context, orm_driver_command_fn execute_command,
+    const orm_query_plan *plan, const orm_limits *limits,
     uint64_t *affected_rows, orm_error_t *error) {
   if (affected_rows != NULL) *affected_rows = 0u;
-  orm_runtime_backend *backend = context;
-  if (backend == NULL || plan == NULL || limits == NULL ||
-      affected_rows == NULL || backend->ops.execute_command == NULL)
+  if (native_context == NULL || execute_command == NULL ||
+      plan == NULL || limits == NULL || affected_rows == NULL)
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid runtime driver command execution");
 
@@ -405,22 +418,168 @@ static orm_status_t runtime_backend_execute_command(
   if (status != ORM_STATUS_OK) return status;
 
   const orm_driver_limits_v1 driver_limits = runtime_driver_limits(limits);
-  status = backend->ops.execute_command(
-      backend->native.context, &view, &driver_limits, affected_rows, error);
+  status = execute_command(
+      native_context, &view, &driver_limits, affected_rows, error);
   if (status != ORM_STATUS_OK) *affected_rows = 0u;
   return status;
 }
 
+static orm_status_t runtime_backend_execute_command(
+    void *context, const orm_query_plan *plan, const orm_limits *limits,
+    uint64_t *affected_rows, orm_error_t *error) {
+  orm_runtime_backend *backend = context;
+  if (backend == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver backend");
+  return runtime_driver_execute_command(
+      backend->native.context, backend->ops.execute_command,
+      plan, limits, affected_rows, error);
+}
+
+typedef struct orm_runtime_transaction {
+  orm_runtime_driver *driver;
+  orm_driver_transaction_v1 native;
+  orm_driver_transaction_ops_v1 ops;
+} orm_runtime_transaction;
+
+static void runtime_transaction_destroy(void *context) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL) return;
+  if (transaction->native.context != NULL)
+    transaction->ops.destroy(transaction->native.context);
+  free(transaction);
+}
+
+static orm_status_t runtime_transaction_open_cursor(
+    void *context, const orm_query_plan *plan, const orm_limits *limits,
+    orm_row_cursor *out_cursor, orm_error_t *error) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver transaction");
+  return runtime_driver_open_cursor(
+      transaction->native.context, transaction->ops.open_cursor,
+      transaction->driver, plan, limits, out_cursor, error);
+}
+
+static orm_status_t runtime_transaction_execute_command(
+    void *context, const orm_query_plan *plan, const orm_limits *limits,
+    uint64_t *affected_rows, orm_error_t *error) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver transaction");
+  return runtime_driver_execute_command(
+      transaction->native.context, transaction->ops.execute_command,
+      plan, limits, affected_rows, error);
+}
+
+static orm_status_t runtime_transaction_commit(
+    void *context, orm_error_t *error) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL || transaction->ops.commit == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver transaction commit");
+  return transaction->ops.commit(transaction->native.context, error);
+}
+
+static orm_status_t runtime_transaction_rollback(
+    void *context, orm_error_t *error) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL || transaction->ops.rollback == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver transaction rollback");
+  return transaction->ops.rollback(transaction->native.context, error);
+}
+
+static orm_status_t runtime_transaction_savepoint(
+    void *context, vstr name, orm_error_t *error) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL || transaction->ops.savepoint == NULL)
+    return runtime_result(error, ORM_STATUS_UNSUPPORTED,
+                          "driver does not support savepoints");
+  const orm_driver_bytes_v1 driver_name = {name.data, name.len};
+  return transaction->ops.savepoint(
+      transaction->native.context, driver_name, error);
+}
+
+static orm_status_t runtime_transaction_rollback_to_savepoint(
+    void *context, vstr name, orm_error_t *error) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL || transaction->ops.rollback_to_savepoint == NULL)
+    return runtime_result(error, ORM_STATUS_UNSUPPORTED,
+                          "driver does not support savepoints");
+  const orm_driver_bytes_v1 driver_name = {name.data, name.len};
+  return transaction->ops.rollback_to_savepoint(
+      transaction->native.context, driver_name, error);
+}
+
+static orm_status_t runtime_transaction_release_savepoint(
+    void *context, vstr name, orm_error_t *error) {
+  orm_runtime_transaction *transaction = context;
+  if (transaction == NULL || transaction->ops.release_savepoint == NULL)
+    return runtime_result(error, ORM_STATUS_UNSUPPORTED,
+                          "driver does not support savepoints");
+  const orm_driver_bytes_v1 driver_name = {name.data, name.len};
+  return transaction->ops.release_savepoint(
+      transaction->native.context, driver_name, error);
+}
+
+static const orm_transaction_backend_ops runtime_transaction_ops = {
+    sizeof(orm_transaction_backend_ops), ORM_TRANSACTION_BACKEND_OPS_ABI_VERSION,
+    runtime_transaction_destroy, runtime_transaction_open_cursor,
+    runtime_transaction_execute_command, runtime_transaction_commit,
+    runtime_transaction_rollback, runtime_transaction_savepoint,
+    runtime_transaction_rollback_to_savepoint,
+    runtime_transaction_release_savepoint};
+
 static orm_status_t runtime_backend_begin_transaction(
     void *context, orm_isolation_t isolation,
     orm_transaction_backend *out_transaction, orm_error_t *error) {
-  (void)context;
-  (void)isolation;
   if (out_transaction != NULL)
     memset(out_transaction, 0, sizeof(*out_transaction));
-  orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                "runtime driver transaction adapter is not implemented");
-  return ORM_STATUS_UNSUPPORTED;
+  orm_runtime_backend *backend = context;
+  if (backend == NULL || out_transaction == NULL ||
+      backend->ops.begin_transaction == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver transaction begin");
+
+  orm_runtime_transaction *transaction =
+      (orm_runtime_transaction *)calloc(1u, sizeof(*transaction));
+  if (transaction == NULL)
+    return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                          "allocate runtime driver transaction adapter");
+
+  orm_driver_transaction_v1 native;
+  memset(&native, 0, sizeof(native));
+  orm_status_t status = backend->ops.begin_transaction(
+      backend->native.context, isolation, &native, error);
+  if (status != ORM_STATUS_OK) {
+    free(transaction);
+    return status;
+  }
+
+  status = orm_driver_validate_transaction_v1(
+      &native, (uint32_t)sizeof(native), backend->driver->capabilities, error);
+  if (status != ORM_STATUS_OK) {
+    /* Successful creation with an invalid ownership descriptor is a driver ABI
+     * violation. Do not invoke an unvalidated destroy callback. */
+    free(transaction);
+    return status;
+  }
+
+  transaction->driver = backend->driver;
+  transaction->native = native;
+  {
+    size_t transaction_ops_bytes = native.ops.bytes;
+    if (transaction_ops_bytes > sizeof(transaction->ops))
+      transaction_ops_bytes = sizeof(transaction->ops);
+    memcpy(&transaction->ops, native.ops.data, transaction_ops_bytes);
+  }
+
+  out_transaction->ops = &runtime_transaction_ops;
+  out_transaction->context = transaction;
+  return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
 static const orm_backend_ops runtime_backend_ops = {

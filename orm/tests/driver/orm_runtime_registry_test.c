@@ -267,6 +267,56 @@ spec("runtime driver registry") {
     orm_runtime_release(runtime);
   }
 
+  it("keeps the module leased through a Driver transaction Publisher") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_transaction_t *transaction = NULL;
+    orm_query_t *query = NULL;
+    orm_config_t connection_config;
+    cflow_publisher command = {0};
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_transaction_begin(connection, ORM_ISOLATION_SERIALIZABLE,
+                                      &transaction, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_insert(connection, orm_view("rows"), &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow_in_transaction(
+                    query, transaction, &command, &error),
+                ORM_STATUS_OK);
+
+    orm_query_destroy(query);
+    query = NULL;
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    const cflow_step step =
+        cflow_publisher_resume(&command, NULL, &result);
+    check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(result.affected_rows, UINT64_C(3));
+    cflow_publisher_destroy(&command);
+
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
+    orm_transaction_destroy(transaction);
+    transaction = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
   it("keeps two runtimes using the same module independent") {
     orm_runtime_config_t config;
     orm_runtime_t *first = NULL;
