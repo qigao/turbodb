@@ -352,11 +352,16 @@ orm_status_t orm_driver_backend_plan_materialize(
     orm_error_t *error) {
   orm_driver_plan_metadata_ops_v1 metadata;
   orm_driver_plan_value_ops_v1 values;
-  orm_driver_plan_meta_v1 meta = {BRIDGE_HEADER(orm_driver_plan_meta_v1)};
-  orm_driver_ordering_v1 ordering = {
-      BRIDGE_HEADER(orm_driver_ordering_v1), {NULL, 0u}, 0u, 0u};
+  orm_driver_plan_meta_v1 meta;
+  orm_driver_ordering_v1 ordering;
   orm_limits limits;
   orm_status_t status;
+
+  memset(&meta, 0, sizeof(meta));
+  meta.header = (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_plan_meta_v1);
+  memset(&ordering, 0, sizeof(ordering));
+  ordering.header =
+      (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_ordering_v1);
 
   if (out_plan != NULL) memset(out_plan, 0, sizeof(*out_plan));
   if (view == NULL || driver_limits == NULL || out_plan == NULL ||
@@ -436,10 +441,13 @@ orm_status_t orm_driver_backend_plan_materialize(
   }
 
   for (uint64_t i = 0u; i < meta.assignment_count; ++i) {
-    orm_driver_assignment_v1 input = {
-        BRIDGE_HEADER(orm_driver_assignment_v1), {NULL, 0u},
-        {BRIDGE_HEADER(orm_driver_value_v1), 0u, 0u, {0}}};
+    orm_driver_assignment_v1 input;
     orm_assignment owned;
+    memset(&input, 0, sizeof(input));
+    input.header =
+        (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_assignment_v1);
+    input.value.header =
+        (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_value_v1);
     memset(&owned, 0, sizeof(owned));
     status = values.assignment_at(view->context, i, &input, error);
     if (status == ORM_STATUS_OK &&
@@ -465,10 +473,13 @@ orm_status_t orm_driver_backend_plan_materialize(
   }
 
   for (uint64_t i = 0u; i < meta.predicate_count; ++i) {
-    orm_driver_predicate_v1 input = {
-        BRIDGE_HEADER(orm_driver_predicate_v1), {NULL, 0u},
-        0u, 0u, {BRIDGE_HEADER(orm_driver_value_v1), 0u, 0u, {0}}};
+    orm_driver_predicate_v1 input;
     orm_predicate owned;
+    memset(&input, 0, sizeof(input));
+    input.header =
+        (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_predicate_v1);
+    input.value.header =
+        (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_value_v1);
     memset(&owned, 0, sizeof(owned));
     status = values.predicate_at(view->context, i, &input, error);
     if (status == ORM_STATUS_OK &&
@@ -498,9 +509,11 @@ orm_status_t orm_driver_backend_plan_materialize(
   }
 
   for (uint64_t i = 0u; i < meta.raw_parameter_count; ++i) {
-    orm_driver_value_v1 input = {
-        BRIDGE_HEADER(orm_driver_value_v1), 0u, 0u, {0}};
+    orm_driver_value_v1 input;
     orm_owned_value owned;
+    memset(&input, 0, sizeof(input));
+    input.header =
+        (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_value_v1);
     memset(&owned, 0, sizeof(owned));
     status = values.raw_parameter_at(view->context, i, &input, error);
     if (status == ORM_STATUS_OK)
