@@ -516,6 +516,32 @@ static void orm_query_release_execution(void *context) {
   orm_query_action(query, orm_owner_release_dependent(&query->owner));
 }
 
+orm_status_t orm_query_acquire_driver_lease(
+    const orm_query_plan *plan, void **out_lease, orm_error_t *error) {
+  orm_query_t *query;
+  orm_status_t status;
+  if (out_lease != NULL) *out_lease = NULL;
+  if (plan == NULL || out_lease == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                  "invalid driver lifetime parent");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  query = (orm_query_t *)(void *)((const unsigned char *)plan -
+                                   offsetof(orm_query_t, plan));
+  status = orm_owner_admit(&query->owner);
+  if (status == ORM_STATUS_OK)
+    *out_lease = query;
+  orm_error_set(error, status,
+                status == ORM_STATUS_OK ? NULL :
+                "query cannot admit a driver operation lease");
+  return status;
+}
+
+void orm_query_release_driver_lease(void *lease) {
+  if (lease != NULL)
+    orm_query_release_execution(lease);
+}
+
 orm_status_t ORM_C_CALL orm_connection_close(orm_connection_t *connection,
                                              orm_error_t *error) {
   orm_owner_action action = ORM_OWNER_KEEP;
@@ -1130,9 +1156,35 @@ orm_status_t ORM_C_CALL orm_connect(const orm_config_t *config,
                                      out_connection, error);
 }
 
+typedef struct orm_factory_adapter_context {
+  orm_backend_factory_v1 factory;
+} orm_factory_adapter_context;
+
+static orm_status_t orm_factory_adapter(
+    const orm_config_t *config, const orm_limits *limits, void *context,
+    orm_backend *out_backend, orm_error_t *error) {
+  orm_factory_adapter_context *adapter = context;
+  return adapter->factory(config, limits, out_backend, error);
+}
+
 orm_status_t ORM_C_CALL orm_connect_with_factory_v1(
     const orm_config_t *config, orm_backend_factory_v1 factory,
     orm_connection_t **out_connection, orm_error_t *error) {
+  if (factory == NULL) {
+    if (out_connection != NULL) *out_connection = NULL;
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                  "invalid ORM connection factory arguments");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  orm_factory_adapter_context adapter = {factory};
+  return orm_connect_with_factory_context_v1(
+      config, orm_factory_adapter, &adapter, out_connection, error);
+}
+
+orm_status_t orm_connect_with_factory_context_v1(
+    const orm_config_t *config, orm_backend_factory_context_v1 factory,
+    void *factory_context, orm_connection_t **out_connection,
+    orm_error_t *error) {
   orm_connection_t *connection;
   orm_status_t status;
   if (out_connection != NULL)
@@ -1150,7 +1202,8 @@ orm_status_t ORM_C_CALL orm_connect_with_factory_v1(
   }
   status = orm_limits_from_config(config, &connection->limits, error);
   if (status == ORM_STATUS_OK)
-    status = factory(config, &connection->limits, &connection->backend, error);
+    status = factory(config, &connection->limits, factory_context,
+                     &connection->backend, error);
   if (status != ORM_STATUS_OK) {
     free(connection);
     return status;

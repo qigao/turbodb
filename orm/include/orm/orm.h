@@ -74,7 +74,15 @@ enum {
   ORM_STATUS_COMMIT_UNKNOWN = 16,
   /* Final native cleanup failed. The owner is quarantined; this is not a
    * retryable close result and resources may remain pinned until process exit. */
-  ORM_STATUS_CLEANUP_FAILED = 17
+  ORM_STATUS_CLEANUP_FAILED = 17,
+  ORM_STATUS_DRIVER_NOT_REGISTERED = 18,
+  ORM_STATUS_DRIVER_ALREADY_REGISTERED = 19,
+  ORM_STATUS_DRIVER_MODULE_NOT_FOUND = 20,
+  /* The explicit module file exists but the OS loader rejected it, including
+   * unresolved native dependencies or an invalid module image. */
+  ORM_STATUS_DRIVER_LOAD_ERROR = 21,
+  ORM_STATUS_DRIVER_ENTRY_MISSING = 22,
+  ORM_STATUS_DRIVER_ID_MISMATCH = 23
 };
 
 typedef int32_t orm_value_kind_t;

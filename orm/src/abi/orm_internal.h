@@ -188,6 +188,10 @@ typedef orm_status_t (*orm_backend_factory_v1)(
     const orm_config_t *config, const orm_limits *limits,
     orm_backend *out_backend, orm_error_t *error);
 
+typedef orm_status_t (*orm_backend_factory_context_v1)(
+    const orm_config_t *config, const orm_limits *limits, void *context,
+    orm_backend *out_backend, orm_error_t *error);
+
 bool orm_query_returns_rows(const orm_query_plan *plan);
 
 ORM_C_API void orm_error_set(orm_error_t *error, orm_status_t status,
@@ -199,6 +203,17 @@ const orm_option_t *orm_option_find(const orm_config_t *config,
 ORM_C_API orm_status_t ORM_C_CALL orm_connect_with_factory_v1(
     const orm_config_t *config, orm_backend_factory_v1 factory,
     orm_connection_t **out_connection, orm_error_t *error);
+orm_status_t orm_connect_with_factory_context_v1(
+    const orm_config_t *config, orm_backend_factory_context_v1 factory,
+    void *factory_context, orm_connection_t **out_connection,
+    orm_error_t *error);
+
+/* Driver host lifetime bridge: parent is the exact frozen query plan token
+ * supplied through orm_driver_plan_view_v1.context. These helpers acquire and
+ * release the same #28 query dependent lease; they do not create a registry. */
+orm_status_t orm_query_acquire_driver_lease(
+    const orm_query_plan *plan, void **out_lease, orm_error_t *error);
+void orm_query_release_driver_lease(void *lease);
 
 orm_status_t orm_plan_init(orm_query_plan *plan, orm_query_kind kind,
                            vstr input, const orm_limits *limits,

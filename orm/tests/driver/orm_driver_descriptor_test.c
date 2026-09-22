@@ -8,7 +8,7 @@
 #define TABLE(p) (orm_driver_table_v1){(p), sizeof(*(p)), 0u}
 #define END(T, field) ((uint32_t)(offsetof(T, field) + sizeof(((T *)0)->field)))
 static uint32_t callback_calls;
-static const uint8_t bundle[ORM_DRIVER_BUNDLE_ID_BYTES] = {17u, 29u, 43u};
+static const uint8_t bundle[ORM_DRIVER_BUNDLE_ID_BYTES] = ORM_DRIVER_BUNDLE_ID_INIT;
 static const orm_driver_bytes_v1 driver_id = {"contract_fixture", 16u};
 
 static orm_status_t ORM_DRIVER_CALL trap_initialize(const orm_driver_host_v1 *h, void **o, orm_error_t *e) {
