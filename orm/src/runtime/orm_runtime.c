@@ -261,6 +261,10 @@ static void runtime_finish_pending(
 
 static void runtime_release_last(orm_runtime_t *runtime);
 
+static void runtime_drop_dependent(orm_runtime_t *runtime) {
+  runtime_drop_dependent(runtime);
+}
+
 static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
   orm_driver_limits_v1 out;
   memset(&out, 0, sizeof(out));
@@ -713,7 +717,7 @@ static orm_status_t runtime_backend_factory(
   status = factory->driver->create_connection(
       factory->driver->module_context, config, &driver_limits, &native, error);
   if (status != ORM_STATUS_OK) {
-    runtime_release_dependent(factory->runtime);
+    runtime_drop_dependent(factory->runtime);
     return status;
   }
 
@@ -722,7 +726,7 @@ static orm_status_t runtime_backend_factory(
   if (status != ORM_STATUS_OK) {
     if (native.context != NULL)
       factory->driver->connection_ops.destroy(native.context);
-    runtime_release_dependent(factory->runtime);
+    runtime_drop_dependent(factory->runtime);
     return status;
   }
 
@@ -730,7 +734,7 @@ static orm_status_t runtime_backend_factory(
       (orm_runtime_backend *)calloc(1u, sizeof(*backend));
   if (backend == NULL) {
     factory->driver->connection_ops.destroy(native.context);
-    runtime_release_dependent(factory->runtime);
+    runtime_drop_dependent(factory->runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime driver connection adapter");
   }
