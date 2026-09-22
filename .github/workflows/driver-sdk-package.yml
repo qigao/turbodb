@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  packages: read
 concurrency:
   group: driver-sdk-package-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -50,6 +51,14 @@ jobs:
           fetch-depth: 1
           path: .ci-salts-utils
           persist-credentials: false
+      - name: Configure shared vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Restore shared re2c binary
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
       - name: Check CI provenance regression
         shell: pwsh
         run: python -m unittest discover -s orm/tests/driver -p test_package_provenance.py -v
@@ -119,16 +128,7 @@ jobs:
           "DRIVER_SDK_VCPKG_REVISION=$revision" >> $env:GITHUB_ENV
           Write-Output "vcpkg cache identity: root=$root revision=$revision"
           if (-not $env:ImageOS -or -not $env:ImageVersion) { throw 'runner image identity is missing' }
-          $cache = Join-Path $env:GITHUB_WORKSPACE '.ci-vcpkg-cache'
-          New-Item -ItemType Directory -Force -Path $cache | Out-Null
-          "VCPKG_BINARY_SOURCES=clear;files,$cache,readwrite" >> $env:GITHUB_ENV
           "key=$env:ImageOS-$env:ImageVersion-$revision" >> $env:GITHUB_OUTPUT
-      - name: Restore vcpkg binary packages
-        id: cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-vcpkg-cache
-          key: driver-sdk-vcpkg-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}-${{ hashFiles('.ci-salts/vcpkg.json', '.ci-salts/vcpkg-configuration.json', '.ci-salts/vcpkg-ports/**') }}
       - name: Restore Salts master package
         id: salts-package-cache
         uses: actions/cache/restore@v4
@@ -143,54 +143,14 @@ jobs:
         with:
           path: external/pkgs/salts-utils/${{ matrix.config }}
           key: driver-sdk-salts-utils-master-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}-${{ steps.deps.outputs.salts_utils }}
-      - name: Restore re2c tool
-        id: re2c-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: external/tools/re2c
-          key: driver-sdk-re2c-v1-${{ runner.os }}-${{ runner.arch }}-4.6
-      - name: Install Linux dependency build prerequisites on cache miss
-        if: runner.os == 'Linux' && (steps.salts-package-cache.outputs.cache-hit != 'true' || steps.salts-utils-package-cache.outputs.cache-hit != 'true' || steps.re2c-cache.outputs.cache-hit != 'true')
+      - name: Install Linux dependency build prerequisites on package cache miss
+        if: runner.os == 'Linux' && (steps.salts-package-cache.outputs.cache-hit != 'true' || steps.salts-utils-package-cache.outputs.cache-hit != 'true')
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y nasm curl xz-utils
-      - name: Build re2c tool on Linux cache miss
-        if: runner.os == 'Linux' && steps.re2c-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: .github/scripts/install-re2c.ps1
-      - name: Build re2c tool on Windows cache miss
-        if: runner.os == 'Windows' && steps.re2c-cache.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          pwsh -NoLogo -NoProfile -File .github\scripts\install-re2c.ps1
-          if errorlevel 1 exit /b 1
-      - name: Save re2c tool
-        if: steps.re2c-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: external/tools/re2c
-          key: ${{ steps.re2c-cache.outputs.cache-primary-key }}
-      - name: Activate re2c tool
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:GITHUB_WORKSPACE 'external/tools/re2c'
-          $suffix = if ($IsWindows) { '.exe' } else { '' }
-          $exe = Join-Path $root ("bin/re2c" + $suffix)
-          if (-not (Test-Path -LiteralPath $exe)) { throw 'cached re2c executable is missing' }
-          $version = (& $exe --version).Trim()
-          if ($version -cne 're2c 4.6') { throw "unexpected cached re2c version: $version" }
-          foreach ($file in @('share/re2c/stdlib/unicode_properties.re', 'share/re2c/stdlib/unicode_categories.re')) {
-            if (-not (Test-Path -LiteralPath (Join-Path $root $file))) {
-              throw "cached re2c standard library is missing: $file"
-            }
-          }
-          "RE2C_ROOT=$root" >> $env:GITHUB_ENV
-          (Join-Path $root 'bin') >> $env:GITHUB_PATH
+          sudo apt-get install -y nasm
+
       - name: Build or reuse Salts master and test SDK on Linux
         if: runner.os == 'Linux'
         env:
@@ -245,7 +205,7 @@ jobs:
             $item = $matches[0]
             $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
             $item.environment.VCPKG_ROOT = $env:DRIVER_SDK_VCPKG_ROOT
-            $item.environment.RE2C_ROOT = "$env:GITHUB_WORKSPACE/external/tools/re2c"
+            $item.environment.RE2C_ROOT = $env:RE2C_ROOT
             if ($name -eq 'win-toolchain') {
               $item.environment.PROJECT_ROOT = $env:GITHUB_WORKSPACE
             }
@@ -295,7 +255,6 @@ jobs:
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          set "RE2C_ROOT=%GITHUB_WORKSPACE%\external\tools\re2c"
           set "SALTS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts\${{ matrix.config }}"
           set "SALTS_UTILS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts-utils\${{ matrix.config }}"
           set "SALTS_UTILS_PROFILE=win-release-user"
@@ -497,12 +456,6 @@ jobs:
             echo "Runtime-loadable MODULE was linked with DF_1_NOOPEN" >&2
             exit 1
           fi
-      - name: Save completed vcpkg binary packages
-        if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .ci-vcpkg-cache
-          key: ${{ steps.cache.outputs.cache-primary-key }}
       - name: Keep complete package evidence
         if: always()
         uses: actions/upload-artifact@v4
