@@ -404,7 +404,13 @@ spec("Driver backend DTO bridge") {
                     cursor.context, &reader, &step, &error),
                 ORM_STATUS_OK);
     check_equal(step.kind, ORM_DRIVER_STEP_ROW_AND_DONE);
-    check_true(cserde_reader_valid(&reader));
+    check_not_null(reader.ops);
+    check_not_null(reader.context);
+    check_equal(reader.state, CSERDE_READER_READY);
+    cserde_token token;
+    memset(&token, 0, sizeof(token));
+    check_equal(cserde_reader_next(&reader, &token), CSERDE_DONE);
+    check_equal(reader.state, CSERDE_READER_DONE);
 
     uint64_t columns = 0u;
     check_equal(cursor_ops->column_count(
