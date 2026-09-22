@@ -357,6 +357,8 @@ orm_status_t orm_driver_backend_plan_materialize(
   orm_limits limits;
   orm_status_t status;
 
+  memset(&metadata, 0, sizeof(metadata));
+  memset(&values, 0, sizeof(values));
   memset(&meta, 0, sizeof(meta));
   meta.header = (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_plan_meta_v1);
   memset(&ordering, 0, sizeof(ordering));
