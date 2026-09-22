@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: driver-sdk-package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   package:
     name: Installed SDK (${{ matrix.os }}, ${{ matrix.config }})
@@ -36,35 +39,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: c4197712261a563ed7e238152b34cb50a2ef98a9
+          ref: master
+          fetch-depth: 1
           path: .ci-salts
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 05453ea6802de5d78a2e3a992f7373b3bf348c34
+          ref: master
+          fetch-depth: 1
           path: .ci-salts-utils
           persist-credentials: false
       - name: Check CI provenance regression
         shell: pwsh
         run: python -m unittest discover -s orm/tests/driver -p test_package_provenance.py -v
-      - name: Set up Linux tools
+      - name: Set up Linux toolchain identity
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y nasm curl xz-utils
           test -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
-          bash .ci-salts-utils/cmake/ci/install-re2c.sh
-      - name: Set up Windows tools
+      - name: Set up Windows toolchain identity
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          choco install re2c -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 're2c installation failed' }
           $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
           if (-not (Test-Path -LiteralPath $toolchain)) { throw 'vcpkg toolchain is missing' }
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -72,6 +72,40 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
           "VSINSTALL=$vs" >> $env:GITHUB_ENV
           "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+      - name: Verify master dependencies and compute content identity
+        id: deps
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Assert-Master([string]$repo, [string]$name) {
+            $branch = git -C $repo branch --show-current
+            if ($LASTEXITCODE -ne 0 -or $branch -cne 'master') {
+              throw "$name must be checked out from master"
+            }
+            git -C $repo diff --exit-code
+            if ($LASTEXITCODE -ne 0) { throw "$name master checkout is dirty" }
+          }
+          function Get-TrackedContentDigest([string]$repo) {
+            $files = @(git -c core.quotepath=false -C $repo ls-files | Sort-Object)
+            if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) {
+              throw "cannot enumerate tracked dependency files"
+            }
+            $hash = [System.Security.Cryptography.IncrementalHash]::CreateHash(
+              [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+            foreach ($relative in $files) {
+              $normalized = $relative.Replace('\', '/')
+              $nameBytes = [System.Text.Encoding]::UTF8.GetBytes($normalized + "`n")
+              $hash.AppendData($nameBytes)
+              $hash.AppendData([System.IO.File]::ReadAllBytes((Join-Path $repo $relative)))
+            }
+            $bytes = $hash.GetHashAndReset()
+            $hash.Dispose()
+            return -join ($bytes | ForEach-Object { $_.ToString('x2') })
+          }
+          Assert-Master '.ci-salts' 'Salts'
+          Assert-Master '.ci-salts-utils' 'SaltsUtils'
+          "salts=$(Get-TrackedContentDigest '.ci-salts')" >> $env:GITHUB_OUTPUT
+          "salts_utils=$(Get-TrackedContentDigest '.ci-salts-utils')" >> $env:GITHUB_OUTPUT
       - name: Record exact dependency cache identity
         id: identity
         shell: pwsh
@@ -95,16 +129,54 @@ jobs:
         with:
           path: .ci-vcpkg-cache
           key: driver-sdk-vcpkg-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}-${{ hashFiles('.ci-salts/vcpkg.json', '.ci-salts/vcpkg-configuration.json', '.ci-salts/vcpkg-ports/**') }}
-      - name: Build real Salts package and test SDK on Linux
-        if: runner.os == 'Linux'
+      - name: Restore Salts master package
+        id: salts-package-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            external/pkgs/salts/${{ matrix.config }}
+            .ci-salts/vcpkg_installed
+          key: driver-sdk-salts-master-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}
+      - name: Restore SaltsUtils master package
+        id: salts-utils-package-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: external/pkgs/salts-utils/${{ matrix.config }}
+          key: driver-sdk-salts-utils-master-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}-${{ steps.deps.outputs.salts_utils }}
+      - name: Install Linux dependency build tools on cache miss
+        if: runner.os == 'Linux' && (steps.salts-package-cache.outputs.cache-hit != 'true' || steps.salts-utils-package-cache.outputs.cache-hit != 'true')
         shell: bash
         run: |
           set -euo pipefail
-          python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config '${{ matrix.config }}'
-      - name: Build real Salts package and test SDK on Windows
+          sudo apt-get update
+          sudo apt-get install -y nasm curl xz-utils
+          if [[ '${{ steps.salts-utils-package-cache.outputs.cache-hit }}' != 'true' ]]; then
+            bash .ci-salts-utils/cmake/ci/install-re2c.sh
+          fi
+      - name: Install Windows SaltsUtils build tool on cache miss
+        if: runner.os == 'Windows' && steps.salts-utils-package-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install re2c -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 're2c installation failed' }
+      - name: Build or reuse Salts master and test SDK on Linux
+        if: runner.os == 'Linux'
+        env:
+          SALTS_SOURCE_DIGEST: ${{ steps.deps.outputs.salts }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          reuse=()
+          if [[ '${{ steps.salts-package-cache.outputs.cache-hit }}' == 'true' ]]; then
+            reuse+=(--reuse-salts-install)
+          fi
+          python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config '${{ matrix.config }}' "${reuse[@]}"
+      - name: Build or reuse Salts master and test SDK on Windows
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
           VCPKG_DISABLE_METRICS: '1'
+          SALTS_SOURCE_DIGEST: ${{ steps.deps.outputs.salts }}
         if: runner.os == 'Windows'
         shell: cmd
         run: |
@@ -113,15 +185,24 @@ jobs:
           echo VsDevCmd selected VCPKG_ROOT=%VCPKG_ROOT%
           rem Keep the explicitly selected runner toolchain used by the cache key.
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}"
-      - name: Adapt pinned SaltsUtils preset paths for this runner
+          set "REUSE_SALTS="
+          if "${{ steps.salts-package-cache.outputs.cache-hit }}"=="true" set "REUSE_SALTS=--reuse-salts-install"
+          python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}" %REUSE_SALTS%
+      - name: Save Salts master package
+        if: steps.salts-package-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            external/pkgs/salts/${{ matrix.config }}
+            .ci-salts/vcpkg_installed
+          key: ${{ steps.salts-package-cache.outputs.cache-primary-key }}
+      - name: Adapt SaltsUtils master preset paths for this runner
+        if: steps.salts-utils-package-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $source = Join-Path $env:GITHUB_WORKSPACE '.ci-salts-utils'
           $evidence = Join-Path $env:GITHUB_WORKSPACE 'evidence/salts-utils'
-          $head = git -C $source rev-parse HEAD
-          if ($LASTEXITCODE -ne 0 -or $head -cne '05453ea6802de5d78a2e3a992f7373b3bf348c34') { throw 'SaltsUtils revision mismatch' }
           git -C $source diff --exit-code
           if ($LASTEXITCODE -ne 0) { throw 'SaltsUtils checkout is not clean before path adaptation' }
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
@@ -142,9 +223,9 @@ jobs:
           git -C $source diff -- CMakeUserPresets.json > "$evidence/ci-paths.diff"
           if ($LASTEXITCODE -ne 0) { throw 'Cannot record SaltsUtils path adaptation' }
           Copy-Item -LiteralPath $path -Destination "$evidence/CMakeUserPresets.json"
-          $head | Set-Content -LiteralPath "$evidence/head.txt" -Encoding utf8NoBOM
-      - name: Build pinned SaltsUtils package on Linux
-        if: runner.os == 'Linux'
+          'master' | Set-Content -LiteralPath "$evidence/ref.txt" -Encoding utf8NoBOM
+      - name: Build SaltsUtils master package on Linux
+        if: runner.os == 'Linux' && steps.salts-utils-package-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -157,7 +238,6 @@ jobs:
           fi
           salts_utils_root="$GITHUB_WORKSPACE/external/pkgs/salts-utils/$config"
           evidence="$GITHUB_WORKSPACE/evidence/salts-utils"
-          test "$(git -C .ci-salts-utils rev-parse HEAD)" = 05453ea6802de5d78a2e3a992f7373b3bf348c34
           cd .ci-salts-utils
           # Keep the existing dependency test/sanitizer policy; inherit package
           # features, toolchain, compiler flags and tool runtime paths upstream.
@@ -173,12 +253,12 @@ jobs:
           test ! -e "$salts_utils_root/lib/cmake/DataBind"
           echo "SALTS_UTILS_ROOT=$salts_utils_root" >> "$GITHUB_ENV"
           mkdir -p "$GITHUB_WORKSPACE/evidence/core"
-          git rev-parse HEAD > "$GITHUB_WORKSPACE/evidence/core/salts-utils-head.txt"
+          printf '%s\n' master > "$GITHUB_WORKSPACE/evidence/core/salts-utils-ref.txt"
 
-      - name: Build pinned SaltsUtils package on Windows
+      - name: Build SaltsUtils master package on Windows
         env:
           VCPKG_DISABLE_METRICS: '1'
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.salts-utils-package-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
@@ -202,7 +282,7 @@ jobs:
           if errorlevel 1 (type evidence\salts-utils\re2c-tools.log & exit /b 1)
           where curl.exe >> evidence\salts-utils\re2c-tools.log 2>&1
           if errorlevel 1 (type evidence\salts-utils\re2c-tools.log & exit /b 1)
-          rem Rebuild the pinned host tool; an existing executable is not provenance.
+          rem Rebuild the master-compatible host tool; an existing executable is not provenance.
           if exist "%RE2C_WORK%" rmdir /s /q "%RE2C_WORK%"
           if errorlevel 1 exit /b 1
           if exist "%RE2C_ROOT%" rmdir /s /q "%RE2C_ROOT%"
@@ -233,9 +313,7 @@ jobs:
           type evidence\salts-utils\re2c-version.log
           if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_properties.re" exit /b 1
           if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_categories.re" exit /b 1
-          echo [re2c] Ready for the pinned SaltsUtils build
-          for /f %%i in ('git -C .ci-salts-utils rev-parse HEAD') do set "SALTS_UTILS_HEAD=%%i"
-          if not "%SALTS_UTILS_HEAD%"=="05453ea6802de5d78a2e3a992f7373b3bf348c34" exit /b 1
+          echo [re2c] Ready for the SaltsUtils master build
           if not exist evidence\salts-utils mkdir evidence\salts-utils
           rem Use upstream configure/build/install presets as a unit: build
           rem presets inherit the Salts/vcpkg DLL paths used by tbe_compiler.
@@ -256,7 +334,28 @@ jobs:
           if exist "%SALTS_UTILS_ROOT%\lib\cmake\DataBind" exit /b 1
           echo SALTS_UTILS_ROOT=%SALTS_UTILS_ROOT%>>"%GITHUB_ENV%"
           if not exist evidence\core mkdir evidence\core
-          echo %SALTS_UTILS_HEAD%>evidence\core\salts-utils-head.txt
+          echo master>evidence\core\salts-utils-ref.txt
+
+      - name: Use SaltsUtils master package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE "external/pkgs/salts-utils/${{ matrix.config }}"
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake'))) {
+            throw 'SaltsUtils master package is missing or incomplete'
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'include/data_bind_native.h'))) {
+            throw 'SaltsUtils master public headers are incomplete'
+          }
+          "SALTS_UTILS_ROOT=$root" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force -Path evidence/core | Out-Null
+          'master' | Set-Content -LiteralPath evidence/core/salts-utils-ref.txt -Encoding utf8NoBOM
+      - name: Save SaltsUtils master package
+        if: steps.salts-utils-package-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: external/pkgs/salts-utils/${{ matrix.config }}
+          key: ${{ steps.salts-utils-package-cache.outputs.cache-primary-key }}
 
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
