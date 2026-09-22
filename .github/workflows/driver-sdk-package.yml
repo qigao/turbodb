@@ -380,8 +380,8 @@ jobs:
           cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/core/configure.log
           cp "$build/compile_commands.json" evidence/core/compile_commands.json
           cp "$build/CMakeCache.txt" evidence/core/CMakeCache.txt
-          cmake --build --preset "$profile" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 2>&1 | tee evidence/core/build.log
-          ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_driver_backend_bridge|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
+          cmake --build --preset "$profile" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_driver_backend_adapter_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 2>&1 | tee evidence/core/build.log
+          ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_driver_backend_bridge|orm_driver_backend_adapter|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
           ctest --preset "$profile" -R '^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ownership.log
       - name: Build and test native plan adapter on Windows
         env:
@@ -406,9 +406,9 @@ jobs:
           if errorlevel 1 exit /b 1
           copy "%BUILD%\CMakeCache.txt" evidence\core\CMakeCache.txt
           if errorlevel 1 exit /b 1
-          cmake --build --preset "%PROFILE%" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 > evidence\core\build.log 2>&1
+          cmake --build --preset "%PROFILE%" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_driver_backend_adapter_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 > evidence\core\build.log 2>&1
           if errorlevel 1 (type evidence\core\build.log & exit /b 1)
-          ctest --preset "%PROFILE%" -R "^(orm_driver_plan_view|orm_driver_backend_bridge|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$" --verbose --no-tests=error > evidence\core\ctest.log 2>&1
+          ctest --preset "%PROFILE%" -R "^(orm_driver_plan_view|orm_driver_backend_bridge|orm_driver_backend_adapter|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$" --verbose --no-tests=error > evidence\core\ctest.log 2>&1
           if errorlevel 1 (type evidence\core\ctest.log & exit /b 1)
           type evidence\core\ctest.log
           ctest --preset "%PROFILE%" -R "^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$" --verbose --no-tests=error > evidence\core\ownership.log 2>&1

@@ -558,3 +558,601 @@ fail:
   orm_driver_backend_plan_destroy(out_plan);
   return status;
 }
+
+
+typedef struct bridge_connection {
+  orm_backend backend;
+} bridge_connection;
+
+typedef struct bridge_cursor {
+  orm_row_cursor cursor;
+} bridge_cursor;
+
+typedef struct bridge_transaction {
+  orm_transaction_backend transaction;
+} bridge_transaction;
+
+static int bridge_backend_valid(const orm_backend *backend) {
+  return backend != NULL && backend->context != NULL &&
+         backend->ops != NULL &&
+         backend->ops->abi_version == ORM_BACKEND_OPS_ABI_VERSION &&
+         backend->ops->struct_size >= sizeof(*backend->ops) &&
+         backend->ops->destroy != NULL &&
+         backend->ops->open_cursor != NULL &&
+         backend->ops->execute_command != NULL &&
+         backend->ops->begin_transaction != NULL;
+}
+
+static int bridge_row_cursor_valid(const orm_row_cursor *cursor) {
+  return cursor != NULL && cursor->context != NULL &&
+         cursor->ops != NULL &&
+         cursor->ops->abi_version == ORM_ROW_CURSOR_OPS_ABI_VERSION &&
+         cursor->ops->struct_size >= sizeof(*cursor->ops) &&
+         cursor->ops->next != NULL &&
+         cursor->ops->cancel != NULL &&
+         cursor->ops->destroy != NULL;
+}
+
+static int bridge_transaction_valid(
+    const orm_transaction_backend *transaction) {
+  return transaction != NULL && transaction->context != NULL &&
+         transaction->ops != NULL &&
+         transaction->ops->abi_version ==
+             ORM_TRANSACTION_BACKEND_OPS_ABI_VERSION &&
+         transaction->ops->struct_size >= sizeof(*transaction->ops) &&
+         transaction->ops->destroy != NULL &&
+         transaction->ops->open_cursor != NULL &&
+         transaction->ops->execute_command != NULL &&
+         transaction->ops->commit != NULL &&
+         transaction->ops->rollback != NULL;
+}
+
+static void bridge_backend_dispose(orm_backend *backend) {
+  if (backend == NULL) return;
+  if (backend->context != NULL && backend->ops != NULL &&
+      backend->ops->destroy != NULL)
+    backend->ops->destroy(backend->context);
+  memset(backend, 0, sizeof(*backend));
+}
+
+static void bridge_row_cursor_dispose(orm_row_cursor *cursor) {
+  if (cursor == NULL) return;
+  if (cursor->context != NULL && cursor->ops != NULL &&
+      cursor->ops->destroy != NULL)
+    cursor->ops->destroy(cursor->context);
+  memset(cursor, 0, sizeof(*cursor));
+}
+
+static void bridge_transaction_dispose(
+    orm_transaction_backend *transaction) {
+  if (transaction == NULL) return;
+  if (transaction->context != NULL && transaction->ops != NULL &&
+      transaction->ops->destroy != NULL)
+    transaction->ops->destroy(transaction->context);
+  memset(transaction, 0, sizeof(*transaction));
+}
+
+static orm_status_t bridge_driver_limits(
+    const orm_driver_limits_v1 *input, orm_limits *out,
+    orm_error_t *error) {
+  return bridge_limits(input, out, error);
+}
+
+static orm_status_t bridge_step_begin(
+    orm_driver_step_v1 *step, orm_error_t *error) {
+  orm_driver_header_v1 header;
+  if (step == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "missing Driver cursor step output");
+  memcpy(&header, &step->header, sizeof(header));
+  if (!bridge_header_valid(&header, sizeof(*step)))
+    return bridge_result(error, ORM_STATUS_ABI_MISMATCH,
+                         "invalid Driver cursor step output");
+  memset(step, 0, sizeof(*step));
+  step->header = header;
+  return ORM_STATUS_OK;
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_cursor_next(
+    void *context, cserde_reader *reader,
+    orm_driver_step_v1 *out_step, orm_error_t *error) {
+  bridge_cursor *wrapper = (bridge_cursor *)context;
+  orm_status_t status = bridge_step_begin(out_step, error);
+  if (status != ORM_STATUS_OK)
+    return status;
+  if (wrapper == NULL || !bridge_row_cursor_valid(&wrapper->cursor) ||
+      reader == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend cursor next");
+
+  const orm_row_cursor_step step =
+      wrapper->cursor.ops->next(wrapper->cursor.context, reader);
+  switch (step.kind) {
+    case ORM_ROW_CURSOR_ROW:
+      out_step->kind = ORM_DRIVER_STEP_ROW;
+      break;
+    case ORM_ROW_CURSOR_ROW_AND_DONE:
+      out_step->kind = ORM_DRIVER_STEP_ROW_AND_DONE;
+      break;
+    case ORM_ROW_CURSOR_WAIT:
+      out_step->kind = ORM_DRIVER_STEP_WAIT;
+      out_step->waitable = step.waitable;
+      break;
+    case ORM_ROW_CURSOR_DONE:
+      out_step->kind = ORM_DRIVER_STEP_DONE;
+      break;
+    case ORM_ROW_CURSOR_ERROR:
+      return bridge_result(
+          error,
+          step.status != ORM_STATUS_OK ? step.status
+                                       : ORM_STATUS_DATASTORE_ERROR,
+          step.message != NULL && step.message[0] != '\0'
+              ? step.message
+              : "backend cursor failed");
+    default:
+      return bridge_result(error, ORM_STATUS_ABI_MISMATCH,
+                           "backend cursor returned an unknown step");
+  }
+  return bridge_result(error, ORM_STATUS_OK, NULL);
+}
+
+static void ORM_DRIVER_CALL bridge_cursor_cancel(void *context) {
+  bridge_cursor *wrapper = (bridge_cursor *)context;
+  if (wrapper != NULL && bridge_row_cursor_valid(&wrapper->cursor))
+    wrapper->cursor.ops->cancel(wrapper->cursor.context);
+}
+
+static void ORM_DRIVER_CALL bridge_cursor_destroy(void *context) {
+  bridge_cursor *wrapper = (bridge_cursor *)context;
+  if (wrapper == NULL) return;
+  bridge_row_cursor_dispose(&wrapper->cursor);
+  free(wrapper);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_cursor_configure_shape(
+    void *context, const cmeta_data_desc *shape,
+    orm_error_t *error) {
+  bridge_cursor *wrapper = (bridge_cursor *)context;
+  if (wrapper == NULL || !bridge_row_cursor_valid(&wrapper->cursor) ||
+      shape == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend cursor shape");
+  if (wrapper->cursor.ops->configure_shape == NULL)
+    return bridge_result(error, ORM_STATUS_UNSUPPORTED,
+                         "backend cursor does not support shape configuration");
+  return wrapper->cursor.ops->configure_shape(
+      wrapper->cursor.context, shape, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_cursor_column_count(
+    void *context, uint64_t *out_count, orm_error_t *error) {
+  bridge_cursor *wrapper = (bridge_cursor *)context;
+  if (out_count != NULL) *out_count = 0u;
+  if (wrapper == NULL || !bridge_row_cursor_valid(&wrapper->cursor) ||
+      out_count == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend cursor column count");
+  if (wrapper->cursor.ops->column_count == NULL)
+    return bridge_result(error, ORM_STATUS_UNSUPPORTED,
+                         "backend cursor does not expose column count");
+  const orm_status_t status = wrapper->cursor.ops->column_count(
+      wrapper->cursor.context, out_count);
+  return bridge_result(error, status, NULL);
+}
+
+static const orm_driver_cursor_ops_v1 bridge_cursor_ops = {
+    BRIDGE_HEADER(orm_driver_cursor_ops_v1),
+    bridge_cursor_next,
+    bridge_cursor_cancel,
+    bridge_cursor_destroy,
+    bridge_cursor_configure_shape,
+    bridge_cursor_column_count};
+
+static orm_status_t bridge_wrap_cursor(
+    orm_row_cursor *cursor, orm_driver_cursor_v1 *out,
+    orm_error_t *error) {
+  if (out != NULL) memset(out, 0, sizeof(*out));
+  if (cursor == NULL || out == NULL || !bridge_row_cursor_valid(cursor))
+    return bridge_result(error, ORM_STATUS_ABI_MISMATCH,
+                         "backend returned an invalid cursor");
+
+  bridge_cursor *wrapper =
+      (bridge_cursor *)calloc(1u, sizeof(*wrapper));
+  if (wrapper == NULL)
+    return bridge_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                         "allocate Driver cursor wrapper");
+
+  wrapper->cursor = *cursor;
+  memset(cursor, 0, sizeof(*cursor));
+  out->header =
+      (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_cursor_v1);
+  out->context = wrapper;
+  out->ops = (orm_driver_table_v1) {
+      &bridge_cursor_ops, (uint32_t)sizeof(bridge_cursor_ops), 0u};
+  return bridge_result(error, ORM_STATUS_OK, NULL);
+}
+
+static orm_status_t bridge_backend_open_cursor(
+    orm_backend *backend,
+    const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *driver_limits,
+    orm_driver_cursor_v1 *out,
+    orm_error_t *error) {
+  if (out != NULL) memset(out, 0, sizeof(*out));
+  if (!bridge_backend_valid(backend) || view == NULL ||
+      driver_limits == NULL || out == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend cursor request");
+
+  orm_query_plan plan;
+  orm_limits limits;
+  orm_row_cursor cursor;
+  memset(&plan, 0, sizeof(plan));
+  memset(&limits, 0, sizeof(limits));
+  memset(&cursor, 0, sizeof(cursor));
+
+  orm_status_t status =
+      orm_driver_backend_plan_materialize(
+          view, driver_limits, &plan, error);
+  if (status == ORM_STATUS_OK)
+    status = bridge_driver_limits(driver_limits, &limits, error);
+  if (status == ORM_STATUS_OK)
+    status = backend->ops->open_cursor(
+        backend->context, &plan, &limits, &cursor, error);
+  orm_driver_backend_plan_destroy(&plan);
+  if (status != ORM_STATUS_OK) {
+    bridge_row_cursor_dispose(&cursor);
+    return status;
+  }
+
+  status = bridge_wrap_cursor(&cursor, out, error);
+  if (status != ORM_STATUS_OK)
+    bridge_row_cursor_dispose(&cursor);
+  return status;
+}
+
+static orm_status_t bridge_backend_execute_command(
+    orm_backend *backend,
+    const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *driver_limits,
+    uint64_t *affected_rows,
+    orm_error_t *error) {
+  if (affected_rows != NULL) *affected_rows = 0u;
+  if (!bridge_backend_valid(backend) || view == NULL ||
+      driver_limits == NULL || affected_rows == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend command request");
+
+  orm_query_plan plan;
+  orm_limits limits;
+  memset(&plan, 0, sizeof(plan));
+  memset(&limits, 0, sizeof(limits));
+
+  orm_status_t status =
+      orm_driver_backend_plan_materialize(
+          view, driver_limits, &plan, error);
+  if (status == ORM_STATUS_OK)
+    status = bridge_driver_limits(driver_limits, &limits, error);
+  if (status == ORM_STATUS_OK)
+    status = backend->ops->execute_command(
+        backend->context, &plan, &limits, affected_rows, error);
+  orm_driver_backend_plan_destroy(&plan);
+  if (status != ORM_STATUS_OK) *affected_rows = 0u;
+  return status;
+}
+
+static orm_status_t bridge_transaction_open_cursor_impl(
+    bridge_transaction *wrapper,
+    const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *driver_limits,
+    orm_driver_cursor_v1 *out,
+    orm_error_t *error) {
+  if (out != NULL) memset(out, 0, sizeof(*out));
+  if (wrapper == NULL ||
+      !bridge_transaction_valid(&wrapper->transaction) ||
+      view == NULL || driver_limits == NULL || out == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend transaction cursor request");
+
+  orm_query_plan plan;
+  orm_limits limits;
+  orm_row_cursor cursor;
+  memset(&plan, 0, sizeof(plan));
+  memset(&limits, 0, sizeof(limits));
+  memset(&cursor, 0, sizeof(cursor));
+
+  orm_status_t status =
+      orm_driver_backend_plan_materialize(
+          view, driver_limits, &plan, error);
+  if (status == ORM_STATUS_OK)
+    status = bridge_driver_limits(driver_limits, &limits, error);
+  if (status == ORM_STATUS_OK)
+    status = wrapper->transaction.ops->open_cursor(
+        wrapper->transaction.context, &plan, &limits, &cursor, error);
+  orm_driver_backend_plan_destroy(&plan);
+  if (status != ORM_STATUS_OK) {
+    bridge_row_cursor_dispose(&cursor);
+    return status;
+  }
+
+  status = bridge_wrap_cursor(&cursor, out, error);
+  if (status != ORM_STATUS_OK)
+    bridge_row_cursor_dispose(&cursor);
+  return status;
+}
+
+static orm_status_t bridge_transaction_execute_impl(
+    bridge_transaction *wrapper,
+    const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *driver_limits,
+    uint64_t *affected_rows,
+    orm_error_t *error) {
+  if (affected_rows != NULL) *affected_rows = 0u;
+  if (wrapper == NULL ||
+      !bridge_transaction_valid(&wrapper->transaction) ||
+      view == NULL || driver_limits == NULL ||
+      affected_rows == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend transaction command request");
+
+  orm_query_plan plan;
+  orm_limits limits;
+  memset(&plan, 0, sizeof(plan));
+  memset(&limits, 0, sizeof(limits));
+
+  orm_status_t status =
+      orm_driver_backend_plan_materialize(
+          view, driver_limits, &plan, error);
+  if (status == ORM_STATUS_OK)
+    status = bridge_driver_limits(driver_limits, &limits, error);
+  if (status == ORM_STATUS_OK)
+    status = wrapper->transaction.ops->execute_command(
+        wrapper->transaction.context, &plan, &limits,
+        affected_rows, error);
+  orm_driver_backend_plan_destroy(&plan);
+  if (status != ORM_STATUS_OK) *affected_rows = 0u;
+  return status;
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_transaction_open_cursor(
+    void *context, const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *limits,
+    orm_driver_cursor_v1 *out, orm_error_t *error) {
+  return bridge_transaction_open_cursor_impl(
+      (bridge_transaction *)context, view, limits, out, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_transaction_execute_command(
+    void *context, const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *limits,
+    uint64_t *affected_rows, orm_error_t *error) {
+  return bridge_transaction_execute_impl(
+      (bridge_transaction *)context, view, limits, affected_rows, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_transaction_commit(
+    void *context, orm_error_t *error) {
+  bridge_transaction *wrapper = (bridge_transaction *)context;
+  if (wrapper == NULL ||
+      !bridge_transaction_valid(&wrapper->transaction))
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend transaction commit");
+  return wrapper->transaction.ops->commit(
+      wrapper->transaction.context, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_transaction_rollback(
+    void *context, orm_error_t *error) {
+  bridge_transaction *wrapper = (bridge_transaction *)context;
+  if (wrapper == NULL ||
+      !bridge_transaction_valid(&wrapper->transaction))
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend transaction rollback");
+  return wrapper->transaction.ops->rollback(
+      wrapper->transaction.context, error);
+}
+
+static orm_status_t bridge_transaction_savepoint_call(
+    bridge_transaction *wrapper,
+    orm_driver_bytes_v1 name,
+    orm_status_t (*callback)(void *, vstr, orm_error_t *),
+    orm_error_t *error) {
+  if (wrapper == NULL ||
+      !bridge_transaction_valid(&wrapper->transaction) ||
+      callback == NULL ||
+      name.size == 0u || name.size > (uint64_t)SIZE_MAX ||
+      name.data == NULL)
+    return bridge_result(error,
+                         callback == NULL ? ORM_STATUS_UNSUPPORTED
+                                          : ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid backend savepoint request");
+  const vstr view = {
+      (const char *)name.data, (size_t)name.size};
+  return callback(wrapper->transaction.context, view, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_transaction_savepoint(
+    void *context, orm_driver_bytes_v1 name, orm_error_t *error) {
+  bridge_transaction *wrapper = (bridge_transaction *)context;
+  return bridge_transaction_savepoint_call(
+      wrapper, name,
+      wrapper != NULL && wrapper->transaction.ops != NULL
+          ? wrapper->transaction.ops->savepoint : NULL,
+      error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_transaction_rollback_to_savepoint(
+    void *context, orm_driver_bytes_v1 name, orm_error_t *error) {
+  bridge_transaction *wrapper = (bridge_transaction *)context;
+  return bridge_transaction_savepoint_call(
+      wrapper, name,
+      wrapper != NULL && wrapper->transaction.ops != NULL
+          ? wrapper->transaction.ops->rollback_to_savepoint : NULL,
+      error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_transaction_release_savepoint(
+    void *context, orm_driver_bytes_v1 name, orm_error_t *error) {
+  bridge_transaction *wrapper = (bridge_transaction *)context;
+  return bridge_transaction_savepoint_call(
+      wrapper, name,
+      wrapper != NULL && wrapper->transaction.ops != NULL
+          ? wrapper->transaction.ops->release_savepoint : NULL,
+      error);
+}
+
+static void ORM_DRIVER_CALL bridge_transaction_destroy(void *context) {
+  bridge_transaction *wrapper = (bridge_transaction *)context;
+  if (wrapper == NULL) return;
+  bridge_transaction_dispose(&wrapper->transaction);
+  free(wrapper);
+}
+
+static const orm_driver_transaction_ops_v1 bridge_transaction_ops = {
+    BRIDGE_HEADER(orm_driver_transaction_ops_v1),
+    bridge_transaction_destroy,
+    bridge_transaction_open_cursor,
+    bridge_transaction_execute_command,
+    bridge_transaction_commit,
+    bridge_transaction_rollback,
+    bridge_transaction_savepoint,
+    bridge_transaction_rollback_to_savepoint,
+    bridge_transaction_release_savepoint};
+
+static orm_status_t bridge_wrap_transaction(
+    orm_transaction_backend *transaction,
+    orm_driver_transaction_v1 *out,
+    orm_error_t *error) {
+  if (out != NULL) memset(out, 0, sizeof(*out));
+  if (transaction == NULL || out == NULL ||
+      !bridge_transaction_valid(transaction))
+    return bridge_result(error, ORM_STATUS_ABI_MISMATCH,
+                         "backend returned an invalid transaction");
+
+  bridge_transaction *wrapper =
+      (bridge_transaction *)calloc(1u, sizeof(*wrapper));
+  if (wrapper == NULL)
+    return bridge_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                         "allocate Driver transaction wrapper");
+  wrapper->transaction = *transaction;
+  memset(transaction, 0, sizeof(*transaction));
+
+  out->header =
+      (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_transaction_v1);
+  out->context = wrapper;
+  out->ops = (orm_driver_table_v1) {
+      &bridge_transaction_ops,
+      (uint32_t)sizeof(bridge_transaction_ops), 0u};
+  return bridge_result(error, ORM_STATUS_OK, NULL);
+}
+
+static void ORM_DRIVER_CALL bridge_connection_destroy(void *context) {
+  bridge_connection *wrapper = (bridge_connection *)context;
+  if (wrapper == NULL) return;
+  bridge_backend_dispose(&wrapper->backend);
+  free(wrapper);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_connection_open_cursor(
+    void *context, const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *limits,
+    orm_driver_cursor_v1 *out, orm_error_t *error) {
+  bridge_connection *wrapper = (bridge_connection *)context;
+  if (wrapper == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid Driver backend connection");
+  return bridge_backend_open_cursor(
+      &wrapper->backend, view, limits, out, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_connection_execute_command(
+    void *context, const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *limits,
+    uint64_t *affected_rows, orm_error_t *error) {
+  bridge_connection *wrapper = (bridge_connection *)context;
+  if (wrapper == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid Driver backend connection");
+  return bridge_backend_execute_command(
+      &wrapper->backend, view, limits, affected_rows, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_connection_begin_transaction(
+    void *context, orm_isolation_t isolation,
+    orm_driver_transaction_v1 *out, orm_error_t *error) {
+  if (out != NULL) memset(out, 0, sizeof(*out));
+  bridge_connection *wrapper = (bridge_connection *)context;
+  if (wrapper == NULL || !bridge_backend_valid(&wrapper->backend) ||
+      out == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid Driver backend transaction begin");
+
+  orm_transaction_backend transaction;
+  memset(&transaction, 0, sizeof(transaction));
+  orm_status_t status = wrapper->backend.ops->begin_transaction(
+      wrapper->backend.context, isolation, &transaction, error);
+  if (status != ORM_STATUS_OK) {
+    bridge_transaction_dispose(&transaction);
+    return status;
+  }
+
+  status = bridge_wrap_transaction(&transaction, out, error);
+  if (status != ORM_STATUS_OK)
+    bridge_transaction_dispose(&transaction);
+  return status;
+}
+
+static const orm_driver_connection_ops_v1 bridge_connection_ops = {
+    BRIDGE_HEADER(orm_driver_connection_ops_v1),
+    bridge_connection_destroy,
+    bridge_connection_open_cursor,
+    bridge_connection_execute_command,
+    bridge_connection_begin_transaction};
+
+orm_status_t orm_driver_backend_connection_create(
+    orm_backend_factory_v1 factory,
+    const orm_config_t *config,
+    const orm_driver_limits_v1 *driver_limits,
+    orm_driver_connection_v1 *out_connection,
+    orm_error_t *error) {
+  if (out_connection != NULL)
+    memset(out_connection, 0, sizeof(*out_connection));
+  if (factory == NULL || config == NULL ||
+      driver_limits == NULL || out_connection == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid Driver backend factory request");
+
+  orm_limits limits;
+  memset(&limits, 0, sizeof(limits));
+  orm_status_t status =
+      bridge_driver_limits(driver_limits, &limits, error);
+  if (status != ORM_STATUS_OK)
+    return status;
+
+  bridge_connection *wrapper =
+      (bridge_connection *)calloc(1u, sizeof(*wrapper));
+  if (wrapper == NULL)
+    return bridge_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                         "allocate Driver backend connection");
+
+  status = factory(config, &limits, &wrapper->backend, error);
+  if (status != ORM_STATUS_OK) {
+    bridge_backend_dispose(&wrapper->backend);
+    free(wrapper);
+    return status;
+  }
+  if (!bridge_backend_valid(&wrapper->backend)) {
+    bridge_backend_dispose(&wrapper->backend);
+    free(wrapper);
+    return bridge_result(error, ORM_STATUS_ABI_MISMATCH,
+                         "backend factory returned an invalid connection");
+  }
+
+  out_connection->header =
+      (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_connection_v1);
+  out_connection->context = wrapper;
+  out_connection->ops = (orm_driver_table_v1) {
+      &bridge_connection_ops,
+      (uint32_t)sizeof(bridge_connection_ops), 0u};
+  return bridge_result(error, ORM_STATUS_OK, NULL);
+}
