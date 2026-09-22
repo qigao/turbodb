@@ -74,7 +74,8 @@ jobs:
         shell: pwsh
         run: choco install nasm ninja -y --no-progress
 
-      - name: Resolve TurboDB PostgreSQL through central registry
+      - name: Resolve TurboDB PostgreSQL through central registry on Linux
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -83,7 +84,7 @@ jobs:
           "$VCPKG_ROOT/vcpkg" install \
             --x-manifest-root="$GITHUB_WORKSPACE" \
             --x-install-root="$install_root" \
-            --triplet="${{ matrix.triplet }}" \
+            --triplet=x64-linux \
             --x-feature=postgresql
           status="$install_root/vcpkg/status"
           test -f "$status"
@@ -91,7 +92,28 @@ jobs:
           grep -F "Package: zstd" "$status"
           grep -F "Package: boringssl" "$status"
 
-      - name: Resolve TidesDB zstd through central registry
+      - name: Resolve TurboDB PostgreSQL through central registry on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Remove-Item Env:VCPKG_OVERLAY_PORTS -ErrorAction SilentlyContinue
+          $installRoot = Join-Path $env:RUNNER_TEMP "turbodb-vcpkg-registry"
+          & (Join-Path $env:VCPKG_ROOT "vcpkg.exe") install `
+            "--x-manifest-root=$env:GITHUB_WORKSPACE" `
+            "--x-install-root=$installRoot" `
+            "--triplet=x64-windows" `
+            "--x-feature=postgresql"
+          if ($LASTEXITCODE -ne 0) { throw "TurboDB PostgreSQL registry install failed" }
+          $status = Join-Path $installRoot "vcpkg\status"
+          if (-not (Test-Path -LiteralPath $status -PathType Leaf)) { throw "missing $status" }
+          $text = Get-Content -LiteralPath $status -Raw
+          foreach ($package in @("libpq", "zstd", "boringssl")) {
+            if ($text -notmatch "(?m)^Package: $package$") { throw "missing installed package: $package" }
+          }
+
+      - name: Resolve TidesDB zstd through central registry on Linux
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -100,10 +122,27 @@ jobs:
           "$VCPKG_ROOT/vcpkg" install \
             --x-manifest-root="$GITHUB_WORKSPACE/tidesdb" \
             --x-install-root="$install_root" \
-            --triplet="${{ matrix.triplet }}"
+            --triplet=x64-linux
           status="$install_root/vcpkg/status"
           test -f "$status"
           grep -F "Package: zstd" "$status"
+
+      - name: Resolve TidesDB zstd through central registry on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Remove-Item Env:VCPKG_OVERLAY_PORTS -ErrorAction SilentlyContinue
+          $installRoot = Join-Path $env:RUNNER_TEMP "tidesdb-vcpkg-registry"
+          & (Join-Path $env:VCPKG_ROOT "vcpkg.exe") install `
+            "--x-manifest-root=$env:GITHUB_WORKSPACE\tidesdb" `
+            "--x-install-root=$installRoot" `
+            "--triplet=x64-windows"
+          if ($LASTEXITCODE -ne 0) { throw "TidesDB registry install failed" }
+          $status = Join-Path $installRoot "vcpkg\status"
+          if (-not (Test-Path -LiteralPath $status -PathType Leaf)) { throw "missing $status" }
+          $text = Get-Content -LiteralPath $status -Raw
+          if ($text -notmatch "(?m)^Package: zstd$") { throw "missing installed package: zstd" }
 
       - name: Verify exact tracked source
         shell: bash
