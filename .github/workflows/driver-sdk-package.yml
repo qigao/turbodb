@@ -143,18 +143,16 @@ jobs:
         with:
           path: external/pkgs/salts-utils/${{ matrix.config }}
           key: driver-sdk-salts-utils-master-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}-${{ steps.deps.outputs.salts_utils }}
-      - name: Install Linux dependency build tools on cache miss
-        if: runner.os == 'Linux' && (steps.salts-package-cache.outputs.cache-hit != 'true' || steps.salts-utils-package-cache.outputs.cache-hit != 'true')
+      - name: Install Linux host build tools
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y nasm curl xz-utils
-          if [[ '${{ steps.salts-utils-package-cache.outputs.cache-hit }}' != 'true' ]]; then
-            bash .ci-salts-utils/cmake/ci/install-re2c.sh
-          fi
-      - name: Build pinned Windows re2c on dependency cache miss
-        if: runner.os == 'Windows' && (steps.salts-package-cache.outputs.cache-hit != 'true' || steps.salts-utils-package-cache.outputs.cache-hit != 'true')
+          bash .ci-salts-utils/cmake/ci/install-re2c.sh
+      - name: Build pinned Windows re2c
+        if: runner.os == 'Windows'
         shell: cmd
         run: |
           if not defined RUNNER_TEMP exit /b 1
