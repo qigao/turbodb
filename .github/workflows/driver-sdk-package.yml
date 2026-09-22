@@ -143,45 +143,54 @@ jobs:
         with:
           path: external/pkgs/salts-utils/${{ matrix.config }}
           key: driver-sdk-salts-utils-master-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}-${{ steps.deps.outputs.salts_utils }}
-      - name: Install Linux host build tools
-        if: runner.os == 'Linux'
+      - name: Restore re2c tool
+        id: re2c-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: external/tools/re2c
+          key: driver-sdk-re2c-v1-${{ runner.os }}-${{ runner.arch }}-4.6
+      - name: Install Linux dependency build prerequisites on cache miss
+        if: runner.os == 'Linux' && (steps.salts-package-cache.outputs.cache-hit != 'true' || steps.salts-utils-package-cache.outputs.cache-hit != 'true' || steps.re2c-cache.outputs.cache-hit != 'true')
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y nasm curl xz-utils
-          bash .ci-salts-utils/cmake/ci/install-re2c.sh
-      - name: Build pinned Windows re2c
-        if: runner.os == 'Windows'
+      - name: Build re2c tool on Linux cache miss
+        if: runner.os == 'Linux' && steps.re2c-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .github/scripts/install-re2c.ps1
+      - name: Build re2c tool on Windows cache miss
+        if: runner.os == 'Windows' && steps.re2c-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
-          if not defined RUNNER_TEMP exit /b 1
-          if not exist evidence\re2c mkdir evidence\re2c
-          set "RE2C_ROOT=%RUNNER_TEMP%\re2c-4.6"
-          set "RE2C_WORK=%RUNNER_TEMP%\re2c-4.6-src"
-          set "RE2C_ARCHIVE=%RUNNER_TEMP%\re2c-4.6.tar.xz"
-          if exist "%RE2C_WORK%" rmdir /s /q "%RE2C_WORK%"
-          if exist "%RE2C_ROOT%" rmdir /s /q "%RE2C_ROOT%"
-          mkdir "%RE2C_WORK%"
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
-          curl.exe --disable --fail --location --silent --show-error --connect-timeout 30 --max-time 180 --proto "=https" --proto-redir "=https" "https://github.com/skvadrik/re2c/releases/download/4.6/re2c-4.6.tar.xz" --output "%RE2C_ARCHIVE%" <nul > evidence\re2c\download.log 2>&1
-          if errorlevel 1 (type evidence\re2c\download.log & exit /b 1)
-          powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; $h=(Get-FileHash -Algorithm SHA256 -LiteralPath $env:RE2C_ARCHIVE).Hash.ToLowerInvariant(); Write-Output $h; if($h -cne '75bf2696445e831d0d44e0d9f2909eeffc18c09757f222b2fb025f7e59fe130b'){exit 1}" <nul > evidence\re2c\sha256.log 2>&1
-          if errorlevel 1 (type evidence\re2c\sha256.log & exit /b 1)
-          cmake -E chdir "%RE2C_WORK%" cmake -E tar xJf "%RE2C_ARCHIVE%" <nul > evidence\re2c\extract.log 2>&1
-          if errorlevel 1 (type evidence\re2c\extract.log & exit /b 1)
-          cmake -S "%RE2C_WORK%\re2c-4.6" -B "%RE2C_WORK%\build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="%RE2C_ROOT%" -DRE2C_BUILD_TESTS=OFF -DRE2C_REBUILD_LEXERS=OFF -DRE2C_REBUILD_PARSERS=OFF -DRE2C_REBUILD_DOCS=OFF -DRE2C_BUILD_RE2D=OFF -DRE2C_BUILD_RE2GO=OFF -DRE2C_BUILD_RE2HS=OFF -DRE2C_BUILD_RE2JAVA=OFF -DRE2C_BUILD_RE2JS=OFF -DRE2C_BUILD_RE2OCAML=OFF -DRE2C_BUILD_RE2PY=OFF -DRE2C_BUILD_RE2RUST=OFF -DRE2C_BUILD_RE2SWIFT=OFF -DRE2C_BUILD_RE2V=OFF -DRE2C_BUILD_RE2ZIG=OFF <nul > evidence\re2c\configure.log 2>&1
-          if errorlevel 1 (type evidence\re2c\configure.log & exit /b 1)
-          cmake --build "%RE2C_WORK%\build" --parallel 2 <nul > evidence\re2c\build.log 2>&1
-          if errorlevel 1 (type evidence\re2c\build.log & exit /b 1)
-          cmake --install "%RE2C_WORK%\build" <nul > evidence\re2c\install.log 2>&1
-          if errorlevel 1 (type evidence\re2c\install.log & exit /b 1)
-          "%RE2C_ROOT%\bin\re2c.exe" --version <nul > evidence\re2c\version.log 2>&1
-          if errorlevel 1 (type evidence\re2c\version.log & exit /b 1)
-          if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_properties.re" exit /b 1
-          if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_categories.re" exit /b 1
-          echo RE2C_ROOT=%RE2C_ROOT%>> "%GITHUB_ENV%"
-          echo %RE2C_ROOT%\bin>> "%GITHUB_PATH%"
+          pwsh -NoLogo -NoProfile -File .github\scripts\install-re2c.ps1
+          if errorlevel 1 exit /b 1
+      - name: Save re2c tool
+        if: steps.re2c-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: external/tools/re2c
+          key: ${{ steps.re2c-cache.outputs.cache-primary-key }}
+      - name: Activate re2c tool
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'external/tools/re2c'
+          $suffix = if ($IsWindows) { '.exe' } else { '' }
+          $exe = Join-Path $root ("bin/re2c" + $suffix)
+          if (-not (Test-Path -LiteralPath $exe)) { throw 'cached re2c executable is missing' }
+          $version = (& $exe --version).Trim()
+          if ($version -cne 're2c 4.6') { throw "unexpected cached re2c version: $version" }
+          foreach ($file in @('share/re2c/stdlib/unicode_properties.re', 'share/re2c/stdlib/unicode_categories.re')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $file))) {
+              throw "cached re2c standard library is missing: $file"
+            }
+          }
+          "RE2C_ROOT=$root" >> $env:GITHUB_ENV
+          (Join-Path $root 'bin') >> $env:GITHUB_PATH
       - name: Build or reuse Salts master and test SDK on Linux
         if: runner.os == 'Linux'
         env:
@@ -236,9 +245,9 @@ jobs:
             $item = $matches[0]
             $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
             $item.environment.VCPKG_ROOT = $env:DRIVER_SDK_VCPKG_ROOT
+            $item.environment.RE2C_ROOT = "$env:GITHUB_WORKSPACE/external/tools/re2c"
             if ($name -eq 'win-toolchain') {
               $item.environment.PROJECT_ROOT = $env:GITHUB_WORKSPACE
-              $item.environment.RE2C_ROOT = "$env:RUNNER_TEMP/re2c-4.6"
             }
           }
           $presets | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $path -Encoding utf8NoBOM
@@ -286,63 +295,15 @@ jobs:
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
+          set "RE2C_ROOT=%GITHUB_WORKSPACE%\external\tools\re2c"
           set "SALTS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts\${{ matrix.config }}"
           set "SALTS_UTILS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts-utils\${{ matrix.config }}"
           set "SALTS_UTILS_PROFILE=win-release-user"
           set "SALTS_UTILS_ASAN=OFF"
           if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_PROFILE=win-dev-user"
           if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_ASAN=ON"
-          rem Reuse the pinned re2c prepared before the Salts build when available.
-          if not defined RUNNER_TEMP exit /b 1
           if not exist evidence\salts-utils mkdir evidence\salts-utils
           if errorlevel 1 exit /b 1
-          set "RE2C_VERSION=4.6"
-          set "RE2C_ROOT=%RUNNER_TEMP%\re2c-4.6"
-          if exist "%RE2C_ROOT%\bin\re2c.exe" if exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_properties.re" if exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_categories.re" goto re2c_ready
-          set "RE2C_WORK=%RUNNER_TEMP%\re2c-4.6-src"
-          set "RE2C_ARCHIVE=%RUNNER_TEMP%\re2c-4.6.tar.xz"
-          where cmake > evidence\salts-utils\re2c-tools.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-tools.log & exit /b 1)
-          where curl.exe >> evidence\salts-utils\re2c-tools.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-tools.log & exit /b 1)
-          rem Rebuild the master-compatible host tool; an existing executable is not provenance.
-          if exist "%RE2C_WORK%" rmdir /s /q "%RE2C_WORK%"
-          if errorlevel 1 exit /b 1
-          if exist "%RE2C_ROOT%" rmdir /s /q "%RE2C_ROOT%"
-          if errorlevel 1 exit /b 1
-          mkdir "%RE2C_WORK%"
-          if errorlevel 1 exit /b 1
-          echo [re2c] Download pinned 4.6 archive
-          curl.exe --disable --fail --location --silent --show-error --connect-timeout 30 --max-time 180 --proto "=https" --proto-redir "=https" "https://github.com/skvadrik/re2c/releases/download/4.6/re2c-4.6.tar.xz" --output "%RE2C_ARCHIVE%" <nul > evidence\salts-utils\re2c-download.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-download.log & exit /b 1)
-          echo [re2c] Verify archive SHA-256
-          powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; $h=(Get-FileHash -Algorithm SHA256 -LiteralPath $env:RE2C_ARCHIVE).Hash.ToLowerInvariant(); Write-Output $h; if($h -cne '75bf2696445e831d0d44e0d9f2909eeffc18c09757f222b2fb025f7e59fe130b'){exit 1}" <nul > evidence\salts-utils\re2c-sha256.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-sha256.log & exit /b 1)
-          echo [re2c] Extract using CMake, not a PATH-selected tar
-          cmake -E chdir "%RE2C_WORK%" cmake -E tar xJf "%RE2C_ARCHIVE%" <nul > evidence\salts-utils\re2c-extract.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-extract.log & exit /b 1)
-          if not exist "%RE2C_WORK%\re2c-4.6\CMakeLists.txt" (echo [re2c] Archive is missing re2c-4.6\CMakeLists.txt & exit /b 1)
-          echo [re2c] Configure Release host tool
-          cmake -S "%RE2C_WORK%\re2c-4.6" -B "%RE2C_WORK%\build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="%RE2C_ROOT%" -DRE2C_BUILD_TESTS=OFF -DRE2C_REBUILD_LEXERS=OFF -DRE2C_REBUILD_PARSERS=OFF -DRE2C_REBUILD_DOCS=OFF -DRE2C_BUILD_RE2D=OFF -DRE2C_BUILD_RE2GO=OFF -DRE2C_BUILD_RE2HS=OFF -DRE2C_BUILD_RE2JAVA=OFF -DRE2C_BUILD_RE2JS=OFF -DRE2C_BUILD_RE2OCAML=OFF -DRE2C_BUILD_RE2PY=OFF -DRE2C_BUILD_RE2RUST=OFF -DRE2C_BUILD_RE2SWIFT=OFF -DRE2C_BUILD_RE2V=OFF -DRE2C_BUILD_RE2ZIG=OFF <nul > evidence\salts-utils\re2c-configure.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-configure.log & exit /b 1)
-          echo [re2c] Build Release host tool
-          cmake --build "%RE2C_WORK%\build" --parallel 2 <nul > evidence\salts-utils\re2c-build.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-build.log & exit /b 1)
-          echo [re2c] Install Release host tool and Unicode data
-          cmake --install "%RE2C_WORK%\build" <nul > evidence\salts-utils\re2c-install.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-install.log & exit /b 1)
-          "%RE2C_ROOT%\bin\re2c.exe" --version <nul > evidence\salts-utils\re2c-version.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-version.log & exit /b 1)
-          type evidence\salts-utils\re2c-version.log
-          if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_properties.re" exit /b 1
-          if not exist "%RE2C_ROOT%\share\re2c\stdlib\unicode_categories.re" exit /b 1
-          echo [re2c] Ready for the SaltsUtils master build
-          :re2c_ready
-          "%RE2C_ROOT%\bin\re2c.exe" --version <nul > evidence\salts-utils\re2c-version.log 2>&1
-          if errorlevel 1 (type evidence\salts-utils\re2c-version.log & exit /b 1)
-          if not exist evidence\salts-utils mkdir evidence\salts-utils
-          rem Use upstream configure/build/install presets as a unit: build
-          rem presets inherit the Salts/vcpkg DLL paths used by tbe_compiler.
           set "SALTS_UTILS_EVIDENCE=%GITHUB_WORKSPACE%\evidence\salts-utils"
           cd /d "%GITHUB_WORKSPACE%\.ci-salts-utils"
           if errorlevel 1 exit /b 1
