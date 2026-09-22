@@ -4,6 +4,7 @@
 #include "../abi/orm_internal.h"
 
 #include <orm_driver_plan.h>
+#include <orm_driver_ops.h>
 
 #ifdef __cplusplus
 extern "C" {
