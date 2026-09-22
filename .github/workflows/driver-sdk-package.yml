@@ -295,243 +295,8 @@ jobs:
           cp "$build/compile_commands.json" evidence/core/compile_commands.json
           cp "$build/CMakeCache.txt" evidence/core/CMakeCache.txt
           cmake --build --preset "$profile" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 2>&1 | tee evidence/core/build.log
-          ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)      - name: Build and test native plan adapter on Windows
-        env:
-          # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
-          VCPKG_DISABLE_METRICS: '1'
-        if: ((github.ref_name == 'feat/runtime-driver-loader' || (github.ref_name == 'feat/runtime-driver-cursor-adapter' || (github.ref_name == 'feat/runtime-driver-command-adapter' || (github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency')))) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          set "ASAN_OPTIONS=halt_on_error=1"
-          set "PROFILE=win-release-user"
-          set "BUILD=build\Msvc-Release"
-          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
-          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          git rev-parse HEAD > evidence\core\head.txt
-          if errorlevel 1 exit /b 1
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > evidence\core\configure.log 2>&1
-          if errorlevel 1 (type evidence\core\configure.log & exit /b 1)
-          copy "%BUILD%\compile_commands.json" evidence\core\compile_commands.json
-          if errorlevel 1 exit /b 1
-          copy "%BUILD%\CMakeCache.txt" evidence\core\CMakeCache.txt
-          if errorlevel 1 exit /b 1
-          cmake --build --preset "%PROFILE%" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 > evidence\core\build.log 2>&1
-          if errorlevel 1 (type evidence\core\build.log & exit /b 1)
-          ctest --preset "%PROFILE%" -R "^(orm_driver_plan_view|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$" --verbose --no-tests=error > evidence\core\ctest.log 2>&1
-          if errorlevel 1 (type evidence\core\ctest.log & exit /b 1)
-          type evidence\core\ctest.log
-          ctest --preset "%PROFILE%" -R "^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$" --verbose --no-tests=error > evidence\core\ownership.log 2>&1
-          if errorlevel 1 (type evidence\core\ownership.log & exit /b 1)
-          type evidence\core\ownership.log
-      - name: Verify native ownership against real PostgreSQL
-        if: ((github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
-        shell: bash
-        env:
-          TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
-        run: |
-          set -euo pipefail
-          profile=linux-release-user
-          build=build/linux-gcc-release
-          if [[ '${{ matrix.config }}' == debug ]]; then
-            profile=linux-dev-user
-            build=build/linux-gcc-debug
-          fi
-          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
-          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-          cmake --preset "$profile" -DORM_BUILD_TESTS=ON -DORM_POSTGRES_LIVE_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/core/postgres-configure.log
-          cp "$build/compile_commands.json" evidence/core/postgres-compile-commands.json
-          cmake --build --preset "$profile" --target orm_owner_postgres_test orm_owner_postgres_loss_test orm_postgres_live_test --parallel 4 2>&1 | tee evidence/core/postgres-build.log
-          ctest --preset "$profile" -R '^(orm_owner_postgres|orm_owner_postgres_loss|orm_postgres_live)$' --verbose --no-tests=error 2>&1 | tee evidence/core/postgres-ctest.log
-      # Run the entire configured root suite after the unchanged focused checks.
-      # Linux keeps the live PostgreSQL service configured by the preceding step.
-      - name: Build and test full root suite on Linux
-        if: ((github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
-        shell: bash
-        env:
-          TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
-        run: |
-          set -euo pipefail
-          profile=linux-release-user
-          build=build/linux-gcc-release
-          if [[ '${{ matrix.config }}' == debug ]]; then
-            profile=linux-dev-user
-            build=build/linux-gcc-debug
-          fi
-          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
-          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-          cp "$build/CMakeCache.txt" evidence/core/full-CMakeCache.txt
-          cp "$build/compile_commands.json" evidence/core/full-compile-commands.json
-          ctest --preset "$profile" --show-only=json-v1 > evidence/core/full-test-inventory.json
-          cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/core/full-build.log
-          ctest --preset "$profile" --verbose --no-tests=error --output-junit "$GITHUB_WORKSPACE/evidence/core/full-ctest.xml" 2>&1 | tee evidence/core/full-ctest.log
-      - name: Build and test full root suite on Windows
-        if: ((github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
-        env:
-          VCPKG_DISABLE_METRICS: '1'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          set "ASAN_OPTIONS=halt_on_error=1"
-          set "PROFILE=win-release-user"
-          set "BUILD=build\Msvc-Release"
-          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
-          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          copy "%BUILD%\CMakeCache.txt" evidence\core\full-CMakeCache.txt
-          if errorlevel 1 exit /b 1
-          copy "%BUILD%\compile_commands.json" evidence\core\full-compile-commands.json
-          if errorlevel 1 exit /b 1
-          ctest --preset "%PROFILE%" --show-only=json-v1 > evidence\core\full-test-inventory.json
-          if errorlevel 1 (type evidence\core\full-test-inventory.json & exit /b 1)
-          cmake --build --preset "%PROFILE%" --parallel 4 > evidence\core\full-build.log 2>&1
-          if errorlevel 1 (type evidence\core\full-build.log & exit /b 1)
-          ctest --preset "%PROFILE%" --verbose --no-tests=error --output-junit "%GITHUB_WORKSPACE%\evidence\core\full-ctest.xml" > evidence\core\full-ctest.log 2>&1
-          if errorlevel 1 (type evidence\core\full-ctest.log & exit /b 1)
-          type evidence\core\full-ctest.log
-      - name: Save completed vcpkg binary packages
-        if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .ci-vcpkg-cache
-          key: ${{ steps.cache.outputs.cache-primary-key }}
-      - name: Keep complete package evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: driver-package-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
-          path: evidence/
-          if-no-files-found: warn --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
-          ctest --preset "$profile" -R '^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)      - name: Build and test native plan adapter on Windows
-        env:
-          # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
-          VCPKG_DISABLE_METRICS: '1'
-        if: ((github.ref_name == 'feat/runtime-driver-loader' || (github.ref_name == 'feat/runtime-driver-cursor-adapter' || (github.ref_name == 'feat/runtime-driver-command-adapter' || (github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency')))) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          set "ASAN_OPTIONS=halt_on_error=1"
-          set "PROFILE=win-release-user"
-          set "BUILD=build\Msvc-Release"
-          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
-          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          git rev-parse HEAD > evidence\core\head.txt
-          if errorlevel 1 exit /b 1
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > evidence\core\configure.log 2>&1
-          if errorlevel 1 (type evidence\core\configure.log & exit /b 1)
-          copy "%BUILD%\compile_commands.json" evidence\core\compile_commands.json
-          if errorlevel 1 exit /b 1
-          copy "%BUILD%\CMakeCache.txt" evidence\core\CMakeCache.txt
-          if errorlevel 1 exit /b 1
-          cmake --build --preset "%PROFILE%" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 > evidence\core\build.log 2>&1
-          if errorlevel 1 (type evidence\core\build.log & exit /b 1)
-          ctest --preset "%PROFILE%" -R "^(orm_driver_plan_view|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$" --verbose --no-tests=error > evidence\core\ctest.log 2>&1
-          if errorlevel 1 (type evidence\core\ctest.log & exit /b 1)
-          type evidence\core\ctest.log
-          ctest --preset "%PROFILE%" -R "^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$" --verbose --no-tests=error > evidence\core\ownership.log 2>&1
-          if errorlevel 1 (type evidence\core\ownership.log & exit /b 1)
-          type evidence\core\ownership.log
-      - name: Verify native ownership against real PostgreSQL
-        if: ((github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
-        shell: bash
-        env:
-          TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
-        run: |
-          set -euo pipefail
-          profile=linux-release-user
-          build=build/linux-gcc-release
-          if [[ '${{ matrix.config }}' == debug ]]; then
-            profile=linux-dev-user
-            build=build/linux-gcc-debug
-          fi
-          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
-          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-          cmake --preset "$profile" -DORM_BUILD_TESTS=ON -DORM_POSTGRES_LIVE_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/core/postgres-configure.log
-          cp "$build/compile_commands.json" evidence/core/postgres-compile-commands.json
-          cmake --build --preset "$profile" --target orm_owner_postgres_test orm_owner_postgres_loss_test orm_postgres_live_test --parallel 4 2>&1 | tee evidence/core/postgres-build.log
-          ctest --preset "$profile" -R '^(orm_owner_postgres|orm_owner_postgres_loss|orm_postgres_live)$' --verbose --no-tests=error 2>&1 | tee evidence/core/postgres-ctest.log
-      # Run the entire configured root suite after the unchanged focused checks.
-      # Linux keeps the live PostgreSQL service configured by the preceding step.
-      - name: Build and test full root suite on Linux
-        if: ((github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
-        shell: bash
-        env:
-          TURBODB_ORM_PGSQL_TEST_CONNINFO: host=127.0.0.1 port=${{ job.services.postgres.ports['5432'] }} dbname=orm_owner_ci user=orm_owner_ci password=orm_owner_ci_only connect_timeout=5 options='-c statement_timeout=5000'
-        run: |
-          set -euo pipefail
-          profile=linux-release-user
-          build=build/linux-gcc-release
-          if [[ '${{ matrix.config }}' == debug ]]; then
-            profile=linux-dev-user
-            build=build/linux-gcc-debug
-          fi
-          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
-          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-          cp "$build/CMakeCache.txt" evidence/core/full-CMakeCache.txt
-          cp "$build/compile_commands.json" evidence/core/full-compile-commands.json
-          ctest --preset "$profile" --show-only=json-v1 > evidence/core/full-test-inventory.json
-          cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/core/full-build.log
-          ctest --preset "$profile" --verbose --no-tests=error --output-junit "$GITHUB_WORKSPACE/evidence/core/full-ctest.xml" 2>&1 | tee evidence/core/full-ctest.log
-      - name: Build and test full root suite on Windows
-        if: ((github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
-        env:
-          VCPKG_DISABLE_METRICS: '1'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          set "ASAN_OPTIONS=halt_on_error=1"
-          set "PROFILE=win-release-user"
-          set "BUILD=build\Msvc-Release"
-          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
-          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          copy "%BUILD%\CMakeCache.txt" evidence\core\full-CMakeCache.txt
-          if errorlevel 1 exit /b 1
-          copy "%BUILD%\compile_commands.json" evidence\core\full-compile-commands.json
-          if errorlevel 1 exit /b 1
-          ctest --preset "%PROFILE%" --show-only=json-v1 > evidence\core\full-test-inventory.json
-          if errorlevel 1 (type evidence\core\full-test-inventory.json & exit /b 1)
-          cmake --build --preset "%PROFILE%" --parallel 4 > evidence\core\full-build.log 2>&1
-          if errorlevel 1 (type evidence\core\full-build.log & exit /b 1)
-          ctest --preset "%PROFILE%" --verbose --no-tests=error --output-junit "%GITHUB_WORKSPACE%\evidence\core\full-ctest.xml" > evidence\core\full-ctest.log 2>&1
-          if errorlevel 1 (type evidence\core\full-ctest.log & exit /b 1)
-          type evidence\core\full-ctest.log
-      - name: Save completed vcpkg binary packages
-        if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .ci-vcpkg-cache
-          key: ${{ steps.cache.outputs.cache-primary-key }}
-      - name: Record runtime loader ELF evidence
-        if: github.ref_name == 'feat/runtime-driver-registry-concurrency' && runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          build=build/linux-gcc-release
-          if [[ '${{ matrix.config }}' == debug ]]; then
-            build=build/linux-gcc-debug
-          fi
-          readelf -d "$build/bin/orm_module_loader_fixture.so" | tee evidence/core/module-loader-elf.txt
-          readelf -d "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-elf.txt
-          readelf -d "$build/bin/libturbo_orm.so" | tee evidence/core/runtime-core-elf.txt
-          ldd "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-ldd.txt
-          if grep -Eq 'FLAGS_1.*NOOPEN' evidence/core/module-loader-elf.txt evidence/core/runtime-race-module-elf.txt; then
-            echo "Runtime-loadable MODULE was linked with DF_1_NOOPEN" >&2
-            exit 1
-          fi
-      - name: Keep complete package evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: driver-package-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
-          path: evidence/
-          if-no-files-found: warn
+          ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
+          ctest --preset "$profile" -R '^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ownership.log
       - name: Build and test native plan adapter on Windows
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
@@ -629,6 +394,23 @@ jobs:
           ctest --preset "%PROFILE%" --verbose --no-tests=error --output-junit "%GITHUB_WORKSPACE%\evidence\core\full-ctest.xml" > evidence\core\full-ctest.log 2>&1
           if errorlevel 1 (type evidence\core\full-ctest.log & exit /b 1)
           type evidence\core\full-ctest.log
+      - name: Record runtime loader ELF evidence
+        if: github.ref_name == 'feat/runtime-driver-registry-concurrency' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=build/linux-gcc-release
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            build=build/linux-gcc-debug
+          fi
+          readelf -d "$build/bin/orm_module_loader_fixture.so" | tee evidence/core/module-loader-elf.txt
+          readelf -d "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-elf.txt
+          readelf -d "$build/bin/libturbo_orm.so" | tee evidence/core/runtime-core-elf.txt
+          ldd "$build/bin/orm_runtime_race_fixture.so" | tee evidence/core/runtime-race-module-ldd.txt
+          if grep -Eq 'FLAGS_1.*NOOPEN' evidence/core/module-loader-elf.txt evidence/core/runtime-race-module-elf.txt; then
+            echo "Runtime-loadable MODULE was linked with DF_1_NOOPEN" >&2
+            exit 1
+          fi
       - name: Save completed vcpkg binary packages
         if: always() && steps.identity.outcome == 'success' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
