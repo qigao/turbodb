@@ -16,7 +16,8 @@ if (Test-Path -LiteralPath $prefix) { Remove-Item -Recurse -Force -LiteralPath $
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $prefix) | Out-Null
 
-& curl.exe --disable --fail --location --silent --show-error --connect-timeout 30 --max-time 180 --proto '=https' --proto-redir '=https' "https://github.com/skvadrik/re2c/releases/download/$version/re2c-$version.tar.xz" --output $archive
+$curl = if ($IsWindows) { 'curl.exe' } else { 'curl' }
+& $curl --disable --fail --location --silent --show-error --connect-timeout 30 --max-time 180 --proto '=https' --proto-redir '=https' "https://github.com/skvadrik/re2c/releases/download/$version/re2c-$version.tar.xz" --output $archive
 if ($LASTEXITCODE -ne 0) { throw 're2c download failed' }
 
 $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
