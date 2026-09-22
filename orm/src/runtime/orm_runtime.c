@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -192,16 +193,200 @@ static void runtime_backend_destroy(void *context) {
   runtime_release_dependent(runtime);
 }
 
+typedef struct orm_runtime_cursor {
+  orm_driver_cursor_v1 native;
+  orm_driver_cursor_ops_v1 ops;
+  uint64_t execution_models;
+  char error_message[ORM_C_ERROR_MESSAGE_CAPACITY];
+} orm_runtime_cursor;
+
+static void runtime_cursor_error(orm_runtime_cursor *cursor,
+                                 orm_status_t status,
+                                 const char *message) {
+  if (cursor == NULL) return;
+  (void)snprintf(cursor->error_message, sizeof(cursor->error_message), "%s",
+                 message != NULL && message[0] != '\0'
+                     ? message
+                     : orm_status_message(status));
+}
+
+static orm_row_cursor_step runtime_cursor_next(
+    void *context, cserde_reader *reader) {
+  orm_runtime_cursor *cursor = context;
+  orm_row_cursor_step out = ORM_ROW_CURSOR_STEP_INIT;
+  if (cursor == NULL || reader == NULL) {
+    out.kind = ORM_ROW_CURSOR_ERROR;
+    out.status = ORM_STATUS_INVALID_ARGUMENT;
+    out.message = "invalid runtime driver cursor next";
+    return out;
+  }
+
+  orm_driver_step_v1 step;
+  memset(&step, 0, sizeof(step));
+  step.header = (orm_driver_header_v1)RUNTIME_HEADER(orm_driver_step_v1);
+  orm_error_t error;
+  orm_error_init(&error);
+  const orm_status_t status =
+      cursor->ops.next(cursor->native.context, reader, &step, &error);
+  if (status != ORM_STATUS_OK) {
+    runtime_cursor_error(cursor, status, error.message);
+    out.kind = ORM_ROW_CURSOR_ERROR;
+    out.status = status;
+    out.message = cursor->error_message;
+    return out;
+  }
+
+  uint32_t declared = 0u;
+  const orm_status_t header_status = orm_driver_check_prefix(
+      &step, (uint32_t)sizeof(step), ORM_DRIVER_ABI_VERSION,
+      (uint32_t)sizeof(step), &declared);
+  if (header_status != ORM_STATUS_OK || step.reserved != 0u) {
+    runtime_cursor_error(cursor, ORM_STATUS_ABI_MISMATCH,
+                         "driver returned an invalid cursor step");
+    out.kind = ORM_ROW_CURSOR_ERROR;
+    out.status = ORM_STATUS_ABI_MISMATCH;
+    out.message = cursor->error_message;
+    return out;
+  }
+
+  switch (step.kind) {
+  case ORM_DRIVER_STEP_ROW:
+    out.kind = ORM_ROW_CURSOR_ROW;
+    return out;
+  case ORM_DRIVER_STEP_ROW_AND_DONE:
+    out.kind = ORM_ROW_CURSOR_ROW_AND_DONE;
+    return out;
+  case ORM_DRIVER_STEP_WAIT:
+    if ((cursor->execution_models & ORM_DRIVER_EXEC_NATIVE_WAIT) == 0u) {
+      runtime_cursor_error(cursor, ORM_STATUS_UNSUPPORTED,
+                           "driver returned WAIT without declaring native WAIT");
+      out.kind = ORM_ROW_CURSOR_ERROR;
+      out.status = ORM_STATUS_UNSUPPORTED;
+      out.message = cursor->error_message;
+      return out;
+    }
+    out.kind = ORM_ROW_CURSOR_WAIT;
+    out.waitable = step.waitable;
+    return out;
+  case ORM_DRIVER_STEP_DONE:
+    out.kind = ORM_ROW_CURSOR_DONE;
+    return out;
+  case ORM_DRIVER_STEP_ERROR:
+    runtime_cursor_error(cursor, ORM_STATUS_DATASTORE_ERROR,
+                         "driver returned ERROR without failure status");
+    out.kind = ORM_ROW_CURSOR_ERROR;
+    out.status = ORM_STATUS_DATASTORE_ERROR;
+    out.message = cursor->error_message;
+    return out;
+  default:
+    runtime_cursor_error(cursor, ORM_STATUS_ABI_MISMATCH,
+                         "driver returned an unknown cursor step");
+    out.kind = ORM_ROW_CURSOR_ERROR;
+    out.status = ORM_STATUS_ABI_MISMATCH;
+    out.message = cursor->error_message;
+    return out;
+  }
+}
+
+static void runtime_cursor_cancel(void *context) {
+  orm_runtime_cursor *cursor = context;
+  if (cursor != NULL && cursor->native.context != NULL)
+    cursor->ops.cancel(cursor->native.context);
+}
+
+static void runtime_cursor_destroy(void *context) {
+  orm_runtime_cursor *cursor = context;
+  if (cursor == NULL) return;
+  if (cursor->native.context != NULL)
+    cursor->ops.destroy(cursor->native.context);
+  free(cursor);
+}
+
+static orm_status_t runtime_cursor_configure_shape(
+    void *context, const cmeta_data_desc *shape, orm_error_t *error) {
+  orm_runtime_cursor *cursor = context;
+  if (cursor == NULL || shape == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver cursor shape");
+  if (cursor->ops.configure_shape == NULL)
+    return runtime_result(error, ORM_STATUS_OK, NULL);
+  return cursor->ops.configure_shape(cursor->native.context, shape, error);
+}
+
+static orm_status_t runtime_cursor_column_count(
+    void *context, uint64_t *out_count) {
+  orm_runtime_cursor *cursor = context;
+  if (out_count != NULL) *out_count = 0u;
+  if (cursor == NULL || out_count == NULL)
+    return ORM_STATUS_INVALID_ARGUMENT;
+  if (cursor->ops.column_count == NULL)
+    return ORM_STATUS_UNSUPPORTED;
+  orm_error_t error;
+  orm_error_init(&error);
+  return cursor->ops.column_count(cursor->native.context, out_count, &error);
+}
+
+static const orm_row_cursor_ops runtime_cursor_ops = {
+    sizeof(orm_row_cursor_ops), ORM_ROW_CURSOR_OPS_ABI_VERSION,
+    "runtime-driver", runtime_cursor_next, runtime_cursor_cancel,
+    runtime_cursor_destroy, runtime_cursor_configure_shape,
+    runtime_cursor_column_count};
+
 static orm_status_t runtime_backend_open_cursor(
     void *context, const orm_query_plan *plan, const orm_limits *limits,
     orm_row_cursor *out_cursor, orm_error_t *error) {
-  (void)context;
-  (void)plan;
-  (void)limits;
   if (out_cursor != NULL) memset(out_cursor, 0, sizeof(*out_cursor));
-  orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                "runtime driver cursor adapter is not implemented");
-  return ORM_STATUS_UNSUPPORTED;
+  orm_runtime_backend *backend = context;
+  if (backend == NULL || plan == NULL || limits == NULL ||
+      out_cursor == NULL || backend->ops.open_cursor == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid runtime driver cursor open");
+
+  orm_runtime_cursor *cursor =
+      (orm_runtime_cursor *)calloc(1u, sizeof(*cursor));
+  if (cursor == NULL)
+    return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                          "allocate runtime driver cursor adapter");
+
+  orm_driver_plan_view_v1 view;
+  memset(&view, 0, sizeof(view));
+  orm_status_t status = orm_driver_plan_borrow(plan, &view, error);
+  if (status != ORM_STATUS_OK) {
+    free(cursor);
+    return status;
+  }
+
+  const orm_driver_limits_v1 driver_limits = runtime_driver_limits(limits);
+  orm_driver_cursor_v1 native;
+  memset(&native, 0, sizeof(native));
+  status = backend->ops.open_cursor(
+      backend->native.context, &view, &driver_limits, &native, error);
+  if (status != ORM_STATUS_OK) {
+    free(cursor);
+    return status;
+  }
+
+  status = orm_driver_validate_cursor_v1(
+      &native, (uint32_t)sizeof(native), backend->driver->capabilities, error);
+  if (status != ORM_STATUS_OK) {
+    /* A driver that reports successful creation with an invalid ownership
+     * descriptor has violated the ABI. No unvalidated callback is invoked. */
+    free(cursor);
+    return status;
+  }
+
+  cursor->native = native;
+  cursor->execution_models = backend->driver->execution_models;
+  {
+    size_t cursor_ops_bytes = native.ops.bytes;
+    if (cursor_ops_bytes > sizeof(cursor->ops))
+      cursor_ops_bytes = sizeof(cursor->ops);
+    memcpy(&cursor->ops, native.ops.data, cursor_ops_bytes);
+  }
+
+  out_cursor->ops = &runtime_cursor_ops;
+  out_cursor->context = cursor;
+  return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
 static orm_status_t runtime_backend_execute_command(

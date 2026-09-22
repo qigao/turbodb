@@ -1,7 +1,7 @@
 name: Driver SDK installed package
 on:
   push:
-    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader]
+    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader, feat/runtime-driver-cursor-adapter]
   workflow_dispatch:
 permissions:
   contents: read
@@ -360,7 +360,7 @@ jobs:
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
-        if: (github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
+        if: ((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter') || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -377,7 +377,7 @@ jobs:
           git diff -- CMakeUserPresets.json > evidence/core/ci-paths.diff
           if ($LASTEXITCODE -ne 0) { throw 'cannot record CI path adaptation' }
       - name: Build and test native plan adapter on Linux
-        if: (github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
+        if: ((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter') || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -400,7 +400,7 @@ jobs:
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
           VCPKG_DISABLE_METRICS: '1'
-        if: (github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
+        if: ((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter') || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
         shell: cmd
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
