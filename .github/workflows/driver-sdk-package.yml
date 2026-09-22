@@ -1,7 +1,7 @@
 name: Driver SDK installed package
 on:
   push:
-    branches: [feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader, feat/runtime-driver-cursor-adapter]
+    branches: [master, feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader, feat/runtime-driver-cursor-adapter]
   workflow_dispatch:
 permissions:
   contents: read
