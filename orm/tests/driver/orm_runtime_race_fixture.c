@@ -67,7 +67,9 @@ static int race_gate_ensure(void) {
 }
 
 static void race_gate_pause(uint32_t phase) {
-  if (!race_gate_ensure()) return;
+  /* Ordinary fixture use does not allocate test-gate state. The control
+   * handle explicitly arms/initializes the gate before a raced callback. */
+  if (gate.initialized == 0u) return;
   salts_mutex_lock(&gate.mutex);
   if (gate.phase == phase) {
     gate.entered = 1u;
@@ -128,6 +130,13 @@ ORM_DRIVER_EXPORT void ORM_DRIVER_CALL orm_runtime_race_gate_release(void) {
   salts_mutex_unlock(&gate.mutex);
 }
 
+static void race_gate_destroy(void) {
+  if (gate.initialized == 0u) return;
+  salts_cond_destroy(&gate.condition);
+  salts_mutex_destroy(&gate.mutex);
+  memset(&gate, 0, sizeof(gate));
+}
+
 static orm_status_t ORM_DRIVER_CALL race_initialize(
     const orm_driver_host_v1 *host, void **out, orm_error_t *error) {
   if (out != NULL) *out = NULL;
@@ -163,6 +172,7 @@ static orm_status_t ORM_DRIVER_CALL race_finalize(
   }
   module_context.live = 0u;
   race_error(error, ORM_STATUS_OK);
+  race_gate_destroy();
   return ORM_STATUS_OK;
 }
 
