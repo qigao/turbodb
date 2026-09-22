@@ -10,14 +10,29 @@ static const char *fixture_path(void) {
   return path == NULL ? "" : path;
 }
 
-static orm_driver_load_config_t load_config(const char *id) {
+static const char *no_entry_fixture_path(void) {
+  const char *path = getenv("ORM_MODULE_NO_ENTRY_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static const char *bad_abi_fixture_path(void) {
+  const char *path = getenv("ORM_MODULE_BAD_ABI_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static orm_driver_load_config_t load_config_path(const char *id,
+                                                 const char *path) {
   orm_driver_load_config_t config;
   memset(&config, 0, sizeof(config));
   config.struct_size = (uint32_t)sizeof(config);
   config.abi_version = ORM_RUNTIME_ABI_VERSION;
-  config.module_path = orm_view(fixture_path());
+  config.module_path = orm_view(path);
   config.expected_driver_id = orm_view(id);
   return config;
+}
+
+static orm_driver_load_config_t load_config(const char *id) {
+  return load_config_path(id, fixture_path());
 }
 
 spec("runtime driver registry") {
@@ -76,6 +91,42 @@ spec("runtime driver registry") {
                 ORM_STATUS_DRIVER_NOT_REGISTERED);
     check_equal(orm_runtime_load_driver(runtime, &right, &error),
                 ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("rejects missing entry and bad ABI without disturbing a good driver") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_info_t info;
+    orm_driver_load_config_t good = load_config("fixture");
+    orm_driver_load_config_t no_entry =
+        load_config_path("noentry", no_entry_fixture_path());
+    orm_driver_load_config_t bad_abi =
+        load_config_path("badabi", bad_abi_fixture_path());
+
+    orm_runtime_config_init(&config);
+    check_true(no_entry.module_path.len != 0u);
+    check_true(bad_abi.module_path.len != 0u);
+    check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &good, &error), ORM_STATUS_OK);
+
+    check_equal(orm_runtime_load_driver(runtime, &no_entry, &error),
+                ORM_STATUS_DRIVER_ENTRY_MISSING);
+    check_equal(orm_runtime_driver_info(runtime, orm_view("noentry"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_load_driver(runtime, &bad_abi, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    check_equal(orm_runtime_driver_info(runtime, orm_view("badabi"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_driver_info(runtime, orm_view("fixture"),
+                                        &info, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
     orm_runtime_release(runtime);
   }
 

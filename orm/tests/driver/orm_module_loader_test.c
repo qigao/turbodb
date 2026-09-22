@@ -16,6 +16,11 @@ static const char *fixture_path(void) {
   return path == NULL ? "" : path;
 }
 
+static const char *invalid_fixture_path(void) {
+  const char *path = getenv("ORM_INVALID_MODULE_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
 spec("runtime module loader") {
   it("rejects relative paths and clears the output handle") {
     orm_error_t error;
@@ -74,5 +79,18 @@ spec("runtime module loader") {
                 ORM_STATUS_DRIVER_MODULE_NOT_FOUND);
     check_null(module.native);
     check_equal(error.status, ORM_STATUS_DRIVER_MODULE_NOT_FOUND);
+  }
+
+  it("classifies an existing non-module as a load error") {
+    orm_error_t error;
+    orm_module_handle module = {0};
+    const char *path = invalid_fixture_path();
+
+    orm_error_init(&error);
+    check_true(path[0] != '\0');
+    check_equal(orm_module_open_absolute(path, &module, &error),
+                ORM_STATUS_DRIVER_LOAD_ERROR);
+    check_null(module.native);
+    check_equal(error.status, ORM_STATUS_DRIVER_LOAD_ERROR);
   }
 }
