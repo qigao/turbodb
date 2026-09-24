@@ -56,7 +56,7 @@ foreach(group IN ITEMS regression state checked public_flow cpp_flow cleanup rac
   set(target orm_owner_${group}_test)
   target_include_directories(${target} PRIVATE ../../src/abi ../../src/flow)
   target_link_libraries(${target} PRIVATE orm_owner_test_core
-    Salts::Databind Salts::CFlow Salts::TinyTest)
+    Salts::DataBind Salts::CFlow Salts::TinyTest)
   set_target_properties(${target} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON LINKER_LANGUAGE CXX FOLDER "orm/tests")
   # The unmodified C++ regression keeps its existing warning policy.
@@ -71,7 +71,7 @@ foreach(group IN ITEMS regression state checked public_flow cpp_flow cleanup rac
   set_tests_properties(orm_owner_${group} PROPERTIES TIMEOUT 60)
   if(WIN32)
     set_tests_properties(orm_owner_${group} PROPERTIES ENVIRONMENT_MODIFICATION
-      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Databind>")
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::DataBind>")
   endif()
 endforeach()
 
@@ -90,7 +90,7 @@ if(ORM_POSTGRES_LIVE_TESTS)
     target_include_directories(${pg_target} PRIVATE
       ../../src/abi ../../src/flow ../../src/dbs/sql ../../src/dbs/postgres)
     target_link_libraries(${pg_target} PRIVATE orm_owner_test_core
-      PostgreSQL::PostgreSQL Salts::Databind Salts::CFlow Salts::TinyTest)
+      PostgreSQL::PostgreSQL Salts::DataBind Salts::CFlow Salts::TinyTest)
     set_target_properties(${pg_target} PROPERTIES C_STANDARD 11
       C_STANDARD_REQUIRED ON LINKER_LANGUAGE CXX FOLDER "orm/tests")
     if(MSVC)
@@ -102,7 +102,7 @@ if(ORM_POSTGRES_LIVE_TESTS)
     set_tests_properties(${pg_name} PROPERTIES TIMEOUT 60)
     if(WIN32)
       set_tests_properties(${pg_name} PROPERTIES ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Databind>")
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::DataBind>")
     endif()
   endforeach()
 endif()
@@ -121,7 +121,7 @@ if(ORM_WITH_PGSQL)
   target_include_directories(orm_postgres_connection_test PRIVATE
     ../../src/abi ../../src/flow ../../src/dbs/postgres)
   target_link_libraries(orm_postgres_connection_test PRIVATE orm_owner_test_core
-    PostgreSQL::PostgreSQL Salts::CSerde Salts::Databind Salts::CFlow Salts::TinyTest)
+    PostgreSQL::PostgreSQL Salts::CSerde Salts::DataBind Salts::CFlow Salts::TinyTest)
   set_target_properties(orm_postgres_connection_test PROPERTIES C_STANDARD 11
     C_STANDARD_REQUIRED ON LINKER_LANGUAGE CXX FOLDER "orm/tests")
   if(MSVC)
@@ -134,6 +134,6 @@ if(ORM_WITH_PGSQL)
   set_tests_properties(orm_postgres_connection PROPERTIES TIMEOUT 30)
   if(WIN32)
     set_tests_properties(orm_postgres_connection PROPERTIES ENVIRONMENT_MODIFICATION
-      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Databind>")
+      "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::DataBind>")
   endif()
 endif()
