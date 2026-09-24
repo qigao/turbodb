@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: master
+          ref: v1.5.0
           fetch-depth: 1
           path: .ci-salts
           persist-credentials: false
@@ -83,18 +83,14 @@ jobs:
           $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
           "VSINSTALL=$vs" >> $env:GITHUB_ENV
-      - name: Verify master dependencies and compute content identity
+      - name: Verify dependency revisions and compute content identity
         id: deps
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          function Assert-Master([string]$repo, [string]$name) {
-            $branch = git -C $repo branch --show-current
-            if ($LASTEXITCODE -ne 0 -or $branch -cne 'master') {
-              throw "$name must be checked out from master"
-            }
+          function Assert-Clean([string]$repo, [string]$name) {
             git -C $repo diff --exit-code
-            if ($LASTEXITCODE -ne 0) { throw "$name master checkout is dirty" }
+            if ($LASTEXITCODE -ne 0) { throw "$name checkout is dirty" }
           }
           function Get-TrackedContentDigest([string]$repo) {
             $files = @(git -c core.quotepath=false -C $repo ls-files | Sort-Object)
@@ -113,8 +109,17 @@ jobs:
             $hash.Dispose()
             return -join ($bytes | ForEach-Object { $_.ToString('x2') })
           }
-          Assert-Master '.ci-salts' 'Salts'
-          Assert-Master '.ci-salts-utils' 'SaltsUtils'
+          Assert-Clean '.ci-salts' 'Salts'
+          Assert-Clean '.ci-salts-utils' 'SaltsUtils'
+          $saltsHead = git -C .ci-salts rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or
+              $saltsHead -cne '47f114cf2f79c888d5b596a643a6e28fd2ab1b5b') {
+            throw "Salts must be the released v1.5.0 commit"
+          }
+          $saltsUtilsBranch = git -C .ci-salts-utils branch --show-current
+          if ($LASTEXITCODE -ne 0 -or $saltsUtilsBranch -cne 'master') {
+            throw "SaltsUtils must be checked out from master"
+          }
           "salts=$(Get-TrackedContentDigest '.ci-salts')" >> $env:GITHUB_OUTPUT
           "salts_utils=$(Get-TrackedContentDigest '.ci-salts-utils')" >> $env:GITHUB_OUTPUT
       - name: Record exact dependency cache identity
@@ -131,14 +136,14 @@ jobs:
           Write-Output "vcpkg cache identity: root=$root revision=$revision"
           if (-not $env:ImageOS -or -not $env:ImageVersion) { throw 'runner image identity is missing' }
           "key=$env:ImageOS-$env:ImageVersion-$revision" >> $env:GITHUB_OUTPUT
-      - name: Restore Salts master package
+      - name: Restore Salts 1.5.0 package
         id: salts-package-cache
         uses: actions/cache/restore@v4
         with:
           path: |
             external/pkgs/salts/${{ matrix.config }}
             .ci-salts/vcpkg_installed
-          key: driver-sdk-salts-master-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}
+          key: driver-sdk-salts-1.5.0-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}
       - name: Restore SaltsUtils master package
         id: salts-utils-package-cache
         uses: actions/cache/restore@v4
@@ -153,7 +158,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y nasm
 
-      - name: Build or reuse Salts master and test SDK on Linux
+      - name: Build or reuse Salts 1.5.0 and test SDK on Linux
         if: runner.os == 'Linux'
         env:
           SALTS_SOURCE_DIGEST: ${{ steps.deps.outputs.salts }}
@@ -165,7 +170,7 @@ jobs:
             reuse+=(--reuse-salts-install)
           fi
           python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config '${{ matrix.config }}' "${reuse[@]}"
-      - name: Build or reuse Salts master and test SDK on Windows
+      - name: Build or reuse Salts 1.5.0 and test SDK on Windows
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
           VCPKG_DISABLE_METRICS: '1'
@@ -181,7 +186,7 @@ jobs:
           set "REUSE_SALTS="
           if "${{ steps.salts-package-cache.outputs.cache-hit }}"=="true" set "REUSE_SALTS=--reuse-salts-install"
           python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}" %REUSE_SALTS%
-      - name: Save Salts master package
+      - name: Save Salts 1.5.0 package
         if: steps.salts-package-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
