@@ -22,7 +22,7 @@ endif()
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
 find_package(Salts CONFIG REQUIRED PATHS "${SDK_SALTS_ROOT}" NO_DEFAULT_PATH)
-foreach(required_target IN ITEMS Salts::Core Salts::CSerde Salts::CBind
+foreach(required_target IN ITEMS Salts::Core Salts::CSerde
                                  Salts::CFlow Salts::TinyTest)
   if(NOT TARGET ${required_target})
     message(FATAL_ERROR "Salts package is missing ${required_target}")
@@ -33,7 +33,7 @@ add_library(orm_driver_sdk INTERFACE)
 target_include_directories(orm_driver_sdk INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/../include/orm")
 target_link_libraries(orm_driver_sdk INTERFACE
-  Salts::Core Salts::CSerde Salts::CBind Salts::CFlow)
+  Salts::Core Salts::CSerde Salts::CFlow)
 
 add_library(orm_driver_build_options INTERFACE)
 if(MSVC)

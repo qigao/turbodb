@@ -5,7 +5,7 @@
 Accepted as an intentionally incompatible replacement on 2026-08-27.
 
 The supported execution contract is a typed CFlow Publisher decoded through
-CSerde and CBind. The eager `orm_result_t` API, the schema-less materialized-row
+CSerde and DataBind. The eager `orm_result_t` API, the schema-less materialized-row
 Publisher, the header-only C chain/JPA/model facades, and their C++ result wrapper
 are migration artifacts and are removed rather than deprecated. The public C++
 API is allowed only as a thin owner/error wrapper over the public C reactive
@@ -33,7 +33,7 @@ immutable C query plan
     -> driver cursor
     -> CFlow Publisher (demand / WAIT / cancellation)
     -> row-local CSerde reader
-         -> typed: CBind + CMeta owning value
+         -> typed: DataBind + CMeta owning value
     -> CFlow Graph -> Subscriber
 ```
 
@@ -42,18 +42,18 @@ remain query-plan operations and are pushed down when a driver can preserve
 their semantics. CFlow operators transform the returned row stream; a CFlow
 request count is downstream-output demand and is never rewritten as SQL LIMIT.
 
-The public execution entry accepts a versioned CBind row configuration and
+The public execution entry accepts a versioned DataBind row configuration and
 moves a driver cursor into a `cflow_publisher`. Successful open transfers Publisher
 ownership to the caller; failed open leaves the output zero. Query, connection,
 transaction, row descriptor, and execution-info storage are borrowed through
 Publisher destruction.
 
 `CSerde` is required at the driver boundary: it is the format-neutral row token
-protocol. `CBind` is required by every row-producing execution because an
+protocol. `DataBind` is required by every row-producing execution because an
 explicit CMeta row shape is the only supported public result contract. There is
 no schema-less index-based result and no universal dynamic row fallback.
 
-Token semantics are normalized by the backend adapter, not by CBind. CBind
+Token semantics are normalized by the backend adapter, not by DataBind. DataBind
 therefore remains strict: a `CSERDE_STRING` is never guessed to be a number or
 boolean. Backends with native value kinds map those kinds directly. PostgreSQL
 uses the libpq field OID to distinguish boolean, signed integer, OID, floating
@@ -93,7 +93,7 @@ changes cannot alter database token semantics.
 - Type ownership: the backend owns native-to-CSerde token selection. The row
   descriptor remains borrowed and immutable; an optional internal cursor
   configuration hook receives it before cursor ownership moves. The common
-  Publisher and CBind layers do not coerce backend strings.
+  Publisher and DataBind layers do not coerce backend strings.
 - Shutdown: stop new demand, cancel the Subscription, close the Subscription, then destroy the
   scheduler/driver executor and borrowed graph state.
 

@@ -1,5 +1,7 @@
 name: Driver handshake source contract
 on:
+  pull_request:
+    branches: [master]
   push:
     branches: [feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers]
   workflow_dispatch:
@@ -43,7 +45,7 @@ jobs:
             git -C .ci-salts archive HEAD > evidence/salts-source.tar
           fi
           includes=(-Iorm/include/orm)
-          for module in tinytest cmeta cflow cstl cserde cbind utils platform concurrency coroutine native-io vendor/sds; do
+          for module in tinytest cmeta cflow cstl cserde utils platform concurrency coroutine native-io vendor/sds; do
             for path in ".ci-salts/$module/include" ".ci-salts/$module"; do
               if [[ -d "$path" ]]; then includes+=(-isystem "$path"); fi
             done

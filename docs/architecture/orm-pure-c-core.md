@@ -36,7 +36,7 @@ public opaque C handles
     -> bounded owning C query plan
     -> versioned backend ops + opaque backend context
     -> driver row cursor / command result
-    -> CBind Publisher / command Publisher
+    -> DataBind row Publisher / command Publisher
 ```
 
 `orm_connection_t` owns one backend handle and immutable limits.
