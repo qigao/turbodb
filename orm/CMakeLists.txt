@@ -129,7 +129,8 @@ set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/dbs/mongo/orm_mongo_cursor.c
                      src/dbs/tidesdb/orm_tidesdb_cursor.c)
 if(ORM_WITH_SQLITE)
-  list(APPEND ORM_C_SOURCES src/dbs/sqlite/backend.c)
+  list(APPEND ORM_C_SOURCES src/dbs/sqlite/backend.c
+                            src/dbs/sqlite/maintenance.c)
   list(APPEND ORM_FLOW_SOURCES src/dbs/sqlite/orm_sqlite_cursor.c)
 endif()
 if(ORM_WITH_REDIS)
@@ -1053,6 +1054,24 @@ endif()
 add_test(NAME orm_sqlite_provider_atomicity
          COMMAND orm_sqlite_provider_atomicity_test)
 
+add_executable(orm_sqlite_provider_checkpoint_test
+               tests/integration/sqlite_provider_checkpoint_test.c)
+target_compile_features(orm_sqlite_provider_checkpoint_test PRIVATE c_std_11)
+target_compile_definitions(orm_sqlite_provider_checkpoint_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_sqlite_provider_checkpoint_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_sqlite_provider_checkpoint_test
+                      PRIVATE turbo_orm Salts::TinyTest)
+set_target_properties(
+  orm_sqlite_provider_checkpoint_test
+  PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_sqlite_provider_checkpoint_test)
+if(MSVC)
+  target_compile_options(orm_sqlite_provider_checkpoint_test
+                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+add_test(NAME orm_sqlite_provider_checkpoint
+         COMMAND orm_sqlite_provider_checkpoint_test)
+
 add_executable(orm_cpp_flow_test tests/flow/orm_cpp_flow_test.cpp)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_cpp_flow_test PRIVATE ORM_C_STATIC)
@@ -1202,6 +1221,11 @@ include(GNUInstallDirs)
 cmake_install_headers(
   FILES include/orm/orm.h include/orm/orm.hpp
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+if(ORM_WITH_SQLITE)
+  cmake_install_headers(
+    FILES include/orm/orm_sqlite.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+endif()
 if(ORM_WITH_PGSQL)
   cmake_install_headers(
     FILES include/orm/orm_postgresql.h include/orm/orm_postgresql.hpp
