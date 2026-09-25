@@ -15,7 +15,7 @@
 
 - **`cstl` / `cmeta`** - Salts 容器、类型元数据与泛型接口
 - **`cflow` / `reactive` / `actor` / `executor`** - Salts 流、背压、Actor 与执行器协议
-- **`cbind`** - Salts CBind schema/binding 边界；若本机 skill 未安装，以 Salts 公共头文件和契约测试为准
+- **DataBind / CMeta / CSerde** - SaltsUtils DataBind schema/binding 与 Salts native/token 边界；以公开头文件和契约测试为准
 - **`memory-design-protocols`** - 内存、buffer、ring、Disruptor、queue、pool 与零拷贝 API/设计协议（所有权、容量、背压、关闭、验证）
 - **`cmake-presets`** - CMake Presets 构建测试指南（configure/build/test preset、target 构建、build tree 恢复）
 - **`c-design-patterns`** - C 语言设计模式实现指南（12 种模式、SOLID 原则、反模式警告）
