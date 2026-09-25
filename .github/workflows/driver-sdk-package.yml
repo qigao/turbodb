@@ -308,7 +308,7 @@ jobs:
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
-        if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge' || github.ref_name == 'feat/driver-plugin-interface')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
+        if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge' || github.ref == 'refs/heads/feat/driver-plugin-interface')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -325,7 +325,7 @@ jobs:
           git diff -- CMakeUserPresets.json > evidence/core/ci-paths.diff
           if ($LASTEXITCODE -ne 0) { throw 'cannot record CI path adaptation' }
       - name: Build reflected Driver Plugin contract on Linux
-        if: github.ref_name == 'feat/driver-plugin-interface' && runner.os == 'Linux'
+        if: github.ref == 'refs/heads/feat/driver-plugin-interface' && runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -341,7 +341,7 @@ jobs:
       - name: Build reflected Driver Plugin contract on Windows
         env:
           VCPKG_DISABLE_METRICS: '1'
-        if: github.ref_name == 'feat/driver-plugin-interface' && runner.os == 'Windows'
+        if: github.ref == 'refs/heads/feat/driver-plugin-interface' && runner.os == 'Windows'
         shell: cmd
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
