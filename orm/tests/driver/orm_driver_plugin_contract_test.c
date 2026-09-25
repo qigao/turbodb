@@ -34,7 +34,7 @@ CMETA_IMPLEMENTS(
     .execution_models = fixture_execution_models,
     .connect = fixture_connect);
 
-#define WRONG_DRIVER_METHODS(X, I) X(I,F0,uint64_t,execution_model,value,&orm_driver_plugin_execution_models_type,CMETA_ABI_SCALAR)
+#define WRONG_DRIVER_METHODS(X, I) X(I,F0,uint64_t,execution_model,value,&orm_driver_interface_execution_models_type,CMETA_ABI_SCALAR)
 CMETA_INTERFACE(turbodb_wrong_driver, WRONG_DRIVER_METHODS);
 
 const cmeta_interface_desc *orm_driver_plugin_peer_interface(void);
