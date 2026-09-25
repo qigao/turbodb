@@ -48,7 +48,7 @@ driver-specific CMake package and no consumer-side PostgreSQL discovery.
 
 Backend targets are private implementation dependencies and are never
 discovered by `OrmConfig.cmake`. `Salts::Core` remains public because
-`orm.h` exposes Salts CBind, CFlow, string-view, and metadata types.
+`orm.h` exposes Salts CMeta/CFlow, string-view, and metadata types.
 Runtime libraries that are dynamically linked remain deployment artifacts,
 not consumer CMake packages. A static clone exists only inside the test build;
 there is no installable static Orm SDK contract.
