@@ -490,6 +490,42 @@ endif()
 if(ORM_BUILD_TESTS)
 set(ORM_TEST_PRIVATE_LIBS Salts::Core)
 
+if(NOT TARGET Salts::Plugin OR NOT TARGET Salts::PluginABI)
+  message(FATAL_ERROR
+          "ORM driver Plugin contract tests require current Salts::Plugin and Salts::PluginABI")
+endif()
+
+add_executable(
+  orm_driver_plugin_contract_test
+  tests/driver/orm_driver_plugin_contract_test.c
+  tests/driver/orm_driver_plugin_interface_peer.c)
+target_compile_features(orm_driver_plugin_contract_test PRIVATE c_std_11)
+target_include_directories(orm_driver_plugin_contract_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(
+  orm_driver_plugin_contract_test
+  PRIVATE Salts::Plugin Salts::TinyTest)
+set_target_properties(
+  orm_driver_plugin_contract_test
+  PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_driver_plugin_contract_test)
+if(MSVC)
+  target_compile_options(orm_driver_plugin_contract_test
+                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+endif()
+add_test(NAME orm_driver_plugin_contract COMMAND orm_driver_plugin_contract_test)
+
+add_executable(
+  orm_driver_plugin_header_cpp_test
+  tests/driver/orm_driver_plugin_header_cpp_test.cpp)
+target_compile_features(orm_driver_plugin_header_cpp_test PRIVATE cxx_std_17)
+target_include_directories(orm_driver_plugin_header_cpp_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_driver_plugin_header_cpp_test PRIVATE Salts::PluginABI)
+set_target_properties(
+  orm_driver_plugin_header_cpp_test
+  PROPERTIES CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_driver_plugin_header_cpp_test)
+add_test(NAME orm_driver_plugin_header_cpp COMMAND orm_driver_plugin_header_cpp_test)
+
 add_test(
   NAME orm_shared_package_contract
   COMMAND
