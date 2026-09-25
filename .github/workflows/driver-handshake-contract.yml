@@ -1,5 +1,7 @@
 name: Driver handshake source contract
 on:
+  pull_request:
+    branches: [master]
   push:
     branches: [feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers]
   workflow_dispatch:
