@@ -45,7 +45,7 @@ def main() -> int:
     print(f"mode=source-only config={args.config} salts={head}", flush=True)
     includes = ["-I" + str(root / "orm/include/orm"),
                 "-I" + str(root / "orm/src/driver")]
-    modules = ("tinytest", "cmeta", "cflow", "cstl", "cserde", "cbind", "utils",
+    modules = ("tinytest", "cmeta", "cflow", "cstl", "cserde", "utils",
                "platform", "concurrency", "coroutine", "native-io", "vendor/sds")
     for module in modules:
         directory = salts / module
