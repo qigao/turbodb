@@ -385,7 +385,7 @@ spec("native cursor execution and cleanup share connection admission") {
   }
   it("blocks commands during native next") { scenario(EXEC_NEXT, EXEC_NEST_COMMAND, 1u); }
   it("allows independent commands during native next") { scenario(EXEC_NEXT, EXEC_NEST_COMMAND, 2u); }
-  it("keeps admission through real CBind reader consumption") { scenario(EXEC_READER, EXEC_NEST_COMMAND, 1u); }
+  it("keeps admission through real DataBind reader consumption") { scenario(EXEC_READER, EXEC_NEST_COMMAND, 1u); }
   it("allows independent commands during real row decoding") { scenario(EXEC_READER, EXEC_NEST_COMMAND, 2u); }
   it("blocks BEGIN during native next") { scenario(EXEC_NEXT, EXEC_NEST_BEGIN, 1u); }
   it("allows independent BEGIN during native next") { scenario(EXEC_NEXT, EXEC_NEST_BEGIN, 2u); }
