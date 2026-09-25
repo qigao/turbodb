@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [master]
   push:
-    branches: [master, feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader, feat/runtime-driver-cursor-adapter, feat/runtime-driver-command-adapter, feat/runtime-driver-transaction-adapter, feat/runtime-driver-registry-concurrency, feat/driver-backend-bridge]
+    branches: [master, feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader, feat/runtime-driver-cursor-adapter, feat/runtime-driver-command-adapter, feat/runtime-driver-transaction-adapter, feat/runtime-driver-registry-concurrency, feat/driver-backend-bridge, feat/driver-plugin-interface]
   workflow_dispatch:
 permissions:
   contents: read
@@ -308,7 +308,7 @@ jobs:
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
-        if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
+        if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge' || github.ref_name == 'feat/driver-plugin-interface')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -324,6 +324,41 @@ jobs:
           New-Item -ItemType Directory -Force -Path evidence/core | Out-Null
           git diff -- CMakeUserPresets.json > evidence/core/ci-paths.diff
           if ($LASTEXITCODE -ne 0) { throw 'cannot record CI path adaptation' }
+      - name: Build reflected Driver Plugin contract on Linux
+        if: github.ref_name == 'feat/driver-plugin-interface' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile=linux-release-user
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            profile=linux-dev-user
+          fi
+          mkdir -p evidence/core
+          git rev-parse HEAD | tee evidence/core/plugin-contract-head.txt
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/core/plugin-contract-configure.log
+          cmake --build --preset "$profile" --target orm_driver_plugin_contract_test orm_driver_plugin_header_cpp_test --parallel 4 2>&1 | tee evidence/core/plugin-contract-build.log
+          ctest --preset "$profile" -R '^(orm_driver_plugin_contract|orm_driver_plugin_header_cpp)$' --verbose --no-tests=error 2>&1 | tee evidence/core/plugin-contract-ctest.log
+      - name: Build reflected Driver Plugin contract on Windows
+        env:
+          VCPKG_DISABLE_METRICS: '1'
+        if: github.ref_name == 'feat/driver-plugin-interface' && runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
+          set "PROFILE=win-release-user"
+          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
+          if not exist evidence\core mkdir evidence\core
+          git rev-parse HEAD > evidence\core\plugin-contract-head.txt
+          if errorlevel 1 exit /b 1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > evidence\core\plugin-contract-configure.log 2>&1
+          if errorlevel 1 (type evidence\core\plugin-contract-configure.log & exit /b 1)
+          cmake --build --preset "%PROFILE%" --target orm_driver_plugin_contract_test orm_driver_plugin_header_cpp_test --parallel 4 > evidence\core\plugin-contract-build.log 2>&1
+          if errorlevel 1 (type evidence\core\plugin-contract-build.log & exit /b 1)
+          ctest --preset "%PROFILE%" -R "^(orm_driver_plugin_contract|orm_driver_plugin_header_cpp)$" --verbose --no-tests=error > evidence\core\plugin-contract-ctest.log 2>&1
+          if errorlevel 1 (type evidence\core\plugin-contract-ctest.log & exit /b 1)
+          type evidence\core\plugin-contract-ctest.log
       - name: Build and test native plan adapter on Linux
         if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
         shell: bash
