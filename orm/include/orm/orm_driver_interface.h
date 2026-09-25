@@ -29,32 +29,45 @@ CMETA_LOCAL const cmeta_type_desc orm_driver_interface_execution_models_type = {
 
 CMETA_LOCAL const cmeta_type_identity orm_driver_interface_config_identity =
     CMETA_TYPE_ID_ATOM_INIT("TurboDb.orm_config.v4");
+CMETA_LOCAL const cmeta_type_identity orm_driver_interface_const_config_identity =
+    CMETA_TYPE_ID_CONST_INIT(&orm_driver_interface_config_identity);
 CMETA_LOCAL const cmeta_type_identity orm_driver_interface_config_ptr_identity =
-    CMETA_TYPE_ID_POINTER_INIT(&orm_driver_interface_config_identity);
+    CMETA_TYPE_ID_POINTER_INIT(&orm_driver_interface_const_config_identity);
 CMETA_LOCAL const cmeta_type_desc orm_driver_interface_config_type = {
     "orm_config_t", sizeof(orm_config_t), CMETA_ALIGNOF(orm_config_t),
     CMETA_T_OBJECT, NULL, NULL, &orm_driver_interface_config_identity
 };
+CMETA_LOCAL const cmeta_type_desc orm_driver_interface_const_config_type = {
+    "const orm_config_t", sizeof(orm_config_t), CMETA_ALIGNOF(orm_config_t),
+    CMETA_T_OBJECT, NULL, NULL, &orm_driver_interface_const_config_identity
+};
 CMETA_LOCAL const cmeta_type_desc orm_driver_interface_config_ptr_type = {
     "const orm_config_t *", sizeof(const orm_config_t *),
     CMETA_ALIGNOF(const orm_config_t *), CMETA_T_POINTER,
-    &orm_driver_interface_config_type, NULL,
+    &orm_driver_interface_const_config_type, NULL,
     &orm_driver_interface_config_ptr_identity
 };
 
 CMETA_LOCAL const cmeta_type_identity orm_driver_interface_limits_identity =
     CMETA_TYPE_ID_ATOM_INIT("TurboDb.Driver.Limits.v1");
+CMETA_LOCAL const cmeta_type_identity orm_driver_interface_const_limits_identity =
+    CMETA_TYPE_ID_CONST_INIT(&orm_driver_interface_limits_identity);
 CMETA_LOCAL const cmeta_type_identity orm_driver_interface_limits_ptr_identity =
-    CMETA_TYPE_ID_POINTER_INIT(&orm_driver_interface_limits_identity);
+    CMETA_TYPE_ID_POINTER_INIT(&orm_driver_interface_const_limits_identity);
 CMETA_LOCAL const cmeta_type_desc orm_driver_interface_limits_type = {
     "orm_driver_limits_v1", sizeof(orm_driver_limits_v1),
     CMETA_ALIGNOF(orm_driver_limits_v1), CMETA_T_OBJECT, NULL, NULL,
     &orm_driver_interface_limits_identity
 };
+CMETA_LOCAL const cmeta_type_desc orm_driver_interface_const_limits_type = {
+    "const orm_driver_limits_v1", sizeof(orm_driver_limits_v1),
+    CMETA_ALIGNOF(orm_driver_limits_v1), CMETA_T_OBJECT, NULL, NULL,
+    &orm_driver_interface_const_limits_identity
+};
 CMETA_LOCAL const cmeta_type_desc orm_driver_interface_limits_ptr_type = {
     "const orm_driver_limits_v1 *", sizeof(const orm_driver_limits_v1 *),
     CMETA_ALIGNOF(const orm_driver_limits_v1 *), CMETA_T_POINTER,
-    &orm_driver_interface_limits_type, NULL,
+    &orm_driver_interface_const_limits_type, NULL,
     &orm_driver_interface_limits_ptr_identity
 };
 
