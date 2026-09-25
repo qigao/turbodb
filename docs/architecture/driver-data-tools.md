@@ -15,7 +15,7 @@ SQLite query 路径会拒绝第二条 statement；PostgreSQL query 路径使用
 - 生产实现保持 C11；C++ 不进入工具 target 的 production sources。
 - 提供独立的 `turbodb-sqlite` 和 `turbodb-postgresql` executable。
 - 每个 executable 静态绑定一个 native driver，不使用运行时 registry 或 service locator。
-- 直接链接 SQLite/libpq，不链接 `turbo_orm`、CFlow、Salts parser targets、CBind 或 CSerde。
+- 直接链接 SQLite/libpq，不链接 `turbo_orm`、CFlow、Salts parser targets、DataBind 或 CSerde。
 - 对文件、配置、事务和 native error 实施 fail-fast、有界、可复验的契约。
 
 非目标包括 schema-to-SQL 编译、migration diff、`ALTER TABLE` 规划、migration history、
