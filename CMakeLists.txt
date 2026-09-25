@@ -95,8 +95,8 @@ unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
 find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
              NO_DEFAULT_PATH)
-if(NOT TARGET Salts::Databind)
-  message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::Databind")
+if(NOT TARGET Salts::DataBind)
+  message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::DataBind")
 endif()
 
 find_package(Threads REQUIRED)
