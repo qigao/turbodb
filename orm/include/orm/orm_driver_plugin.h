@@ -19,15 +19,17 @@ CMETA_INLINE bool orm_driver_plugin_binding_valid(
   return binding != NULL &&
          turbodb_driver_valid(&binding->driver) &&
          binding->capabilities == turbodb_driver_capabilities(&binding->driver) &&
+         (binding->capabilities & ~ORM_DRIVER_CAP_KNOWN_MASK) == 0u &&
          binding->execution_models != 0u &&
          (binding->execution_models & ~ORM_DRIVER_EXEC_KNOWN_MASK) == 0u;
 }
 
 /*
- * Control-plane admission. The returned binding copies only the typed
- * {self,vtable} handle and validated metadata. The caller must independently
- * retain the Salts::Plugin lease for as long as this binding or any object
- * created through it can execute module code.
+ * Control-plane admission. The caller must already hold a live Salts::Plugin
+ * lease for the export being inspected. The returned binding copies only the
+ * typed {self,vtable} handle and validated metadata; that lease must then be
+ * retained for as long as this binding or any object created through it can
+ * execute module code. Lease acquisition/release belongs to orm_runtime (#89).
  */
 CMETA_INLINE salts_plugin_status orm_driver_plugin_bind_export(
     const salts_plugin_export *entry,
