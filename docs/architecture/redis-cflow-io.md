@@ -151,7 +151,7 @@ coroutine. Cursor cancellation immediately cancels the Redis command Publisher.
 synchronous AUTH/SELECT/control commands use one absolute monotonic deadline
 across all of their network fragments.
 
-The Redis row adapter continues to expose each row as a `cserde_reader`; CBind
+The Redis row adapter continues to expose each row as a `cserde_reader`; DataBind
 constructs the typed row in caller-provided CFlow output storage. RESP and
 database headers do not leak through the public ORM API.
 
