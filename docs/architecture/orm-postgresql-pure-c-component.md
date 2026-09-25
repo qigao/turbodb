@@ -8,7 +8,7 @@
 
 1. PostgreSQL/libpq 依赖必须位于可选组件边界，普通 `Orm::C` 消费者不应发现 PostgreSQL。
 2. PostgreSQL 必须有显式启用、真实服务器支持的 live integration gate。
-3. 复合主键必须能通过当前纯 C query API 原子地形成多列等值谓词，供手写 facade、CMeta/CBind 描述符适配器或 build-time generated C code 使用。
+3. 复合主键必须能通过当前纯 C query API 原子地形成多列等值谓词，供手写 facade、CMeta/DataBind 描述符适配器或 build-time generated C code 使用。
 
 ## 候选方案
 
@@ -68,9 +68,9 @@ C++ 只提供 header wrapper。`orm::connection` 增加接收 C connector functi
   `OrmTargets.cmake` 额外导出 `Orm::PostgreSQL`，不生成独立 driver package。
 - core 和 component 只提供 shared SDK。component 自己封闭 libpq 的 runtime
   dependencies，消费端不执行 `find_dependency(PostgreSQL)`。
-- CBind/CSerde/CFlow 继续来自 Salts。ORM 不新增 parser runtime 依赖，也不在运行时调用 `tbe_compiler`。
+- CMeta/CSerde/CFlow 继续来自 Salts，DataBind 来自 SaltsUtils。ORM 不新增 parser/compiler hot-path 依赖。
 
-## CBind 关系
+## DataBind 关系
 
 复合主键属于 query construction，不属于 wire-format serialization。ORM 因此不解析 schema 文件，也不复制独立 binding runtime 的 descriptor。
 
@@ -79,7 +79,7 @@ C++ 只提供 header wrapper。`orm::connection` 增加接收 C connector functi
 1. build/CI 使用 `tbe_compiler --source-output` 生成 `.h/.c`，生成代码把 key members 转成 `orm_key_part_t[]`；
 2. 现有 C struct 使用 `TBE_TYPED_DEFINE_STRUCT` 描述，应用层 adapter 读取明确的 key metadata 并构造 `orm_key_part_t[]`。
 
-两条路线都在调用边界完成值转换；ORM 立即复制 key parts，不保存 CBind object、descriptor child 或 callback-borrowed view。
+两条路线都在调用边界完成值转换；ORM 立即复制 key parts，不保存 DataBind runtime plan、descriptor child 或 callback-borrowed view。
 
 ## Live test gate
 
