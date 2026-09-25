@@ -170,7 +170,7 @@ jobs:
           if [[ '${{ steps.salts-package-cache.outputs.cache-hit }}' == 'true' ]]; then
             reuse+=(--reuse-salts-install)
           fi
-          python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config '${{ matrix.config }}' "${reuse[@]}"
+          python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --expected-salts-commit 5c4199c10e12b54fe57fffc4e0eaa07b646e207f --config '${{ matrix.config }}' "${reuse[@]}"
       - name: Build or reuse Salts 1.6.0 and test SDK on Windows
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
@@ -186,7 +186,7 @@ jobs:
           set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
           set "REUSE_SALTS="
           if "${{ steps.salts-package-cache.outputs.cache-hit }}"=="true" set "REUSE_SALTS=--reuse-salts-install"
-          python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --config "${{ matrix.config }}" %REUSE_SALTS%
+          python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --expected-salts-commit 5c4199c10e12b54fe57fffc4e0eaa07b646e207f --config "${{ matrix.config }}" %REUSE_SALTS%
       - name: Save Salts 1.6.0 package
         if: steps.salts-package-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
