@@ -60,7 +60,7 @@ class PackageProvenanceTest(unittest.TestCase):
                 f'CMAKE_TOOLCHAIN_FILE:FILEPATH={self.configured_toolchain}\n')
         return ''
 
-    def invoke(self):
+    def invoke(self, expected_salts_commit=None):
         with ExitStack() as stack:
             stack.enter_context(mock.patch.dict(os.environ, self.env, clear=True))
             stack.enter_context(mock.patch.object(runner, '__file__',
@@ -68,8 +68,11 @@ class PackageProvenanceTest(unittest.TestCase):
             stack.enter_context(mock.patch.object(runner.platform, 'system', return_value='Linux'))
             stack.enter_context(mock.patch.object(runner.platform, 'machine', return_value='x86_64'))
             stack.enter_context(mock.patch.object(runner, 'run', side_effect=self.command_boundary))
-            stack.enter_context(mock.patch('sys.argv', ['run_package_contract.py',
-                '--salts-source', str(self.salts), '--config', 'debug']))
+            argv = ['run_package_contract.py',
+                    '--salts-source', str(self.salts), '--config', 'debug']
+            if expected_salts_commit is not None:
+                argv.extend(['--expected-salts-commit', expected_salts_commit])
+            stack.enter_context(mock.patch('sys.argv', argv))
             return runner.main()
 
     def assert_rejected(self, reason):
@@ -105,6 +108,23 @@ class PackageProvenanceTest(unittest.TestCase):
     def test_rejects_non_master_salts_checkout(self):
         self.git(self.salts, 'checkout', '-qb', 'feature')
         self.assert_rejected('Salts source must be checked out at master')
+
+    def test_accepts_detached_exact_release_commit(self):
+        expected = self.git(self.salts, 'rev-parse', 'HEAD').strip()
+        self.git(self.salts, 'checkout', '--detach', '-q', expected)
+        with self.assertRaises(BuildBoundaryReached):
+            self.invoke(expected)
+
+    def test_rejects_wrong_exact_release_commit(self):
+        expected = '0' * 40
+        try:
+            self.invoke(expected)
+        except BuildBoundaryReached:
+            self.fail('wrong exact release commit reached native build')
+        except RuntimeError as error:
+            self.assertRegex(str(error), 'Salts source commit mismatch')
+        else:
+            self.fail('wrong exact release commit was accepted')
 
     def test_records_matching_identity_before_configure(self):
         with self.assertRaises(BuildBoundaryReached):
