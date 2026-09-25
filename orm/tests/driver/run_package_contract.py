@@ -1,4 +1,4 @@
-"""Build or reuse Salts master, then run SDK contracts through CMake/CTest."""
+"""Build or reuse an explicitly qualified Salts source, then run SDK contracts."""
 from __future__ import annotations
 
 import argparse
@@ -71,6 +71,9 @@ def configured_toolchain(cache: Path, expected: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--salts-source", required=True, type=Path)
+    parser.add_argument(
+        "--expected-salts-commit",
+        help="Exact Salts commit required for a versioned release qualification")
     parser.add_argument("--config", choices=("debug", "release"), required=True)
     parser.add_argument("--reuse-salts-install", action="store_true")
     args = parser.parse_args()
@@ -89,7 +92,15 @@ def main() -> int:
                                    text=True).strip()
     salts_ref = subprocess.check_output(
         ["git", "-C", str(salts), "branch", "--show-current"], text=True).strip()
-    if salts_ref != "master":
+    salts_head = subprocess.check_output(
+        ["git", "-C", str(salts), "rev-parse", "HEAD"], text=True).strip()
+    if args.expected_salts_commit:
+        if salts_head != args.expected_salts_commit:
+            raise RuntimeError(
+                "Salts source commit mismatch: "
+                f"expected {args.expected_salts_commit}, got {salts_head}")
+        salts_ref = f"commit:{salts_head}"
+    elif salts_ref != "master":
         raise RuntimeError(
             f"Salts source must be checked out at master, got {salts_ref or 'detached'}")
     env["ASAN_OPTIONS"] = ("halt_on_error=1" if system == "windows" else
@@ -109,7 +120,7 @@ def main() -> int:
     else:
         salts_build = salts / "build" / f"linux-gcc-{args.config}"
     manifest = {
-        "head": head, "salts_ref": "master",
+        "head": head, "salts_ref": salts_ref, "salts_head": salts_head,
         "salts_source_digest": env.get("SALTS_SOURCE_DIGEST", ""),
         "system": platform.platform(), "arch": platform.machine(),
         "profile": args.config,
@@ -124,7 +135,7 @@ def main() -> int:
     if args.reuse_salts_install:
         manifest["salts_cache"] = "hit"
         if not (prefix / "lib/cmake/Salts/SaltsConfig.cmake").is_file():
-            raise RuntimeError("cached Salts master install is incomplete")
+            raise RuntimeError("cached Salts install is incomplete")
     else:
         manifest["salts_cache"] = "miss"
         salts_configure = ["cmake", "--preset", salts_preset,
