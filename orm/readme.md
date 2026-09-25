@@ -2,7 +2,7 @@
 
 TurboDB ORM is a typed, demand-driven database facade for C11. Query results
 are exposed only as CFlow Publishers: drivers publish one row-local CSerde reader,
-CBind decodes it into an owning CMeta value, and downstream demand controls
+DataBind decodes it into an owning CMeta value, and downstream demand controls
 cursor advancement. The C++17 header is a small RAII and exception wrapper over
 the same C API.
 
@@ -16,7 +16,7 @@ runtime, or schema-less materialized row.
 C query plan
   -> database cursor
   -> CSerde row reader
-  -> CBind typed value
+  -> DataBind typed value
   -> CFlow Publisher / Graph / Subscriber
 ```
 
@@ -30,7 +30,7 @@ ORM. PostgreSQL uses libpq single-row mode, MongoDB uses its native cursor,
 Redis parses the network RESP array one owned row at a time, SQLite advances
 the prepared statement, and TidesDB advances its iterator.
 
-Each backend selects CSerde token kinds from its own native metadata. CBind
+Each backend selects CSerde token kinds from its own native metadata. DataBind
 does not guess numeric or boolean values from arbitrary strings. PostgreSQL
 uses field OIDs; Redis uses the declared CMeta field kind for typeless RESP bulk
 strings. A malformed declared scalar fails the Publisher instead of being returned
@@ -70,9 +70,8 @@ if (orm_connect(&config, &connection, &error) != ORM_STATUS_OK) {
 
 ### Typed row Publisher
 
-Row execution requires a `cmeta_data_desc`. Generate production descriptors
-with the Salts TBE compiler's `--cbind-output`; small tests may define a descriptor
-directly with CMeta. The descriptor field names are matched against driver row
+Row execution requires a `cmeta_data_desc`. Generate production descriptors through the canonical DataBind/CMeta codegen path;
+small tests may define a descriptor directly with CMeta. The descriptor field names are matched against driver row
 keys.
 
 ```c
@@ -87,7 +86,7 @@ orm_query_add_column(query, orm_view("id"), &error);
 orm_query_add_column(query, orm_view("name"), &error);
 orm_query_order_by(query, orm_view("id"), ORM_ORDER_ASCENDING, &error);
 
-orm_flow_config(&flow_config, my_row_cbind_data());
+orm_flow_config(&flow_config, my_row_data());
 if (orm_query_open_flow(query, &flow_config, &publisher, &error) == ORM_STATUS_OK) {
   while ((step = cflow_publisher_resume(&publisher, NULL, &row)).kind ==
          CFLOW_STEP_VALUE) {
@@ -139,9 +138,9 @@ blindly.
 - The query, connection, row descriptor, and reachable descriptor metadata must
   outlive the Publisher. A transaction Publisher also borrows its transaction.
 - Each successfully moved cursor is destroyed exactly once by Publisher teardown.
-- Row token views expire before the next cursor advance. CBind output is an
+- Row token views expire before the next cursor advance. DataBind output is an
   owning value governed by its CMeta traits.
-- `max_result_rows`, `max_result_bytes`, `max_columns`, CBind scratch size,
+- `max_result_rows`, `max_result_bytes`, `max_columns`, DataBind scratch size,
   nesting depth, container items, and buffer bytes are hard limits.
 - Errors are fail-fast; there is no schema-less or eager fallback.
 
@@ -166,7 +165,7 @@ auto rows = db.select("person")
     .column("id")
     .column("name")
     .order_by("id", ORM_ORDER_ASCENDING)
-    .open<person_row>(*person_row_cbind_data());
+    .open<person_row>(*person_row_data());
 
 person_row row{};
 for (cflow_step step = rows.next(row);
