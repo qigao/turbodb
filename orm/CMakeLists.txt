@@ -1311,6 +1311,16 @@ if(WIN32)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
+    if(SQLite3_LIBRARY)
+      get_filename_component(ORM_TEST_SQLITE_LIBRARY_DIR
+                             "${SQLite3_LIBRARY}" DIRECTORY)
+      get_filename_component(ORM_TEST_SQLITE_PREFIX_DIR
+                             "${ORM_TEST_SQLITE_LIBRARY_DIR}" DIRECTORY)
+      if(EXISTS "${ORM_TEST_SQLITE_PREFIX_DIR}/bin")
+        string(APPEND ORM_TEST_RUNTIME_PATH
+               ";PATH=path_list_prepend:${ORM_TEST_SQLITE_PREFIX_DIR}/bin")
+      endif()
+    endif()
     list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_sqlite_plugin
                                   orm_public_flow
                                   orm_sqlite_provider_atomicity orm_cpp_flow
