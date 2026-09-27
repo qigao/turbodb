@@ -166,7 +166,7 @@ target_include_directories(
           ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 target_link_libraries(
   turbo_orm PUBLIC Salts::Core Salts::CFlow
-  PRIVATE Salts::CSerde Salts::DataBind
+  PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin
           Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
 
 if(ORM_WITH_SQLITE)
@@ -462,7 +462,7 @@ if(ORM_BUILD_TESTS)
             ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
   target_link_libraries(
     orm_c_test_static PUBLIC Salts::Core
-    PRIVATE Salts::CSerde Salts::DataBind Salts::CFlow
+    PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin Salts::CFlow
             Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
