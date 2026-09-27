@@ -108,7 +108,7 @@ jobs:
             build_type=Debug
             sdk_preset=sdk-linux-debug
           fi
-          cmake -S tests/deps -B "build/deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" 2>&1 | tee evidence/deps/configure.log
+          cmake -S tests/deps -B "build/deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-linux 2>&1 | tee evidence/deps/configure.log
           cmake --build "build/deps-${{ matrix.config }}" --parallel 4 2>&1 | tee evidence/deps/build.log
           ctest --test-dir "build/deps-${{ matrix.config }}" --output-on-failure 2>&1 | tee evidence/deps/ctest.log
           (cd orm/driver-sdk && cmake --preset "$sdk_preset") 2>&1 | tee evidence/deps/sdk-configure.log
@@ -125,7 +125,7 @@ jobs:
           set "SDK_PRESET=sdk-windows-release"
           if "${{ matrix.config }}"=="debug" set "BUILD_TYPE=Debug"
           if "${{ matrix.config }}"=="debug" set "SDK_PRESET=sdk-windows-debug"
-          cmake -S tests\deps -B "build\deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE=%BUILD_TYPE% > evidence\deps\configure.log 2>&1
+          cmake -S tests\deps -B "build\deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_MANIFEST_DIR="%GITHUB_WORKSPACE%" -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-windows > evidence\deps\configure.log 2>&1
           if errorlevel 1 (type evidence\deps\configure.log & exit /b 1)
           cmake --build "build\deps-${{ matrix.config }}" --parallel 4 > evidence\deps\build.log 2>&1
           if errorlevel 1 (type evidence\deps\build.log & exit /b 1)
