@@ -29,7 +29,6 @@
       "dependencies": [
         {
           "name": "libpq",
-          "version>=": "16.9",
           "default-features": false,
           "features": [
             "zstd"
