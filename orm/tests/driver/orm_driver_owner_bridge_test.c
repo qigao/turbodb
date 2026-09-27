@@ -35,7 +35,7 @@ spec("Driver host lifetime bridge uses the native query owner") {
 
     orm_error_init(&error);
     connection = open_sqlite(&error);
-    check_equal(orm_raw(connection, view("select 1"), &query, &error),
+    check_equal(orm_query_create(connection, view("items"), &query, &error),
                 ORM_STATUS_OK);
     check_not_null(query);
     check_not_null(lifetime);
