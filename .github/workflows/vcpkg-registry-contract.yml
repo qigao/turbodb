@@ -189,7 +189,7 @@ jobs:
             -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
             -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
           cmake --build "$build" --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
-          ctest --test-dir "$build" -R '^orm_postgresql_plugin
+          ctest --test-dir "$build" -R "^orm_postgresql_plugin$" --output-on-failure
 
       - name: Build PostgreSQL runtime Driver on Windows
         if: runner.os == 'Windows'
@@ -220,7 +220,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver configure failed" }
           & cmake --build $build --config Release --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
           if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver build failed" }
-          & ctest --test-dir $build -C Release -R '^orm_postgresql_plugin
+          & ctest --test-dir $build -C Release -R "^orm_postgresql_plugin$" --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver contract failed" }
 
       - name: Verify exact tracked source
