@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
+# Development/test builds never inject vcpkg applocal deployment into link steps.
+set(VCPKG_APPLOCAL_DEPS OFF CACHE BOOL "" FORCE)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 if(POLICY CMP0144)
   cmake_policy(SET CMP0144 NEW)
