@@ -95,8 +95,24 @@ unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
 find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
              NO_DEFAULT_PATH)
-if(NOT TARGET Salts::DataBind)
-  message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::DataBind")
+foreach(TURBODB_REQUIRED_PRODUCER_TARGET IN ITEMS
+        Salts::CMeta
+        Salts::DataBind
+        Salts::PluginABI
+        Salts::Plugin)
+  if(NOT TARGET ${TURBODB_REQUIRED_PRODUCER_TARGET})
+    message(FATAL_ERROR
+            "The selected Salts/SaltsUtils installations must export ${TURBODB_REQUIRED_PRODUCER_TARGET}")
+  endif()
+endforeach()
+
+if(BUILD_TESTING)
+  add_executable(turbodb_plugin_baseline_contract
+                 tests/cmake/plugin_baseline_contract.c)
+  target_compile_features(turbodb_plugin_baseline_contract PRIVATE c_std_11)
+  target_link_libraries(turbodb_plugin_baseline_contract PRIVATE Salts::Plugin)
+  add_test(NAME turbodb_plugin_baseline_contract
+           COMMAND turbodb_plugin_baseline_contract)
 endif()
 
 find_package(Threads REQUIRED)
