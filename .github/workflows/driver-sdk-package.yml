@@ -187,7 +187,7 @@ jobs:
           set -euo pipefail
           profile=linux-release-user
           if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
-          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DVCPKG_INSTALL_OPTIONS=--only-binarycaching 2>&1 | tee evidence/deps/root-configure.log
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
           ctest --preset "$profile" --output-on-failure 2>&1 | tee evidence/deps/root-ctest.log
 
@@ -199,7 +199,7 @@ jobs:
           if errorlevel 1 exit /b 1
           set "PROFILE=win-release-user"
           if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DVCPKG_INSTALL_OPTIONS=--only-binarycaching > evidence\deps\root-configure.log 2>&1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
           cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
           if errorlevel 1 (type evidence\deps\root-build.log & exit /b 1)
