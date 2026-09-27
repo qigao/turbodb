@@ -208,7 +208,6 @@ if(ORM_WITH_SQLITE)
       C_VISIBILITY_PRESET hidden
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
-  orm_enable_strict_warnings(orm_sqlite_driver)
 endif()
 
 if(ORM_WITH_REDIS)
@@ -476,6 +475,10 @@ function(orm_enable_strict_warnings target)
     endif()
   endif()
 endfunction()
+
+if(TARGET orm_sqlite_driver)
+  orm_enable_strict_warnings(orm_sqlite_driver)
+endif()
 
 orm_enable_strict_warnings(turbo_orm)
 if(ORM_WITH_PGSQL)
