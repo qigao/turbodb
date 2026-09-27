@@ -200,9 +200,13 @@ jobs:
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
           set "PROFILE=win-release-user"
+          set "BUILD=build\Msvc-Release"
           if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
+          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
           cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
+          findstr /c:"z-applocal" "%BUILD%\build.ninja" >nul
+          if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
           cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
           if errorlevel 1 (type evidence\deps\root-build.log & exit /b 1)
           ctest --preset "%PROFILE%" --output-on-failure > evidence\deps\root-ctest.log 2>&1
