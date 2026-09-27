@@ -65,6 +65,62 @@ static orm_status_t runtime_result(orm_error_t *error, orm_status_t status,
   return status;
 }
 
+static orm_status_t runtime_plugin_status(
+    salts_plugin_status status, orm_error_t *error, const char *context) {
+  orm_status_t mapped;
+  switch (status) {
+  case SALTS_PLUGIN_OK:
+    mapped = ORM_STATUS_OK;
+    break;
+  case SALTS_PLUGIN_INVALID_ARGUMENT:
+    mapped = ORM_STATUS_INVALID_ARGUMENT;
+    break;
+  case SALTS_PLUGIN_ALLOCATION_FAILED:
+    mapped = ORM_STATUS_OUT_OF_MEMORY;
+    break;
+  case SALTS_PLUGIN_CAPACITY_EXCEEDED:
+    mapped = ORM_STATUS_LIMIT_EXCEEDED;
+    break;
+  case SALTS_PLUGIN_DUPLICATE_PLUGIN_ID:
+  case SALTS_PLUGIN_ALREADY:
+    mapped = ORM_STATUS_DRIVER_ALREADY_REGISTERED;
+    break;
+  case SALTS_PLUGIN_LOAD_FAILED:
+    mapped = ORM_STATUS_DRIVER_LOAD_ERROR;
+    break;
+  case SALTS_PLUGIN_QUERY_MISSING:
+  case SALTS_PLUGIN_UNKNOWN_EXPORT:
+    mapped = ORM_STATUS_DRIVER_ENTRY_MISSING;
+    break;
+  case SALTS_PLUGIN_UNSUPPORTED_ABI:
+  case SALTS_PLUGIN_INVALID_MANIFEST:
+  case SALTS_PLUGIN_QUERY_REJECTED:
+  case SALTS_PLUGIN_INCOMPATIBLE_CONTRACT:
+    mapped = ORM_STATUS_ABI_MISMATCH;
+    break;
+  case SALTS_PLUGIN_BUSY:
+    mapped = ORM_STATUS_BUSY;
+    break;
+  case SALTS_PLUGIN_UNLOAD_FAILED:
+    mapped = ORM_STATUS_CLEANUP_FAILED;
+    break;
+  case SALTS_PLUGIN_UNKNOWN_PLUGIN:
+  case SALTS_PLUGIN_STALE:
+  case SALTS_PLUGIN_INVALID_STATE:
+  case SALTS_PLUGIN_DUPLICATE_EXPORT:
+  default:
+    mapped = ORM_STATUS_INVALID_STATE;
+    break;
+  }
+  if (mapped == ORM_STATUS_OK)
+    return runtime_result(error, mapped, NULL);
+  char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+  (void)snprintf(message, sizeof(message), "%s: %s",
+                 context != NULL ? context : "plugin",
+                 salts_plugin_status_string(status));
+  return runtime_result(error, mapped, message);
+}
+
 static int runtime_id_valid(orm_string_view_t id) {
   if (id.data == NULL || id.len == 0u || id.len > ORM_DRIVER_ID_MAX_BYTES)
     return 0;
@@ -813,20 +869,25 @@ orm_runtime_create(const orm_runtime_config_t *config,
                           "initialize runtime mutex");
   }
 
+  salts_plugin_registry_config plugin_config = {
+      (size_t)config->max_drivers};
+  const salts_plugin_status plugin_status =
+      salts_plugin_registry_init(&runtime->plugins, &plugin_config);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    salts_mutex_destroy(&runtime->mutex);
+    free(runtime);
+    return runtime_plugin_status(plugin_status, error,
+                                 "initialize Plugin registry");
+  }
+
   runtime->drivers = (orm_runtime_driver *)calloc(
       config->max_drivers, sizeof(*runtime->drivers));
-  const size_t alias_count =
-      (size_t)config->max_drivers * config->max_aliases_per_driver;
-  if (runtime->drivers == NULL ||
-      (alias_count != 0u &&
-       (runtime->aliases = (orm_runtime_id *)calloc(
-            alias_count, sizeof(*runtime->aliases))) == NULL)) {
-    free(runtime->aliases);
-    free(runtime->drivers);
+  if (runtime->drivers == NULL) {
+    (void)salts_plugin_registry_destroy(&runtime->plugins);
     salts_mutex_destroy(&runtime->mutex);
     free(runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
-                          "allocate runtime registry");
+                          "allocate runtime driver index");
   }
 
   runtime->refs = 1u;
