@@ -9,6 +9,13 @@ on:
       - "tidesdb/vcpkg.json"
       - "tidesdb/vcpkg-configuration.json"
       - "presets/Options.json"
+      - "orm/CMakeLists.txt"
+      - "orm/src/dbs/postgres/**"
+      - "orm/src/driver/**"
+      - "orm/src/runtime/**"
+      - "orm/include/orm/orm_driver_*.h"
+      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/integration/postgres_live_test.c"
       - ".github/workflows/vcpkg-registry-contract.yml"
   push:
     branches: [master]
@@ -18,6 +25,13 @@ on:
       - "tidesdb/vcpkg.json"
       - "tidesdb/vcpkg-configuration.json"
       - "presets/Options.json"
+      - "orm/CMakeLists.txt"
+      - "orm/src/dbs/postgres/**"
+      - "orm/src/driver/**"
+      - "orm/src/runtime/**"
+      - "orm/include/orm/orm_driver_*.h"
+      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/integration/postgres_live_test.c"
       - ".github/workflows/vcpkg-registry-contract.yml"
   workflow_dispatch:
 
@@ -91,6 +105,7 @@ jobs:
           grep -F "Package: libpq" "$status"
           grep -F "Package: zstd" "$status"
           grep -F "Package: boringssl" "$status"
+          echo "TURBODB_REGISTRY_INSTALL_ROOT=$install_root" >> "$GITHUB_ENV"
 
       - name: Resolve TurboDB PostgreSQL through central registry on Windows
         if: runner.os == 'Windows'
@@ -111,6 +126,7 @@ jobs:
           foreach ($package in @("libpq", "zstd", "boringssl")) {
             if ($text -notmatch "(?m)^Package: $package$") { throw "missing installed package: $package" }
           }
+          "TURBODB_REGISTRY_INSTALL_ROOT=$installRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 
       - name: Resolve TidesDB zstd through central registry on Linux
         if: runner.os == 'Linux'
@@ -143,6 +159,67 @@ jobs:
           if (-not (Test-Path -LiteralPath $status -PathType Leaf)) { throw "missing $status" }
           $text = Get-Content -LiteralPath $status -Raw
           if ($text -notmatch "(?m)^Package: zstd$") { throw "missing installed package: zstd" }
+
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
+          ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid $rid
+
+      - name: Build PostgreSQL runtime Driver on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/postgresql-driver-build"
+          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_MANIFEST_INSTALL=OFF \
+            -DVCPKG_INSTALLED_DIR="$TURBODB_REGISTRY_INSTALL_ROOT" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DORM_WITH_SQLITE=OFF \
+            -DORM_WITH_PGSQL=ON \
+            -DORM_WITH_REDIS=OFF \
+            -DORM_WITH_MONGODB=OFF \
+            -DORM_BUILD_TESTS=ON \
+            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
+            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
+          cmake --build "$build" --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
+          ctest --test-dir "$build" -R '^orm_postgresql_plugin --output-on-failure
+
+      - name: Build PostgreSQL runtime Driver on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $build = Join-Path $env:RUNNER_TEMP "postgresql-driver-build"
+          $args = @(
+            "-S", $env:GITHUB_WORKSPACE,
+            "-B", $build,
+            "-G", "Visual Studio 17 2022",
+            "-A", "x64",
+            "-DCMAKE_TOOLCHAIN_FILE=$env:QIGAO_VCPKG_TOOLCHAIN_FILE",
+            "-DVCPKG_MANIFEST_INSTALL=OFF",
+            "-DVCPKG_APPLOCAL_DEPS=OFF",
+            "-DVCPKG_INSTALLED_DIR=$env:TURBODB_REGISTRY_INSTALL_ROOT",
+            "-DVCPKG_TARGET_TRIPLET=x64-windows",
+            "-DORM_WITH_SQLITE=OFF",
+            "-DORM_WITH_PGSQL=ON",
+            "-DORM_WITH_REDIS=OFF",
+            "-DORM_WITH_MONGODB=OFF",
+            "-DORM_BUILD_TESTS=ON",
+            "-DTURBODB_DBTOOLS_WITH_SQLITE=OFF",
+            "-DTURBODB_DBTOOLS_WITH_PGSQL=OFF"
+          )
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver configure failed" }
+          & cmake --build $build --config Release --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver build failed" }
+          & ctest --test-dir $build -C Release -R '^orm_postgresql_plugin --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver contract failed" }
 
       - name: Verify exact tracked source
         shell: bash
