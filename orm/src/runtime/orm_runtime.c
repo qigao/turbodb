@@ -1,7 +1,8 @@
 #include <orm_runtime.h>
+#include <orm_driver_plugin.h>
+#include <salts/plugin.h>
 #include <salts/thread.h>
 
-#include "orm_module_loader.h"
 #include "../abi/orm_internal.h"
 #include "../driver/orm_driver_contract.h"
 #include "../driver/orm_driver_owner_bridge.h"
@@ -18,26 +19,16 @@
 #define RUNTIME_FIELD_END(T, field) \
   ((uint32_t)(offsetof(T, field) + sizeof(((T *)0)->field)))
 
-typedef int32_t (ORM_DRIVER_CALL *orm_runtime_bootstrap_fn)(
-    const orm_driver_host_v1 *, uint32_t,
-    const orm_driver_api_v1 **, uint32_t *);
-
 typedef struct orm_runtime_id {
   uint32_t size;
   char text[ORM_RUNTIME_DRIVER_ID_CAPACITY];
 } orm_runtime_id;
 
 typedef struct orm_runtime_driver {
-  orm_module_handle module;
-  void *module_context;
-  const orm_driver_api_v1 *api;
-  uint32_t api_bytes;
-  orm_driver_module_ops_v1 module_ops;
-  orm_driver_create_fn create_connection;
-  orm_driver_connection_ops_v1 connection_ops;
+  salts_plugin_ref plugin;
+  TurboDb_Driver *binding;
   char *module_path;
   orm_runtime_id canonical;
-  uint32_t alias_count;
   uint64_t capabilities;
   uint64_t execution_models;
   uint8_t bundle_id[ORM_DRIVER_BUNDLE_ID_BYTES];
@@ -55,9 +46,10 @@ struct orm_runtime {
   uint32_t refs;
   uint32_t closed;
   orm_runtime_config_t config;
+  salts_plugin_registry plugins;
   orm_runtime_driver *drivers;
-  orm_runtime_id *aliases;
   uint32_t driver_count;
+  uint32_t close_remaining;
   uint32_t dependents;
   uint32_t pending_operations;
   uint32_t load_active;
@@ -102,26 +94,11 @@ static void runtime_copy_id(orm_runtime_id *out,
     memcpy(out->text, value.data, (size_t)value.size);
 }
 
-static orm_runtime_id *runtime_alias_slot(orm_runtime_t *runtime,
-                                          uint32_t driver_index,
-                                          uint32_t alias_index) {
-  const size_t offset =
-      (size_t)driver_index * runtime->config.max_aliases_per_driver +
-      alias_index;
-  return &runtime->aliases[offset];
-}
-
 static int runtime_id_conflicts(orm_runtime_t *runtime,
                                 orm_driver_bytes_v1 id) {
   for (uint32_t i = 0u; i < runtime->driver_count; ++i) {
-    orm_runtime_driver *driver = &runtime->drivers[i];
-    if (runtime_same_bytes(&driver->canonical, id.data, id.size))
+    if (runtime_same_bytes(&runtime->drivers[i].canonical, id.data, id.size))
       return 1;
-    for (uint32_t j = 0u; j < driver->alias_count; ++j) {
-      if (runtime_same_bytes(runtime_alias_slot(runtime, i, j),
-                             id.data, id.size))
-        return 1;
-    }
   }
   return 0;
 }
@@ -132,11 +109,6 @@ static orm_runtime_driver *runtime_find_driver(orm_runtime_t *runtime,
     orm_runtime_driver *driver = &runtime->drivers[i];
     if (runtime_same_bytes(&driver->canonical, id.data, id.len))
       return driver;
-    for (uint32_t j = 0u; j < driver->alias_count; ++j) {
-      if (runtime_same_bytes(runtime_alias_slot(runtime, i, j),
-                             id.data, id.len))
-        return driver;
-    }
   }
   return NULL;
 }
