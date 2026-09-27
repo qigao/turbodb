@@ -1,0 +1,32 @@
+#include <orm_driver_plugin.h>
+
+#include <cstdint>
+#include <type_traits>
+
+using driver_create_type = orm_status_t (ORM_DRIVER_CALL *)(
+    void *, const orm_config_t *, const orm_driver_limits_v1 *,
+    orm_driver_connection_v1 *, orm_error_t *);
+
+static_assert(std::is_standard_layout<TurboDb_Driver>::value,
+              "Driver interface must keep C layout");
+static_assert(std::is_standard_layout<TurboDb_Driver_vtable>::value,
+              "Driver vtable must keep C layout");
+static_assert(
+    std::is_same<decltype(static_cast<TurboDb_Driver_vtable *>(nullptr)->create),
+                 driver_create_type>::value,
+    "reflected create dispatch must preserve the existing Driver C ABI");
+static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 1u,
+              "Driver contract version drift");
+static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
+              "TurboDB supports exactly Plugin ABI 2");
+
+int main() {
+  const cmeta_interface_desc *desc = TurboDb_Driver_interface();
+  if (desc == nullptr || !cmeta_interface_desc_valid(desc) ||
+      desc->method_count != 1u)
+    return 1;
+  if (desc->methods[0].function == nullptr ||
+      desc->methods[0].abi == nullptr)
+    return 2;
+  return 0;
+}

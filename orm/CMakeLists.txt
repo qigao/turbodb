@@ -700,6 +700,24 @@ else()
 endif()
 add_test(NAME orm_driver_plan_view COMMAND orm_driver_plan_view_test)
 
+add_executable(orm_driver_interface_test
+  tests/driver/orm_driver_interface_test.c
+  tests/driver/orm_driver_interface_peer_a.c
+  tests/driver/orm_driver_interface_peer_b.c)
+target_compile_features(orm_driver_interface_test PRIVATE c_std_11)
+target_compile_definitions(orm_driver_interface_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_driver_interface_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_driver_interface_test PRIVATE Salts::Plugin Salts::CFlow)
+set_target_properties(orm_driver_interface_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_driver_interface_test)
+if(MSVC)
+  target_compile_options(orm_driver_interface_test PRIVATE /WX)
+else()
+  target_compile_options(orm_driver_interface_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_driver_interface COMMAND orm_driver_interface_test)
+
 add_executable(orm_driver_backend_bridge_test
   tests/driver/orm_driver_backend_bridge_test.c
   src/driver/orm_driver_backend_bridge.c)
