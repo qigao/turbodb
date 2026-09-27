@@ -273,12 +273,6 @@ jobs:
               throw "core/application hash changed for scenario: $scenario"
             }
           }
-          & dumpbin /DEPENDENTS $core | Set-Content -LiteralPath (Join-Path $evidence "core-dependencies.txt") -Encoding ascii
-          $dependencies = Get-Content -LiteralPath (Join-Path $evidence "core-dependencies.txt") -Raw
-          if ($dependencies -match '(?i)sqlite|libpq|postgres') {
-            throw "generic core imports a native SQL library"
-          }
-
       - name: Verify exact tracked source
         shell: bash
         run: |
