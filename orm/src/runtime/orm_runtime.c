@@ -313,6 +313,7 @@ static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
 typedef struct orm_runtime_backend {
   orm_runtime_t *runtime;
   orm_runtime_driver *driver;
+  salts_plugin_lease plugin_lease;
   orm_driver_connection_v1 native;
   orm_driver_connection_ops_v1 ops;
 } orm_runtime_backend;
@@ -323,7 +324,19 @@ static void runtime_backend_destroy(void *context) {
   if (backend->native.context != NULL)
     backend->ops.destroy(backend->native.context);
   orm_runtime_t *runtime = backend->runtime;
+  const salts_plugin_status release_status =
+      salts_plugin_registry_release(&runtime->plugins, &backend->plugin_lease);
   free(backend);
+  if (release_status != SALTS_PLUGIN_OK) {
+    orm_error_t cleanup_error;
+    (void)runtime_plugin_status(
+        release_status, &cleanup_error, "release Driver Plugin lease");
+    if (runtime->config.on_cleanup_error != NULL)
+      runtime->config.on_cleanup_error(
+          runtime->config.cleanup_context, &cleanup_error);
+    else
+      abort();
+  }
   if (runtime_release_dependent_ref(runtime))
     runtime_release_last(runtime);
 }
@@ -730,6 +743,9 @@ typedef struct orm_runtime_factory_context {
 static orm_status_t runtime_backend_factory(
     const orm_config_t *config, const orm_limits *limits, void *context,
     orm_backend *out_backend, orm_error_t *error) {
+  salts_plugin_lease lease = {0};
+  const salts_plugin_manifest *manifest = NULL;
+
   if (out_backend != NULL) memset(out_backend, 0, sizeof(*out_backend));
   if (config == NULL || limits == NULL || context == NULL ||
       out_backend == NULL)
@@ -740,12 +756,24 @@ static orm_status_t runtime_backend_factory(
   orm_status_t status = runtime_acquire_dependent(factory->runtime, error);
   if (status != ORM_STATUS_OK) return status;
 
+  const salts_plugin_status acquire_status =
+      salts_plugin_registry_acquire(
+          &factory->runtime->plugins, factory->driver->plugin,
+          &lease, &manifest);
+  if (acquire_status != SALTS_PLUGIN_OK) {
+    runtime_drop_dependent(factory->runtime);
+    return runtime_plugin_status(
+        acquire_status, error, "acquire Driver Plugin lease");
+  }
+  (void)manifest;
+
   orm_driver_connection_v1 native;
   memset(&native, 0, sizeof(native));
   const orm_driver_limits_v1 driver_limits = runtime_driver_limits(limits);
-  status = factory->driver->create_connection(
-      factory->driver->module_context, config, &driver_limits, &native, error);
+  status = TurboDb_Driver_create(
+      factory->driver->binding, config, &driver_limits, &native, error);
   if (status != ORM_STATUS_OK) {
+    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return status;
   }
@@ -753,16 +781,25 @@ static orm_status_t runtime_backend_factory(
   status = orm_driver_validate_connection_v1(
       &native, (uint32_t)sizeof(native), factory->driver->capabilities, error);
   if (status != ORM_STATUS_OK) {
-    if (native.context != NULL)
-      factory->driver->connection_ops.destroy(native.context);
+    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return status;
+  }
+
+  orm_driver_connection_ops_v1 connection_ops;
+  memset(&connection_ops, 0, sizeof(connection_ops));
+  {
+    size_t connection_ops_bytes = native.ops.bytes;
+    if (connection_ops_bytes > sizeof(connection_ops))
+      connection_ops_bytes = sizeof(connection_ops);
+    memcpy(&connection_ops, native.ops.data, connection_ops_bytes);
   }
 
   orm_runtime_backend *backend =
       (orm_runtime_backend *)calloc(1u, sizeof(*backend));
   if (backend == NULL) {
-    factory->driver->connection_ops.destroy(native.context);
+    connection_ops.destroy(native.context);
+    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime driver connection adapter");
@@ -770,34 +807,12 @@ static orm_status_t runtime_backend_factory(
 
   backend->runtime = factory->runtime;
   backend->driver = factory->driver;
+  backend->plugin_lease = lease;
   backend->native = native;
-  memset(&backend->ops, 0, sizeof(backend->ops));
-  {
-    size_t connection_ops_bytes = native.ops.bytes;
-    if (connection_ops_bytes > sizeof(backend->ops))
-      connection_ops_bytes = sizeof(backend->ops);
-    memcpy(&backend->ops, native.ops.data, connection_ops_bytes);
-  }
+  backend->ops = connection_ops;
   out_backend->ops = &runtime_backend_ops;
   out_backend->context = backend;
   return runtime_result(error, ORM_STATUS_OK, NULL);
-}
-
-static orm_driver_host_v1 runtime_host(void) {
-  const orm_driver_plan_metadata_ops_v1 *metadata =
-      orm_driver_plan_metadata_services_v1();
-  const orm_driver_plan_value_ops_v1 *values =
-      orm_driver_plan_value_services_v1();
-  const orm_driver_lifetime_ops_v1 *lifetime =
-      orm_driver_owner_services_v1();
-  orm_driver_host_v1 host;
-  memset(&host, 0, sizeof(host));
-  host.header = (orm_driver_header_v1)RUNTIME_HEADER(orm_driver_host_v1);
-  memcpy(host.bundle_id, runtime_bundle, sizeof(host.bundle_id));
-  host.plan_metadata = (orm_driver_table_v1)RUNTIME_TABLE(metadata);
-  host.plan_values = (orm_driver_table_v1)RUNTIME_TABLE(values);
-  host.lifetime = (orm_driver_table_v1)RUNTIME_TABLE(lifetime);
-  return host;
 }
 
 static orm_status_t runtime_validate_config(
