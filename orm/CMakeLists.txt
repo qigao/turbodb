@@ -1127,7 +1127,7 @@ if(WIN32)
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::DataBind>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
                         orm_row_publisher orm_pure_c_build orm_sql_render
-                        orm_driver_plan_view orm_driver_owner_bridge orm_module_loader
+                        orm_driver_plan_view orm_driver_owner_bridge
                         orm_postgres_flow orm_backend_profile)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
