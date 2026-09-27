@@ -1804,7 +1804,7 @@ int btree_builder_add(btree_builder_t *builder, const uint8_t *key, const size_t
 
     /* we flush the full leaf before adding -- but never across a run of entries
      * that share a key. a key's versions must all stay within one leaf so
-     * internal-node routing lands on the single leaf holding them and btree_get
+     * internal-node routing lands on the single leaf holding them and tidesdb_btree_get
      * can resolve the whole run. */
     if (builder->current_leaf->current_size >= builder->config.target_node_size &&
         builder->current_leaf->num_entries >= BTREE_MIN_ENTRIES_PER_LEAF)
@@ -2466,7 +2466,7 @@ int btree_get_at_seq(btree_t *tree, const uint8_t *key, const size_t key_size,
     return 0;
 }
 
-int btree_get(btree_t *tree, const uint8_t *key, const size_t key_size, uint8_t **value,
+int tidesdb_btree_get(btree_t *tree, const uint8_t *key, const size_t key_size, uint8_t **value,
               size_t *value_size, uint64_t *vlog_offset, uint64_t *seq, int64_t *ttl,
               uint8_t *deleted)
 {

@@ -64,7 +64,7 @@ endif()
 
 # Find required base dependencies
 if(NOT TARGET Salts::Core)
-  find_package(Salts 1.7.9 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
+  find_package(Salts 1.7.10 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
 
@@ -77,7 +77,7 @@ if(NOT TARGET Salts::DataBind)
   endif()
   unset(SaltsUtils_DIR CACHE)
   unset(SaltsUtils_DIR)
-  find_package(SaltsUtils 4.0.1 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
+  find_package(SaltsUtils 4.0.2 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
 foreach(required_salts_utils_target IN ITEMS Salts::DataBind Salts::PluginABI Salts::Plugin)
@@ -319,6 +319,53 @@ if(ORM_WITH_PGSQL)
     RUNTIME_DEPENDENCY_SET
     OrmPostgreSQLRuntimeDependencies
     NO_VERSION)
+
+  add_library(orm_postgresql_driver MODULE
+    src/dbs/postgres/plugin.c
+    src/driver/orm_driver_backend_bridge.c
+    src/dbs/postgres/backend.c
+    src/dbs/postgres/orm_postgres_libpq.c
+    src/dbs/postgres/orm_postgres_cursor.c
+    src/dbs/sql/orm_sql_render.c
+    src/flow/orm_text_token.c)
+  target_compile_features(orm_postgresql_driver PRIVATE c_std_11)
+  target_compile_definitions(
+    orm_postgresql_driver PRIVATE ORM_C_STATIC ORM_WITH_PGSQL
+                                  ORM_NATIVE_OWNER_CANDIDATE)
+  target_include_directories(
+    orm_postgresql_driver PRIVATE
+      ${ORM_INCLUDE_DIR}
+      ${ORM_ABI_SOURCE_DIR}
+      ${ORM_FLOW_SOURCE_DIR}
+      ${ORM_SQL_SOURCE_DIR}
+      ${ORM_DRIVER_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/postgres)
+  target_link_libraries(
+    orm_postgresql_driver PRIVATE
+      turbo_orm
+      PostgreSQL::PostgreSQL
+      Salts::PluginABI
+      Salts::Core
+      Salts::CSerde
+      Salts::CFlow
+      Salts::CSTL)
+  set_target_properties(
+    orm_postgresql_driver PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "turbodb_driver_postgresql"
+      C_STANDARD_REQUIRED ON
+      LINKER_LANGUAGE CXX
+      C_VISIBILITY_PRESET hidden
+      WINDOWS_EXPORT_ALL_SYMBOLS OFF
+      FOLDER "orm/drivers")
+  get_target_property(ORM_POSTGRESQL_DRIVER_LINK_CONTRACT
+                      orm_postgresql_driver LINK_LIBRARIES)
+  list(FIND ORM_POSTGRESQL_DRIVER_LINK_CONTRACT "PostgreSQL::PostgreSQL"
+       ORM_POSTGRESQL_DRIVER_NATIVE_LINK_INDEX)
+  if(ORM_POSTGRESQL_DRIVER_NATIVE_LINK_INDEX EQUAL -1)
+    message(FATAL_ERROR
+            "orm_postgresql_driver must directly link PostgreSQL::PostgreSQL")
+  endif()
 endif()
 
 set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::DataBind)
@@ -489,6 +536,9 @@ endfunction()
 if(TARGET orm_sqlite_driver)
   orm_enable_strict_warnings(orm_sqlite_driver)
 endif()
+if(TARGET orm_postgresql_driver)
+  orm_enable_strict_warnings(orm_postgresql_driver)
+endif()
 
 orm_enable_strict_warnings(turbo_orm)
 if(ORM_WITH_PGSQL)
@@ -649,11 +699,34 @@ if(MSVC)
 endif()
 add_test(NAME orm_postgresql_component COMMAND orm_postgresql_component_test)
 
+add_executable(orm_postgresql_plugin_test
+  tests/driver/orm_postgresql_plugin_test.c)
+target_compile_features(orm_postgresql_plugin_test PRIVATE c_std_11)
+target_compile_definitions(orm_postgresql_plugin_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_postgresql_plugin_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_postgresql_plugin_test PRIVATE
+  turbo_orm Salts::TinyTest)
+add_dependencies(orm_postgresql_plugin_test orm_postgresql_driver)
+set_target_properties(orm_postgresql_plugin_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_postgresql_plugin_test)
+if(MSVC)
+  target_compile_options(orm_postgresql_plugin_test PRIVATE /WX)
+else()
+  target_compile_options(orm_postgresql_plugin_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_postgresql_plugin COMMAND orm_postgresql_plugin_test)
+set_tests_properties(orm_postgresql_plugin PROPERTIES
+  ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
+
 if(ORM_POSTGRES_LIVE_TESTS)
   add_executable(orm_postgres_live_test tests/integration/postgres_live_test.c)
   target_compile_features(orm_postgres_live_test PRIVATE c_std_11)
-  target_link_libraries(orm_postgres_live_test PRIVATE orm_postgresql
+  target_compile_definitions(orm_postgres_live_test PRIVATE ORM_C_STATIC)
+  target_include_directories(orm_postgres_live_test PRIVATE ${ORM_INCLUDE_DIR})
+  target_link_libraries(orm_postgres_live_test PRIVATE turbo_orm
                                                          Salts::TinyTest)
+  add_dependencies(orm_postgres_live_test orm_postgresql_driver)
   set_target_properties(orm_postgres_live_test
                         PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
   orm_enable_strict_warnings(orm_postgres_live_test)
@@ -662,6 +735,8 @@ if(ORM_POSTGRES_LIVE_TESTS)
                            PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
   endif()
   add_test(NAME orm_postgres_live COMMAND orm_postgres_live_test)
+  set_tests_properties(orm_postgres_live PROPERTIES
+    ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
 endif()
 
 endif()
@@ -1265,6 +1340,12 @@ include(GNUInstallDirs)
 if(TARGET orm_sqlite_driver)
   install(
     TARGETS orm_sqlite_driver
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+endif()
+if(TARGET orm_postgresql_driver)
+  install(
+    TARGETS orm_postgresql_driver
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
 endif()

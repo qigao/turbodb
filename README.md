@@ -175,7 +175,7 @@ See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detai
 
 ## Build and package model
 
-TurboDB consumes the published producer pair **Salts.Native 1.7.9** and **SaltsUtils.Native 4.0.1**. Callers provide their exact install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`.
+TurboDB consumes the published producer pair **Salts.Native 1.7.10** and **SaltsUtils.Native 4.0.2**. Callers provide their exact install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`.
 
 The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient or unversioned SDK.
 

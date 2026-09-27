@@ -450,7 +450,7 @@ int btree_get_at_seq(btree_t *tree, const uint8_t *key, size_t key_size, uint64_
                      int64_t *ttl, uint8_t *deleted);
 
 /**
- * btree_get
+ * tidesdb_btree_get
  * retrieves the newest version of a key (equivalent to btree_get_at_seq with
  * seq_ceiling = UINT64_MAX)
  * @param tree the B+tree
@@ -464,7 +464,7 @@ int btree_get_at_seq(btree_t *tree, const uint8_t *key, size_t key_size, uint64_
  * @param deleted output tombstone flag
  * @return 0 on success, -1 on not found or error
  */
-int btree_get(btree_t *tree, const uint8_t *key, size_t key_size, uint8_t **value,
+int tidesdb_btree_get(btree_t *tree, const uint8_t *key, size_t key_size, uint8_t **value,
               size_t *value_size, uint64_t *vlog_offset, uint64_t *seq, int64_t *ttl,
               uint8_t *deleted);
 

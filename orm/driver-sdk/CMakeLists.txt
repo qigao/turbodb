@@ -28,10 +28,10 @@ if(NOT IS_DIRECTORY "${SDK_SALTS_UTILS_ROOT}")
 endif()
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
-find_package(Salts 1.7.9 EXACT CONFIG REQUIRED PATHS "${SDK_SALTS_ROOT}" NO_DEFAULT_PATH)
+find_package(Salts 1.7.10 EXACT CONFIG REQUIRED PATHS "${SDK_SALTS_ROOT}" NO_DEFAULT_PATH)
 unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
-find_package(SaltsUtils 4.0.1 EXACT CONFIG REQUIRED
+find_package(SaltsUtils 4.0.2 EXACT CONFIG REQUIRED
   PATHS "${SDK_SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 foreach(required_target IN ITEMS Salts::Core Salts::CSerde
                                  Salts::CFlow Salts::TinyTest
