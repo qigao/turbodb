@@ -1,8 +1,9 @@
 #include <orm_driver_plugin.h>
 
-#include <assert.h>
 #include <stdint.h>
 #include <string.h>
+
+#define REQUIRE(condition) do { if (!(condition)) return __LINE__; } while (0)
 
 const cmeta_interface_desc *orm_driver_interface_peer_a(void);
 const cmeta_interface_desc *orm_driver_interface_peer_b(void);
@@ -20,10 +21,9 @@ static orm_status_t ORM_DRIVER_CALL fixture_create(
     const orm_driver_limits_v1 *limits,
     orm_driver_connection_v1 *out_connection, orm_error_t *error) {
   unsigned *calls = (unsigned *)self;
-  assert(config != NULL);
-  assert(limits != NULL);
-  assert(out_connection != NULL);
-  assert(error != NULL);
+  if (calls == NULL || config == NULL || limits == NULL ||
+      out_connection == NULL || error == NULL)
+    return ORM_STATUS_INVALID_ARGUMENT;
   ++*calls;
   out_connection->context = self;
   error->status = ORM_STATUS_OK;
@@ -38,39 +38,39 @@ int main(void) {
   const cmeta_function_desc *function;
   const cmeta_function_abi_desc *abi;
 
-  assert(local != NULL && peer_a != NULL && peer_b != NULL);
-  assert(local != peer_a && peer_a != peer_b);
-  assert(cmeta_interface_desc_valid(local));
-  assert(cmeta_interface_desc_equal(local, peer_a));
-  assert(cmeta_interface_desc_equal(peer_a, peer_b));
-  assert(strcmp(local->name, "TurboDb_Driver") == 0);
-  assert(local->method_count == 1u);
+  REQUIRE(local != NULL && peer_a != NULL && peer_b != NULL);
+  REQUIRE(local != peer_a && peer_a != peer_b);
+  REQUIRE(cmeta_interface_desc_valid(local));
+  REQUIRE(cmeta_interface_desc_equal(local, peer_a));
+  REQUIRE(cmeta_interface_desc_equal(peer_a, peer_b));
+  REQUIRE(strcmp(local->name, "TurboDb_Driver") == 0);
+  REQUIRE(local->method_count == 1u);
 
   method = &local->methods[0];
-  assert(cmeta_interface_method_reflection_valid(method));
-  assert(strcmp(method->name, "create") == 0);
-  assert(method->dispatch_arity == 4u);
+  REQUIRE(cmeta_interface_method_reflection_valid(method));
+  REQUIRE(strcmp(method->name, "create") == 0);
+  REQUIRE(method->dispatch_arity == 4u);
 
   function = method->function;
   abi = method->abi;
-  assert(function != NULL && abi != NULL);
-  assert(strcmp(function->name, "TurboDb_Driver.create") == 0);
-  assert(function->param_count == 4u);
-  assert(function->effects == (CMETA_EFFECT_IO | CMETA_EFFECT_MAY_FAIL));
-  assert(function->params[0].flags ==
+  REQUIRE(function != NULL && abi != NULL);
+  REQUIRE(strcmp(function->name, "TurboDb_Driver.create") == 0);
+  REQUIRE(function->param_count == 4u);
+  REQUIRE(function->effects == (CMETA_EFFECT_IO | CMETA_EFFECT_MAY_FAIL));
+  REQUIRE(function->params[0].flags ==
          (CMETA_PARAM_IN | CMETA_PARAM_BORROWED));
-  assert(function->params[1].flags ==
+  REQUIRE(function->params[1].flags ==
          (CMETA_PARAM_IN | CMETA_PARAM_BORROWED));
-  assert(function->params[2].flags ==
+  REQUIRE(function->params[2].flags ==
          (CMETA_PARAM_OUT | CMETA_PARAM_BORROWED));
-  assert(function->params[3].flags ==
+  REQUIRE(function->params[3].flags ==
          (CMETA_PARAM_OUT | CMETA_PARAM_BORROWED | CMETA_PARAM_NULLABLE));
-  assert(abi->return_carrier == CMETA_ABI_SCALAR);
-  assert(abi->param_count == 4u);
-  assert(abi->param_carriers[0] == CMETA_ABI_OBJECT_POINTER);
-  assert(abi->param_carriers[1] == CMETA_ABI_OBJECT_POINTER);
-  assert(abi->param_carriers[2] == CMETA_ABI_OBJECT_POINTER);
-  assert(abi->param_carriers[3] == CMETA_ABI_OBJECT_POINTER);
+  REQUIRE(abi->return_carrier == CMETA_ABI_SCALAR);
+  REQUIRE(abi->param_count == 4u);
+  REQUIRE(abi->param_carriers[0] == CMETA_ABI_OBJECT_POINTER);
+  REQUIRE(abi->param_carriers[1] == CMETA_ABI_OBJECT_POINTER);
+  REQUIRE(abi->param_carriers[2] == CMETA_ABI_OBJECT_POINTER);
+  REQUIRE(abi->param_carriers[3] == CMETA_ABI_OBJECT_POINTER);
 
   static const TurboDb_Driver_vtable vtable = {
       .implementation = "fixture",
@@ -82,37 +82,37 @@ int main(void) {
   orm_driver_connection_v1 connection = {0};
   orm_error_t error = {0};
 
-  assert(TurboDb_Driver_valid(&driver));
-  assert(TurboDb_Driver_create(
+  REQUIRE(TurboDb_Driver_valid(&driver));
+  REQUIRE(TurboDb_Driver_create(
              &driver, &config, &limits, &connection, &error) == ORM_STATUS_OK);
-  assert(create_calls == 1u);
-  assert(connection.context == &create_calls);
+  REQUIRE(create_calls == 1u);
+  REQUIRE(connection.context == &create_calls);
 
   salts_plugin_export entry = orm_driver_plugin_export(
       &driver, ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_TRANSACTION);
-  assert(entry.struct_size == SALTS_PLUGIN_EXPORT_SIZE);
-  assert(entry.kind == SALTS_PLUGIN_EXPORT_INTERFACE);
-  assert(strcmp(entry.export_id, ORM_DRIVER_PLUGIN_EXPORT_ID) == 0);
-  assert(strcmp(entry.contract_id, ORM_DRIVER_INTERFACE_CONTRACT_ID) == 0);
-  assert(entry.contract_version == ORM_DRIVER_INTERFACE_CONTRACT_VERSION);
-  assert(entry.value.interface.value == &driver);
-  assert(entry.value.interface.desc == local);
+  REQUIRE(entry.struct_size == SALTS_PLUGIN_EXPORT_SIZE);
+  REQUIRE(entry.kind == SALTS_PLUGIN_EXPORT_INTERFACE);
+  REQUIRE(strcmp(entry.export_id, ORM_DRIVER_PLUGIN_EXPORT_ID) == 0);
+  REQUIRE(strcmp(entry.contract_id, ORM_DRIVER_INTERFACE_CONTRACT_ID) == 0);
+  REQUIRE(entry.contract_version == ORM_DRIVER_INTERFACE_CONTRACT_VERSION);
+  REQUIRE(entry.value.interface.value == &driver);
+  REQUIRE(entry.value.interface.desc == local);
 
-  assert(salts_plugin_export_require_interface(
+  REQUIRE(salts_plugin_export_require_interface(
              &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
              ORM_DRIVER_CAP_SELECT, peer_a) == SALTS_PLUGIN_OK);
-  assert(salts_plugin_export_require_interface(
+  REQUIRE(salts_plugin_export_require_interface(
              &entry, "TurboDb.NotDriver",
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
              ORM_DRIVER_CAP_SELECT, peer_a) ==
          SALTS_PLUGIN_INCOMPATIBLE_CONTRACT);
-  assert(salts_plugin_export_require_interface(
+  REQUIRE(salts_plugin_export_require_interface(
              &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION + 1u,
              ORM_DRIVER_CAP_SELECT, peer_a) ==
          SALTS_PLUGIN_INCOMPATIBLE_CONTRACT);
-  assert(salts_plugin_export_require_interface(
+  REQUIRE(salts_plugin_export_require_interface(
              &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
              ORM_DRIVER_CAP_DELETE, peer_a) ==
@@ -121,10 +121,10 @@ int main(void) {
   const cmeta_interface_desc *wrong_base = TurboDb_Driver_Wrong_interface();
   cmeta_interface_desc wrong_shape = *wrong_base;
   wrong_shape.name = local->name;
-  assert(cmeta_interface_desc_valid(&wrong_shape));
+  REQUIRE(cmeta_interface_desc_valid(&wrong_shape));
   salts_plugin_export wrong_entry = entry;
   wrong_entry.value.interface.desc = &wrong_shape;
-  assert(salts_plugin_export_require_interface(
+  REQUIRE(salts_plugin_export_require_interface(
              &wrong_entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
              ORM_DRIVER_CAP_SELECT, peer_a) ==
@@ -137,9 +137,9 @@ int main(void) {
       .version = {1u, 0u, 0u},
       .exports = &entry,
       .export_count = 1u};
-  assert(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_OK);
+  REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_OK);
   manifest.abi_version = SALTS_PLUGIN_ABI_VERSION + 1u;
-  assert(salts_plugin_manifest_validate(&manifest) ==
+  REQUIRE(salts_plugin_manifest_validate(&manifest) ==
          SALTS_PLUGIN_UNSUPPORTED_ABI);
 
   return 0;
