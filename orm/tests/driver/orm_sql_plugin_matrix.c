@@ -3,11 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static void matrix_stage(const char *stage) {
-  fprintf(stderr, "sql-matrix: %s\n", stage);
-  fflush(stderr);
-}
-
 static int load_driver(orm_runtime_t *runtime, const char *id,
                        const char *path, orm_error_t *error) {
   orm_driver_load_config_t load;
@@ -17,10 +12,8 @@ static int load_driver(orm_runtime_t *runtime, const char *id,
   load.abi_version = ORM_RUNTIME_ABI_VERSION;
   load.module_path = orm_view(path);
   load.expected_driver_id = orm_view(id);
-  matrix_stage("load-driver-before");
   if (orm_runtime_load_driver(runtime, &load, error) != ORM_STATUS_OK)
     return 0;
-  matrix_stage("load-driver-after");
   memset(&info, 0, sizeof(info));
   if (orm_runtime_driver_info(runtime, orm_view(id), &info, error) !=
       ORM_STATUS_OK)
@@ -44,33 +37,21 @@ static int exercise_sqlite(orm_runtime_t *runtime, orm_error_t *error) {
   config.options = &filename;
   config.option_count = 1u;
 
-  matrix_stage("sqlite-connect-before");
   if (orm_runtime_connect(runtime, &config, &connection, error) !=
       ORM_STATUS_OK)
     return 0;
-  matrix_stage("sqlite-connect-after");
-  matrix_stage("sqlite-raw-before");
   if (orm_raw(connection, orm_view("select 41 + 1"), &query, error) !=
       ORM_STATUS_OK)
     goto fail;
-  matrix_stage("sqlite-raw-after");
-  matrix_stage("sqlite-execute-before");
   if (orm_query_execute(query, &result, error) != ORM_STATUS_OK)
     goto fail;
-  matrix_stage("sqlite-execute-after");
-  matrix_stage("sqlite-read-before");
   if (orm_result_get_int64(result, 0u, 0u, &value, error) != ORM_STATUS_OK ||
       value != INT64_C(42))
     goto fail;
-  matrix_stage("sqlite-read-after");
 
-  matrix_stage("sqlite-destroy-result");
   orm_result_destroy(result);
-  matrix_stage("sqlite-destroy-query");
   orm_query_destroy(query);
-  matrix_stage("sqlite-disconnect");
   orm_disconnect(connection);
-  matrix_stage("sqlite-done");
   return 1;
 
 fail:
@@ -123,13 +104,10 @@ int main(int argc, char **argv) {
     return 8;
   }
 
-  matrix_stage("runtime-close-before");
   if (orm_runtime_close(runtime, &error) != ORM_STATUS_OK) {
     orm_runtime_release(runtime);
     return 9;
   }
-  matrix_stage("runtime-close-after");
   orm_runtime_release(runtime);
-  matrix_stage("runtime-release-after");
   return 0;
 }
