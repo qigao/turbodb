@@ -29,6 +29,7 @@ static orm_driver_load_config_t postgresql_load(const char *id) {
 }
 
 spec("PostgreSQL runtime Plugin contract") {
+  (void)ttest_config__;
   it("loads the canonical Plugin and publishes exact capabilities") {
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
