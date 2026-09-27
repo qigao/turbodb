@@ -200,6 +200,16 @@ if(ORM_WITH_SQLITE)
       Salts::CSerde
       Salts::CFlow
       Salts::CSTL)
+  # #81 boundary gate: the runtime MODULE must own a direct native SQLite
+  # link.  turbo_orm may still carry its transitional SQLite link until #32.
+  get_target_property(ORM_SQLITE_DRIVER_LINK_CONTRACT
+                      orm_sqlite_driver LINK_LIBRARIES)
+  list(FIND ORM_SQLITE_DRIVER_LINK_CONTRACT "SQLite::SQLite3"
+       ORM_SQLITE_DRIVER_SQLITE_LINK_INDEX)
+  if(ORM_SQLITE_DRIVER_SQLITE_LINK_INDEX EQUAL -1)
+    message(FATAL_ERROR
+            "orm_sqlite_driver must directly link SQLite::SQLite3")
+  endif()
   set_target_properties(
     orm_sqlite_driver PROPERTIES
       PREFIX ""
