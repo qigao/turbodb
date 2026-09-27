@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [master]
   push:
-    branches: [master, feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader, feat/runtime-driver-cursor-adapter, feat/runtime-driver-command-adapter, feat/runtime-driver-transaction-adapter, feat/runtime-driver-registry-concurrency, feat/driver-backend-bridge]
+    branches: [master, chore/deps-salts-1.7.9-utils-4.0.1, feat/runtime-driver-sdk-prefix, feat/runtime-driver-sdk-descriptors, feat/runtime-driver-sdk-handshake, feat/runtime-driver-sdk-consumers, feat/runtime-driver-sdk-plan-view, feat/orm-native-ownership, refactor/orm-databind-row-publisher, feat/public-retained-ownership, feat/runtime-driver-loader, feat/runtime-driver-cursor-adapter, feat/runtime-driver-command-adapter, feat/runtime-driver-transaction-adapter, feat/runtime-driver-registry-concurrency, feat/driver-backend-bridge]
   workflow_dispatch:
 permissions:
   contents: read
@@ -39,20 +39,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: qigao/salts
-          ref: v1.6.0
-          fetch-depth: 1
-          path: .ci-salts
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: qigao/salts-utils
-          ref: master
-          fetch-depth: 1
-          path: .ci-salts-utils
-          persist-credentials: false
       - name: Configure shared vcpkg binary cache
         uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
@@ -61,9 +47,6 @@ jobs:
       - name: Restore shared re2c binary
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
-      - name: Check CI provenance regression
-        shell: pwsh
-        run: python -m unittest discover -s orm/tests/driver -p test_package_provenance.py -v
       - name: Set up Linux toolchain identity
         if: runner.os == 'Linux'
         shell: bash
@@ -83,45 +66,6 @@ jobs:
           $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
           "VSINSTALL=$vs" >> $env:GITHUB_ENV
-      - name: Verify dependency revisions and compute content identity
-        id: deps
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          function Assert-Clean([string]$repo, [string]$name) {
-            git -C $repo diff --exit-code
-            if ($LASTEXITCODE -ne 0) { throw "$name checkout is dirty" }
-          }
-          function Get-TrackedContentDigest([string]$repo) {
-            $files = @(git -c core.quotepath=false -C $repo ls-files | Sort-Object)
-            if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) {
-              throw "cannot enumerate tracked dependency files"
-            }
-            $hash = [System.Security.Cryptography.IncrementalHash]::CreateHash(
-              [System.Security.Cryptography.HashAlgorithmName]::SHA256)
-            foreach ($relative in $files) {
-              $normalized = $relative.Replace('\', '/')
-              $nameBytes = [System.Text.Encoding]::UTF8.GetBytes($normalized + "`n")
-              $hash.AppendData($nameBytes)
-              $hash.AppendData([System.IO.File]::ReadAllBytes((Join-Path $repo $relative)))
-            }
-            $bytes = $hash.GetHashAndReset()
-            $hash.Dispose()
-            return -join ($bytes | ForEach-Object { $_.ToString('x2') })
-          }
-          Assert-Clean '.ci-salts' 'Salts'
-          Assert-Clean '.ci-salts-utils' 'SaltsUtils'
-          $saltsHead = git -C .ci-salts rev-parse HEAD
-          if ($LASTEXITCODE -ne 0 -or
-              $saltsHead -cne '5c4199c10e12b54fe57fffc4e0eaa07b646e207f') {
-            throw "Salts must be the released v1.6.0 commit"
-          }
-          $saltsUtilsBranch = git -C .ci-salts-utils branch --show-current
-          if ($LASTEXITCODE -ne 0 -or $saltsUtilsBranch -cne 'master') {
-            throw "SaltsUtils must be checked out from master"
-          }
-          "salts=$(Get-TrackedContentDigest '.ci-salts')" >> $env:GITHUB_OUTPUT
-          "salts_utils=$(Get-TrackedContentDigest '.ci-salts-utils')" >> $env:GITHUB_OUTPUT
       - name: Record exact dependency cache identity
         id: identity
         shell: pwsh
@@ -136,184 +80,45 @@ jobs:
           Write-Output "vcpkg cache identity: root=$root revision=$revision"
           if (-not $env:ImageOS -or -not $env:ImageVersion) { throw 'runner image identity is missing' }
           "key=$env:ImageOS-$env:ImageVersion-$revision" >> $env:GITHUB_OUTPUT
-      - name: Restore Salts 1.6.0 package
-        id: salts-package-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            external/pkgs/salts/${{ matrix.config }}
-            .ci-salts/vcpkg_installed
-          key: driver-sdk-salts-1.6.0-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}
-      - name: Restore SaltsUtils master package
-        id: salts-utils-package-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: external/pkgs/salts-utils/${{ matrix.config }}
-          key: driver-sdk-salts-utils-master-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.config }}-${{ steps.identity.outputs.key }}-${{ steps.deps.outputs.salts }}-${{ steps.deps.outputs.salts_utils }}
-      - name: Install Linux dependency build prerequisites on package cache miss
-        if: runner.os == 'Linux' && (steps.salts-package-cache.outputs.cache-hit != 'true' || steps.salts-utils-package-cache.outputs.cache-hit != 'true')
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y nasm
-
-      - name: Build or reuse Salts 1.6.0 and test SDK on Linux
-        if: runner.os == 'Linux'
-        env:
-          SALTS_SOURCE_DIGEST: ${{ steps.deps.outputs.salts }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          reuse=()
-          if [[ '${{ steps.salts-package-cache.outputs.cache-hit }}' == 'true' ]]; then
-            reuse+=(--reuse-salts-install)
-          fi
-          python3 orm/tests/driver/run_package_contract.py --salts-source .ci-salts --expected-salts-commit 5c4199c10e12b54fe57fffc4e0eaa07b646e207f --config '${{ matrix.config }}' "${reuse[@]}"
-      - name: Build or reuse Salts 1.6.0 and test SDK on Windows
-        env:
-          # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
-          VCPKG_DISABLE_METRICS: '1'
-          SALTS_SOURCE_DIGEST: ${{ steps.deps.outputs.salts }}
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          echo VsDevCmd selected VCPKG_ROOT=%VCPKG_ROOT%
-          rem Keep the explicitly selected runner toolchain used by the cache key.
-          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          set "REUSE_SALTS="
-          if "${{ steps.salts-package-cache.outputs.cache-hit }}"=="true" set "REUSE_SALTS=--reuse-salts-install"
-          python orm/tests/driver/run_package_contract.py --salts-source .ci-salts --expected-salts-commit 5c4199c10e12b54fe57fffc4e0eaa07b646e207f --config "${{ matrix.config }}" %REUSE_SALTS%
-      - name: Save Salts 1.6.0 package
-        if: steps.salts-package-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            external/pkgs/salts/${{ matrix.config }}
-            .ci-salts/vcpkg_installed
-          key: ${{ steps.salts-package-cache.outputs.cache-primary-key }}
-      - name: Adapt SaltsUtils master preset paths for this runner
-        if: steps.salts-utils-package-cache.outputs.cache-hit != 'true'
+      - name: Restore published Salts 1.7.9 and SaltsUtils 4.0.1
+        id: native-sdk
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $source = Join-Path $env:GITHUB_WORKSPACE '.ci-salts-utils'
-          $evidence = Join-Path $env:GITHUB_WORKSPACE 'evidence/salts-utils'
-          git -C $source diff --exit-code
-          if ($LASTEXITCODE -ne 0) { throw 'SaltsUtils checkout is not clean before path adaptation' }
-          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
-          $path = Join-Path $source 'CMakeUserPresets.json'
-          $presets = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable
-          foreach ($name in @('win-toolchain', 'linux-paths')) {
-            $matches = @($presets.configurePresets | Where-Object { $_.name -eq $name })
-            if ($matches.Count -ne 1) { throw "Missing or duplicate upstream path preset: $name" }
-            $item = $matches[0]
-            $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
-            $item.environment.VCPKG_ROOT = $env:DRIVER_SDK_VCPKG_ROOT
-            $item.environment.RE2C_ROOT = $env:RE2C_ROOT
-            if ($name -eq 'win-toolchain') {
-              $item.environment.PROJECT_ROOT = $env:GITHUB_WORKSPACE
-            }
-          }
-          $presets | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $path -Encoding utf8NoBOM
-          git -C $source diff -- CMakeUserPresets.json > "$evidence/ci-paths.diff"
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot record SaltsUtils path adaptation' }
-          Copy-Item -LiteralPath $path -Destination "$evidence/CMakeUserPresets.json"
-          'master' | Set-Content -LiteralPath "$evidence/ref.txt" -Encoding utf8NoBOM
-      - name: Build SaltsUtils master package on Linux
-        if: runner.os == 'Linux' && steps.salts-utils-package-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          config='${{ matrix.config }}'
-          profile=linux-release-user
-          salts_utils_asan=OFF
-          if [[ "$config" == debug ]]; then
-            profile=linux-dev-user
-            salts_utils_asan=ON
-          fi
-          salts_utils_root="$GITHUB_WORKSPACE/external/pkgs/salts-utils/$config"
-          evidence="$GITHUB_WORKSPACE/evidence/salts-utils"
-          cd .ci-salts-utils
-          # Keep the existing dependency test/sanitizer policy; inherit package
-          # features, toolchain, compiler flags and tool runtime paths upstream.
-          cmake --preset "$profile" \
-            -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF \
-            -DENABLE_SANITIZER_ADDRESS="$salts_utils_asan" -DENABLE_SANITIZER_UNDEFINED=OFF \
-            2>&1 | tee "$evidence/configure.log"
-          cmake --build --preset "$profile" --parallel 4 2>&1 | tee "$evidence/build.log"
-          rm -rf "$salts_utils_root"
-          cmake --build --preset "install-$profile" --parallel 4 2>&1 | tee "$evidence/install.log"
-          test -f "$salts_utils_root/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
-          test -f "$salts_utils_root/include/data_bind_native.h"
-          test ! -e "$salts_utils_root/lib/cmake/DataBind"
-          echo "SALTS_UTILS_ROOT=$salts_utils_root" >> "$GITHUB_ENV"
-          mkdir -p "$GITHUB_WORKSPACE/evidence/core"
-          printf '%s\n' master > "$GITHUB_WORKSPACE/evidence/core/salts-utils-ref.txt"
-
-      - name: Build SaltsUtils master package on Windows
-        env:
-          VCPKG_DISABLE_METRICS: '1'
-        if: runner.os == 'Windows' && steps.salts-utils-package-cache.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "VCPKG_ROOT=%DRIVER_SDK_VCPKG_ROOT%"
-          set "SALTS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts\${{ matrix.config }}"
-          set "SALTS_UTILS_ROOT=%GITHUB_WORKSPACE%\external\pkgs\salts-utils\${{ matrix.config }}"
-          set "SALTS_UTILS_PROFILE=win-release-user"
-          set "SALTS_UTILS_ASAN=OFF"
-          if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_PROFILE=win-dev-user"
-          if "${{ matrix.config }}"=="debug" set "SALTS_UTILS_ASAN=ON"
-          if not exist evidence\salts-utils mkdir evidence\salts-utils
-          if errorlevel 1 exit /b 1
-          set "SALTS_UTILS_EVIDENCE=%GITHUB_WORKSPACE%\evidence\salts-utils"
-          cd /d "%GITHUB_WORKSPACE%\.ci-salts-utils"
-          if errorlevel 1 exit /b 1
-          cmake --preset "%SALTS_UTILS_PROFILE%" -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DENABLE_SANITIZER_ADDRESS=%SALTS_UTILS_ASAN% -DENABLE_SANITIZER_UNDEFINED=OFF > "%SALTS_UTILS_EVIDENCE%\configure.log" 2>&1
-          if errorlevel 1 (type "%SALTS_UTILS_EVIDENCE%\configure.log" & exit /b 1)
-          cmake --build --preset "%SALTS_UTILS_PROFILE%" --parallel 4 > "%SALTS_UTILS_EVIDENCE%\build.log" 2>&1
-          if errorlevel 1 (type "%SALTS_UTILS_EVIDENCE%\build.log" & exit /b 1)
-          if exist "%SALTS_UTILS_ROOT%" rmdir /s /q "%SALTS_UTILS_ROOT%"
-          cmake --build --preset "install-%SALTS_UTILS_PROFILE%" --parallel 4 > "%SALTS_UTILS_EVIDENCE%\install.log" 2>&1
-          if errorlevel 1 (type "%SALTS_UTILS_EVIDENCE%\install.log" & exit /b 1)
-          cd /d "%GITHUB_WORKSPACE%"
-          if errorlevel 1 exit /b 1
-          if not exist "%SALTS_UTILS_ROOT%\lib\cmake\SaltsUtils\SaltsUtilsConfig.cmake" exit /b 1
-          if not exist "%SALTS_UTILS_ROOT%\include\data_bind_native.h" exit /b 1
-          if exist "%SALTS_UTILS_ROOT%\lib\cmake\DataBind" exit /b 1
-          echo SALTS_UTILS_ROOT=%SALTS_UTILS_ROOT%>>"%GITHUB_ENV%"
-          if not exist evidence\core mkdir evidence\core
-          echo master>evidence\core\salts-utils-ref.txt
-
-      - name: Use SaltsUtils master package
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:GITHUB_WORKSPACE "external/pkgs/salts-utils/${{ matrix.config }}"
-          if (-not (Test-Path -LiteralPath (Join-Path $root 'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake'))) {
-            throw 'SaltsUtils master package is missing or incomplete'
-          }
-          if (-not (Test-Path -LiteralPath (Join-Path $root 'include/data_bind_native.h'))) {
-            throw 'SaltsUtils master public headers are incomplete'
-          }
-          "SALTS_UTILS_ROOT=$root" >> $env:GITHUB_ENV
+          ./cmake/ci/restore-published-native-sdks.ps1
           New-Item -ItemType Directory -Force -Path evidence/core | Out-Null
-          'master' | Set-Content -LiteralPath evidence/core/salts-utils-ref.txt -Encoding utf8NoBOM
-      - name: Save SaltsUtils master package
-        if: steps.salts-utils-package-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: external/pkgs/salts-utils/${{ matrix.config }}
-          key: ${{ steps.salts-utils-package-cache.outputs.cache-primary-key }}
+          @(
+            'Salts.Native=1.7.9'
+            'SaltsUtils.Native=4.0.1'
+            'PluginABI=2'
+            "SALTS_ROOT=$env:SALTS_ROOT"
+            "SALTS_UTILS_ROOT=$env:SALTS_UTILS_ROOT"
+          ) | Set-Content -LiteralPath evidence/core/producer-baseline.txt -Encoding utf8NoBOM
+
+      - name: Test Driver SDK against published Salts 1.7.9
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $platform = if ($env:RUNNER_OS -eq 'Windows') { 'windows' } else { 'linux' }
+          $preset = "sdk-$platform-${{ matrix.config }}"
+          Push-Location orm/driver-sdk
+          try {
+            cmake --preset $preset
+            if ($LASTEXITCODE -ne 0) { throw "Driver SDK configure failed" }
+            cmake --build --preset $preset --parallel 4
+            if ($LASTEXITCODE -ne 0) { throw "Driver SDK build failed" }
+            ctest --preset $preset --verbose --no-tests=error
+            if ($LASTEXITCODE -ne 0) { throw "Driver SDK tests failed" }
+          } finally {
+            Pop-Location
+          }
 
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
       - name: Configure core preset paths for this runner
-        if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
+        if: (((github.ref_name == 'chore/deps-salts-1.7.9-utils-4.0.1' || github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -324,13 +129,18 @@ jobs:
               $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
               $item.environment.VCPKG_ROOT = $env:DRIVER_SDK_VCPKG_ROOT
             }
+            if ($item.name -in @('win-dev-user', 'win-release-user',
+                                 'linux-dev-user', 'linux-release-user')) {
+              $item.environment.SALTS_ROOT = $env:SALTS_ROOT
+              $item.environment.SALTS_UTILS_ROOT = $env:SALTS_UTILS_ROOT
+            }
           }
           $preset | ConvertTo-Json -Depth 30 | Set-Content CMakeUserPresets.json -Encoding utf8NoBOM
           New-Item -ItemType Directory -Force -Path evidence/core | Out-Null
           git diff -- CMakeUserPresets.json > evidence/core/ci-paths.diff
           if ($LASTEXITCODE -ne 0) { throw 'cannot record CI path adaptation' }
       - name: Build and test native plan adapter on Linux
-        if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
+        if: (((github.ref_name == 'chore/deps-salts-1.7.9-utils-4.0.1' || github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -346,14 +156,14 @@ jobs:
           cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/core/configure.log
           cp "$build/compile_commands.json" evidence/core/compile_commands.json
           cp "$build/CMakeCache.txt" evidence/core/CMakeCache.txt
-          cmake --build --preset "$profile" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_driver_backend_adapter_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 2>&1 | tee evidence/core/build.log
-          ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_driver_backend_bridge|orm_driver_backend_adapter|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
+          cmake --build --preset "$profile" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_driver_backend_adapter_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test turbodb_plugin_baseline_contract --parallel 4 2>&1 | tee evidence/core/build.log
+          ctest --preset "$profile" -R '^(orm_driver_plan_view|orm_driver_backend_bridge|orm_driver_backend_adapter|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race|turbodb_plugin_baseline_contract|turbodb_install_profile_contract)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ctest.log
           ctest --preset "$profile" -R '^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$' --verbose --no-tests=error 2>&1 | tee evidence/core/ownership.log
       - name: Build and test native plan adapter on Windows
         env:
           # Avoid vcpkg telemetry self-copy locking its executable during parallel launches (#50).
           VCPKG_DISABLE_METRICS: '1'
-        if: (((github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
+        if: (((github.ref_name == 'chore/deps-salts-1.7.9-utils-4.0.1' || github.ref_name == 'feat/runtime-driver-loader' || github.ref_name == 'feat/runtime-driver-cursor-adapter' || github.ref_name == 'feat/runtime-driver-command-adapter' || github.ref_name == 'feat/runtime-driver-transaction-adapter' || github.ref_name == 'feat/runtime-driver-registry-concurrency' || github.ref_name == 'feat/driver-backend-bridge')) || github.ref_name == 'feat/runtime-driver-sdk-plan-view' || (github.ref_name == 'feat/orm-native-ownership' || github.ref_name == 'refactor/orm-databind-row-publisher' || github.ref_name == 'feat/public-retained-ownership') || github.ref_name == 'refactor/orm-databind-row-publisher') && runner.os == 'Windows'
         shell: cmd
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
@@ -372,9 +182,9 @@ jobs:
           if errorlevel 1 exit /b 1
           copy "%BUILD%\CMakeCache.txt" evidence\core\CMakeCache.txt
           if errorlevel 1 exit /b 1
-          cmake --build --preset "%PROFILE%" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_driver_backend_adapter_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test --parallel 4 > evidence\core\build.log 2>&1
+          cmake --build --preset "%PROFILE%" --target orm_postgres_flow_test orm_postgres_connection_test orm_driver_plan_view_test orm_driver_backend_bridge_test orm_driver_backend_adapter_test orm_sql_render_test orm_public_flow_test orm_cpp_flow_test orm_owner_regression_test orm_owner_state_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_owner_cleanup_test orm_owner_race_test orm_owner_failure_test orm_module_loader_test orm_runtime_registry_test orm_runtime_race_test turbodb_plugin_baseline_contract --parallel 4 > evidence\core\build.log 2>&1
           if errorlevel 1 (type evidence\core\build.log & exit /b 1)
-          ctest --preset "%PROFILE%" -R "^(orm_driver_plan_view|orm_driver_backend_bridge|orm_driver_backend_adapter|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race)$" --verbose --no-tests=error > evidence\core\ctest.log 2>&1
+          ctest --preset "%PROFILE%" -R "^(orm_driver_plan_view|orm_driver_backend_bridge|orm_driver_backend_adapter|orm_sql_render|orm_public_flow|orm_cpp_flow|orm_postgres_flow|orm_postgres_connection|orm_module_loader|orm_runtime_registry|orm_runtime_race|turbodb_plugin_baseline_contract|turbodb_install_profile_contract)$" --verbose --no-tests=error > evidence\core\ctest.log 2>&1
           if errorlevel 1 (type evidence\core\ctest.log & exit /b 1)
           type evidence\core\ctest.log
           ctest --preset "%PROFILE%" -R "^orm_owner_(regression|state|checked|public_flow|cpp_flow|cleanup|race|failure)$" --verbose --no-tests=error > evidence\core\ownership.log 2>&1
