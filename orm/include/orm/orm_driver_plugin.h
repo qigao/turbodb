@@ -18,7 +18,11 @@
  */
 CMETA_INLINE salts_plugin_export orm_driver_plugin_export(
     TurboDb_Driver *driver, uint64_t capabilities) {
+#ifdef __cplusplus
+  salts_plugin_export entry{};
+#else
   salts_plugin_export entry = {0};
+#endif
   entry.struct_size = SALTS_PLUGIN_EXPORT_SIZE;
   entry.kind = SALTS_PLUGIN_EXPORT_INTERFACE;
   entry.contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION;
