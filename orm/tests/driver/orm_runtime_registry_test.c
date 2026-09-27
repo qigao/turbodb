@@ -6,17 +6,17 @@
 #include <string.h>
 
 static const char *fixture_path(void) {
-  const char *path = getenv("ORM_MODULE_FIXTURE");
+  const char *path = getenv("ORM_PLUGIN_FIXTURE");
   return path == NULL ? "" : path;
 }
 
 static const char *no_entry_fixture_path(void) {
-  const char *path = getenv("ORM_MODULE_NO_ENTRY_FIXTURE");
+  const char *path = getenv("ORM_PLUGIN_NO_QUERY_FIXTURE");
   return path == NULL ? "" : path;
 }
 
 static const char *bad_abi_fixture_path(void) {
-  const char *path = getenv("ORM_MODULE_BAD_ABI_FIXTURE");
+  const char *path = getenv("ORM_PLUGIN_BAD_ABI_FIXTURE");
   return path == NULL ? "" : path;
 }
 
@@ -64,9 +64,7 @@ spec("runtime driver registry") {
     memset(&info, 0, sizeof(info));
     check_equal(orm_runtime_driver_info(runtime, orm_view("fixture-alias"),
                                         &info, &error),
-                ORM_STATUS_OK);
-    check_equal(info.canonical_id_size, 7u);
-    check_equal(memcmp(info.canonical_id, "fixture", 7u), 0);
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
 
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
@@ -245,7 +243,7 @@ spec("runtime driver registry") {
 
     orm_runtime_config_init(&runtime_config);
     orm_config(&connection_config);
-    connection_config.driver = orm_view("fixture-alias");
+    connection_config.driver = orm_view("fixture");
     orm_flow_config(&flow_config, &cmeta_data_int);
 
     check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
@@ -379,7 +377,7 @@ spec("runtime driver registry") {
 
     orm_runtime_config_init(&config);
     orm_config(&connection_config);
-    connection_config.driver = orm_view("fixture-alias");
+    connection_config.driver = orm_view("fixture");
     check_equal(orm_runtime_create(&config, &first, &error), ORM_STATUS_OK);
     check_equal(orm_runtime_create(&config, &second, &error), ORM_STATUS_OK);
     check_equal(orm_runtime_load_driver(first, &load, &error), ORM_STATUS_OK);
