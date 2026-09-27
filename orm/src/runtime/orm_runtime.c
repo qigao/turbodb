@@ -831,11 +831,6 @@ static orm_status_t runtime_validate_config(
       config->execution.owner_context != NULL)
     return runtime_result(error, ORM_STATUS_UNSUPPORTED,
                           "runtime execution model is not implemented");
-  if (config->max_aliases_per_driver != 0u &&
-      (size_t)config->max_drivers >
-          SIZE_MAX / (size_t)config->max_aliases_per_driver)
-    return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
-                          "runtime registry size exceeds addressable memory");
   return ORM_STATUS_OK;
 }
 
