@@ -709,7 +709,7 @@ target_include_directories(orm_driver_backend_bridge_test PRIVATE
   ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
   ${ORM_FLOW_SOURCE_DIR} ${ORM_DRIVER_SOURCE_DIR})
 target_link_libraries(orm_driver_backend_bridge_test PRIVATE
-  Salts::Core Salts::CSTL Salts::TinyTest)
+  Salts::Core Salts::CFlow Salts::CSTL Salts::TinyTest)
 set_target_properties(orm_driver_backend_bridge_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_driver_backend_bridge_test)
