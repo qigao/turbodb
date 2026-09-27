@@ -119,7 +119,6 @@ set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
                   src/abi/orm_result.c src/driver/orm_driver_contract.c
                   src/driver/orm_driver_owner_bridge.c
                   src/driver/orm_driver_plan_view.c
-                  src/runtime/orm_module_loader.c
                   src/runtime/orm_runtime.c
                   src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
