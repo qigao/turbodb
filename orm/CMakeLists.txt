@@ -1188,7 +1188,7 @@ add_executable(orm_public_flow_test tests/flow/orm_public_flow_test.c)
 target_compile_features(orm_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_public_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_public_flow_test PRIVATE turbo_orm
+target_link_libraries(orm_public_flow_test PRIVATE orm_c_test_static
                                                    Salts::CFlow
                                                    Salts::TinyTest)
 set_target_properties(orm_public_flow_test
@@ -1206,7 +1206,7 @@ target_compile_features(orm_sqlite_provider_atomicity_test PRIVATE c_std_11)
 target_compile_definitions(orm_sqlite_provider_atomicity_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_sqlite_provider_atomicity_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_sqlite_provider_atomicity_test
-                      PRIVATE turbo_orm Salts::TinyTest)
+                      PRIVATE orm_c_test_static Salts::TinyTest)
 set_target_properties(
   orm_sqlite_provider_atomicity_test
   PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
@@ -1222,7 +1222,7 @@ add_executable(orm_cpp_flow_test tests/flow/orm_cpp_flow_test.cpp)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_cpp_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_cpp_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_cpp_flow_test PRIVATE turbo_orm
+target_link_libraries(orm_cpp_flow_test PRIVATE orm_c_test_static
                                                 Salts::CFlow
                                                 Salts::TinyTest)
 set_target_properties(orm_cpp_flow_test
@@ -1233,9 +1233,10 @@ add_test(NAME orm_cpp_flow COMMAND orm_cpp_flow_test)
 add_executable(orm_public_ownership_test
                tests/flow/orm_public_ownership_test.c)
 target_compile_features(orm_public_ownership_test PRIVATE c_std_11)
+target_compile_definitions(orm_public_ownership_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_public_ownership_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_public_ownership_test
-                      PRIVATE turbo_orm Salts::CFlow Salts::TinyTest)
+                      PRIVATE orm_c_test_static Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_public_ownership_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_public_ownership_test)
@@ -1248,9 +1249,10 @@ add_test(NAME orm_public_ownership COMMAND orm_public_ownership_test)
 add_executable(orm_public_ownership_cpp_test
                tests/flow/orm_public_ownership_cpp_test.cpp)
 target_compile_features(orm_public_ownership_cpp_test PRIVATE cxx_std_17)
+target_compile_definitions(orm_public_ownership_cpp_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_public_ownership_cpp_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_public_ownership_cpp_test
-                      PRIVATE orm_cpp Salts::TinyTest)
+                      PRIVATE orm_c_test_static Salts::TinyTest)
 set_target_properties(orm_public_ownership_cpp_test
                       PROPERTIES CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_public_ownership_cpp_test)
