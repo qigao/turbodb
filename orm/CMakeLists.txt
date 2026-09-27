@@ -174,6 +174,41 @@ target_link_libraries(
 if(ORM_WITH_SQLITE)
   target_compile_definitions(turbo_orm PRIVATE ORM_WITH_SQLITE)
   target_link_libraries(turbo_orm PRIVATE SQLite::SQLite3)
+
+  add_library(orm_sqlite_driver MODULE
+    src/dbs/sqlite/plugin.c
+    src/driver/orm_driver_backend_bridge.c
+    src/dbs/sqlite/backend.c
+    src/dbs/sqlite/orm_sqlite_cursor.c
+    src/dbs/sql/orm_sql_render.c)
+  target_compile_features(orm_sqlite_driver PRIVATE c_std_11)
+  target_compile_definitions(orm_sqlite_driver PRIVATE ORM_C_STATIC ORM_WITH_SQLITE)
+  target_include_directories(
+    orm_sqlite_driver PRIVATE
+      ${ORM_INCLUDE_DIR}
+      ${ORM_ABI_SOURCE_DIR}
+      ${ORM_FLOW_SOURCE_DIR}
+      ${ORM_SQL_SOURCE_DIR}
+      ${ORM_DRIVER_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sqlite)
+  target_link_libraries(
+    orm_sqlite_driver PRIVATE
+      turbo_orm
+      SQLite::SQLite3
+      Salts::PluginABI
+      Salts::Core
+      Salts::CSerde
+      Salts::CFlow
+      Salts::CSTL)
+  set_target_properties(
+    orm_sqlite_driver PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "turbodb_driver_sqlite"
+      C_STANDARD_REQUIRED ON
+      C_VISIBILITY_PRESET hidden
+      WINDOWS_EXPORT_ALL_SYMBOLS OFF
+      FOLDER "orm/drivers")
+  orm_enable_strict_warnings(orm_sqlite_driver)
 endif()
 
 if(ORM_WITH_REDIS)
@@ -1192,6 +1227,13 @@ endif()
 endif()
 
 include(GNUInstallDirs)
+
+if(TARGET orm_sqlite_driver)
+  install(
+    TARGETS orm_sqlite_driver
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+endif()
 
 cmake_install_headers(
   FILES include/orm/orm.h include/orm/orm.hpp
