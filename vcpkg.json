@@ -12,10 +12,7 @@
     "sqlite": {
       "description": "Build SQLite ORM and database-tool backends",
       "dependencies": [
-        {
-          "name": "sqlite3",
-          "version>=": "3.49.0"
-        }
+        "sqlite3"
       ]
     },
     "mongodb": {
@@ -29,7 +26,6 @@
       "dependencies": [
         {
           "name": "libpq",
-          "version>=": "16.9",
           "default-features": false,
           "features": [
             "zstd"

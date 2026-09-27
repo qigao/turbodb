@@ -64,7 +64,7 @@ endif()
 
 # Find required base dependencies
 if(NOT TARGET Salts::Core)
-  find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
+  find_package(Salts 1.7.9 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
 
@@ -77,7 +77,7 @@ if(NOT TARGET Salts::DataBind)
   endif()
   unset(SaltsUtils_DIR CACHE)
   unset(SaltsUtils_DIR)
-  find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
+  find_package(SaltsUtils 4.0.1 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
 if(NOT TARGET Salts::DataBind)
@@ -165,8 +165,8 @@ target_include_directories(
   PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR}
           ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 target_link_libraries(
-  turbo_orm PUBLIC Salts::Core
-  PRIVATE Salts::CSerde Salts::DataBind Salts::CFlow
+  turbo_orm PUBLIC Salts::Core Salts::CFlow
+  PRIVATE Salts::CSerde Salts::DataBind
           Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
 
 if(ORM_WITH_SQLITE)
@@ -709,7 +709,7 @@ target_include_directories(orm_driver_backend_bridge_test PRIVATE
   ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
   ${ORM_FLOW_SOURCE_DIR} ${ORM_DRIVER_SOURCE_DIR})
 target_link_libraries(orm_driver_backend_bridge_test PRIVATE
-  Salts::Core Salts::CSTL Salts::TinyTest)
+  Salts::Core Salts::CFlow Salts::CSTL Salts::TinyTest)
 set_target_properties(orm_driver_backend_bridge_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_driver_backend_bridge_test)
