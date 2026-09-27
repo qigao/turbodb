@@ -740,11 +740,14 @@ if(ORM_WITH_SQLITE AND ORM_WITH_PGSQL)
               "SQL Plugin matrix app must not link ${ORM_FORBIDDEN_MATRIX_LINK}")
     endif()
   endforeach()
-  add_test(
-    NAME orm_sql_plugin_matrix
-    COMMAND orm_sql_plugin_matrix_test both
-            "$<TARGET_FILE:orm_sqlite_driver>"
-            "$<TARGET_FILE:orm_postgresql_driver>")
+  foreach(ORM_SQL_PLUGIN_MATRIX_SCENARIO IN ITEMS sqlite postgresql both)
+    add_test(
+      NAME orm_sql_plugin_matrix_${ORM_SQL_PLUGIN_MATRIX_SCENARIO}
+      COMMAND orm_sql_plugin_matrix_test
+              ${ORM_SQL_PLUGIN_MATRIX_SCENARIO}
+              "$<TARGET_FILE:orm_sqlite_driver>"
+              "$<TARGET_FILE:orm_postgresql_driver>")
+  endforeach()
 endif()
 
 if(ORM_POSTGRES_LIVE_TESTS)
@@ -1318,7 +1321,10 @@ if(WIN32)
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:PostgreSQL::PostgreSQL>")
     list(APPEND ORM_RUNTIME_TESTS orm_postgres_libpq)
     if(ORM_WITH_SQLITE)
-      list(APPEND ORM_RUNTIME_TESTS orm_sql_plugin_matrix)
+      list(APPEND ORM_RUNTIME_TESTS
+           orm_sql_plugin_matrix_sqlite
+           orm_sql_plugin_matrix_postgresql
+           orm_sql_plugin_matrix_both)
     endif()
     if(ORM_POSTGRES_LIVE_TESTS)
       list(APPEND ORM_RUNTIME_TESTS orm_postgres_live)
