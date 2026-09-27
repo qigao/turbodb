@@ -718,8 +718,7 @@ static orm_status_t ORM_DRIVER_CALL bridge_cursor_configure_shape(
     return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
                          "invalid backend cursor shape");
   if (wrapper->cursor.ops->configure_shape == NULL)
-    return bridge_result(error, ORM_STATUS_UNSUPPORTED,
-                         "backend cursor does not support shape configuration");
+    return bridge_result(error, ORM_STATUS_OK, NULL);
   return wrapper->cursor.ops->configure_shape(
       wrapper->cursor.context, shape, error);
 }
