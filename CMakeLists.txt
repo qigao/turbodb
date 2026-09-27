@@ -81,7 +81,7 @@ if(NOT IS_DIRECTORY "${SALTS_ROOT_PATH}")
 endif()
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
-find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
+find_package(Salts 1.7.9 EXACT CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
              NO_DEFAULT_PATH)
 
 if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
@@ -93,7 +93,7 @@ if(NOT IS_DIRECTORY "${SALTS_UTILS_ROOT_PATH}")
 endif()
 unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
-find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
+find_package(SaltsUtils 4.0.1 EXACT CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
              NO_DEFAULT_PATH)
 if(NOT TARGET Salts::DataBind)
   message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::DataBind")
