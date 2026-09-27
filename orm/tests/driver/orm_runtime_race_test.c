@@ -1,10 +1,11 @@
-#include "orm_module_loader.h"
 #include <orm_runtime.h>
 
+#include <salts/clock.h>
 #include <salts/thread.h>
 #include <tinytest.h>
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,17 +15,6 @@ enum {
   RACE_GATE_CONNECT = 2u,
   RACE_GATE_FINALIZE = 3u
 };
-
-typedef int32_t (ORM_DRIVER_CALL *race_gate_arm_fn)(uint32_t);
-typedef int32_t (ORM_DRIVER_CALL *race_gate_wait_fn)(uint64_t);
-typedef void (ORM_DRIVER_CALL *race_gate_release_fn)(void);
-
-typedef struct race_control {
-  orm_module_handle module;
-  race_gate_arm_fn arm;
-  race_gate_wait_fn wait_entered;
-  race_gate_release_fn release;
-} race_control;
 
 typedef struct race_worker {
   orm_runtime_t *runtime;
@@ -81,32 +71,69 @@ static void close_worker(void *context) {
   worker->status = orm_runtime_close(worker->runtime, &worker->error);
 }
 
-static int load_control(race_control *control) {
-  orm_error_t error;
-  orm_error_init(&error);
-  memset(control, 0, sizeof(*control));
-  if (orm_module_open_absolute(fixture_path(), &control->module, &error) !=
-      ORM_STATUS_OK)
+static int race_marker_path(
+    char *out, size_t out_size, const char *driver,
+    uint32_t phase, const char *kind) {
+  const char *prefix = getenv("ORM_RUNTIME_RACE_GATE_PREFIX");
+  if (out == NULL || out_size == 0u || driver == NULL ||
+      prefix == NULL || prefix[0] == '\0')
     return 0;
-  if (orm_module_symbol(&control->module, "orm_runtime_race_gate_arm",
-                        &control->arm, sizeof(control->arm), &error) !=
-          ORM_STATUS_OK ||
-      orm_module_symbol(&control->module, "orm_runtime_race_gate_wait_entered",
-                        &control->wait_entered,
-                        sizeof(control->wait_entered), &error) !=
-          ORM_STATUS_OK ||
-      orm_module_symbol(&control->module, "orm_runtime_race_gate_release",
-                        &control->release, sizeof(control->release), &error) !=
-          ORM_STATUS_OK) {
-    orm_module_close(&control->module);
-    return 0;
-  }
+  const int written = snprintf(
+      out, out_size, "%s-%s-%u-%s", prefix, driver,
+      (unsigned)phase, kind);
+  return written > 0 && (size_t)written < out_size;
+}
+
+static int race_marker_exists(const char *path) {
+  FILE *file = fopen(path, "rb");
+  if (file == NULL) return 0;
+  fclose(file);
   return 1;
+}
+
+static int race_marker_write(const char *path) {
+  FILE *file = fopen(path, "wb");
+  if (file == NULL) return 0;
+  fputc('1', file);
+  fclose(file);
+  return 1;
+}
+
+static int race_arm(const char *driver, uint32_t phase) {
+  char arm[1024], entered[1024], release[1024];
+  if (!race_marker_path(arm, sizeof(arm), driver, phase, "arm") ||
+      !race_marker_path(entered, sizeof(entered), driver, phase, "entered") ||
+      !race_marker_path(release, sizeof(release), driver, phase, "release"))
+    return 0;
+  (void)remove(arm);
+  (void)remove(entered);
+  (void)remove(release);
+  return race_marker_write(arm);
+}
+
+static int race_wait_entered(
+    const char *driver, uint32_t phase, uint64_t timeout_ms) {
+  char entered[1024];
+  if (!race_marker_path(
+          entered, sizeof(entered), driver, phase, "entered"))
+    return 0;
+  const uint64_t started = salts_monotonic_ms();
+  while (salts_monotonic_ms() - started < timeout_ms) {
+    if (race_marker_exists(entered)) return 1;
+    salts_sleep_ms(1u);
+  }
+  return race_marker_exists(entered);
+}
+
+static int race_release(const char *driver, uint32_t phase) {
+  char release[1024];
+  return race_marker_path(
+             release, sizeof(release), driver, phase, "release") &&
+         race_marker_write(release);
 }
 
 spec("runtime close and admission serialization") {
   it("keeps close BUSY while module initialization is outside the lock") {
-    race_control control;
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
@@ -114,16 +141,15 @@ spec("runtime close and admission serialization") {
     race_worker worker;
     memset(&worker, 0, sizeof(worker));
 
-    check_true(load_control(&control));
     orm_runtime_config_init(&config);
     check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
     worker.runtime = runtime;
     worker.load = load_config();
 
-    check_equal(control.arm(RACE_GATE_INITIALIZE), ORM_STATUS_OK);
+    check_true(race_arm("race", RACE_GATE_INITIALIZE));
     check_equal(salts_thread_create(&worker_thread, load_worker, &worker),
                 0);
-    check_true(control.wait_entered(RACE_TIMEOUT_MS));
+    check_true(race_wait_entered("race", RACE_GATE_INITIALIZE, RACE_TIMEOUT_MS));
     orm_driver_info_t info;
     check_equal(orm_runtime_driver_info(runtime, orm_view("race"),
                                         &info, &error),
@@ -131,18 +157,16 @@ spec("runtime close and admission serialization") {
     check_equal(orm_runtime_load_driver(runtime, &worker.load, &error),
                 ORM_STATUS_BUSY);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
-    control.release();
+    check_true(race_release("race", RACE_GATE_INITIALIZE));
     check_equal(salts_thread_join(&worker_thread), 0);
     salts_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
 
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
     orm_runtime_release(runtime);
-    orm_module_close(&control.module);
   }
 
   it("keeps close BUSY while connection creation is outside the lock") {
-    race_control control;
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
@@ -150,7 +174,6 @@ spec("runtime close and admission serialization") {
     race_worker worker;
     memset(&worker, 0, sizeof(worker));
 
-    check_true(load_control(&control));
     orm_runtime_config_init(&config);
     check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
     worker.runtime = runtime;
@@ -160,12 +183,12 @@ spec("runtime close and admission serialization") {
     orm_config(&worker.connect);
     worker.connect.driver = orm_view("race");
 
-    check_equal(control.arm(RACE_GATE_CONNECT), ORM_STATUS_OK);
+    check_true(race_arm("race", RACE_GATE_CONNECT));
     check_equal(salts_thread_create(&worker_thread, connect_worker, &worker),
                 0);
-    check_true(control.wait_entered(RACE_TIMEOUT_MS));
+    check_true(race_wait_entered("race", RACE_GATE_CONNECT, RACE_TIMEOUT_MS));
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
-    control.release();
+    check_true(race_release("race", RACE_GATE_CONNECT));
     check_equal(salts_thread_join(&worker_thread), 0);
     salts_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
@@ -175,7 +198,6 @@ spec("runtime close and admission serialization") {
     orm_disconnect(worker.connection);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
     orm_runtime_release(runtime);
-    orm_module_close(&control.module);
   }
 
   it("loads two independent modules and multiple connections without cross-talk") {
@@ -255,7 +277,6 @@ spec("runtime close and admission serialization") {
   }
 
   it("rejects new admission while module finalization is outside the lock") {
-    race_control control;
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
@@ -264,7 +285,6 @@ spec("runtime close and admission serialization") {
     race_worker worker;
     memset(&worker, 0, sizeof(worker));
 
-    check_true(load_control(&control));
     orm_runtime_config_init(&config);
     check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
     worker.runtime = runtime;
@@ -274,10 +294,10 @@ spec("runtime close and admission serialization") {
     orm_config(&worker.connect);
     worker.connect.driver = orm_view("race");
 
-    check_equal(control.arm(RACE_GATE_FINALIZE), ORM_STATUS_OK);
+    check_true(race_arm("race", RACE_GATE_FINALIZE));
     check_equal(salts_thread_create(&worker_thread, close_worker, &worker),
                 0);
-    check_true(control.wait_entered(RACE_TIMEOUT_MS));
+    check_true(race_wait_entered("race", RACE_GATE_FINALIZE, RACE_TIMEOUT_MS));
 
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
     check_equal(orm_runtime_driver_info(runtime, orm_view("race"),
@@ -291,13 +311,12 @@ spec("runtime close and admission serialization") {
     check_equal(orm_runtime_load_driver(runtime, &worker.load, &error),
                 ORM_STATUS_INVALID_STATE);
 
-    control.release();
+    check_true(race_release("race", RACE_GATE_INITIALIZE));
     check_equal(salts_thread_join(&worker_thread), 0);
     salts_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
 
     orm_runtime_release(runtime);
-    orm_module_close(&control.module);
   }
 }
