@@ -197,7 +197,7 @@ jobs:
             orm_sqlite_driver orm_postgresql_driver \
             orm_postgresql_plugin_test orm_sql_plugin_matrix_test --parallel 4
           ctest --test-dir "$build" \
-            -R "^(orm_postgresql_plugin|orm_sql_plugin_matrix)$" \
+            -R "^(orm_postgresql_plugin|orm_sql_plugin_matrix_(sqlite|postgresql|both))$" \
             --output-on-failure
 
           core="$build/bin/libturbo_orm.so"
@@ -249,7 +249,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix configure failed" }
           & cmake --build $build --config Release --target orm_sqlite_driver orm_postgresql_driver orm_postgresql_plugin_test orm_sql_plugin_matrix_test --parallel 4
           if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix build failed" }
-          & ctest --test-dir $build -C Release -R "^(orm_postgresql_plugin|orm_sql_plugin_matrix)$" --output-on-failure
+          & ctest --test-dir $build -C Release -R "^(orm_postgresql_plugin|orm_sql_plugin_matrix_(sqlite|postgresql|both))$" --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix contract failed" }
 
           $bin = Join-Path $build "bin/Release"
