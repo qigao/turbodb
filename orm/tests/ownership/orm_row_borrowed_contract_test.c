@@ -145,7 +145,7 @@ static void require_borrowed_rejection(cmeta_data_kind kind, bool nested) {
   check_equal(orm_row_publisher_init(&borrowed_publisher, &borrowed_cursor,
                                     &config, &error), ORM_STATUS_UNSUPPORTED);
   check_equal(error.status, ORM_STATUS_UNSUPPORTED);
-  check_not_null(strstr(error.message, "move lifecycle"));
+  check_not_null(strstr(error.message, "managed owned v2 buffer semantics"));
   check_null(borrowed_publisher.self);
   check_true(borrowed_cursor.context == &borrowed_source);
   check_equal(borrowed_source.configure_calls, 0u);
