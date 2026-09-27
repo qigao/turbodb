@@ -1,7 +1,8 @@
 #include <orm_runtime.h>
+#include <orm_driver_plugin.h>
+#include <salts/plugin.h>
 #include <salts/thread.h>
 
-#include "orm_module_loader.h"
 #include "../abi/orm_internal.h"
 #include "../driver/orm_driver_contract.h"
 #include "../driver/orm_driver_owner_bridge.h"
@@ -18,26 +19,16 @@
 #define RUNTIME_FIELD_END(T, field) \
   ((uint32_t)(offsetof(T, field) + sizeof(((T *)0)->field)))
 
-typedef int32_t (ORM_DRIVER_CALL *orm_runtime_bootstrap_fn)(
-    const orm_driver_host_v1 *, uint32_t,
-    const orm_driver_api_v1 **, uint32_t *);
-
 typedef struct orm_runtime_id {
   uint32_t size;
   char text[ORM_RUNTIME_DRIVER_ID_CAPACITY];
 } orm_runtime_id;
 
 typedef struct orm_runtime_driver {
-  orm_module_handle module;
-  void *module_context;
-  const orm_driver_api_v1 *api;
-  uint32_t api_bytes;
-  orm_driver_module_ops_v1 module_ops;
-  orm_driver_create_fn create_connection;
-  orm_driver_connection_ops_v1 connection_ops;
+  salts_plugin_ref plugin;
+  TurboDb_Driver *binding;
   char *module_path;
   orm_runtime_id canonical;
-  uint32_t alias_count;
   uint64_t capabilities;
   uint64_t execution_models;
   uint8_t bundle_id[ORM_DRIVER_BUNDLE_ID_BYTES];
@@ -55,9 +46,10 @@ struct orm_runtime {
   uint32_t refs;
   uint32_t closed;
   orm_runtime_config_t config;
+  salts_plugin_registry plugins;
   orm_runtime_driver *drivers;
-  orm_runtime_id *aliases;
   uint32_t driver_count;
+  uint32_t close_remaining;
   uint32_t dependents;
   uint32_t pending_operations;
   uint32_t load_active;
@@ -71,6 +63,62 @@ static orm_status_t runtime_result(orm_error_t *error, orm_status_t status,
   orm_error_init(error);
   orm_error_set(error, status, message);
   return status;
+}
+
+static orm_status_t runtime_plugin_status(
+    salts_plugin_status status, orm_error_t *error, const char *context) {
+  orm_status_t mapped;
+  switch (status) {
+  case SALTS_PLUGIN_OK:
+    mapped = ORM_STATUS_OK;
+    break;
+  case SALTS_PLUGIN_INVALID_ARGUMENT:
+    mapped = ORM_STATUS_INVALID_ARGUMENT;
+    break;
+  case SALTS_PLUGIN_ALLOCATION_FAILED:
+    mapped = ORM_STATUS_OUT_OF_MEMORY;
+    break;
+  case SALTS_PLUGIN_CAPACITY_EXCEEDED:
+    mapped = ORM_STATUS_LIMIT_EXCEEDED;
+    break;
+  case SALTS_PLUGIN_DUPLICATE_PLUGIN_ID:
+  case SALTS_PLUGIN_ALREADY:
+    mapped = ORM_STATUS_DRIVER_ALREADY_REGISTERED;
+    break;
+  case SALTS_PLUGIN_LOAD_FAILED:
+    mapped = ORM_STATUS_DRIVER_LOAD_ERROR;
+    break;
+  case SALTS_PLUGIN_QUERY_MISSING:
+  case SALTS_PLUGIN_UNKNOWN_EXPORT:
+    mapped = ORM_STATUS_DRIVER_ENTRY_MISSING;
+    break;
+  case SALTS_PLUGIN_UNSUPPORTED_ABI:
+  case SALTS_PLUGIN_INVALID_MANIFEST:
+  case SALTS_PLUGIN_QUERY_REJECTED:
+  case SALTS_PLUGIN_INCOMPATIBLE_CONTRACT:
+    mapped = ORM_STATUS_ABI_MISMATCH;
+    break;
+  case SALTS_PLUGIN_BUSY:
+    mapped = ORM_STATUS_BUSY;
+    break;
+  case SALTS_PLUGIN_UNLOAD_FAILED:
+    mapped = ORM_STATUS_CLEANUP_FAILED;
+    break;
+  case SALTS_PLUGIN_UNKNOWN_PLUGIN:
+  case SALTS_PLUGIN_STALE:
+  case SALTS_PLUGIN_INVALID_STATE:
+  case SALTS_PLUGIN_DUPLICATE_EXPORT:
+  default:
+    mapped = ORM_STATUS_INVALID_STATE;
+    break;
+  }
+  if (mapped == ORM_STATUS_OK)
+    return runtime_result(error, mapped, NULL);
+  char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+  (void)snprintf(message, sizeof(message), "%s: %s",
+                 context != NULL ? context : "plugin",
+                 salts_plugin_status_string(status));
+  return runtime_result(error, mapped, message);
 }
 
 static int runtime_id_valid(orm_string_view_t id) {
@@ -102,26 +150,11 @@ static void runtime_copy_id(orm_runtime_id *out,
     memcpy(out->text, value.data, (size_t)value.size);
 }
 
-static orm_runtime_id *runtime_alias_slot(orm_runtime_t *runtime,
-                                          uint32_t driver_index,
-                                          uint32_t alias_index) {
-  const size_t offset =
-      (size_t)driver_index * runtime->config.max_aliases_per_driver +
-      alias_index;
-  return &runtime->aliases[offset];
-}
-
 static int runtime_id_conflicts(orm_runtime_t *runtime,
                                 orm_driver_bytes_v1 id) {
   for (uint32_t i = 0u; i < runtime->driver_count; ++i) {
-    orm_runtime_driver *driver = &runtime->drivers[i];
-    if (runtime_same_bytes(&driver->canonical, id.data, id.size))
+    if (runtime_same_bytes(&runtime->drivers[i].canonical, id.data, id.size))
       return 1;
-    for (uint32_t j = 0u; j < driver->alias_count; ++j) {
-      if (runtime_same_bytes(runtime_alias_slot(runtime, i, j),
-                             id.data, id.size))
-        return 1;
-    }
   }
   return 0;
 }
@@ -132,11 +165,6 @@ static orm_runtime_driver *runtime_find_driver(orm_runtime_t *runtime,
     orm_runtime_driver *driver = &runtime->drivers[i];
     if (runtime_same_bytes(&driver->canonical, id.data, id.len))
       return driver;
-    for (uint32_t j = 0u; j < driver->alias_count; ++j) {
-      if (runtime_same_bytes(runtime_alias_slot(runtime, i, j),
-                             id.data, id.len))
-        return driver;
-    }
   }
   return NULL;
 }
@@ -285,6 +313,7 @@ static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
 typedef struct orm_runtime_backend {
   orm_runtime_t *runtime;
   orm_runtime_driver *driver;
+  salts_plugin_lease plugin_lease;
   orm_driver_connection_v1 native;
   orm_driver_connection_ops_v1 ops;
 } orm_runtime_backend;
@@ -295,7 +324,19 @@ static void runtime_backend_destroy(void *context) {
   if (backend->native.context != NULL)
     backend->ops.destroy(backend->native.context);
   orm_runtime_t *runtime = backend->runtime;
+  const salts_plugin_status release_status =
+      salts_plugin_registry_release(&runtime->plugins, &backend->plugin_lease);
   free(backend);
+  if (release_status != SALTS_PLUGIN_OK) {
+    orm_error_t cleanup_error;
+    (void)runtime_plugin_status(
+        release_status, &cleanup_error, "release Driver Plugin lease");
+    if (runtime->config.on_cleanup_error != NULL)
+      runtime->config.on_cleanup_error(
+          runtime->config.cleanup_context, &cleanup_error);
+    else
+      abort();
+  }
   if (runtime_release_dependent_ref(runtime))
     runtime_release_last(runtime);
 }
@@ -702,6 +743,9 @@ typedef struct orm_runtime_factory_context {
 static orm_status_t runtime_backend_factory(
     const orm_config_t *config, const orm_limits *limits, void *context,
     orm_backend *out_backend, orm_error_t *error) {
+  salts_plugin_lease lease = {0};
+  const salts_plugin_manifest *manifest = NULL;
+
   if (out_backend != NULL) memset(out_backend, 0, sizeof(*out_backend));
   if (config == NULL || limits == NULL || context == NULL ||
       out_backend == NULL)
@@ -712,12 +756,24 @@ static orm_status_t runtime_backend_factory(
   orm_status_t status = runtime_acquire_dependent(factory->runtime, error);
   if (status != ORM_STATUS_OK) return status;
 
+  const salts_plugin_status acquire_status =
+      salts_plugin_registry_acquire(
+          &factory->runtime->plugins, factory->driver->plugin,
+          &lease, &manifest);
+  if (acquire_status != SALTS_PLUGIN_OK) {
+    runtime_drop_dependent(factory->runtime);
+    return runtime_plugin_status(
+        acquire_status, error, "acquire Driver Plugin lease");
+  }
+  (void)manifest;
+
   orm_driver_connection_v1 native;
   memset(&native, 0, sizeof(native));
   const orm_driver_limits_v1 driver_limits = runtime_driver_limits(limits);
-  status = factory->driver->create_connection(
-      factory->driver->module_context, config, &driver_limits, &native, error);
+  status = TurboDb_Driver_create(
+      factory->driver->binding, config, &driver_limits, &native, error);
   if (status != ORM_STATUS_OK) {
+    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return status;
   }
@@ -725,16 +781,25 @@ static orm_status_t runtime_backend_factory(
   status = orm_driver_validate_connection_v1(
       &native, (uint32_t)sizeof(native), factory->driver->capabilities, error);
   if (status != ORM_STATUS_OK) {
-    if (native.context != NULL)
-      factory->driver->connection_ops.destroy(native.context);
+    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return status;
+  }
+
+  orm_driver_connection_ops_v1 connection_ops;
+  memset(&connection_ops, 0, sizeof(connection_ops));
+  {
+    size_t connection_ops_bytes = native.ops.bytes;
+    if (connection_ops_bytes > sizeof(connection_ops))
+      connection_ops_bytes = sizeof(connection_ops);
+    memcpy(&connection_ops, native.ops.data, connection_ops_bytes);
   }
 
   orm_runtime_backend *backend =
       (orm_runtime_backend *)calloc(1u, sizeof(*backend));
   if (backend == NULL) {
-    factory->driver->connection_ops.destroy(native.context);
+    connection_ops.destroy(native.context);
+    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime driver connection adapter");
@@ -742,34 +807,12 @@ static orm_status_t runtime_backend_factory(
 
   backend->runtime = factory->runtime;
   backend->driver = factory->driver;
+  backend->plugin_lease = lease;
   backend->native = native;
-  memset(&backend->ops, 0, sizeof(backend->ops));
-  {
-    size_t connection_ops_bytes = native.ops.bytes;
-    if (connection_ops_bytes > sizeof(backend->ops))
-      connection_ops_bytes = sizeof(backend->ops);
-    memcpy(&backend->ops, native.ops.data, connection_ops_bytes);
-  }
+  backend->ops = connection_ops;
   out_backend->ops = &runtime_backend_ops;
   out_backend->context = backend;
   return runtime_result(error, ORM_STATUS_OK, NULL);
-}
-
-static orm_driver_host_v1 runtime_host(void) {
-  const orm_driver_plan_metadata_ops_v1 *metadata =
-      orm_driver_plan_metadata_services_v1();
-  const orm_driver_plan_value_ops_v1 *values =
-      orm_driver_plan_value_services_v1();
-  const orm_driver_lifetime_ops_v1 *lifetime =
-      orm_driver_owner_services_v1();
-  orm_driver_host_v1 host;
-  memset(&host, 0, sizeof(host));
-  host.header = (orm_driver_header_v1)RUNTIME_HEADER(orm_driver_host_v1);
-  memcpy(host.bundle_id, runtime_bundle, sizeof(host.bundle_id));
-  host.plan_metadata = (orm_driver_table_v1)RUNTIME_TABLE(metadata);
-  host.plan_values = (orm_driver_table_v1)RUNTIME_TABLE(values);
-  host.lifetime = (orm_driver_table_v1)RUNTIME_TABLE(lifetime);
-  return host;
 }
 
 static orm_status_t runtime_validate_config(
@@ -788,11 +831,6 @@ static orm_status_t runtime_validate_config(
       config->execution.owner_context != NULL)
     return runtime_result(error, ORM_STATUS_UNSUPPORTED,
                           "runtime execution model is not implemented");
-  if (config->max_aliases_per_driver != 0u &&
-      (size_t)config->max_drivers >
-          SIZE_MAX / (size_t)config->max_aliases_per_driver)
-    return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
-                          "runtime registry size exceeds addressable memory");
   return ORM_STATUS_OK;
 }
 
@@ -841,20 +879,25 @@ orm_runtime_create(const orm_runtime_config_t *config,
                           "initialize runtime mutex");
   }
 
+  salts_plugin_registry_config plugin_config = {
+      (size_t)config->max_drivers};
+  const salts_plugin_status plugin_status =
+      salts_plugin_registry_init(&runtime->plugins, &plugin_config);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    salts_mutex_destroy(&runtime->mutex);
+    free(runtime);
+    return runtime_plugin_status(plugin_status, error,
+                                 "initialize Plugin registry");
+  }
+
   runtime->drivers = (orm_runtime_driver *)calloc(
       config->max_drivers, sizeof(*runtime->drivers));
-  const size_t alias_count =
-      (size_t)config->max_drivers * config->max_aliases_per_driver;
-  if (runtime->drivers == NULL ||
-      (alias_count != 0u &&
-       (runtime->aliases = (orm_runtime_id *)calloc(
-            alias_count, sizeof(*runtime->aliases))) == NULL)) {
-    free(runtime->aliases);
-    free(runtime->drivers);
+  if (runtime->drivers == NULL) {
+    (void)salts_plugin_registry_destroy(&runtime->plugins);
     salts_mutex_destroy(&runtime->mutex);
     free(runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
-                          "allocate runtime registry");
+                          "allocate runtime driver index");
   }
 
   runtime->refs = 1u;
@@ -884,10 +927,38 @@ static orm_status_t runtime_copy_path(orm_runtime_t *runtime,
   return ORM_STATUS_OK;
 }
 
+static salts_plugin_status runtime_discard_plugin(
+    orm_runtime_t *runtime, salts_plugin_ref ref, int started) {
+  salts_plugin_status status;
+  bool quiescent = false;
+  if (!salts_plugin_ref_valid(ref)) return SALTS_PLUGIN_OK;
+  if (started) {
+    status = salts_plugin_registry_request_stop(&runtime->plugins, ref);
+    if (status != SALTS_PLUGIN_OK && status != SALTS_PLUGIN_ALREADY)
+      return status;
+    status = salts_plugin_registry_poll_quiescent(
+        &runtime->plugins, ref, &quiescent);
+    if (status != SALTS_PLUGIN_OK)
+      return status;
+    if (!quiescent)
+      return SALTS_PLUGIN_BUSY;
+  }
+  return salts_plugin_registry_unload(&runtime->plugins, ref);
+}
+
 orm_status_t ORM_C_CALL
 orm_runtime_load_driver(orm_runtime_t *runtime,
                         const orm_driver_load_config_t *config,
                         orm_error_t *error) {
+  salts_plugin_ref plugin = {0};
+  salts_plugin_lease admission = {0};
+  const salts_plugin_manifest *manifest = NULL;
+  const salts_plugin_export *entry = NULL;
+  TurboDb_Driver *binding = NULL;
+  int started = 0;
+  orm_status_t status;
+  salts_plugin_status plugin_status;
+
   if (runtime == NULL || config == NULL ||
       config->struct_size < sizeof(*config) ||
       config->abi_version != ORM_RUNTIME_ABI_VERSION ||
@@ -897,8 +968,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
                           "invalid driver load configuration");
 
   char *path = NULL;
-  orm_status_t status =
-      runtime_copy_path(runtime, config->module_path, &path, error);
+  status = runtime_copy_path(runtime, config->module_path, &path, error);
   if (status != ORM_STATUS_OK)
     return status;
 
@@ -908,94 +978,88 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     return status;
   }
 
-  orm_module_handle module = {0};
-  status = orm_module_open_absolute(path, &module, error);
-  if (status != ORM_STATUS_OK)
+  plugin_status =
+      salts_plugin_registry_load(&runtime->plugins, path, &plugin);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(plugin_status, error, "load driver Plugin");
     goto fail_reserved;
-
-  orm_runtime_bootstrap_fn bootstrap = NULL;
-  status = orm_module_symbol(&module, "orm_driver_get_api_v1",
-                             &bootstrap, sizeof(bootstrap), error);
-  if (status != ORM_STATUS_OK)
-    goto fail_module;
-
-  const orm_driver_host_v1 host = runtime_host();
-  const orm_driver_api_v1 *api = NULL;
-  uint32_t api_bytes = 0u;
-  const int32_t bootstrap_status =
-      bootstrap(&host, (uint32_t)sizeof(host), &api, &api_bytes);
-  if (bootstrap_status != ORM_STATUS_OK) {
-    status = (orm_status_t)bootstrap_status;
-    runtime_result(error, status, "driver bootstrap failed");
-    goto fail_module;
-  }
-  if (api == NULL) {
-    status = ORM_STATUS_ABI_MISMATCH;
-    runtime_result(error, status, "driver bootstrap returned no descriptor");
-    goto fail_module;
   }
 
-  uint32_t declared = 0u;
-  status = orm_driver_check_prefix(
-      api, api_bytes, ORM_DRIVER_ABI_VERSION,
-      RUNTIME_FIELD_END(orm_driver_api_v1, canonical_id), &declared);
-  if (status != ORM_STATUS_OK) {
-    runtime_result(error, status, "driver descriptor prefix is invalid");
-    goto fail_module;
+  plugin_status = salts_plugin_registry_start(&runtime->plugins, plugin);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(plugin_status, error, "start driver Plugin");
+    goto fail_plugin;
+  }
+  started = 1;
+
+  plugin_status = salts_plugin_registry_acquire(
+      &runtime->plugins, plugin, &admission, &manifest);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(
+        plugin_status, error, "acquire driver Plugin admission lease");
+    goto fail_plugin;
   }
 
-  orm_driver_bytes_v1 canonical;
-  memcpy(&canonical, &api->canonical_id, sizeof(canonical));
-  status = orm_driver_validate_api_v1(
-      api, api_bytes, runtime_bundle, canonical,
-      runtime->config.max_aliases_per_driver, error);
-  if (status != ORM_STATUS_OK)
-    goto fail_module;
-
-  if (canonical.size != config->expected_driver_id.len ||
-      memcmp(canonical.data, config->expected_driver_id.data,
-             (size_t)canonical.size) != 0) {
-    status = ORM_STATUS_DRIVER_ID_MISMATCH;
-    runtime_result(error, status, "driver canonical ID does not match request");
-    goto fail_module;
-  }
-  if ((api->execution_models &
-       runtime->config.execution.execution_model) == 0u) {
-    status = ORM_STATUS_UNSUPPORTED;
-    runtime_result(error, status,
-                   "driver does not support runtime execution model");
-    goto fail_module;
+  if (manifest == NULL || manifest->plugin_id == NULL) {
+    status = runtime_result(error, ORM_STATUS_ABI_MISMATCH,
+                            "driver Plugin has no canonical ID");
+    goto fail_admission;
   }
 
-  if (runtime_id_conflicts(runtime, canonical)) {
-    status = ORM_STATUS_DRIVER_ALREADY_REGISTERED;
-    runtime_result(error, status, "driver ID is already registered");
-    goto fail_module;
-  }
-  for (uint32_t i = 0u; i < api->alias_count; ++i) {
-    orm_driver_bytes_v1 alias;
-    memcpy(&alias,
-           (const unsigned char *)api->aliases +
-               (size_t)i * sizeof(alias),
-           sizeof(alias));
-    if (runtime_id_conflicts(runtime, alias)) {
-      status = ORM_STATUS_DRIVER_ALREADY_REGISTERED;
-      runtime_result(error, status, "driver alias is already registered");
-      goto fail_module;
-    }
+  const size_t plugin_id_size = strlen(manifest->plugin_id);
+  const orm_string_view_t plugin_id = {
+      manifest->plugin_id, plugin_id_size};
+  if (!runtime_id_valid(plugin_id) ||
+      plugin_id_size != config->expected_driver_id.len ||
+      memcmp(manifest->plugin_id, config->expected_driver_id.data,
+             plugin_id_size) != 0) {
+    status = runtime_result(error, ORM_STATUS_DRIVER_ID_MISMATCH,
+                            "Plugin ID does not match requested driver ID");
+    goto fail_admission;
   }
 
-  orm_driver_module_ops_v1 module_ops;
-  memcpy(&module_ops, api->module_ops.data, sizeof(module_ops));
-  void *module_context = NULL;
-  status = module_ops.initialize(&host, &module_context, error);
-  if (status != ORM_STATUS_OK)
-    goto fail_module;
-  if (module_context == NULL) {
-    status = ORM_STATUS_ABI_MISMATCH;
-    runtime_result(error, status,
-                   "driver initialize returned no module context");
-    goto fail_module;
+  plugin_status = salts_plugin_manifest_find_export(
+      manifest, ORM_DRIVER_PLUGIN_EXPORT_ID, &entry);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(
+        plugin_status, error, "find TurboDb.Driver export");
+    goto fail_admission;
+  }
+
+  plugin_status = salts_plugin_export_require_interface(
+      entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
+      ORM_DRIVER_INTERFACE_CONTRACT_VERSION, 0u,
+      TurboDb_Driver_interface());
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(
+        plugin_status, error, "admit TurboDb.Driver interface");
+    goto fail_admission;
+  }
+
+  binding = (TurboDb_Driver *)entry->value.interface.value;
+  if (binding == NULL || !TurboDb_Driver_valid(binding) ||
+      binding->vtable->capabilities != entry->capabilities ||
+      (entry->capabilities & ~ORM_DRIVER_CAP_KNOWN_MASK) != 0u) {
+    status = runtime_result(error, ORM_STATUS_ABI_MISMATCH,
+                            "TurboDb.Driver binding is invalid");
+    goto fail_admission;
+  }
+
+  if (runtime_id_conflicts(
+          runtime,
+          (orm_driver_bytes_v1){manifest->plugin_id,
+                                (uint64_t)plugin_id_size})) {
+    status = runtime_result(error, ORM_STATUS_DRIVER_ALREADY_REGISTERED,
+                            "driver ID is already registered");
+    goto fail_admission;
+  }
+
+  plugin_status =
+      salts_plugin_registry_release(&runtime->plugins, &admission);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(
+        plugin_status, error, "release driver admission lease");
+    goto fail_plugin;
   }
 
   salts_mutex_lock(&runtime->mutex);
@@ -1003,75 +1067,54 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
       runtime->load_active == 0u ||
       runtime->pending_operations == 0u) {
     salts_mutex_unlock(&runtime->mutex);
-    status = ORM_STATUS_INVALID_STATE;
-    runtime_result(error, status, "runtime load reservation was lost");
-    goto fail_initialized;
+    status = runtime_result(error, ORM_STATUS_INVALID_STATE,
+                            "runtime load reservation was lost");
+    goto fail_plugin;
   }
-  if (runtime_id_conflicts(runtime, canonical)) {
+  if (runtime_id_conflicts(
+          runtime,
+          (orm_driver_bytes_v1){manifest->plugin_id,
+                                (uint64_t)plugin_id_size})) {
     salts_mutex_unlock(&runtime->mutex);
-    status = ORM_STATUS_DRIVER_ALREADY_REGISTERED;
-    runtime_result(error, status, "driver ID is already registered");
-    goto fail_initialized;
-  }
-  for (uint32_t i = 0u; i < api->alias_count; ++i) {
-    orm_driver_bytes_v1 alias;
-    memcpy(&alias,
-           (const unsigned char *)api->aliases +
-               (size_t)i * sizeof(alias),
-           sizeof(alias));
-    if (runtime_id_conflicts(runtime, alias)) {
-      salts_mutex_unlock(&runtime->mutex);
-      status = ORM_STATUS_DRIVER_ALREADY_REGISTERED;
-      runtime_result(error, status, "driver alias is already registered");
-      goto fail_initialized;
-    }
+    status = runtime_result(error, ORM_STATUS_DRIVER_ALREADY_REGISTERED,
+                            "driver ID is already registered");
+    goto fail_plugin;
   }
 
   const uint32_t index = runtime->driver_count;
-  orm_runtime_driver *entry = &runtime->drivers[index];
-  memset(entry, 0, sizeof(*entry));
-  entry->module = module;
-  entry->module_context = module_context;
-  entry->module_path = path;
-  entry->api = api;
-  entry->api_bytes = api_bytes;
-  entry->module_ops = module_ops;
-  entry->create_connection = api->create_connection;
-  memset(&entry->connection_ops, 0, sizeof(entry->connection_ops));
-  {
-    size_t connection_ops_bytes = api->connection_ops.bytes;
-    if (connection_ops_bytes > sizeof(entry->connection_ops))
-      connection_ops_bytes = sizeof(entry->connection_ops);
-    memcpy(&entry->connection_ops, api->connection_ops.data,
-           connection_ops_bytes);
-  }
-  runtime_copy_id(&entry->canonical, canonical);
-  entry->alias_count = api->alias_count;
-  entry->capabilities = api->capabilities;
-  entry->execution_models = api->execution_models;
-  memcpy(entry->bundle_id, api->bundle_id, sizeof(entry->bundle_id));
-  for (uint32_t i = 0u; i < api->alias_count; ++i) {
-    orm_driver_bytes_v1 alias;
-    memcpy(&alias,
-           (const unsigned char *)api->aliases +
-               (size_t)i * sizeof(alias),
-           sizeof(alias));
-    runtime_copy_id(runtime_alias_slot(runtime, index, i), alias);
-  }
+  orm_runtime_driver *driver = &runtime->drivers[index];
+  memset(driver, 0, sizeof(*driver));
+  driver->plugin = plugin;
+  driver->binding = binding;
+  driver->module_path = path;
+  runtime_copy_id(
+      &driver->canonical,
+      (orm_driver_bytes_v1){manifest->plugin_id, (uint64_t)plugin_id_size});
+  driver->capabilities = entry->capabilities;
+  driver->execution_models = ORM_DRIVER_EXEC_CALLER_BLOCKING;
+  memcpy(driver->bundle_id, runtime_bundle, sizeof(driver->bundle_id));
   ++runtime->driver_count;
   --runtime->pending_operations;
   runtime->load_active = 0u;
   salts_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 
-fail_initialized:
-  {
-    orm_error_t ignored;
-    orm_error_init(&ignored);
-    (void)module_ops.finalize(module_context, &ignored);
+fail_admission:
+  if (salts_plugin_lease_valid(admission)) {
+    const salts_plugin_status release_status =
+        salts_plugin_registry_release(&runtime->plugins, &admission);
+    if (release_status != SALTS_PLUGIN_OK)
+      status = runtime_plugin_status(
+          release_status, error, "release failed driver admission lease");
   }
-fail_module:
-  orm_module_close(&module);
+fail_plugin:
+  {
+    const salts_plugin_status discard_status =
+        runtime_discard_plugin(runtime, plugin, started);
+    if (discard_status != SALTS_PLUGIN_OK)
+      status = runtime_plugin_status(
+          discard_status, error, "discard failed driver Plugin");
+  }
 fail_reserved:
   free(path);
   runtime_finish_pending(runtime, 1);
@@ -1148,7 +1191,6 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "runtime is required");
 
-  uint32_t driver_count = 0u;
   salts_mutex_lock(&runtime->mutex);
   if (runtime->closed == ORM_RUNTIME_CLOSED) {
     salts_mutex_unlock(&runtime->mutex);
@@ -1159,38 +1201,80 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     return runtime_result(error, ORM_STATUS_CLEANUP_FAILED,
                           "runtime cleanup is quarantined");
   }
-  if (runtime->closed == ORM_RUNTIME_CLOSING) {
-    salts_mutex_unlock(&runtime->mutex);
-    return runtime_result(error, ORM_STATUS_BUSY,
-                          "runtime close is already in progress");
+  if (runtime->closed == ORM_RUNTIME_OPEN) {
+    if (runtime->dependents != 0u || runtime->pending_operations != 0u) {
+      salts_mutex_unlock(&runtime->mutex);
+      return runtime_result(error, ORM_STATUS_BUSY,
+                            "runtime has active or pending operations");
+    }
+    runtime->closed = ORM_RUNTIME_CLOSING;
+    runtime->close_remaining = runtime->driver_count;
   }
-  if (runtime->dependents != 0u || runtime->pending_operations != 0u) {
-    salts_mutex_unlock(&runtime->mutex);
-    return runtime_result(error, ORM_STATUS_BUSY,
-                          "runtime has active or pending operations");
-  }
-  runtime->closed = ORM_RUNTIME_CLOSING;
-  driver_count = runtime->driver_count;
+  const uint32_t remaining_snapshot = runtime->close_remaining;
   salts_mutex_unlock(&runtime->mutex);
 
-  for (uint32_t remaining = driver_count; remaining != 0u; --remaining) {
+  for (uint32_t remaining = remaining_snapshot; remaining != 0u; --remaining) {
     orm_runtime_driver *driver = &runtime->drivers[remaining - 1u];
-    orm_error_t finalize_error;
-    orm_error_init(&finalize_error);
-    const orm_status_t status =
-        driver->module_ops.finalize(driver->module_context,
-                                    &finalize_error);
-    if (status != ORM_STATUS_OK) {
+    salts_plugin_status plugin_status =
+        salts_plugin_registry_request_stop(&runtime->plugins, driver->plugin);
+    if (plugin_status != SALTS_PLUGIN_OK &&
+        plugin_status != SALTS_PLUGIN_ALREADY) {
       salts_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
       salts_mutex_unlock(&runtime->mutex);
-      return runtime_result(error, ORM_STATUS_CLEANUP_FAILED,
-                            "driver module finalization failed");
+      return runtime_plugin_status(
+          plugin_status, error, "request Driver Plugin stop");
     }
-    driver->module_context = NULL;
-    orm_module_close(&driver->module);
+
+    bool quiescent = false;
+    plugin_status = salts_plugin_registry_poll_quiescent(
+        &runtime->plugins, driver->plugin, &quiescent);
+    if (plugin_status != SALTS_PLUGIN_OK) {
+      salts_mutex_lock(&runtime->mutex);
+      runtime->closed = ORM_RUNTIME_FAILED;
+      salts_mutex_unlock(&runtime->mutex);
+      return runtime_plugin_status(
+          plugin_status, error, "poll Driver Plugin quiescence");
+    }
+    if (!quiescent)
+      return runtime_result(error, ORM_STATUS_BUSY,
+                            "driver Plugin is still quiescing");
+
+    plugin_status =
+        salts_plugin_registry_unload(&runtime->plugins, driver->plugin);
+    if (plugin_status != SALTS_PLUGIN_OK) {
+      if (plugin_status == SALTS_PLUGIN_BUSY)
+        return runtime_plugin_status(
+            plugin_status, error, "unload Driver Plugin");
+      salts_mutex_lock(&runtime->mutex);
+      runtime->closed = ORM_RUNTIME_FAILED;
+      salts_mutex_unlock(&runtime->mutex);
+      return runtime_plugin_status(
+          plugin_status, error, "unload Driver Plugin");
+    }
+
     free(driver->module_path);
     driver->module_path = NULL;
+    driver->binding = NULL;
+    driver->plugin = (salts_plugin_ref){0};
+
+    salts_mutex_lock(&runtime->mutex);
+    if (runtime->close_remaining != remaining) {
+      salts_mutex_unlock(&runtime->mutex);
+      abort();
+    }
+    --runtime->close_remaining;
+    salts_mutex_unlock(&runtime->mutex);
+  }
+
+  const salts_plugin_status destroy_status =
+      salts_plugin_registry_destroy(&runtime->plugins);
+  if (destroy_status != SALTS_PLUGIN_OK) {
+    salts_mutex_lock(&runtime->mutex);
+    runtime->closed = ORM_RUNTIME_FAILED;
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_plugin_status(
+        destroy_status, error, "destroy Driver Plugin registry");
   }
 
   salts_mutex_lock(&runtime->mutex);
@@ -1211,7 +1295,6 @@ static void runtime_release_last(orm_runtime_t *runtime) {
     }
     abort();
   }
-  free(runtime->aliases);
   free(runtime->drivers);
   salts_mutex_destroy(&runtime->mutex);
   free(runtime);

@@ -80,9 +80,12 @@ if(NOT TARGET Salts::DataBind)
   find_package(SaltsUtils 4.0.1 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
-if(NOT TARGET Salts::DataBind)
-  message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::DataBind")
-endif()
+foreach(required_salts_utils_target IN ITEMS Salts::DataBind Salts::PluginABI Salts::Plugin)
+  if(NOT TARGET ${required_salts_utils_target})
+    message(FATAL_ERROR
+            "The selected SaltsUtils installation must export ${required_salts_utils_target}")
+  endif()
+endforeach()
 
 # Find backend-specific dependencies based on enabled options
 if(ORM_WITH_SQLITE)
@@ -119,7 +122,6 @@ set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
                   src/abi/orm_result.c src/driver/orm_driver_contract.c
                   src/driver/orm_driver_owner_bridge.c
                   src/driver/orm_driver_plan_view.c
-                  src/runtime/orm_module_loader.c
                   src/runtime/orm_runtime.c
                   src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
@@ -166,7 +168,7 @@ target_include_directories(
           ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 target_link_libraries(
   turbo_orm PUBLIC Salts::Core Salts::CFlow
-  PRIVATE Salts::CSerde Salts::DataBind
+  PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin
           Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
 
 if(ORM_WITH_SQLITE)
@@ -462,7 +464,7 @@ if(ORM_BUILD_TESTS)
             ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
   target_link_libraries(
     orm_c_test_static PUBLIC Salts::Core
-    PRIVATE Salts::CSerde Salts::DataBind Salts::CFlow
+    PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin Salts::CFlow
             Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
@@ -777,63 +779,38 @@ else()
 endif()
 add_test(NAME orm_driver_owner_bridge COMMAND orm_driver_owner_bridge_test)
 
-# Qualify the private OS loader with a real MODULE target. The fixture exports
-# only the Driver ABI bootstrap name and has no database dependency.
-add_library(orm_module_no_entry_fixture MODULE
+# Qualify canonical Plugin loading/admission with real DSOs. These fixtures
+# publish only Plugin ABI 2 contracts; no TurboDB-private loader entry exists.
+add_library(orm_plugin_no_query_fixture MODULE
   tests/driver/orm_module_no_entry_fixture.c)
-target_compile_features(orm_module_no_entry_fixture PRIVATE c_std_11)
-set_target_properties(orm_module_no_entry_fixture PROPERTIES
+target_compile_features(orm_plugin_no_query_fixture PRIVATE c_std_11)
+set_target_properties(orm_plugin_no_query_fixture PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_module_no_entry_fixture)
+orm_enable_strict_warnings(orm_plugin_no_query_fixture)
 
-add_library(orm_module_bad_abi_fixture MODULE
+add_library(orm_plugin_bad_abi_fixture MODULE
   tests/driver/orm_module_bad_abi_fixture.c)
-target_compile_features(orm_module_bad_abi_fixture PRIVATE c_std_11)
-target_compile_definitions(orm_module_bad_abi_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
-target_include_directories(orm_module_bad_abi_fixture PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_module_bad_abi_fixture PRIVATE
-  Salts::Core Salts::CSerde Salts::CFlow)
-set_target_properties(orm_module_bad_abi_fixture PROPERTIES
+target_compile_features(orm_plugin_bad_abi_fixture PRIVATE c_std_11)
+target_link_libraries(orm_plugin_bad_abi_fixture PRIVATE Salts::PluginABI)
+set_target_properties(orm_plugin_bad_abi_fixture PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_module_bad_abi_fixture)
+orm_enable_strict_warnings(orm_plugin_bad_abi_fixture)
 
-add_library(orm_module_loader_fixture MODULE
-  tests/driver/orm_module_loader_fixture.c)
-target_compile_features(orm_module_loader_fixture PRIVATE c_std_11)
-target_compile_definitions(orm_module_loader_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
-target_include_directories(orm_module_loader_fixture PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_module_loader_fixture PRIVATE
-  Salts::Core Salts::CSerde Salts::CFlow)
-set_target_properties(orm_module_loader_fixture PROPERTIES
+add_library(orm_runtime_plugin_fixture MODULE
+  tests/driver/orm_runtime_plugin_fixture.c)
+target_compile_features(orm_runtime_plugin_fixture PRIVATE c_std_11)
+target_include_directories(orm_runtime_plugin_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_runtime_plugin_fixture PRIVATE
+  Salts::PluginABI Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_runtime_plugin_fixture PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_module_loader_fixture)
+orm_enable_strict_warnings(orm_runtime_plugin_fixture)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  target_link_options(orm_module_loader_fixture PRIVATE "LINKER:--exclude-libs,ALL")
+  target_link_options(orm_runtime_plugin_fixture PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
-
-add_executable(orm_module_loader_test tests/driver/orm_module_loader_test.c)
-target_compile_features(orm_module_loader_test PRIVATE c_std_11)
-target_compile_definitions(orm_module_loader_test PRIVATE ORM_C_STATIC)
-target_include_directories(orm_module_loader_test PRIVATE
-  ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR}
-  ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
-orm_link_internal_test(orm_module_loader_test Salts::TinyTest ${CMAKE_DL_LIBS})
-add_dependencies(orm_module_loader_test orm_module_loader_fixture)
-set_target_properties(orm_module_loader_test PROPERTIES
-  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_module_loader_test)
-if(MSVC)
-  target_compile_options(orm_module_loader_test PRIVATE /WX)
-else()
-  target_compile_options(orm_module_loader_test PRIVATE -Werror)
-endif()
-add_test(NAME orm_module_loader COMMAND orm_module_loader_test)
-set_tests_properties(orm_module_loader PROPERTIES
-  ENVIRONMENT
-    "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>;ORM_INVALID_MODULE_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/driver/orm_module_loader_test.c")
 
 add_executable(orm_runtime_registry_test
   tests/driver/orm_runtime_registry_test.c)
@@ -841,8 +818,8 @@ target_compile_features(orm_runtime_registry_test PRIVATE c_std_11)
 target_include_directories(orm_runtime_registry_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_registry_test PRIVATE turbo_orm Salts::TinyTest)
 add_dependencies(orm_runtime_registry_test
-  orm_module_loader_fixture orm_module_no_entry_fixture
-  orm_module_bad_abi_fixture)
+  orm_runtime_plugin_fixture orm_plugin_no_query_fixture
+  orm_plugin_bad_abi_fixture)
 set_target_properties(orm_runtime_registry_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_runtime_registry_test)
@@ -854,17 +831,16 @@ endif()
 add_test(NAME orm_runtime_registry COMMAND orm_runtime_registry_test)
 set_tests_properties(orm_runtime_registry PROPERTIES
   ENVIRONMENT
-    "ORM_MODULE_FIXTURE=$<TARGET_FILE:orm_module_loader_fixture>;ORM_MODULE_NO_ENTRY_FIXTURE=$<TARGET_FILE:orm_module_no_entry_fixture>;ORM_MODULE_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_module_bad_abi_fixture>")
+    "ORM_PLUGIN_FIXTURE=$<TARGET_FILE:orm_runtime_plugin_fixture>;ORM_PLUGIN_NO_QUERY_FIXTURE=$<TARGET_FILE:orm_plugin_no_query_fixture>;ORM_PLUGIN_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_plugin_bad_abi_fixture>")
 
 # Dedicated race fixture intentionally exports test-only gate symbols in
 # addition to the Driver ABI bootstrap. It is not the export-surface fixture.
 add_library(orm_runtime_race_fixture MODULE
   tests/driver/orm_runtime_race_fixture.c)
 target_compile_features(orm_runtime_race_fixture PRIVATE c_std_11)
-target_compile_definitions(orm_runtime_race_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
 target_include_directories(orm_runtime_race_fixture PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_race_fixture PRIVATE
-  Salts::Core Salts::CSerde Salts::CFlow)
+  Salts::PluginABI Salts::Platform Salts::CFlow)
 set_target_properties(orm_runtime_race_fixture PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
@@ -877,10 +853,10 @@ add_library(orm_runtime_race_fixture_two MODULE
   tests/driver/orm_runtime_race_fixture.c)
 target_compile_features(orm_runtime_race_fixture_two PRIVATE c_std_11)
 target_compile_definitions(orm_runtime_race_fixture_two PRIVATE
-  ORM_DRIVER_MODULE_BUILD ORM_RUNTIME_RACE_DRIVER_ID="race2")
+  ORM_RUNTIME_RACE_DRIVER_ID="race2")
 target_include_directories(orm_runtime_race_fixture_two PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_race_fixture_two PRIVATE
-  Salts::Core Salts::CSerde Salts::CFlow)
+  Salts::PluginABI Salts::Platform Salts::CFlow)
 set_target_properties(orm_runtime_race_fixture_two PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
@@ -897,7 +873,7 @@ target_include_directories(orm_runtime_race_test PRIVATE
   ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
   ${ORM_FLOW_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 orm_link_internal_test(orm_runtime_race_test
-  Salts::TinyTest ${CMAKE_DL_LIBS})
+  Salts::TinyTest)
 add_dependencies(orm_runtime_race_test
   orm_runtime_race_fixture orm_runtime_race_fixture_two)
 set_target_properties(orm_runtime_race_test PROPERTIES
@@ -911,7 +887,7 @@ endif()
 add_test(NAME orm_runtime_race COMMAND orm_runtime_race_test)
 set_tests_properties(orm_runtime_race PROPERTIES
   ENVIRONMENT
-    "ORM_RUNTIME_RACE_FIXTURE=$<TARGET_FILE:orm_runtime_race_fixture>;ORM_RUNTIME_RACE_FIXTURE_TWO=$<TARGET_FILE:orm_runtime_race_fixture_two>")
+    "ORM_RUNTIME_RACE_FIXTURE=$<TARGET_FILE:orm_runtime_race_fixture>;ORM_RUNTIME_RACE_FIXTURE_TWO=$<TARGET_FILE:orm_runtime_race_fixture_two>;ORM_RUNTIME_RACE_GATE_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/runtime-race-gate")
 
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
@@ -1154,7 +1130,7 @@ if(WIN32)
       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::DataBind>")
   set(ORM_RUNTIME_TESTS orm_redis_flow orm_mongo_flow orm_tidesdb_flow
                         orm_row_publisher orm_pure_c_build orm_sql_render
-                        orm_driver_plan_view orm_driver_owner_bridge orm_module_loader
+                        orm_driver_plan_view orm_driver_owner_bridge
                         orm_postgres_flow orm_backend_profile)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH

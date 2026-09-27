@@ -208,9 +208,9 @@ jobs:
           findstr /c:"z-applocal" "%BUILD%\build.ninja" >nul
           if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
           cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
-          if errorlevel 1 (type evidence\deps\root-build.log & exit /b 1)
+          if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-build.log & exit /b 1)
           ctest --preset "%PROFILE%" --output-on-failure > evidence\deps\root-ctest.log 2>&1
-          if errorlevel 1 (type evidence\deps\root-ctest.log & exit /b 1)
+          if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-ctest.log & exit /b 1)
 
       - name: Keep dependency qualification evidence
         if: always()
