@@ -141,6 +141,7 @@ static uint64_t sqlite_plugin_affected_in_transaction(
 }
 
 spec("SQLite runtime Plugin") {
+  (void)ttest_config__;
   it("loads the real Plugin and keeps it leased through a typed row Publisher") {
     orm_error_t error;
     orm_runtime_t *runtime;
