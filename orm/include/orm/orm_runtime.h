@@ -33,6 +33,8 @@ typedef struct orm_runtime_config {
   uint32_t struct_size;
   uint32_t abi_version;
   uint32_t max_drivers;
+  /* ABI-retained compatibility field. Plugin manifest IDs are canonical and
+   * TurboDB does not infer or register private driver aliases. */
   uint32_t max_aliases_per_driver;
   uint32_t max_connections;
   uint32_t max_pending_operations;
@@ -73,15 +75,17 @@ ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_create(const orm_runtime_config_t *config,
                    orm_runtime_t **out_runtime, orm_error_t *error);
 
-/* Loads exactly the caller-supplied absolute module path. No directory scan,
- * fallback, download, alias inference, or implicit connect occurs. The
- * expected ID must equal the module's canonical ID. */
+/* Loads exactly the caller-supplied absolute module path through Salts::Plugin.
+ * No directory scan, fallback, download, ABI retry, alias inference, or
+ * implicit connect occurs. expected_driver_id must exactly equal the Plugin
+ * manifest plugin_id. Admission requires one Plugin ABI 2 "driver" export
+ * implementing the reflected TurboDb.Driver Interface. */
 ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_load_driver(orm_runtime_t *runtime,
                         const orm_driver_load_config_t *config,
                         orm_error_t *error);
 
-/* Copies bounded metadata for a canonical ID or registered alias. */
+/* Copies bounded metadata for one canonical Plugin manifest ID. */
 ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
                         orm_driver_info_t *out_info, orm_error_t *error);
@@ -94,9 +98,10 @@ ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_connect(orm_runtime_t *runtime, const orm_config_t *config,
                     orm_connection_t **out_connection, orm_error_t *error);
 
-/* Checked close finalizes modules in reverse registration order and unloads
- * them only after all runtime dependents/admissions are gone. BUSY changes no
- * state. Repeated close on a held closed runtime returns OK. */
+/* Checked close requests Plugin stop in reverse registration order, waits for
+ * quiescence, and unloads only after all runtime dependents and Plugin leases
+ * are gone. BUSY preserves resumable closing state. Repeated close on a held
+ * closed runtime returns OK. */
 ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error);
 
