@@ -175,9 +175,11 @@ See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detai
 
 ## Build and package model
 
-TurboDB requires an explicitly installed Salts profile through `SALTS_ROOT`.
+TurboDB consumes the published producer pair **Salts.Native 1.7.9** and **SaltsUtils.Native 4.0.1**. Callers provide their exact install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`.
 
-The top-level CMake configuration resolves Salts with `NO_DEFAULT_PATH` semantics and fails if the configured root is absent or invalid. The project does not silently select another Salts installation.
+The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient or unversioned SDK.
+
+Salts owns canonical CMeta reflection. SaltsUtils owns Plugin ABI 2 publication, loading, lifecycle, and leases. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata or maintaining a second generic plugin runtime.
 
 Main build areas are independently configurable through CMake options, including ORM backends, Redis support, and standalone database tools.
 
