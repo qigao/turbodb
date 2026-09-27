@@ -1,4 +1,4 @@
-#include "orm_postgresql.h"
+#include <orm_runtime.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,6 +110,9 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
       {orm_view("domain_id"), orm_text("domain-a")},
       {orm_view("user_id"), orm_text("user-a")},
       {orm_view("group_id"), orm_text("group-a")}};
+  orm_runtime_config_t runtime_config;
+  orm_runtime_t *runtime = NULL;
+  orm_driver_load_config_t load;
   orm_config_t config;
   orm_connection_t *connection = NULL;
   orm_transaction_t *transaction = NULL;
@@ -122,13 +125,27 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
   int64_t revision = 0;
   orm_status_t status;
 
+  orm_runtime_config_init(&runtime_config);
+  status = orm_runtime_create(&runtime_config, &runtime, error);
+  if (status != ORM_STATUS_OK)
+    goto cleanup;
+
+  memset(&load, 0, sizeof(load));
+  load.struct_size = (uint32_t)sizeof(load);
+  load.abi_version = ORM_RUNTIME_ABI_VERSION;
+  load.module_path = orm_view(getenv("ORM_POSTGRESQL_PLUGIN"));
+  load.expected_driver_id = orm_view("postgresql");
+  status = orm_runtime_load_driver(runtime, &load, error);
+  if (status != ORM_STATUS_OK)
+    goto cleanup;
+
   orm_config(&config);
   config.driver = orm_view("postgresql");
   config.options = &option;
   config.option_count = 1u;
   config.max_result_rows = 1u;
 
-  status = orm_postgresql_connect(&config, &connection, error);
+  status = orm_runtime_connect(runtime, &config, &connection, error);
   if (status != ORM_STATUS_OK)
     goto cleanup;
   status = orm_postgres_live_raw(
@@ -264,10 +281,16 @@ cleanup:
   orm_query_destroy(query);
   orm_transaction_destroy(transaction);
   orm_disconnect(connection);
+  if (runtime != NULL) {
+    const orm_status_t close_status = orm_runtime_close(runtime, error);
+    if (status == ORM_STATUS_OK && close_status != ORM_STATUS_OK)
+      status = close_status;
+    orm_runtime_release(runtime);
+  }
   return status;
 }
 
-spec("ORM PostgreSQL live component") {
+spec("ORM PostgreSQL live Plugin") {
   it("round trips values, transactions, constraints, keys, and limits") {
     const char *conninfo = getenv("TURBODB_ORM_PGSQL_TEST_CONNINFO");
     orm_error_t error;
