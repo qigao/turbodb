@@ -165,8 +165,8 @@ target_include_directories(
   PRIVATE ${ORM_ABI_SOURCE_DIR} ${ORM_FLOW_SOURCE_DIR} ${ORM_SQL_SOURCE_DIR}
           ${ORM_DRIVER_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 target_link_libraries(
-  turbo_orm PUBLIC Salts::Core
-  PRIVATE Salts::CSerde Salts::DataBind Salts::CFlow
+  turbo_orm PUBLIC Salts::Core Salts::CFlow
+  PRIVATE Salts::CSerde Salts::DataBind
           Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
 
 if(ORM_WITH_SQLITE)
