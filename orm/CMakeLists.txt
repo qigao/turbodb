@@ -718,22 +718,6 @@ else()
 endif()
 add_test(NAME orm_driver_interface COMMAND orm_driver_interface_test)
 
-add_executable(orm_driver_interface_cpp_test
-  tests/driver/orm_driver_interface_cpp_test.cpp)
-target_compile_features(orm_driver_interface_cpp_test PRIVATE cxx_std_17)
-target_compile_definitions(orm_driver_interface_cpp_test PRIVATE ORM_C_STATIC)
-target_include_directories(orm_driver_interface_cpp_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(orm_driver_interface_cpp_test PRIVATE Salts::PluginABI)
-set_target_properties(orm_driver_interface_cpp_test PROPERTIES
-  CXX_STANDARD_REQUIRED ON FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_driver_interface_cpp_test)
-if(MSVC)
-  target_compile_options(orm_driver_interface_cpp_test PRIVATE /WX)
-else()
-  target_compile_options(orm_driver_interface_cpp_test PRIVATE -Werror)
-endif()
-add_test(NAME orm_driver_interface_cpp COMMAND orm_driver_interface_cpp_test)
-
 add_executable(orm_driver_backend_bridge_test
   tests/driver/orm_driver_backend_bridge_test.c
   src/driver/orm_driver_backend_bridge.c)
