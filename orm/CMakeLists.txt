@@ -836,10 +836,9 @@ set_tests_properties(orm_runtime_registry PROPERTIES
 add_library(orm_runtime_race_fixture MODULE
   tests/driver/orm_runtime_race_fixture.c)
 target_compile_features(orm_runtime_race_fixture PRIVATE c_std_11)
-target_compile_definitions(orm_runtime_race_fixture PRIVATE ORM_DRIVER_MODULE_BUILD)
 target_include_directories(orm_runtime_race_fixture PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_race_fixture PRIVATE
-  Salts::Core Salts::CSerde Salts::CFlow)
+  Salts::PluginABI Salts::Platform)
 set_target_properties(orm_runtime_race_fixture PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
@@ -852,10 +851,10 @@ add_library(orm_runtime_race_fixture_two MODULE
   tests/driver/orm_runtime_race_fixture.c)
 target_compile_features(orm_runtime_race_fixture_two PRIVATE c_std_11)
 target_compile_definitions(orm_runtime_race_fixture_two PRIVATE
-  ORM_DRIVER_MODULE_BUILD ORM_RUNTIME_RACE_DRIVER_ID="race2")
+  ORM_RUNTIME_RACE_DRIVER_ID="race2")
 target_include_directories(orm_runtime_race_fixture_two PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_race_fixture_two PRIVATE
-  Salts::Core Salts::CSerde Salts::CFlow)
+  Salts::PluginABI Salts::Platform)
 set_target_properties(orm_runtime_race_fixture_two PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
@@ -872,7 +871,7 @@ target_include_directories(orm_runtime_race_test PRIVATE
   ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
   ${ORM_FLOW_SOURCE_DIR} ${ORM_RUNTIME_SOURCE_DIR})
 orm_link_internal_test(orm_runtime_race_test
-  Salts::TinyTest ${CMAKE_DL_LIBS})
+  Salts::TinyTest)
 add_dependencies(orm_runtime_race_test
   orm_runtime_race_fixture orm_runtime_race_fixture_two)
 set_target_properties(orm_runtime_race_test PROPERTIES
@@ -886,7 +885,7 @@ endif()
 add_test(NAME orm_runtime_race COMMAND orm_runtime_race_test)
 set_tests_properties(orm_runtime_race PROPERTIES
   ENVIRONMENT
-    "ORM_RUNTIME_RACE_FIXTURE=$<TARGET_FILE:orm_runtime_race_fixture>;ORM_RUNTIME_RACE_FIXTURE_TWO=$<TARGET_FILE:orm_runtime_race_fixture_two>")
+    "ORM_RUNTIME_RACE_FIXTURE=$<TARGET_FILE:orm_runtime_race_fixture>;ORM_RUNTIME_RACE_FIXTURE_TWO=$<TARGET_FILE:orm_runtime_race_fixture_two>;ORM_RUNTIME_RACE_GATE_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/runtime-race-gate")
 
 set(ORM_POSTGRES_FLOW_TEST_SOURCES tests/flow/orm_postgres_flow_test.c
                                   src/dbs/postgres/orm_postgres_cursor.c)
