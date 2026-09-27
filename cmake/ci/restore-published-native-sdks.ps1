@@ -104,5 +104,5 @@ if ($env:GITHUB_OUTPUT) {
   "rid=$rid" >> $env:GITHUB_OUTPUT
 }
 
-Write-Host "Salts.Native $SaltsVersion: $saltsRoot"
-Write-Host "SaltsUtils.Native $SaltsUtilsVersion: $saltsUtilsRoot"
+Write-Host "Salts.Native ${SaltsVersion}: $saltsRoot"
+Write-Host "SaltsUtils.Native ${SaltsUtilsVersion}: $saltsUtilsRoot"
