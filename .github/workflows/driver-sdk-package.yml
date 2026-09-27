@@ -40,7 +40,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Configure shared vcpkg binary cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@fix/versioned-port-tree-materialization
         with:
           mode: read
 
