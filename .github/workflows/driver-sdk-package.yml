@@ -97,23 +97,30 @@ jobs:
             "SALTS_UTILS_ROOT=$env:SALTS_UTILS_ROOT"
           ) | Set-Content -LiteralPath evidence/core/producer-baseline.txt -Encoding utf8NoBOM
 
-      - name: Test Driver SDK against published Salts 1.7.9
-        shell: pwsh
+      - name: Test Driver SDK against published Salts 1.7.9 on Linux
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          $platform = if ($env:RUNNER_OS -eq 'Windows') { 'windows' } else { 'linux' }
-          $preset = "sdk-$platform-${{ matrix.config }}"
-          Push-Location orm/driver-sdk
-          try {
-            cmake --preset $preset
-            if ($LASTEXITCODE -ne 0) { throw "Driver SDK configure failed" }
-            cmake --build --preset $preset --parallel 4
-            if ($LASTEXITCODE -ne 0) { throw "Driver SDK build failed" }
-            ctest --preset $preset --verbose --no-tests=error
-            if ($LASTEXITCODE -ne 0) { throw "Driver SDK tests failed" }
-          } finally {
-            Pop-Location
-          }
+          set -euo pipefail
+          preset="sdk-linux-${{ matrix.config }}"
+          cd orm/driver-sdk
+          cmake --preset "$preset"
+          cmake --build --preset "$preset" --parallel 4
+          ctest --preset "$preset" --verbose --no-tests=error
+
+      - name: Test Driver SDK against published Salts 1.7.9 on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          cd /d "%GITHUB_WORKSPACE%\orm\driver-sdk"
+          cmake --preset "sdk-windows-${{ matrix.config }}"
+          if errorlevel 1 exit /b 1
+          cmake --build --preset "sdk-windows-${{ matrix.config }}" --parallel 4
+          if errorlevel 1 exit /b 1
+          ctest --preset "sdk-windows-${{ matrix.config }}" --verbose --no-tests=error
+          if errorlevel 1 exit /b 1
 
       # The core adapter uses the real core presets and backend dependencies.
       # Only CI machine paths change; the original backend/profile selections stay on.
