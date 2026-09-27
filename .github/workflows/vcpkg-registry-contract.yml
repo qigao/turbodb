@@ -99,10 +99,12 @@ jobs:
             --x-manifest-root="$GITHUB_WORKSPACE" \
             --x-install-root="$install_root" \
             --triplet=x64-linux \
-            --x-feature=postgresql
+            --x-feature=postgresql \
+            --x-feature=sqlite
           status="$install_root/vcpkg/status"
           test -f "$status"
           grep -F "Package: libpq" "$status"
+          grep -F "Package: sqlite3" "$status"
           grep -F "Package: zstd" "$status"
           grep -F "Package: boringssl" "$status"
           echo "TURBODB_REGISTRY_INSTALL_ROOT=$install_root" >> "$GITHUB_ENV"
@@ -118,12 +120,13 @@ jobs:
             "--x-manifest-root=$env:GITHUB_WORKSPACE" `
             "--x-install-root=$installRoot" `
             "--triplet=x64-windows" `
-            "--x-feature=postgresql"
+            "--x-feature=postgresql" `
+            "--x-feature=sqlite"
           if ($LASTEXITCODE -ne 0) { throw "TurboDB PostgreSQL registry install failed" }
           $status = Join-Path $installRoot "vcpkg\status"
           if (-not (Test-Path -LiteralPath $status -PathType Leaf)) { throw "missing $status" }
           $text = Get-Content -LiteralPath $status -Raw
-          foreach ($package in @("libpq", "zstd", "boringssl")) {
+          foreach ($package in @("libpq", "sqlite3", "zstd", "boringssl")) {
             if ($text -notmatch "(?m)^Package: $package$") { throw "missing installed package: $package" }
           }
           "TURBODB_REGISTRY_INSTALL_ROOT=$installRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
@@ -168,19 +171,21 @@ jobs:
           $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
           ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid $rid
 
-      - name: Build PostgreSQL runtime Driver on Linux
+      - name: Build SQL runtime Driver matrix on Linux
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          build="$RUNNER_TEMP/postgresql-driver-build"
+          build="$RUNNER_TEMP/sql-driver-build"
+          evidence="$GITHUB_WORKSPACE/evidence/sql-matrix-linux"
+          mkdir -p "$evidence"
           cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
             -DVCPKG_MANIFEST_INSTALL=OFF \
             -DVCPKG_INSTALLED_DIR="$TURBODB_REGISTRY_INSTALL_ROOT" \
             -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DORM_WITH_SQLITE=OFF \
+            -DORM_WITH_SQLITE=ON \
             -DORM_WITH_PGSQL=ON \
             -DORM_WITH_REDIS=OFF \
             -DTURBODB_BUILD_REDIS=OFF \
@@ -188,15 +193,40 @@ jobs:
             -DORM_BUILD_TESTS=ON \
             -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
             -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
-          cmake --build "$build" --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
-          ctest --test-dir "$build" -R "^orm_postgresql_plugin$" --output-on-failure
+          cmake --build "$build" --target \
+            orm_sqlite_driver orm_postgresql_driver \
+            orm_sqlite_plugin_test orm_postgresql_plugin_test \
+            orm_sql_plugin_matrix_test --parallel 4
+          ctest --test-dir "$build" \
+            -R "^(orm_sqlite_plugin|orm_postgresql_plugin|orm_sql_plugin_matrix_(sqlite|postgresql|both))$" \
+            --output-on-failure
 
-      - name: Build PostgreSQL runtime Driver on Windows
+          core="$build/bin/libturbo_orm.so"
+          app="$build/bin/orm_sql_plugin_matrix_test"
+          sqlite_plugin="$build/bin/turbodb_driver_sqlite.so"
+          postgresql_plugin="$build/bin/turbodb_driver_postgresql.so"
+          export LD_LIBRARY_PATH="$build/bin:$TURBODB_REGISTRY_INSTALL_ROOT/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          sha256sum "$core" "$app" > "$evidence/baseline.sha256"
+          for scenario in sqlite postgresql both; do
+            "$app" "$scenario" "$sqlite_plugin" "$postgresql_plugin"
+            sha256sum "$core" "$app" > "$evidence/$scenario.sha256"
+            cmp "$evidence/baseline.sha256" "$evidence/$scenario.sha256"
+          done
+          readelf -d "$core" > "$evidence/core-dependencies.txt"
+          if grep -Eiq 'sqlite|libpq|postgres' "$evidence/core-dependencies.txt"; then
+            cat "$evidence/core-dependencies.txt"
+            echo 'generic core imports a native SQL library' >&2
+            exit 1
+          fi
+
+      - name: Build SQL runtime Driver matrix on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $build = Join-Path $env:RUNNER_TEMP "postgresql-driver-build"
+          $build = Join-Path $env:RUNNER_TEMP "sql-driver-build"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "evidence/sql-matrix-windows"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
           $args = @(
             "-S", $env:GITHUB_WORKSPACE,
             "-B", $build,
@@ -207,7 +237,7 @@ jobs:
             "-DVCPKG_APPLOCAL_DEPS=OFF",
             "-DVCPKG_INSTALLED_DIR=$env:TURBODB_REGISTRY_INSTALL_ROOT",
             "-DVCPKG_TARGET_TRIPLET=x64-windows",
-            "-DORM_WITH_SQLITE=OFF",
+            "-DORM_WITH_SQLITE=ON",
             "-DORM_WITH_PGSQL=ON",
             "-DORM_WITH_REDIS=OFF",
             "-DTURBODB_BUILD_REDIS=OFF",
@@ -217,15 +247,43 @@ jobs:
             "-DTURBODB_DBTOOLS_WITH_PGSQL=OFF"
           )
           & cmake @args
-          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver configure failed" }
-          & cmake --build $build --config Release --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
-          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver build failed" }
-          & ctest --test-dir $build -C Release -R "^orm_postgresql_plugin$" --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver contract failed" }
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix configure failed" }
+          & cmake --build $build --config Release --target orm_sqlite_driver orm_postgresql_driver orm_sqlite_plugin_test orm_postgresql_plugin_test orm_sql_plugin_matrix_test --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix build failed" }
+          & ctest --test-dir $build -C Release -R "^(orm_sqlite_plugin|orm_postgresql_plugin|orm_sql_plugin_matrix_(sqlite|postgresql|both))$" --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix contract failed" }
 
+          $bin = Join-Path $build "bin/Release"
+          $core = Join-Path $bin "turbo_orm.dll"
+          $app = Join-Path $bin "orm_sql_plugin_matrix_test.exe"
+          $sqlitePlugin = Join-Path $bin "turbodb_driver_sqlite.dll"
+          $postgresqlPlugin = Join-Path $bin "turbodb_driver_postgresql.dll"
+          $vcpkgBin = Join-Path $env:TURBODB_REGISTRY_INSTALL_ROOT "x64-windows/bin"
+          $env:PATH = "$bin;$vcpkgBin;$env:PATH"
+          $baselineCore = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+          $baselineApp = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+          "core=$baselineCore`napp=$baselineApp" | Set-Content -LiteralPath (Join-Path $evidence "baseline.sha256") -Encoding ascii
+          foreach ($scenario in @("sqlite", "postgresql", "both")) {
+            & $app $scenario $sqlitePlugin $postgresqlPlugin
+            if ($LASTEXITCODE -ne 0) { throw "SQL Plugin matrix scenario failed: $scenario" }
+            $coreHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+            $appHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+            "core=$coreHash`napp=$appHash" | Set-Content -LiteralPath (Join-Path $evidence "$scenario.sha256") -Encoding ascii
+            if ($coreHash -ne $baselineCore -or $appHash -ne $baselineApp) {
+              throw "core/application hash changed for scenario: $scenario"
+            }
+          }
       - name: Verify exact tracked source
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           git diff --exit-code
+
+      - name: Keep SQL Plugin matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-plugin-matrix-${{ matrix.os }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: warn
