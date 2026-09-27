@@ -378,12 +378,16 @@ spec("SQLite runtime Plugin") {
     second = sqlite_plugin_connect(runtime, second_path, &error);
 
     result = sqlite_plugin_execute(
-        first, "create table state(value integer);insert into state values(11)",
-        &error);
+        first, "create table state(value integer)", &error);
     orm_result_destroy(result);
     result = sqlite_plugin_execute(
-        second, "create table state(value integer);insert into state values(22)",
-        &error);
+        first, "insert into state values(11)", &error);
+    orm_result_destroy(result);
+    result = sqlite_plugin_execute(
+        second, "create table state(value integer)", &error);
+    orm_result_destroy(result);
+    result = sqlite_plugin_execute(
+        second, "insert into state values(22)", &error);
     orm_result_destroy(result);
 
     result = sqlite_plugin_execute(first, "select value from state", &error);
