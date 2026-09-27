@@ -713,6 +713,40 @@ add_test(NAME orm_postgresql_plugin COMMAND orm_postgresql_plugin_test)
 set_tests_properties(orm_postgresql_plugin PROPERTIES
   ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
 
+if(ORM_WITH_SQLITE AND ORM_WITH_PGSQL)
+  add_executable(orm_sql_plugin_matrix_test
+    tests/driver/orm_sql_plugin_matrix.c)
+  target_compile_features(orm_sql_plugin_matrix_test PRIVATE c_std_11)
+  target_include_directories(orm_sql_plugin_matrix_test PRIVATE ${ORM_INCLUDE_DIR})
+  target_link_libraries(orm_sql_plugin_matrix_test PRIVATE turbo_orm)
+  add_dependencies(orm_sql_plugin_matrix_test
+    orm_sqlite_driver orm_postgresql_driver)
+  set_target_properties(orm_sql_plugin_matrix_test PROPERTIES
+    C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_sql_plugin_matrix_test)
+  if(MSVC)
+    target_compile_options(orm_sql_plugin_matrix_test PRIVATE /WX)
+  else()
+    target_compile_options(orm_sql_plugin_matrix_test PRIVATE -Werror)
+  endif()
+  get_target_property(ORM_SQL_PLUGIN_MATRIX_LINK_CONTRACT
+                      orm_sql_plugin_matrix_test LINK_LIBRARIES)
+  foreach(ORM_FORBIDDEN_MATRIX_LINK IN ITEMS SQLite::SQLite3
+                                           PostgreSQL::PostgreSQL)
+    list(FIND ORM_SQL_PLUGIN_MATRIX_LINK_CONTRACT
+         "${ORM_FORBIDDEN_MATRIX_LINK}" ORM_FORBIDDEN_MATRIX_LINK_INDEX)
+    if(NOT ORM_FORBIDDEN_MATRIX_LINK_INDEX EQUAL -1)
+      message(FATAL_ERROR
+              "SQL Plugin matrix app must not link ${ORM_FORBIDDEN_MATRIX_LINK}")
+    endif()
+  endforeach()
+  add_test(
+    NAME orm_sql_plugin_matrix
+    COMMAND orm_sql_plugin_matrix_test both
+            "$<TARGET_FILE:orm_sqlite_driver>"
+            "$<TARGET_FILE:orm_postgresql_driver>")
+endif()
+
 if(ORM_POSTGRES_LIVE_TESTS)
   add_executable(orm_postgres_live_test tests/integration/postgres_live_test.c)
   target_compile_features(orm_postgres_live_test PRIVATE c_std_11)
@@ -1281,6 +1315,9 @@ if(WIN32)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:PostgreSQL::PostgreSQL>")
     list(APPEND ORM_RUNTIME_TESTS orm_postgres_libpq)
+    if(ORM_WITH_SQLITE)
+      list(APPEND ORM_RUNTIME_TESTS orm_sql_plugin_matrix)
+    endif()
     if(ORM_POSTGRES_LIVE_TESTS)
       list(APPEND ORM_RUNTIME_TESTS orm_postgres_live)
     endif()
