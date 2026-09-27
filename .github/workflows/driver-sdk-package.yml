@@ -32,9 +32,10 @@ jobs:
         with:
           mode: read
 
-      - uses: actions/setup-dotnet@v4
+      - name: Restore canonical re2c host tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
         with:
-          dotnet-version: "8.0.x"
+          version: "4.6.3"
 
       - name: Locate MSVC
         if: runner.os == 'Windows'
@@ -68,6 +69,7 @@ jobs:
             'Salts.Native=1.7.9',
             'SaltsUtils.Native=4.0.1',
             'PluginABI=2',
+            'Qigao.Re2c.Binary=4.6.3',
             "SALTS_ROOT=$env:SALTS_ROOT",
             "SALTS_UTILS_ROOT=$env:SALTS_UTILS_ROOT"
           ) | Set-Content -LiteralPath evidence/deps/identity.txt -Encoding utf8NoBOM
