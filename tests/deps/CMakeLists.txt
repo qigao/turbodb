@@ -23,12 +23,12 @@ endif()
 
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
-find_package(Salts CONFIG REQUIRED
+find_package(Salts 1.7.9 EXACT CONFIG REQUIRED
   PATHS "${SALTS_ROOT_PATH}" NO_DEFAULT_PATH)
 
 unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
-find_package(SaltsUtils CONFIG REQUIRED
+find_package(SaltsUtils 4.0.1 EXACT CONFIG REQUIRED
   PATHS "${SALTS_UTILS_ROOT_PATH}" NO_DEFAULT_PATH)
 
 foreach(required_target IN ITEMS
