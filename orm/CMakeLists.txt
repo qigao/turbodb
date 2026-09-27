@@ -840,7 +840,7 @@ add_library(orm_runtime_race_fixture MODULE
 target_compile_features(orm_runtime_race_fixture PRIVATE c_std_11)
 target_include_directories(orm_runtime_race_fixture PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_race_fixture PRIVATE
-  Salts::PluginABI Salts::Platform)
+  Salts::PluginABI Salts::Platform Salts::CFlow)
 set_target_properties(orm_runtime_race_fixture PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
@@ -856,7 +856,7 @@ target_compile_definitions(orm_runtime_race_fixture_two PRIVATE
   ORM_RUNTIME_RACE_DRIVER_ID="race2")
 target_include_directories(orm_runtime_race_fixture_two PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_race_fixture_two PRIVATE
-  Salts::PluginABI Salts::Platform)
+  Salts::PluginABI Salts::Platform Salts::CFlow)
 set_target_properties(orm_runtime_race_fixture_two PROPERTIES
   PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
