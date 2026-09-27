@@ -1196,7 +1196,6 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "runtime is required");
 
-  uint32_t driver_count = 0u;
   salts_mutex_lock(&runtime->mutex);
   if (runtime->closed == ORM_RUNTIME_CLOSED) {
     salts_mutex_unlock(&runtime->mutex);
@@ -1207,38 +1206,80 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     return runtime_result(error, ORM_STATUS_CLEANUP_FAILED,
                           "runtime cleanup is quarantined");
   }
-  if (runtime->closed == ORM_RUNTIME_CLOSING) {
-    salts_mutex_unlock(&runtime->mutex);
-    return runtime_result(error, ORM_STATUS_BUSY,
-                          "runtime close is already in progress");
+  if (runtime->closed == ORM_RUNTIME_OPEN) {
+    if (runtime->dependents != 0u || runtime->pending_operations != 0u) {
+      salts_mutex_unlock(&runtime->mutex);
+      return runtime_result(error, ORM_STATUS_BUSY,
+                            "runtime has active or pending operations");
+    }
+    runtime->closed = ORM_RUNTIME_CLOSING;
+    runtime->close_remaining = runtime->driver_count;
   }
-  if (runtime->dependents != 0u || runtime->pending_operations != 0u) {
-    salts_mutex_unlock(&runtime->mutex);
-    return runtime_result(error, ORM_STATUS_BUSY,
-                          "runtime has active or pending operations");
-  }
-  runtime->closed = ORM_RUNTIME_CLOSING;
-  driver_count = runtime->driver_count;
+  const uint32_t remaining_snapshot = runtime->close_remaining;
   salts_mutex_unlock(&runtime->mutex);
 
-  for (uint32_t remaining = driver_count; remaining != 0u; --remaining) {
+  for (uint32_t remaining = remaining_snapshot; remaining != 0u; --remaining) {
     orm_runtime_driver *driver = &runtime->drivers[remaining - 1u];
-    orm_error_t finalize_error;
-    orm_error_init(&finalize_error);
-    const orm_status_t status =
-        driver->module_ops.finalize(driver->module_context,
-                                    &finalize_error);
-    if (status != ORM_STATUS_OK) {
+    salts_plugin_status plugin_status =
+        salts_plugin_registry_request_stop(&runtime->plugins, driver->plugin);
+    if (plugin_status != SALTS_PLUGIN_OK &&
+        plugin_status != SALTS_PLUGIN_ALREADY) {
       salts_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
       salts_mutex_unlock(&runtime->mutex);
-      return runtime_result(error, ORM_STATUS_CLEANUP_FAILED,
-                            "driver module finalization failed");
+      return runtime_plugin_status(
+          plugin_status, error, "request Driver Plugin stop");
     }
-    driver->module_context = NULL;
-    orm_module_close(&driver->module);
+
+    bool quiescent = false;
+    plugin_status = salts_plugin_registry_poll_quiescent(
+        &runtime->plugins, driver->plugin, &quiescent);
+    if (plugin_status != SALTS_PLUGIN_OK) {
+      salts_mutex_lock(&runtime->mutex);
+      runtime->closed = ORM_RUNTIME_FAILED;
+      salts_mutex_unlock(&runtime->mutex);
+      return runtime_plugin_status(
+          plugin_status, error, "poll Driver Plugin quiescence");
+    }
+    if (!quiescent)
+      return runtime_result(error, ORM_STATUS_BUSY,
+                            "driver Plugin is still quiescing");
+
+    plugin_status =
+        salts_plugin_registry_unload(&runtime->plugins, driver->plugin);
+    if (plugin_status != SALTS_PLUGIN_OK) {
+      if (plugin_status == SALTS_PLUGIN_BUSY)
+        return runtime_plugin_status(
+            plugin_status, error, "unload Driver Plugin");
+      salts_mutex_lock(&runtime->mutex);
+      runtime->closed = ORM_RUNTIME_FAILED;
+      salts_mutex_unlock(&runtime->mutex);
+      return runtime_plugin_status(
+          plugin_status, error, "unload Driver Plugin");
+    }
+
     free(driver->module_path);
     driver->module_path = NULL;
+    driver->binding = NULL;
+    driver->plugin = (salts_plugin_ref){0};
+
+    salts_mutex_lock(&runtime->mutex);
+    if (runtime->close_remaining != remaining) {
+      salts_mutex_unlock(&runtime->mutex);
+      abort();
+    }
+    --runtime->close_remaining;
+    salts_mutex_unlock(&runtime->mutex);
+  }
+
+  const salts_plugin_status destroy_status =
+      salts_plugin_registry_destroy(&runtime->plugins);
+  if (destroy_status != SALTS_PLUGIN_OK) {
+    salts_mutex_lock(&runtime->mutex);
+    runtime->closed = ORM_RUNTIME_FAILED;
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_plugin_status(
+        destroy_status, error, "destroy Driver Plugin registry");
   }
 
   salts_mutex_lock(&runtime->mutex);
@@ -1259,7 +1300,6 @@ static void runtime_release_last(orm_runtime_t *runtime) {
     }
     abort();
   }
-  free(runtime->aliases);
   free(runtime->drivers);
   salts_mutex_destroy(&runtime->mutex);
   free(runtime);
