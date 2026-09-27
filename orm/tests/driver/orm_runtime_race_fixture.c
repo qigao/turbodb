@@ -1,8 +1,9 @@
-#include <orm_driver_abi.h>
+#include <orm_driver_plugin.h>
 #include <salts/clock.h>
 #include <salts/thread.h>
 
-#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define RACE_HEADER(T) {(uint32_t)sizeof(T), ORM_DRIVER_ABI_VERSION}
@@ -11,23 +12,19 @@
 
 enum {
   ORM_RUNTIME_RACE_GATE_NONE = 0u,
-  ORM_RUNTIME_RACE_GATE_INITIALIZE = 1u,
+  ORM_RUNTIME_RACE_GATE_START = 1u,
   ORM_RUNTIME_RACE_GATE_CONNECT = 2u,
-  ORM_RUNTIME_RACE_GATE_FINALIZE = 3u
+  ORM_RUNTIME_RACE_GATE_STOP = 3u
 };
 
-typedef struct race_gate {
-  salts_mutex_t mutex;
-  salts_cond_t condition;
-  uint32_t initialized;
-  uint32_t phase;
-  uint32_t entered;
-  uint32_t released;
-} race_gate;
+#ifndef ORM_RUNTIME_RACE_DRIVER_ID
+#define ORM_RUNTIME_RACE_DRIVER_ID "race"
+#endif
+static const char driver_id[] = ORM_RUNTIME_RACE_DRIVER_ID;
 
 typedef struct race_module {
   uint32_t live_connections;
-  uint32_t live;
+  uint32_t started;
 } race_module;
 
 typedef struct race_connection {
@@ -35,15 +32,8 @@ typedef struct race_connection {
   uint32_t live;
 } race_connection;
 
-static race_gate gate;
 static race_module module_context;
 static race_connection connection_contexts[4];
-static const uint8_t bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
-    ORM_DRIVER_BUNDLE_ID_INIT;
-#ifndef ORM_RUNTIME_RACE_DRIVER_ID
-#define ORM_RUNTIME_RACE_DRIVER_ID "race"
-#endif
-static const char driver_id[] = ORM_RUNTIME_RACE_DRIVER_ID;
 
 static void race_error(orm_error_t *error, orm_status_t status) {
   if (error == NULL) return;
@@ -52,135 +42,91 @@ static void race_error(orm_error_t *error, orm_status_t status) {
   error->status = status;
 }
 
-static int race_gate_ensure(void) {
-  if (gate.initialized != 0u) return 1;
-  salts_mutex_init(&gate.mutex);
-  if (gate.mutex == NULL) return 0;
-  salts_cond_init(&gate.condition);
-  if (gate.condition == NULL) {
-    salts_mutex_destroy(&gate.mutex);
-    gate.mutex = NULL;
+static int race_marker_path(
+    char *out, size_t out_size, const char *kind, uint32_t phase) {
+  const char *prefix = getenv("ORM_RUNTIME_RACE_GATE_PREFIX");
+  if (out == NULL || out_size == 0u || prefix == NULL || prefix[0] == '\0')
     return 0;
-  }
-  gate.initialized = 1u;
+  const int written = snprintf(
+      out, out_size, "%s-%s-%u-%s", prefix, driver_id,
+      (unsigned)phase, kind);
+  return written > 0 && (size_t)written < out_size;
+}
+
+static int race_marker_exists(const char *path) {
+  FILE *file = fopen(path, "rb");
+  if (file == NULL) return 0;
+  fclose(file);
   return 1;
 }
 
+static void race_marker_write(const char *path) {
+  FILE *file = fopen(path, "wb");
+  if (file == NULL) return;
+  fputc('1', file);
+  fclose(file);
+}
+
 static void race_gate_pause(uint32_t phase) {
-  /* Ordinary fixture use does not allocate test-gate state. The control
-   * handle explicitly arms/initializes the gate before a raced callback. */
-  if (gate.initialized == 0u) return;
-  salts_mutex_lock(&gate.mutex);
-  if (gate.phase == phase) {
-    gate.entered = 1u;
-    salts_cond_broadcast(&gate.condition);
-    const uint64_t started = salts_monotonic_ms();
-    while (gate.released == 0u) {
-      const uint64_t elapsed = salts_monotonic_ms() - started;
-      if (elapsed >= RACE_TIMEOUT_MS) break;
-      const uint64_t remaining = RACE_TIMEOUT_MS - elapsed;
-      if (salts_cond_timedwait(&gate.condition, &gate.mutex,
-                               salts_ms_to_ns(remaining)) != 0 &&
-          salts_monotonic_ms() - started >= RACE_TIMEOUT_MS)
-        break;
-    }
-    gate.phase = ORM_RUNTIME_RACE_GATE_NONE;
-  }
-  salts_mutex_unlock(&gate.mutex);
-}
+  char arm[1024];
+  char entered[1024];
+  char release[1024];
+  if (!race_marker_path(arm, sizeof(arm), "arm", phase) ||
+      !race_marker_path(entered, sizeof(entered), "entered", phase) ||
+      !race_marker_path(release, sizeof(release), "release", phase) ||
+      !race_marker_exists(arm))
+    return;
 
-ORM_DRIVER_EXPORT int32_t ORM_DRIVER_CALL
-orm_runtime_race_gate_arm(uint32_t phase) {
-  if (!race_gate_ensure() ||
-      phase < ORM_RUNTIME_RACE_GATE_INITIALIZE ||
-      phase > ORM_RUNTIME_RACE_GATE_FINALIZE)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  salts_mutex_lock(&gate.mutex);
-  gate.phase = phase;
-  gate.entered = 0u;
-  gate.released = 0u;
-  salts_mutex_unlock(&gate.mutex);
-  return ORM_STATUS_OK;
-}
-
-ORM_DRIVER_EXPORT int32_t ORM_DRIVER_CALL
-orm_runtime_race_gate_wait_entered(uint64_t timeout_ms) {
-  if (!race_gate_ensure() || timeout_ms == 0u) return 0;
-  salts_mutex_lock(&gate.mutex);
+  race_marker_write(entered);
   const uint64_t started = salts_monotonic_ms();
-  while (gate.entered == 0u) {
-    const uint64_t elapsed = salts_monotonic_ms() - started;
-    if (elapsed >= timeout_ms) break;
-    const uint64_t remaining = timeout_ms - elapsed;
-    if (salts_cond_timedwait(&gate.condition, &gate.mutex,
-                             salts_ms_to_ns(remaining)) != 0 &&
-        salts_monotonic_ms() - started >= timeout_ms)
-      break;
-  }
-  const int entered = gate.entered != 0u;
-  salts_mutex_unlock(&gate.mutex);
-  return entered;
+  while (!race_marker_exists(release) &&
+         salts_monotonic_ms() - started < RACE_TIMEOUT_MS)
+    salts_sleep_ms(1u);
+
+  (void)remove(arm);
+  (void)remove(entered);
+  (void)remove(release);
 }
 
-ORM_DRIVER_EXPORT void ORM_DRIVER_CALL orm_runtime_race_gate_release(void) {
-  if (!race_gate_ensure()) return;
-  salts_mutex_lock(&gate.mutex);
-  gate.released = 1u;
-  salts_cond_broadcast(&gate.condition);
-  salts_mutex_unlock(&gate.mutex);
+static salts_plugin_status SALTS_PLUGIN_CALL race_start(void *self) {
+  race_module *module = (race_module *)self;
+  if (module != &module_context)
+    return SALTS_PLUGIN_INVALID_ARGUMENT;
+  race_gate_pause(ORM_RUNTIME_RACE_GATE_START);
+  module->started = 1u;
+  return SALTS_PLUGIN_OK;
 }
 
-static void race_gate_destroy(void) {
-  if (gate.initialized == 0u) return;
-  salts_cond_destroy(&gate.condition);
-  salts_mutex_destroy(&gate.mutex);
-  memset(&gate, 0, sizeof(gate));
+static salts_plugin_status SALTS_PLUGIN_CALL race_request_stop(void *self) {
+  race_module *module = (race_module *)self;
+  if (module != &module_context)
+    return SALTS_PLUGIN_INVALID_ARGUMENT;
+  race_gate_pause(ORM_RUNTIME_RACE_GATE_STOP);
+  if (module->live_connections != 0u)
+    return SALTS_PLUGIN_BUSY;
+  module->started = 0u;
+  return SALTS_PLUGIN_OK;
 }
 
-static orm_status_t ORM_DRIVER_CALL race_initialize(
-    const orm_driver_host_v1 *host, void **out, orm_error_t *error) {
-  if (out != NULL) *out = NULL;
-  if (host == NULL || out == NULL ||
-      host->header.abi_version != ORM_DRIVER_ABI_VERSION ||
-      host->header.struct_size < sizeof(*host) ||
-      memcmp(host->bundle_id, bundle, sizeof(bundle)) != 0) {
-    race_error(error, ORM_STATUS_ABI_MISMATCH);
-    return ORM_STATUS_ABI_MISMATCH;
-  }
-  race_gate_pause(ORM_RUNTIME_RACE_GATE_INITIALIZE);
-  if (module_context.live != 0u) {
-    race_error(error, ORM_STATUS_BUSY);
-    return ORM_STATUS_BUSY;
-  }
-  memset(&module_context, 0, sizeof(module_context));
-  module_context.live = 1u;
-  *out = &module_context;
-  race_error(error, ORM_STATUS_OK);
-  return ORM_STATUS_OK;
+static bool SALTS_PLUGIN_CALL race_is_quiescent(const void *self) {
+  const race_module *module = (const race_module *)self;
+  return module == &module_context &&
+         module->started == 0u &&
+         module->live_connections == 0u;
 }
 
-static orm_status_t ORM_DRIVER_CALL race_finalize(
-    void *context, orm_error_t *error) {
-  if (context != &module_context || module_context.live == 0u) {
-    race_error(error, ORM_STATUS_INVALID_ARGUMENT);
-    return ORM_STATUS_INVALID_ARGUMENT;
-  }
-  race_gate_pause(ORM_RUNTIME_RACE_GATE_FINALIZE);
-  if (module_context.live_connections != 0u) {
-    race_error(error, ORM_STATUS_BUSY);
-    return ORM_STATUS_BUSY;
-  }
-  module_context.live = 0u;
-  race_error(error, ORM_STATUS_OK);
-  race_gate_destroy();
-  return ORM_STATUS_OK;
+static void SALTS_PLUGIN_CALL race_destroy(void *self) {
+  if (self == &module_context)
+    memset(&module_context, 0, sizeof(module_context));
 }
 
 static void ORM_DRIVER_CALL race_destroy_connection(void *context) {
-  race_connection *connection = context;
+  race_connection *connection = (race_connection *)context;
   if (connection == NULL || connection->live == 0u ||
       connection->module == NULL)
     return;
+  if (connection->module->live_connections == 0u)
+    abort();
   --connection->module->live_connections;
   memset(connection, 0, sizeof(*connection));
 }
@@ -190,15 +136,17 @@ static const orm_driver_connection_ops_v1 connection_ops = {
     race_destroy_connection, NULL, NULL, NULL};
 
 static orm_status_t ORM_DRIVER_CALL race_create_connection(
-    void *context, const orm_config_t *config,
+    void *self, const orm_config_t *config,
     const orm_driver_limits_v1 *limits, orm_driver_connection_v1 *out,
     orm_error_t *error) {
   if (out != NULL) memset(out, 0, sizeof(*out));
-  if (context != &module_context || module_context.live == 0u ||
+  race_module *module = (race_module *)self;
+  if (module != &module_context || module->started == 0u ||
       config == NULL || limits == NULL || out == NULL) {
     race_error(error, ORM_STATUS_INVALID_ARGUMENT);
     return ORM_STATUS_INVALID_ARGUMENT;
   }
+
   race_gate_pause(ORM_RUNTIME_RACE_GATE_CONNECT);
   if (config->option_count != 0u && config->options != NULL &&
       config->options[0].keyword.data != NULL &&
@@ -214,9 +162,9 @@ static orm_status_t ORM_DRIVER_CALL race_create_connection(
        ++i) {
     if (connection_contexts[i].live == 0u) {
       memset(&connection_contexts[i], 0, sizeof(connection_contexts[i]));
-      connection_contexts[i].module = &module_context;
+      connection_contexts[i].module = module;
       connection_contexts[i].live = 1u;
-      ++module_context.live_connections;
+      ++module->live_connections;
       out->header =
           (orm_driver_header_v1)RACE_HEADER(orm_driver_connection_v1);
       out->context = &connection_contexts[i];
@@ -225,35 +173,42 @@ static orm_status_t ORM_DRIVER_CALL race_create_connection(
       return ORM_STATUS_OK;
     }
   }
+
   race_error(error, ORM_STATUS_LIMIT_EXCEEDED);
   return ORM_STATUS_LIMIT_EXCEEDED;
 }
 
-static const orm_driver_module_ops_v1 module_ops = {
-    RACE_HEADER(orm_driver_module_ops_v1), race_initialize, race_finalize};
+static const TurboDb_Driver_vtable driver_vtable = {
+    .implementation = driver_id,
+    .capabilities = 0u,
+    .create = race_create_connection};
 
-static const orm_driver_api_v1 api = {
-    RACE_HEADER(orm_driver_api_v1),
-    ORM_DRIVER_BUNDLE_ID_INIT,
-    {driver_id, sizeof(driver_id) - 1u},
-    NULL,
-    0u,
-    0u,
-    0u,
-    ORM_DRIVER_EXEC_CALLER_BLOCKING,
-    RACE_TABLE(&module_ops),
-    race_create_connection,
-    RACE_TABLE(&connection_ops)};
+static TurboDb_Driver driver = {
+    &module_context, &driver_vtable};
 
-ORM_DRIVER_EXPORT int32_t ORM_DRIVER_CALL orm_driver_get_api_v1(
-    const orm_driver_host_v1 *host, uint32_t host_bytes,
-    const orm_driver_api_v1 **out_api, uint32_t *out_api_bytes) {
-  if (out_api != NULL) *out_api = NULL;
-  if (out_api_bytes != NULL) *out_api_bytes = 0u;
-  if (host == NULL || host_bytes < sizeof(*host) ||
-      out_api == NULL || out_api_bytes == NULL)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  *out_api = &api;
-  *out_api_bytes = (uint32_t)sizeof(api);
-  return ORM_STATUS_OK;
+static const salts_plugin_export exports[] = {{
+    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
+    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+    .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
+    .capabilities = 0u,
+    .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
+    .contract_id = ORM_DRIVER_INTERFACE_CONTRACT_ID,
+    .value.interface = {&TurboDb_Driver_interface_meta, &driver}}};
+
+static const salts_plugin_manifest manifest = {
+    .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
+    .abi_version = SALTS_PLUGIN_ABI_VERSION,
+    .plugin_id = driver_id,
+    .version = {1u, 0u, 0u},
+    .exports = exports,
+    .export_count = 1u,
+    .self = &module_context,
+    .start = race_start,
+    .request_stop = race_request_stop,
+    .is_quiescent = race_is_quiescent,
+    .destroy = race_destroy};
+
+SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
+salts_plugin_query(uint32_t host_abi) {
+  return host_abi == SALTS_PLUGIN_ABI_VERSION ? &manifest : NULL;
 }
