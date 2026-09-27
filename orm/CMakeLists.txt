@@ -130,10 +130,6 @@ set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/dbs/redis/orm_redis_cursor.c
                      src/dbs/mongo/orm_mongo_cursor.c
                      src/dbs/tidesdb/orm_tidesdb_cursor.c)
-if(ORM_WITH_SQLITE)
-  list(APPEND ORM_C_SOURCES src/dbs/sqlite/backend.c)
-  list(APPEND ORM_FLOW_SOURCES src/dbs/sqlite/orm_sqlite_cursor.c)
-endif()
 if(ORM_WITH_REDIS)
   list(APPEND ORM_C_SOURCES src/dbs/redis/backend.c
                              src/dbs/redis/query.c
@@ -171,10 +167,18 @@ target_link_libraries(
   PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin
           Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
 
-if(ORM_WITH_SQLITE)
-  target_compile_definitions(turbo_orm PRIVATE ORM_WITH_SQLITE)
-  target_link_libraries(turbo_orm PRIVATE SQLite::SQLite3)
+get_target_property(ORM_CORE_LINK_CONTRACT turbo_orm LINK_LIBRARIES)
+foreach(ORM_FORBIDDEN_SQL_CORE_LINK IN ITEMS SQLite::SQLite3
+                                             PostgreSQL::PostgreSQL)
+  list(FIND ORM_CORE_LINK_CONTRACT "${ORM_FORBIDDEN_SQL_CORE_LINK}"
+       ORM_FORBIDDEN_SQL_CORE_LINK_INDEX)
+  if(NOT ORM_FORBIDDEN_SQL_CORE_LINK_INDEX EQUAL -1)
+    message(FATAL_ERROR
+            "generic turbo_orm must not link ${ORM_FORBIDDEN_SQL_CORE_LINK}")
+  endif()
+endforeach()
 
+if(ORM_WITH_SQLITE)
   add_library(orm_sqlite_driver MODULE
     src/dbs/sqlite/plugin.c
     src/driver/orm_driver_backend_bridge.c
@@ -200,8 +204,8 @@ if(ORM_WITH_SQLITE)
       Salts::CSerde
       Salts::CFlow
       Salts::CSTL)
-  # #81 boundary gate: the runtime MODULE must own a direct native SQLite
-  # link.  turbo_orm may still carry its transitional SQLite link until #32.
+  # Runtime MODULE owns the native SQLite dependency. Generic Orm::C must
+  # remain independent from SQLite headers, objects and link items.
   get_target_property(ORM_SQLITE_DRIVER_LINK_CONTRACT
                       orm_sqlite_driver LINK_LIBRARIES)
   list(FIND ORM_SQLITE_DRIVER_LINK_CONTRACT "SQLite::SQLite3"
@@ -369,9 +373,6 @@ if(ORM_WITH_PGSQL)
 endif()
 
 set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::DataBind)
-if(ORM_WITH_SQLITE)
-  list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS SQLite::SQLite3)
-endif()
 if(ORM_WITH_REDIS)
   list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS TurboDB::Redis)
 endif()
@@ -449,19 +450,6 @@ endforeach()
 # DLL location. Preserve the explicit SQL prefix-to-bin derivation as a
 # fallback for those targets.
 set(ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR)
-foreach(ORM_BACKEND_LIBRARY IN ITEMS "${SQLite3_LIBRARY}")
-  if(WIN32 AND ORM_BACKEND_LIBRARY)
-    get_filename_component(ORM_BACKEND_LIBRARY_DIR "${ORM_BACKEND_LIBRARY}"
-                           DIRECTORY)
-    get_filename_component(ORM_BACKEND_PREFIX_DIR "${ORM_BACKEND_LIBRARY_DIR}"
-                           DIRECTORY)
-    list(APPEND ORM_RUNTIME_SEARCH_DIRECTORIES "${ORM_BACKEND_PREFIX_DIR}/bin")
-    if("${ORM_BACKEND_LIBRARY}" STREQUAL "${SQLite3_LIBRARY}")
-      set(ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR
-          "${ORM_BACKEND_PREFIX_DIR}/bin")
-    endif()
-  endif()
-endforeach()
 list(REMOVE_DUPLICATES ORM_RUNTIME_SEARCH_DIRECTORIES)
 if(WIN32)
   install(
@@ -547,7 +535,13 @@ endif()
 
 set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
 if(ORM_BUILD_TESTS)
-  add_library(orm_c_test_static STATIC ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+  set(ORM_TEST_STATIC_SOURCES ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
+  if(ORM_WITH_SQLITE)
+    list(APPEND ORM_TEST_STATIC_SOURCES
+         src/dbs/sqlite/backend.c
+         src/dbs/sqlite/orm_sqlite_cursor.c)
+  endif()
+  add_library(orm_c_test_static STATIC ${ORM_TEST_STATIC_SOURCES})
   target_compile_features(orm_c_test_static PRIVATE c_std_11)
   target_compile_definitions(orm_c_test_static PRIVATE ORM_C_STATIC)
   # Internal tests that compile cursor/backend sources directly must see the
@@ -1340,8 +1334,25 @@ include(GNUInstallDirs)
 if(TARGET orm_sqlite_driver)
   install(
     TARGETS orm_sqlite_driver
+    RUNTIME_DEPENDENCY_SET OrmSqliteDriverRuntimeDependencies
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+  if(WIN32)
+    install(
+      RUNTIME_DEPENDENCY_SET OrmSqliteDriverRuntimeDependencies
+      DIRECTORIES "$<TARGET_FILE_DIR:SQLite::SQLite3>"
+      PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                          "turbo_orm\\.dll" "salts_.*\\.dll"
+      POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers)
+  else()
+    install(
+      RUNTIME_DEPENDENCY_SET OrmSqliteDriverRuntimeDependencies
+      DIRECTORIES "$<TARGET_FILE_DIR:SQLite::SQLite3>"
+      PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libsalts_.*"
+      POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+  endif()
 endif()
 if(TARGET orm_postgresql_driver)
   install(
