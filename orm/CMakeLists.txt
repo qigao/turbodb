@@ -1377,6 +1377,18 @@ endif()
 include(GNUInstallDirs)
 
 if(TARGET orm_sqlite_driver)
+  set(ORM_SQLITE_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  orm_collect_runtime_search_directories(
+    SQLite::SQLite3 ORM_SQLITE_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  if(WIN32 AND SQLite3_LIBRARY)
+    get_filename_component(ORM_SQLITE_DRIVER_LIBRARY_DIR
+                           "${SQLite3_LIBRARY}" DIRECTORY)
+    get_filename_component(ORM_SQLITE_DRIVER_PREFIX_DIR
+                           "${ORM_SQLITE_DRIVER_LIBRARY_DIR}" DIRECTORY)
+    list(APPEND ORM_SQLITE_DRIVER_RUNTIME_SEARCH_DIRECTORIES
+         "${ORM_SQLITE_DRIVER_PREFIX_DIR}/bin")
+  endif()
+  list(REMOVE_DUPLICATES ORM_SQLITE_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
   install(
     TARGETS orm_sqlite_driver
     RUNTIME_DEPENDENCY_SET OrmSqliteDriverRuntimeDependencies
@@ -1385,15 +1397,16 @@ if(TARGET orm_sqlite_driver)
   if(WIN32)
     install(
       RUNTIME_DEPENDENCY_SET OrmSqliteDriverRuntimeDependencies
-      DIRECTORIES "$<TARGET_FILE_DIR:SQLite::SQLite3>"
+      DIRECTORIES ${ORM_SQLITE_DRIVER_RUNTIME_SEARCH_DIRECTORIES}
       PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                          "clang_rt.asan_dynamic-.*"
                           "turbo_orm\\.dll" "salts_.*\\.dll"
       POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
       RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers)
   else()
     install(
       RUNTIME_DEPENDENCY_SET OrmSqliteDriverRuntimeDependencies
-      DIRECTORIES "$<TARGET_FILE_DIR:SQLite::SQLite3>"
+      DIRECTORIES ${ORM_SQLITE_DRIVER_RUNTIME_SEARCH_DIRECTORIES}
       PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libsalts_.*"
       POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
