@@ -133,7 +133,7 @@ static int race_release(const char *driver, uint32_t phase) {
 }
 
 spec("runtime close and admission serialization") {
-  it("keeps close BUSY while module initialization is outside the lock") {
+  it("keeps close BUSY while Plugin start is outside the lock") {
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
@@ -276,7 +276,7 @@ spec("runtime close and admission serialization") {
     orm_runtime_release(runtime);
   }
 
-  it("rejects new admission while module finalization is outside the lock") {
+  it("rejects new admission while Plugin stop is outside the lock") {
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
@@ -311,7 +311,7 @@ spec("runtime close and admission serialization") {
     check_equal(orm_runtime_load_driver(runtime, &worker.load, &error),
                 ORM_STATUS_INVALID_STATE);
 
-    check_true(race_release("race", RACE_GATE_INITIALIZE));
+    check_true(race_release("race", RACE_GATE_FINALIZE));
     check_equal(salts_thread_join(&worker_thread), 0);
     salts_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
