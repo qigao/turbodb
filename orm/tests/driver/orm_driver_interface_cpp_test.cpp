@@ -12,7 +12,7 @@ static_assert(std::is_standard_layout<TurboDb_Driver>::value,
 static_assert(std::is_standard_layout<TurboDb_Driver_vtable>::value,
               "Driver vtable must keep C layout");
 static_assert(
-    std::is_same<decltype(((TurboDb_Driver_vtable *)nullptr)->create),
+    std::is_same<decltype(static_cast<TurboDb_Driver_vtable *>(nullptr)->create),
                  driver_create_type>::value,
     "reflected create dispatch must preserve the existing Driver C ABI");
 static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 1u,
