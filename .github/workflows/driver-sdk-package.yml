@@ -27,6 +27,7 @@ jobs:
           persist-credentials: false
 
       - name: Configure shared vcpkg binary cache
+        id: vcpkg_cache
         uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
           mode: read
@@ -108,7 +109,7 @@ jobs:
             build_type=Debug
             sdk_preset=sdk-linux-debug
           fi
-          cmake -S tests/deps -B "build/deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-linux 2>&1 | tee evidence/deps/configure.log
+          cmake -S tests/deps -B "build/deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_INSTALL_OPTIONS=--only-binarycaching 2>&1 | tee evidence/deps/configure.log
           cmake --build "build/deps-${{ matrix.config }}" --parallel 4 2>&1 | tee evidence/deps/build.log
           ctest --test-dir "build/deps-${{ matrix.config }}" --output-on-failure 2>&1 | tee evidence/deps/ctest.log
           (cd orm/driver-sdk && cmake --preset "$sdk_preset") 2>&1 | tee evidence/deps/sdk-configure.log
@@ -125,7 +126,7 @@ jobs:
           set "SDK_PRESET=sdk-windows-release"
           if "${{ matrix.config }}"=="debug" set "BUILD_TYPE=Debug"
           if "${{ matrix.config }}"=="debug" set "SDK_PRESET=sdk-windows-debug"
-          cmake -S tests\deps -B "build\deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_MANIFEST_DIR="%GITHUB_WORKSPACE%" -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-windows > evidence\deps\configure.log 2>&1
+          cmake -S tests\deps -B "build\deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DVCPKG_MANIFEST_DIR="%GITHUB_WORKSPACE%" -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_INSTALL_OPTIONS=--only-binarycaching > evidence\deps\configure.log 2>&1
           if errorlevel 1 (type evidence\deps\configure.log & exit /b 1)
           cmake --build "build\deps-${{ matrix.config }}" --parallel 4 > evidence\deps\build.log 2>&1
           if errorlevel 1 (type evidence\deps\build.log & exit /b 1)
@@ -159,6 +160,9 @@ jobs:
               $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
               $item.environment.VCPKG_ROOT = $env:VCPKG_ROOT
             }
+            if ($item.name -in @('win-paths', 'linux-paths')) {
+              $item.toolchainFile = $env:QIGAO_VCPKG_TOOLCHAIN_FILE
+            }
             if ($item.name -eq 'linux-paths') {
               $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
               $item.environment.VCPKG_ROOT = $env:VCPKG_ROOT
@@ -174,7 +178,7 @@ jobs:
           set -euo pipefail
           profile=linux-release-user
           if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
-          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee evidence/deps/root-configure.log
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DVCPKG_INSTALL_OPTIONS=--only-binarycaching 2>&1 | tee evidence/deps/root-configure.log
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
           ctest --preset "$profile" --output-on-failure 2>&1 | tee evidence/deps/root-ctest.log
 
@@ -186,7 +190,7 @@ jobs:
           if errorlevel 1 exit /b 1
           set "PROFILE=win-release-user"
           if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > evidence\deps\root-configure.log 2>&1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DVCPKG_INSTALL_OPTIONS=--only-binarycaching > evidence\deps\root-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
           cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
           if errorlevel 1 (type evidence\deps\root-build.log & exit /b 1)
