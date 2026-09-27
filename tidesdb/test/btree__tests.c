@@ -155,7 +155,7 @@ void test_btree_get()
 
     char search_key[32];
     snprintf(search_key, sizeof(search_key), "key%05d", 25);
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)search_key, strlen(search_key) + 1, &value, &value_size,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)search_key, strlen(search_key) + 1, &value, &value_size,
                           &vlog_offset, &seq, &ttl, &deleted) == 0);
     ASSERT_TRUE(value != NULL);
 
@@ -166,7 +166,7 @@ void test_btree_get()
     free(value);
 
     value = NULL;
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"nonexistent", 12, &value, &value_size, &vlog_offset,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"nonexistent", 12, &value, &value_size, &vlog_offset,
                           &seq, &ttl, &deleted) != 0);
 
     btree_free(tree);
@@ -552,7 +552,7 @@ void test_btree_open_existing()
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(reopened, (uint8_t *)search_key, strlen(search_key) + 1, &value,
+    ASSERT_TRUE(tidesdb_btree_get(reopened, (uint8_t *)search_key, strlen(search_key) + 1, &value,
                           &value_size, &vlog_offset, &seq, &ttl, &deleted) == 0);
     ASSERT_TRUE(value != NULL);
 
@@ -598,7 +598,7 @@ void test_btree_tombstone()
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(tree, key2, sizeof(key2), &value, &value_size, &vlog_offset, &seq, &ttl,
+    ASSERT_TRUE(tidesdb_btree_get(tree, key2, sizeof(key2), &value, &value_size, &vlog_offset, &seq, &ttl,
                           &deleted) == 0);
     ASSERT_EQ(deleted, 1);
 
@@ -654,7 +654,7 @@ void test_btree_large_dataset()
         int64_t ttl = 0;
         uint8_t deleted = 0;
 
-        ASSERT_TRUE(btree_get(tree, (uint8_t *)search_key, strlen(search_key) + 1, &value,
+        ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)search_key, strlen(search_key) + 1, &value,
                               &value_size, &vlog_offset, &seq, &ttl, &deleted) == 0);
         ASSERT_TRUE(value != NULL);
         free(value);
@@ -707,7 +707,7 @@ void test_btree_empty_tree()
     uint64_t seq = 0;
     int64_t ttl = 0;
     uint8_t deleted = 0;
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"key", 4, &value, &value_size, &vlog_offset, &seq, &ttl,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"key", 4, &value, &value_size, &vlog_offset, &seq, &ttl,
                           &deleted) != 0);
 
     btree_free(tree);
@@ -803,7 +803,7 @@ void test_btree_duplicate_keys()
 /* a key present multiple times in one btree -- a tombstone at a higher seq and
  * an older live value at a lower seq, the shape a flush or compaction produces
  * when it retains a version chain -- must resolve to the NEWEST version on
- * lookup. before the fix btree_get did a plain exact-match binary search and
+ * lookup. before the fix tidesdb_btree_get did a plain exact-match binary search and
  * returned a non-deterministic match among the duplicates; the trailing key
  * here makes the search midpoint land on the older live entry, resurrecting a
  * deleted key. */
@@ -822,7 +822,7 @@ void test_btree_multi_version_resolution()
     ASSERT_TRUE(btree_builder_new(&builder, bm, &config) == 0);
 
     /* key "k" twice -- tombstone at seq 100, older live value at seq 50 -- then
-     * a trailing key "m" so the leaf has 3 entries and btree_get's binary
+     * a trailing key "m" so the leaf has 3 entries and tidesdb_btree_get's binary
      * search midpoint (index 1) lands on the stale live "k" */
     uint8_t k[] = "k";
     uint8_t m[] = "m";
@@ -845,7 +845,7 @@ void test_btree_multi_version_resolution()
     int64_t ttl = 0;
     uint8_t deleted = 0;
     ASSERT_EQ(
-        btree_get(tree, k, sizeof(k), &value, &value_size, &vlog_offset, &seq, &ttl, &deleted), 0);
+        tidesdb_btree_get(tree, k, sizeof(k), &value, &value_size, &vlog_offset, &seq, &ttl, &deleted), 0);
     ASSERT_EQ(seq, 100);
     ASSERT_TRUE(deleted & BTREE_ENTRY_FLAG_TOMBSTONE);
     free(value);
@@ -921,7 +921,7 @@ void test_btree_large_keys_values()
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(tree, large_key, large_key_size, &retrieved_value, &retrieved_size,
+    ASSERT_TRUE(tidesdb_btree_get(tree, large_key, large_key_size, &retrieved_value, &retrieved_size,
                           &vlog_offset, &seq, &ttl, &deleted) == 0);
     ASSERT_EQ(retrieved_size, large_value_size);
     ASSERT_EQ(memcmp(retrieved_value, large_value, large_value_size), 0);
@@ -1078,12 +1078,12 @@ void test_btree_comparator_string(void)
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"cherry", 7, &value, &value_size, &vlog_offset, &seq,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"cherry", 7, &value, &value_size, &vlog_offset, &seq,
                           &ttl, &deleted) == 0);
     ASSERT_EQ(strcmp((char *)value, "val_cherry"), 0);
     free(value);
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"nonexistent", 12, &value, &value_size, &vlog_offset,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"nonexistent", 12, &value, &value_size, &vlog_offset,
                           &seq, &ttl, &deleted) != 0);
 
     btree_free(tree);
@@ -1128,14 +1128,14 @@ void test_btree_comparator_numeric(void)
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)&search_key, sizeof(search_key), &value, &value_size,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)&search_key, sizeof(search_key), &value, &value_size,
                           &vlog_offset, &seq, &ttl, &deleted) == 0);
     ASSERT_EQ(strcmp((char *)value, "num_50"), 0);
     free(value);
 
     /* non-existent numeric key */
     uint64_t missing_key = 55;
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)&missing_key, sizeof(missing_key), &value, &value_size,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)&missing_key, sizeof(missing_key), &value, &value_size,
                           &vlog_offset, &seq, &ttl, &deleted) != 0);
 
     /* cursor forward iteration should be in numeric order */
@@ -1471,8 +1471,8 @@ void test_btree_null_args(void)
     ASSERT_EQ(btree_open(&tree, NULL, &config, 0, 0, 0), -1);
     ASSERT_EQ(btree_open(&tree, bm, NULL, 0, 0, 0), -1);
 
-    /* btree_get NULL args */
-    ASSERT_EQ(btree_get(NULL, (uint8_t *)"k", 1, NULL, NULL, NULL, NULL, NULL, NULL), -1);
+    /* tidesdb_btree_get NULL args */
+    ASSERT_EQ(tidesdb_btree_get(NULL, (uint8_t *)"k", 1, NULL, NULL, NULL, NULL, NULL, NULL), -1);
 
     /* btree_get_min_key / btree_get_max_key NULL args */
     uint8_t *key = NULL;
@@ -1532,26 +1532,26 @@ void test_btree_ttl_entries(void)
     ASSERT_TRUE(btree_builder_finish(builder, &tree) == 0);
     ASSERT_EQ(tree->entry_count, 3);
 
-    /* verify TTL roundtrips through btree_get */
+    /* verify TTL roundtrips through tidesdb_btree_get */
     uint8_t *value = NULL;
     size_t value_size = 0;
     uint64_t vlog_offset = 0, seq = 0;
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_EQ(btree_get(tree, (uint8_t *)"key_a", 6, &value, &value_size, &vlog_offset, &seq, &ttl,
+    ASSERT_EQ(tidesdb_btree_get(tree, (uint8_t *)"key_a", 6, &value, &value_size, &vlog_offset, &seq, &ttl,
                         &deleted),
               0);
     ASSERT_EQ(ttl, 0);
     free(value);
 
-    ASSERT_EQ(btree_get(tree, (uint8_t *)"key_b", 6, &value, &value_size, &vlog_offset, &seq, &ttl,
+    ASSERT_EQ(tidesdb_btree_get(tree, (uint8_t *)"key_b", 6, &value, &value_size, &vlog_offset, &seq, &ttl,
                         &deleted),
               0);
     ASSERT_EQ(ttl, 1000000);
     free(value);
 
-    ASSERT_EQ(btree_get(tree, (uint8_t *)"key_c", 6, &value, &value_size, &vlog_offset, &seq, &ttl,
+    ASSERT_EQ(tidesdb_btree_get(tree, (uint8_t *)"key_c", 6, &value, &value_size, &vlog_offset, &seq, &ttl,
                         &deleted),
               0);
     ASSERT_EQ(ttl, 9999999);
@@ -1610,26 +1610,26 @@ void test_btree_vlog_offset_entries(void)
     ASSERT_TRUE(btree_builder_finish(builder, &tree) == 0);
     ASSERT_EQ(tree->entry_count, 3);
 
-    /* verify vlog_offset roundtrips through btree_get */
+    /* verify vlog_offset roundtrips through tidesdb_btree_get */
     uint8_t *value = NULL;
     size_t value_size = 0;
     uint64_t vlog_offset = 0, seq = 0;
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_EQ(btree_get(tree, (uint8_t *)"key_inline", 11, &value, &value_size, &vlog_offset, &seq,
+    ASSERT_EQ(tidesdb_btree_get(tree, (uint8_t *)"key_inline", 11, &value, &value_size, &vlog_offset, &seq,
                         &ttl, &deleted),
               0);
     ASSERT_EQ(vlog_offset, 0);
     free(value);
 
-    ASSERT_EQ(btree_get(tree, (uint8_t *)"key_vlog_1", 11, &value, &value_size, &vlog_offset, &seq,
+    ASSERT_EQ(tidesdb_btree_get(tree, (uint8_t *)"key_vlog_1", 11, &value, &value_size, &vlog_offset, &seq,
                         &ttl, &deleted),
               0);
     ASSERT_EQ(vlog_offset, 12345);
     if (value) free(value);
 
-    ASSERT_EQ(btree_get(tree, (uint8_t *)"key_vlog_2", 11, &value, &value_size, &vlog_offset, &seq,
+    ASSERT_EQ(tidesdb_btree_get(tree, (uint8_t *)"key_vlog_2", 11, &value, &value_size, &vlog_offset, &seq,
                         &ttl, &deleted),
               0);
     ASSERT_EQ(vlog_offset, 99999);
@@ -1759,7 +1759,7 @@ void bench_btree_get()
         int64_t ttl = 0;
         uint8_t deleted = 0;
 
-        btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
+        tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
                   &ttl, &deleted);
         free(value);
     }
@@ -1783,7 +1783,7 @@ void bench_btree_get()
         int64_t ttl = 0;
         uint8_t deleted = 0;
 
-        btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
+        tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
                   &ttl, &deleted);
         free(value);
     }
@@ -1812,7 +1812,7 @@ void bench_btree_get()
         int64_t ttl = 0;
         uint8_t deleted = 0;
 
-        btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
+        tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
                   &ttl, &deleted);
         free(value);
     }
@@ -1836,7 +1836,7 @@ void bench_btree_get()
         int64_t ttl = 0;
         uint8_t deleted = 0;
 
-        btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
+        tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset, &seq,
                   &ttl, &deleted);
         free(value);
     }
@@ -1894,17 +1894,17 @@ void test_btree_compression_lz4()
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"key00000000", 12, &value, &value_size, &vlog_offset,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"key00000000", 12, &value, &value_size, &vlog_offset,
                           &seq, &ttl, &deleted) == 0);
     ASSERT_TRUE(value != NULL);
     free(value);
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"key00000050", 12, &value, &value_size, &vlog_offset,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"key00000050", 12, &value, &value_size, &vlog_offset,
                           &seq, &ttl, &deleted) == 0);
     ASSERT_TRUE(value != NULL);
     free(value);
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"key00000099", 12, &value, &value_size, &vlog_offset,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"key00000099", 12, &value, &value_size, &vlog_offset,
                           &seq, &ttl, &deleted) == 0);
     ASSERT_TRUE(value != NULL);
     free(value);
@@ -2000,7 +2000,7 @@ void test_btree_compression_two_leaves()
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"key00000000", 12, &value, &value_size, &vlog_offset,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"key00000000", 12, &value, &value_size, &vlog_offset,
                           &seq, &ttl, &deleted) == 0);
     free(value);
 
@@ -2144,7 +2144,7 @@ void test_btree_compression_single_leaf()
     int64_t ttl = 0;
     uint8_t deleted = 0;
 
-    ASSERT_TRUE(btree_get(tree, (uint8_t *)"key0", 5, &value, &value_size, &vlog_offset, &seq, &ttl,
+    ASSERT_TRUE(tidesdb_btree_get(tree, (uint8_t *)"key0", 5, &value, &value_size, &vlog_offset, &seq, &ttl,
                           &deleted) == 0);
     ASSERT_TRUE(value != NULL);
     free(value);
@@ -2283,7 +2283,7 @@ void bench_btree_compression_comparison()
             uint64_t vlog_offset = 0, seq = 0;
             int64_t ttl = 0;
             uint8_t deleted = 0;
-            btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
+            tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
                       &seq, &ttl, &deleted);
             free(value);
         }
@@ -2341,7 +2341,7 @@ void bench_btree_compression_comparison()
             uint64_t vlog_offset = 0, seq = 0;
             int64_t ttl = 0;
             uint8_t deleted = 0;
-            btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
+            tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
                       &seq, &ttl, &deleted);
             free(value);
         }
@@ -2399,7 +2399,7 @@ void bench_btree_compression_comparison()
             uint64_t vlog_offset = 0, seq = 0;
             int64_t ttl = 0;
             uint8_t deleted = 0;
-            btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
+            tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
                       &seq, &ttl, &deleted);
             free(value);
         }
@@ -2493,7 +2493,7 @@ void bench_btree_node_sizes()
             uint64_t vlog_offset = 0, seq = 0;
             int64_t ttl = 0;
             uint8_t deleted = 0;
-            btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
+            tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
                       &seq, &ttl, &deleted);
             free(value);
         }
@@ -2568,7 +2568,7 @@ void bench_btree_node_sizes()
             uint64_t vlog_offset = 0, seq = 0;
             int64_t ttl = 0;
             uint8_t deleted = 0;
-            btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
+            tidesdb_btree_get(tree, (uint8_t *)key, strlen(key) + 1, &value, &value_size, &vlog_offset,
                       &seq, &ttl, &deleted);
             free(value);
         }
