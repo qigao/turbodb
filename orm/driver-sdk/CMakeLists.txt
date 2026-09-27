@@ -19,13 +19,25 @@ file(TO_CMAKE_PATH "$ENV{SALTS_ROOT}" SDK_SALTS_ROOT)
 if(NOT IS_DIRECTORY "${SDK_SALTS_ROOT}")
   message(FATAL_ERROR "SALTS_ROOT is not a directory: ${SDK_SALTS_ROOT}")
 endif()
+if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
+  message(FATAL_ERROR "SALTS_UTILS_ROOT must name the matching installed SaltsUtils prefix")
+endif()
+file(TO_CMAKE_PATH "$ENV{SALTS_UTILS_ROOT}" SDK_SALTS_UTILS_ROOT)
+if(NOT IS_DIRECTORY "${SDK_SALTS_UTILS_ROOT}")
+  message(FATAL_ERROR "SALTS_UTILS_ROOT is not a directory: ${SDK_SALTS_UTILS_ROOT}")
+endif()
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
 find_package(Salts 1.7.9 EXACT CONFIG REQUIRED PATHS "${SDK_SALTS_ROOT}" NO_DEFAULT_PATH)
+unset(SaltsUtils_DIR CACHE)
+unset(SaltsUtils_DIR)
+find_package(SaltsUtils 4.0.1 EXACT CONFIG REQUIRED
+  PATHS "${SDK_SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 foreach(required_target IN ITEMS Salts::Core Salts::CSerde
-                                 Salts::CFlow Salts::TinyTest)
+                                 Salts::CFlow Salts::TinyTest
+                                 Salts::PluginABI Salts::Plugin)
   if(NOT TARGET ${required_target})
-    message(FATAL_ERROR "Salts package is missing ${required_target}")
+    message(FATAL_ERROR "published SDK pair is missing ${required_target}")
   endif()
 endforeach()
 
@@ -33,7 +45,7 @@ add_library(orm_driver_sdk INTERFACE)
 target_include_directories(orm_driver_sdk INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/../include/orm")
 target_link_libraries(orm_driver_sdk INTERFACE
-  Salts::Core Salts::CSerde Salts::CFlow)
+  Salts::Core Salts::CSerde Salts::CFlow Salts::PluginABI)
 
 add_library(orm_driver_build_options INTERFACE)
 if(MSVC)
@@ -111,3 +123,17 @@ add_executable(orm_driver_cpp_consumer
 target_link_libraries(orm_driver_cpp_consumer PRIVATE orm_driver_contract
   orm_driver_build_options)
 add_test(NAME orm_driver_cpp_consumer COMMAND orm_driver_cpp_consumer)
+
+add_executable(orm_driver_interface_test
+  ../tests/driver/orm_driver_interface_test.c
+  ../tests/driver/orm_driver_interface_peer_a.c
+  ../tests/driver/orm_driver_interface_peer_b.c)
+target_link_libraries(orm_driver_interface_test PRIVATE
+  orm_driver_sdk orm_driver_build_options Salts::Plugin)
+add_test(NAME orm_driver_interface COMMAND orm_driver_interface_test)
+
+add_executable(orm_driver_interface_cpp_test
+  ../tests/driver/orm_driver_interface_cpp_test.cpp)
+target_link_libraries(orm_driver_interface_cpp_test PRIVATE
+  orm_driver_sdk orm_driver_build_options)
+add_test(NAME orm_driver_interface_cpp COMMAND orm_driver_interface_cpp_test)
