@@ -1048,6 +1048,26 @@ if(MSVC)
 endif()
 add_test(NAME orm_sqlite_flow COMMAND orm_sqlite_flow_test)
 
+add_executable(orm_sqlite_plugin_test
+  tests/driver/orm_sqlite_plugin_test.c)
+target_compile_features(orm_sqlite_plugin_test PRIVATE c_std_11)
+target_compile_definitions(orm_sqlite_plugin_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_sqlite_plugin_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_sqlite_plugin_test PRIVATE
+  turbo_orm Salts::TinyTest)
+add_dependencies(orm_sqlite_plugin_test orm_sqlite_driver)
+set_target_properties(orm_sqlite_plugin_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_sqlite_plugin_test)
+if(MSVC)
+  target_compile_options(orm_sqlite_plugin_test PRIVATE /WX)
+else()
+  target_compile_options(orm_sqlite_plugin_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_sqlite_plugin COMMAND orm_sqlite_plugin_test)
+set_tests_properties(orm_sqlite_plugin PROPERTIES
+  ENVIRONMENT "ORM_SQLITE_PLUGIN=$<TARGET_FILE:orm_sqlite_driver>")
+
 add_executable(orm_public_flow_test tests/flow/orm_public_flow_test.c)
 target_compile_features(orm_public_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_public_flow_test PRIVATE ORM_C_STATIC)
@@ -1170,7 +1190,8 @@ if(WIN32)
   if(ORM_WITH_SQLITE)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
-    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_public_flow
+    list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_sqlite_plugin
+                                  orm_public_flow
                                   orm_sqlite_provider_atomicity orm_cpp_flow
                                   orm_public_ownership orm_public_ownership_cpp)
   endif()
