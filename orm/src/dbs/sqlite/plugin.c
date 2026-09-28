@@ -19,12 +19,14 @@ extern TurboDb_SqliteMaintenance orm_sqlite_maintenance;
 static const orm_driver_storage_capabilities_v1 sqlite_storage_capabilities = {
     .header = {(uint32_t)sizeof(orm_driver_storage_capabilities_v1),
                ORM_DRIVER_STORAGE_ABI_VERSION},
-    .capabilities = ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA,
+    .capabilities = (ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA |
+                     ORM_DRIVER_STORAGE_CAP_FILE_BACKED_CHECKPOINT |
+                     ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE),
     .max_batch_operations = 0u,
     .max_batch_bytes = 0u,
     .max_progress_metadata_bytes = ORM_DRIVER_STORAGE_LIMIT_CONFIGURED,
     .max_checkpoint_chunk_bytes = 0u,
-    .max_restore_chunk_bytes = 0u};
+    .max_restore_chunk_bytes = ORM_DRIVER_STORAGE_LIMIT_CONFIGURED};
 
 static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
 sqlite_driver_storage_capabilities(void *self) {
