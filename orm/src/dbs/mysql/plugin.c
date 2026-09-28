@@ -27,7 +27,7 @@ static salts_plugin_status SALTS_PLUGIN_CALL mysql_plugin_start(void *self) {
   if (state != &mysql_lifecycle)
     return SALTS_PLUGIN_INVALID_ARGUMENT;
   if (mysql_library_init(0, NULL, NULL) != 0)
-    return SALTS_PLUGIN_START_FAILED;
+    return SALTS_PLUGIN_INVALID_STATE;
   state->started = 1;
   state->stopping = 0;
   return SALTS_PLUGIN_OK;
