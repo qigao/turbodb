@@ -149,6 +149,34 @@ static void cleanup3(char *a, char *b, char *c) {
 }
 
 spec("SQLite plugin maintenance checkpoint and restore") {
+  it("holds the runtime and Plugin lease until extension release") {
+    orm_error_t error;
+    orm_error_init(&error);
+    orm_runtime_t *runtime = open_runtime(&error);
+    orm_runtime_driver_extension_t *extension = NULL;
+    void *binding = NULL;
+
+    check_equal(
+        orm_runtime_driver_acquire_extension(
+            runtime, orm_view("sqlite"),
+            orm_view(ORM_SQLITE_MAINTENANCE_EXPORT_ID),
+            orm_view(ORM_SQLITE_MAINTENANCE_CONTRACT_ID),
+            ORM_SQLITE_MAINTENANCE_CONTRACT_VERSION,
+            TurboDb_SqliteMaintenance_interface(),
+            &extension, &binding, &error),
+        ORM_STATUS_OK);
+    check_not_null(extension);
+    check_not_null(binding);
+    check_true(TurboDb_SqliteMaintenance_valid(
+        (TurboDb_SqliteMaintenance *)binding));
+
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+    check_equal(orm_runtime_driver_release_extension(extension, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
   it("publishes a stable file-backed checkpoint through the plugin extension") {
     orm_error_t error;
     orm_error_init(&error);
