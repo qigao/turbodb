@@ -87,7 +87,9 @@ static orm_runtime_t *orm_redis_test_runtime(orm_error_t *error) {
       info.canonical_id_size != 5u ||
       memcmp(info.canonical_id, "redis", 5u) != 0 ||
       (info.capabilities & required) != required ||
-      (info.capabilities & forbidden) != 0u) {
+      (info.capabilities & forbidden) != 0u ||
+      info.execution_models !=
+          (ORM_DRIVER_EXEC_CALLER_BLOCKING | ORM_DRIVER_EXEC_NATIVE_WAIT)) {
     fprintf(stderr, "Redis Driver capability contract mismatch: %s\n",
             error->message);
     (void)orm_runtime_close(runtime, error);
