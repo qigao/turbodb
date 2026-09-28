@@ -180,7 +180,7 @@ mysql_wire_status_t mysql_wire_build_stmt_close(
   size_t offset = 0u;
   mysql_wire_status_t status;
 
-  if (statement_id == 0u || out == NULL || out_size == NULL)
+  if (out == NULL || out_size == NULL)
     return MYSQL_WIRE_STATUS_INVALID;
   *out_size = 0u;
 
@@ -230,7 +230,7 @@ mysql_wire_status_t mysql_wire_build_stmt_execute(
   size_t i;
   mysql_wire_status_t status;
 
-  if (statement_id == 0u || out == NULL || out_size == NULL ||
+  if (out == NULL || out_size == NULL ||
       (values == NULL && value_count != 0u))
     return MYSQL_WIRE_STATUS_INVALID;
   *out_size = 0u;
