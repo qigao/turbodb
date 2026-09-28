@@ -196,7 +196,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=x64-linux \
             -DORM_WITH_SQLITE=ON \
             -DORM_WITH_PGSQL=ON \
-            -DORM_WITH_REDIS=OFF \
+            -DORM_BUILD_REDIS_DRIVER=OFF \
             -DTURBODB_BUILD_REDIS=OFF \
             -DORM_WITH_MONGODB=OFF \
             -DORM_BUILD_TESTS=ON \
@@ -323,7 +323,7 @@ jobs:
             "-DVCPKG_TARGET_TRIPLET=x64-windows",
             "-DORM_WITH_SQLITE=ON",
             "-DORM_WITH_PGSQL=ON",
-            "-DORM_WITH_REDIS=OFF",
+            "-DORM_BUILD_REDIS_DRIVER=OFF",
             "-DTURBODB_BUILD_REDIS=OFF",
             "-DORM_WITH_MONGODB=OFF",
             "-DORM_BUILD_TESTS=ON",

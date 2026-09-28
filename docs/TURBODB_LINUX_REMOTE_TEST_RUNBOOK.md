@@ -232,7 +232,7 @@ if [ "$TURBODB_EU_POSTGRES_LIVE" = 1 ]; then
 fi
 cmake --fresh --preset "$orm_preset" \
     -DTIDESDB_BUILD_TESTS=OFF \
-    -DORM_WITH_REDIS=ON \
+    -DORM_BUILD_REDIS_DRIVER=ON \
     -DTURBODB_BUILD_DBTOOLS=ON \
     -DTURBODB_DBTOOLS_WITH_SQLITE="$orm_sqlite_dbtools" \
     -DENABLE_TESTS=ON \

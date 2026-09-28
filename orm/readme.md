@@ -38,9 +38,10 @@ as text.
 
 ## C API
 
-Load the installed Orm package, include `orm.h`, and link `Orm::C`. Consumers
-never find backend packages directly. The installed shared Orm closes backend
-linkage and runtime packaging inside the library boundary.
+Load the installed Orm package, include `orm.h`, and link `Orm::C`. The
+generic shared core owns query planning, result/Publisher plumbing and the
+canonical Driver runtime. Database-native dependencies stay in their
+components/Driver modules rather than the generic core.
 
 ```cmake
 find_package(Orm CONFIG REQUIRED)
@@ -67,6 +68,46 @@ if (orm_connect(&config, &connection, &error) != ORM_STATUS_OK) {
   /* error.status and error.message describe the failed boundary. */
 }
 ```
+
+
+### Runtime-loaded Drivers
+
+Redis and TidesDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
+The application loads an exact module path into an `orm_runtime_t`, then
+connects by the canonical Plugin manifest ID. Runtime loading does not scan
+directories, infer aliases, retry older ABIs, or fall back to a built-in
+backend.
+
+```c
+#include <orm_runtime.h>
+
+orm_runtime_config_t runtime_config;
+orm_driver_load_config_t load = {0};
+orm_runtime_t *runtime = NULL;
+
+orm_runtime_config_init(&runtime_config);
+orm_runtime_create(&runtime_config, &runtime, &error);
+
+load.struct_size = sizeof(load);
+load.abi_version = ORM_RUNTIME_ABI_VERSION;
+load.module_path = orm_view("/absolute/path/to/turbodb_driver_redis");
+load.expected_driver_id = orm_view("redis");
+orm_runtime_load_driver(runtime, &load, &error);
+
+orm_config(&config);
+config.driver = orm_view("redis");
+/* configure host/port/options */
+orm_runtime_connect(runtime, &config, &connection, &error);
+
+/* destroy all Publishers/queries/transactions, then disconnect first */
+orm_disconnect(connection);
+orm_runtime_close(runtime, &error);
+orm_runtime_release(runtime);
+```
+
+The Driver keeps its Plugin lease while connection-owned native work is live.
+Unsupported Redis transaction/raw-SQL operations remain explicit backend
+errors; they are not emulated by another database.
 
 ### Typed row Publisher
 
@@ -257,10 +298,11 @@ unchanged.
 
 ## Build and test
 
-Backend CMake options are `ORM_WITH_SQLITE`, `ORM_WITH_PGSQL`,
-`ORM_WITH_REDIS`, and `ORM_WITH_MONGODB`. SQLite and PostgreSQL are enabled by
-default; Redis and MongoDB remain opt-in. The embedded TidesDB backend is
-always part of `Orm::C`.
+Backend/component build options include `ORM_WITH_SQLITE`,
+`ORM_WITH_PGSQL`, `ORM_BUILD_REDIS_DRIVER`,
+`ORM_BUILD_TIDESDB_DRIVER`, and `ORM_WITH_MONGODB`. Redis and TidesDB ORM
+adapters are independent runtime-loaded Driver modules; enabling them does not
+put their native client/storage implementation back into generic `Orm::C`.
 
 ```sh
 cmake --preset win-dev-user
