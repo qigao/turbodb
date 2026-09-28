@@ -91,8 +91,8 @@ jobs:
           {
             echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
             echo "RedisStack=7.4.0-v8"
-            echo "Salts.Native=1.7.10"
-            echo "SaltsUtils.Native=4.0.2"
+            echo "Salts.Native=1.8.0"
+            echo "SaltsUtils.Native=4.1.0"
             echo "PluginABI=2"
             echo "TURBODB_REDIS_TEST_PORT=6379"
           } > evidence/redis-live/qualification.txt
