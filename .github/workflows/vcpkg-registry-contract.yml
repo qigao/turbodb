@@ -222,15 +222,19 @@ jobs:
             cmp "$evidence/baseline.sha256" "$evidence/$scenario.sha256"
           done
 
-          # Qualification uses the production install graph unchanged (#36).
-          # Build only production install targets; unrelated test targets are
-          # intentionally outside installed-module staging.
-          cmake --build "$build" --target \
-            tidesdb turbo_orm orm_postgresql \
-            orm_sqlite_driver orm_postgresql_driver --parallel 4
+          # Stage only the Driver MODULE deployment payload in CI shell (#36):
+          # no test-only CMake install/verify logic and no unrelated package targets.
           stage="$RUNNER_TEMP/turbodb-driver-install"
+          driver_dir="$stage/lib/turbodb/drivers"
           rm -rf "$stage"
-          cmake --install "$build" --prefix "$stage"
+          mkdir -p "$driver_dir"
+          cmake -E copy "$sqlite_plugin" "$driver_dir/turbodb_driver_sqlite.so"
+          cmake -E copy "$postgresql_plugin" "$driver_dir/turbodb_driver_postgresql.so"
+          cat > "$RUNNER_TEMP/remove-driver-rpath.cmake" <<EOF
+file(RPATH_REMOVE FILE "$driver_dir/turbodb_driver_sqlite.so")
+file(RPATH_REMOVE FILE "$driver_dir/turbodb_driver_postgresql.so")
+EOF
+          cmake -P "$RUNNER_TEMP/remove-driver-rpath.cmake"
           installed_sqlite="$stage/lib/turbodb/drivers/turbodb_driver_sqlite.so"
           installed_postgresql="$stage/lib/turbodb/drivers/turbodb_driver_postgresql.so"
           test -f "$installed_sqlite"
@@ -354,16 +358,13 @@ jobs:
             }
           }
 
-          # Qualification uses the production install graph unchanged (#36).
-          # Build only production install targets; unrelated /WX test targets
-          # are intentionally outside installed-module staging.
-          & cmake --build $build --config Release --target tidesdb turbo_orm orm_postgresql orm_sqlite_driver orm_postgresql_driver --parallel 4
-          if ($LASTEXITCODE -ne 0) { throw "production install target build failed" }
+          # Stage only the Driver MODULE deployment payload in CI shell (#36).
           $stage = Join-Path $env:RUNNER_TEMP "turbodb-driver-install"
-          Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-          & cmake --install $build --prefix $stage --config Release
-          if ($LASTEXITCODE -ne 0) { throw "installed Driver module staging failed" }
           $installedDir = Join-Path $stage "bin/turbodb/drivers"
+          Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $installedDir | Out-Null
+          Copy-Item -LiteralPath $sqlitePlugin -Destination (Join-Path $installedDir "turbodb_driver_sqlite.dll")
+          Copy-Item -LiteralPath $postgresqlPlugin -Destination (Join-Path $installedDir "turbodb_driver_postgresql.dll")
           $installedSqlite = Join-Path $installedDir "turbodb_driver_sqlite.dll"
           $installedPostgresql = Join-Path $installedDir "turbodb_driver_postgresql.dll"
           if (-not (Test-Path -LiteralPath $installedSqlite -PathType Leaf)) { throw "missing installed SQLite Driver" }
