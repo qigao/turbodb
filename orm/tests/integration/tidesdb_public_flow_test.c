@@ -294,10 +294,16 @@ spec("TidesDB public reactive C facade") {
 
     cflow_publisher_destroy(&source);
     orm_query_destroy(query);
+    (void)fprintf(stderr, "TIDESDBG: before disconnect\n");
     orm_disconnect(connection);
+    (void)fprintf(stderr, "TIDESDBG: after disconnect\n");
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    (void)fprintf(stderr, "TIDESDBG: after runtime close\n");
     orm_runtime_release(runtime);
+    (void)fprintf(stderr, "TIDESDBG: after runtime release\n");
     check_equal(tt_remove_tree(path), 0);
+    (void)fprintf(stderr, "TIDESDBG: after remove tree\n");
     free(path);
+    (void)fprintf(stderr, "TIDESDBG: after free path\n");
   }
 }
