@@ -117,7 +117,7 @@ ctest --preset win-release-dbtools-pg-user --output-on-failure
 cmake --build --preset install-win-release-dbtools-pg-user
 ```
 
-Consumers must select the intended package explicitly. Profiles do not fall back to each other.
+Consumers must select the intended package explicitly. Profiles do not fall back to each other. Runtime ORM Drivers are deployment artifacts under `turbodb/drivers`; changing Driver deployment does not require relinking `Orm::C`.
 
 ### SQLite
 
@@ -181,7 +181,7 @@ The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` 
 
 Salts owns canonical CMeta reflection plus Plugin ABI 2 publication, loading, lifecycle, and leases. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
 
-Main build areas are independently configurable through CMake options, including ORM backends, Redis support, and standalone database tools.
+Main build areas are independently configurable through CMake options. Runtime database modules use explicit `ORM_BUILD_*_DRIVER` switches; standalone dbtools use their own `TURBODB_DBTOOLS_*` switches. The generic `Orm::C` package does not encode which Drivers were built or deployed.
 
 ## Design principles
 
