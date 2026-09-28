@@ -14,6 +14,7 @@ typedef struct orm_row_publisher_state {
   orm_row_cursor cursor;
   const cmeta_data_desc *row_shape;
   DataBindNativeOptions bind_options;
+  const DataBindMessagePlan *message_plan;
   void *scratch;
   size_t max_buffer_bytes;
   cflow_publisher_terminal terminal;
@@ -161,6 +162,8 @@ static orm_status_t orm_row_status_to_orm(DataBindStatus status) {
       return ORM_STATUS_OUT_OF_MEMORY;
     case DATA_BIND_ERR_SCHEMA:
       return ORM_STATUS_UNSUPPORTED;
+    case DATA_BIND_ERR_VALIDATION:
+      return ORM_STATUS_VALIDATION_ERROR;
     case DATA_BIND_ERR_INVALID_ARG:
     case DATA_BIND_ERR_RUNTIME:
     case DATA_BIND_ERR_BUFFER_TOO_SMALL:
@@ -223,21 +226,41 @@ static cflow_step orm_row_publisher_resume_admitted(
                                    "driver returned an invalid cursor step");
   }
 
-  bind_status = data_bind_native_init(
-      &state->bind_options, state->row_shape, out_value,
-      state->row_shape->storage_type->size, &bind_error);
-  if (bind_status == DATA_BIND_OK)
-    bind_status = data_bind_native_decode_bounded(
-        &state->bind_options, state->row_shape, &reader, out_value,
-        state->row_shape->storage_type->size, state->max_buffer_bytes, &bind_error);
-  if (bind_status != DATA_BIND_OK) {
-    char message[ORM_C_ERROR_MESSAGE_CAPACITY];
-    (void)snprintf(message, sizeof(message),
-                   "row binding failed: databind=%d cserde=%d path=%s",
-                   (int)bind_status, (int)bind_error.source_status,
-                   bind_error.error.path);
-    return orm_row_publisher_fail(
-        state, orm_row_status_to_orm(bind_status), message);
+  if (state->message_plan != NULL) {
+    DataBindMessagePlanDiagnostic diagnostic =
+        DATA_BIND_MESSAGE_PLAN_DIAGNOSTIC_INIT;
+    bind_status = data_bind_message_plan_decode_native(
+        state->message_plan, &state->bind_options, &reader, out_value,
+        state->row_shape->storage_type->size, &diagnostic);
+    if (bind_status != DATA_BIND_OK) {
+      char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+      (void)snprintf(
+          message, sizeof(message),
+          "row binding failed: databind=%d field=%s detail=%s",
+          (int)bind_status,
+          diagnostic.schema_field[0] != '\0' ? diagnostic.schema_field : "-",
+          diagnostic.message[0] != '\0' ? diagnostic.message : "-");
+      return orm_row_publisher_fail(
+          state, orm_row_status_to_orm(bind_status), message);
+    }
+  } else {
+    bind_status = data_bind_native_init(
+        &state->bind_options, state->row_shape, out_value,
+        state->row_shape->storage_type->size, &bind_error);
+    if (bind_status == DATA_BIND_OK)
+      bind_status = data_bind_native_decode_bounded(
+          &state->bind_options, state->row_shape, &reader, out_value,
+          state->row_shape->storage_type->size, state->max_buffer_bytes,
+          &bind_error);
+    if (bind_status != DATA_BIND_OK) {
+      char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+      (void)snprintf(message, sizeof(message),
+                     "row binding failed: databind=%d cserde=%d path=%s",
+                     (int)bind_status, (int)bind_error.source_status,
+                     bind_error.error.path);
+      return orm_row_publisher_fail(
+          state, orm_row_status_to_orm(bind_status), message);
+    }
   }
 
   if (cursor_step.kind == ORM_ROW_CURSOR_ROW_AND_DONE) {
@@ -375,6 +398,9 @@ orm_status_t orm_row_publisher_prepare(
   DataBindNativeDiagnostic diagnostic = DATA_BIND_NATIVE_DIAGNOSTIC_INIT;
   DataBindStatus status;
   orm_row_publisher_state *state;
+  const DataBindNativeTypeBinding *message_native = NULL;
+  size_t message_bitmap_bytes = 0u;
+  size_t workspace_bytes;
   size_t probe_bytes, allocation_bytes, padding;
   void *probe;
   if (out_prepared == NULL || *out_prepared != NULL ||
@@ -382,6 +408,25 @@ orm_status_t orm_row_publisher_prepare(
     orm_row_set_error(error, ORM_STATUS_INVALID_ARGUMENT,
                       "invalid DataBind source configuration");
     return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  if (config->message_plan != NULL) {
+    const size_t field_count =
+        data_bind_message_plan_field_count(config->message_plan);
+    message_native =
+        data_bind_message_plan_native_binding(config->message_plan);
+    if (message_native == NULL || message_native->data == NULL ||
+        !cmeta_data_desc_equal(message_native->data, config->row_shape)) {
+      orm_row_set_error(
+          error, ORM_STATUS_TYPE_ERROR,
+          "DataBind MessagePlan native shape does not match ORM row_shape");
+      return ORM_STATUS_TYPE_ERROR;
+    }
+    if (field_count > SIZE_MAX - 7u) {
+      orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED,
+                        "DataBind MessagePlan field bitmap overflow");
+      return ORM_STATUS_LIMIT_EXCEEDED;
+    }
+    message_bitmap_bytes = (field_count + 7u) / 8u;
   }
   /* Native depth counts scalar leaves; ORM depth counts containers. The
    * measured container depth separately rejects an extra empty Struct. */
@@ -439,9 +484,10 @@ orm_status_t orm_row_publisher_prepare(
   padding = (uintptr_t)state->scratch % required.workspace_alignment;
   if (padding != 0u) padding = required.workspace_alignment - padding;
   options.workspace = (unsigned char *)state->scratch + padding;
-  options.workspace_bytes = required.decode_bytes;
+  options.workspace_bytes = workspace_bytes;
   options.max_items = required.descriptor_nodes;
   state->bind_options = options;
+  state->message_plan = config->message_plan;
   state->max_buffer_bytes = config->max_buffer_bytes;
   state->row_shape = config->row_shape;
   state->terminal = CFLOW_PUBLISHER_OPEN;
