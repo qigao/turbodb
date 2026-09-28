@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -56,7 +57,20 @@ static orm_runtime_t *orm_tides_plugin_runtime(orm_error_t *error) {
   load.abi_version = ORM_RUNTIME_ABI_VERSION;
   load.module_path = orm_view(orm_tides_plugin_path());
   load.expected_driver_id = orm_view("tidesdb");
-  check_equal(orm_runtime_load_driver(runtime, &load, error), ORM_STATUS_OK);
+  {
+    const orm_status_t load_status =
+        orm_runtime_load_driver(runtime, &load, error);
+    if (load_status != ORM_STATUS_OK) {
+      (void)fprintf(stderr, "TidesDB Plugin load failed: status=%d message=%s\n",
+                    (int)load_status, error->message);
+      (void)orm_runtime_close(runtime, error);
+      orm_runtime_release(runtime);
+      runtime = NULL;
+    }
+    check_equal(load_status, ORM_STATUS_OK);
+    if (load_status != ORM_STATUS_OK)
+      return NULL;
+  }
 
   memset(&info, 0, sizeof(info));
   check_equal(
