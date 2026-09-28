@@ -1093,6 +1093,10 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
         "TurboDb.Driver storage capability descriptor is invalid");
     goto fail_admission;
   }
+  /* The descriptor is borrowed Plugin storage. Snapshot it while admission
+   * still holds the module lease; do not dereference it after lease release. */
+  const orm_driver_storage_capabilities_v1 storage_snapshot =
+      *storage_capabilities;
 
   if (runtime_id_conflicts(
           runtime,
@@ -1141,7 +1145,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
       (orm_driver_bytes_v1){manifest->plugin_id, (uint64_t)plugin_id_size});
   driver->capabilities = entry->capabilities;
   driver->execution_models = execution_models;
-  driver->storage = *storage_capabilities;
+  driver->storage = storage_snapshot;
   memcpy(driver->bundle_id, runtime_bundle, sizeof(driver->bundle_id));
   ++runtime->driver_count;
   --runtime->pending_operations;
