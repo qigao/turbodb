@@ -28,7 +28,8 @@ static const uint8_t MYSQL_SESSION_PROBE_SQL[] =
 typedef enum mysql_session_action_t {
   MYSQL_SESSION_ACTION_PING = 0,
   MYSQL_SESSION_ACTION_PREPARED_PROBE,
-  MYSQL_SESSION_ACTION_PREPARED_CURSOR
+  MYSQL_SESSION_ACTION_PREPARED_CURSOR,
+  MYSQL_SESSION_ACTION_PREPARED_COMMAND
 } mysql_session_action_t;
 
 typedef enum mysql_session_phase_t {
@@ -46,6 +47,7 @@ typedef enum mysql_session_phase_t {
   MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF,
   MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF,
   MYSQL_PHASE_WAIT_EXECUTE_SEND,
+  MYSQL_PHASE_WAIT_COMMAND_REPLY,
   MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT,
   MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF,
   MYSQL_PHASE_WAIT_RESULT_ROW,
@@ -72,6 +74,7 @@ typedef struct mysql_session_t {
   mysql_session_error_t *error;
   mysql_session_action_t action;
   mysql_session_prepared_probe_t *probe;
+  mysql_session_command_result_t *command_result;
   const uint8_t *prepared_sql;
   size_t prepared_sql_size;
   const mysql_stmt_value_t *prepared_values;
@@ -135,6 +138,7 @@ static bool mysql_session_waits_for_receive(mysql_session_phase_t phase) {
          phase == MYSQL_PHASE_WAIT_PREPARE_OK ||
          phase == MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF ||
          phase == MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF ||
+         phase == MYSQL_PHASE_WAIT_COMMAND_REPLY ||
          phase == MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT ||
          phase == MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF ||
          phase == MYSQL_PHASE_WAIT_RESULT_ROW;
@@ -403,7 +407,8 @@ static void mysql_session_send_prepare(mysql_session_t *session) {
                             "prepared statements require CLIENT_DEPRECATE_EOF");
     return;
   }
-  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR ||
+      session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
     sql = session->prepared_sql;
     sql_size = session->prepared_sql_size;
   }
@@ -454,7 +459,8 @@ static void mysql_session_send_execute(mysql_session_t *session) {
   size_t payload_size = 0u;
   mysql_wire_status_t wire_status;
 
-  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR ||
+      session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
     values = session->prepared_values;
     value_count = session->prepared_value_count;
   }
@@ -509,7 +515,8 @@ static void mysql_session_begin_action(mysql_session_t *session) {
     return;
   }
   if (session->action == MYSQL_SESSION_ACTION_PREPARED_PROBE ||
-      session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+      session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR ||
+      session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
     mysql_session_send_prepare(session);
     return;
   }
@@ -674,6 +681,15 @@ static void mysql_session_handle_prepare_ok(
                               "prepared cursor metadata exceeds expected shape");
       return;
     }
+  } else if (session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
+    if ((size_t)session->prepare_ok.parameter_count !=
+            session->prepared_value_count ||
+        session->prepare_ok.column_count != 0u) {
+      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                              "prepare-shape",
+                              "prepared command unexpectedly returns columns");
+      return;
+    }
   } else if (session->prepare_ok.parameter_count != 1u ||
              session->prepare_ok.column_count !=
                  MYSQL_SESSION_PROBE_COLUMN_COUNT) {
@@ -683,9 +699,13 @@ static void mysql_session_handle_prepare_ok(
     return;
   }
   session->metadata_index = 0u;
-  session->phase = session->prepare_ok.parameter_count == 0u
-                       ? MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF
-                       : MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF;
+  if (session->prepare_ok.parameter_count != 0u) {
+    session->phase = MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF;
+  } else if (session->prepare_ok.column_count != 0u) {
+    session->phase = MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF;
+  } else {
+    mysql_session_send_execute(session);
+  }
 }
 
 static void mysql_session_handle_prepare_param_def(
@@ -700,7 +720,10 @@ static void mysql_session_handle_prepare_param_def(
   ++session->metadata_index;
   if (session->metadata_index == session->prepare_ok.parameter_count) {
     session->metadata_index = 0u;
-    session->phase = MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF;
+    if (session->prepare_ok.column_count != 0u)
+      session->phase = MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF;
+    else
+      mysql_session_send_execute(session);
   }
 }
 
@@ -718,6 +741,30 @@ static void mysql_session_handle_prepare_column_def(
     session->metadata_index = 0u;
     mysql_session_send_execute(session);
   }
+}
+
+static void mysql_session_handle_command_reply(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  mysql_wire_ok_packet_t ok;
+
+  if (mysql_session_decode_server_error(
+          session, payload, payload_size, "command-server"))
+    return;
+  if (mysql_wire_decode_ok_packet(
+          payload, payload_size, session->client_capabilities,
+          &ok) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "command-ok",
+                            "invalid prepared command OK packet");
+    return;
+  }
+  if (session->command_result != NULL) {
+    session->command_result->affected_rows = ok.affected_rows;
+    session->command_result->last_insert_id = ok.last_insert_id;
+    session->command_result->status_flags = ok.status_flags;
+    session->command_result->warnings = ok.warnings;
+  }
+  mysql_session_send_close(session);
 }
 
 static void mysql_session_handle_result_column_count(
@@ -932,6 +979,9 @@ static void mysql_session_handle_message(
     case MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF:
       mysql_session_handle_prepare_column_def(session, payload, payload_size);
       break;
+    case MYSQL_PHASE_WAIT_COMMAND_REPLY:
+      mysql_session_handle_command_reply(session, payload, payload_size);
+      break;
     case MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT:
       mysql_session_handle_result_column_count(session, payload, payload_size);
       break;
@@ -1090,7 +1140,10 @@ static void mysql_session_on_send(
       (void)mysql_session_request_receive(session);
       break;
     case MYSQL_SEND_EXECUTE:
-      session->phase = MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT;
+      session->phase =
+          session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND
+              ? MYSQL_PHASE_WAIT_COMMAND_REPLY
+              : MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT;
       (void)mysql_session_request_receive(session);
       break;
     case MYSQL_SEND_CLOSE:
