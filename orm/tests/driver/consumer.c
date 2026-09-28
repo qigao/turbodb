@@ -13,7 +13,9 @@ static orm_status_t ORM_DRIVER_CALL consumer_create(
       out_connection == NULL || error == NULL)
     return ORM_STATUS_INVALID_ARGUMENT;
   memset(out_connection, 0, sizeof(*out_connection));
-  orm_error_init(error);
+  memset(error, 0, sizeof(*error));
+  error->struct_size = (uint32_t)sizeof(*error);
+  error->status = ORM_STATUS_OK;
   return ORM_STATUS_OK;
 }
 
