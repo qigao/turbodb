@@ -20,11 +20,12 @@ static orm_status_t ORM_DRIVER_CALL consumer_create(
 }
 
 int main(void) {
+  static unsigned consumer_state;
   static const TurboDb_Driver_vtable vtable = {
       .implementation = "sdk-consumer",
       .capabilities = ORM_DRIVER_CAP_SELECT,
       .create = consumer_create};
-  TurboDb_Driver driver = TurboDb_Driver_bind(NULL, &vtable);
+  TurboDb_Driver driver = TurboDb_Driver_bind(&consumer_state, &vtable);
   salts_plugin_export entry =
       orm_driver_plugin_export(&driver, ORM_DRIVER_CAP_SELECT);
   salts_plugin_manifest manifest = {
