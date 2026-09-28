@@ -68,9 +68,13 @@ Semantic capabilities:
 - **RECONCILE**  
   A read-only operation can determine whether a previously ambiguous or repeated logical operation is already committed, retryable, conflicting, or missing.
 
-The descriptor also exposes limits needed for admission. A capability bit without its required limits is invalid.
+The descriptor also exposes limits needed for admission. A capability bit without the limits that apply to its execution model is invalid.
 
 `ORM_DRIVER_STORAGE_LIMIT_CONFIGURED` means the Driver has a real finite bound, but its exact value comes from connection/operation configuration rather than from a module-wide constant. It never means unlimited.
+
+`STAGED_RESTORE` has two valid local forms:
+- a Driver that ingests restore payload chunks publishes a non-zero `max_restore_chunk_bytes`;
+- a publication-only Driver accepts a pre-materialized immutable generation and publishes `max_restore_chunk_bytes == 0`, meaning no restore payload bytes cross the Driver maintenance interface.
 
 ## Result semantics
 
@@ -116,10 +120,10 @@ The export API must define ownership, lifetime, cleanup, and whether concurrent 
 A provider-grade restore must:
 
 1. create or open staging state;
-2. consume bounded input;
-3. validate completion/integrity;
+2. either consume bounded input or accept a caller-owned pre-materialized immutable staging generation;
+3. validate completion/integrity before authority changes;
 4. atomically publish or switch to the restored state;
-5. discard staging state on abort/failure.
+5. preserve explicit ownership of unpublished staging state on abort/failure.
 
 An API that writes directly into the authoritative database while bytes are still arriving does not satisfy `STAGED_RESTORE`.
 
@@ -129,8 +133,8 @@ This matrix records the currently claimed semantics. “Primitive” means usefu
 
 | Backend | Local transaction | Atomic state + caller metadata | Replay/conflict classes | Commit ambiguity | Checkpoint export | Staged restore | Qualification |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SQLite ORM | yes | qualified; machine-readable | no | no explicit class | missing current-master provider-grade path | missing | #47 |
-| TidesDB | yes | qualified; machine-readable | APPLIED / REPLAYED / GAP / CONFLICT | no explicit ambiguous class | qualified file-backed checkpoint | not yet provider-grade | #48 |
+| SQLite ORM | yes | qualified; machine-readable | no | no explicit class | qualified file-backed checkpoint | qualified staged restore | #47 |
+| TidesDB | yes | qualified; machine-readable | APPLIED / REPLAYED / GAP / CONFLICT | no explicit ambiguous class | qualified file-backed checkpoint | immutable-generation ACTIVE publication | #48 / #145 |
 | Redis ordered apply | specialized atomic Lua path | yes for current ordered-apply metadata/state operation | APPLIED / REPLAYED / GAP / CONFLICT / PENDING | COMMIT_UNKNOWN | no generic snapshot capability claimed | no generic restore capability claimed | machine-readable via Driver v3; #49 |
 | PostgreSQL ORM | yes | primitive only | no | no explicit class | no provider-grade path in current scope | no | informational / future |
 
@@ -138,14 +142,12 @@ This matrix records the currently claimed semantics. “Primitive” means usefu
 
 Current ORM code exposes explicit transactions including serializable mode. The retained provider atomicity test proves application state and caller-owned progress rows commit or roll back together across reopen. The SQLite Driver therefore publishes `ATOMIC_STATE_METADATA`; its metadata budget is connection/operation configured.
 
-SQLite does not yet publish `FILE_BACKED_CHECKPOINT` or `STAGED_RESTORE` on current master. The closed historical #68 implementation remains reference material only.
+#47 is complete on current master through #143. The SQLite Driver publishes:
+- `ATOMIC_STATE_METADATA`;
+- `FILE_BACKED_CHECKPOINT`;
+- `STAGED_RESTORE`.
 
-#47 owns:
-
-- atomic mutation + progress metadata in one SQLite transaction;
-- bounded/file-backed checkpoint creation;
-- staged restore with complete-state publication;
-- crash tests around commit and restore boundaries.
+The maintenance interface is a typed secondary CMeta export from the same SQLite Driver Plugin. It uses bounded Online Backup, validates staging with `quick_check`, and publishes through `salts_fs_replace_durable()`. Historical #68 remains reference material only.
 
 ### TidesDB
 
@@ -156,9 +158,14 @@ Current retained tests qualify:
 - APPLIED / REPLAYED / GAP / CONFLICT classification that survives reopen and does not mutate rejected paths;
 - a filesystem checkpoint that reopens at the completed checkpoint boundary and refuses to overwrite a non-empty destination.
 
-The TidesDB Driver therefore publishes `ATOMIC_STATE_METADATA`, `ORDERED_REPLAY_CLASSIFICATION`, and `FILE_BACKED_CHECKPOINT`. It does not claim `BOUNDED_BATCH`, `AMBIGUOUS_COMMIT`, `RECONCILE`, `STREAMING_CHECKPOINT`, or `STAGED_RESTORE`.
+The TidesDB Driver publishes `ATOMIC_STATE_METADATA`, `ORDERED_REPLAY_CLASSIFICATION`, and `FILE_BACKED_CHECKPOINT`. #145 adds publication-only `STAGED_RESTORE` through a typed `TurboDb.TidesMaintenance` export:
+- callers pre-materialize one closed immutable generation under `provider-root/generations/<id>`;
+- the Driver validates the candidate before authority changes;
+- ACTIVE is published through `salts_fs_replace_durable()`;
+- `DURABILITY_UNKNOWN` maps to `ORM_STATUS_COMMIT_UNKNOWN` and is reconciled by reading ACTIVE;
+- the maintenance interface accepts no restore payload bytes, so `max_restore_chunk_bytes == 0`.
 
-#48 still owns generation-directory staged restore and durable ACTIVE publication before `STAGED_RESTORE` can be advertised.
+TidesDB still does not claim `BOUNDED_BATCH`, `AMBIGUOUS_COMMIT`, `RECONCILE`, or `STREAMING_CHECKPOINT`.
 
 ### Redis
 
@@ -216,8 +223,8 @@ Rules:
 - generic code contains no backend-name switch;
 - SQL/CRUD Driver capability bits and storage durability capability bits remain separate namespaces;
 - unsupported storage semantics are represented by absent bits, never by fallback or emulation;
-- SQLite publishes only its already-qualified atomic state+metadata fact;
-- TidesDB publishes only its already-qualified atomic metadata, ordered replay classification, and file-backed checkpoint facts;
+- SQLite publishes its qualified atomic metadata, file-backed checkpoint, and staged-restore facts;
+- TidesDB publishes qualified atomic metadata, ordered replay classification, file-backed checkpoint, and publication-only staged restore after #145 qualification;
 - PostgreSQL, MySQL, and MongoDB publish a valid empty storage descriptor until provider-grade semantics are separately qualified;
 - Redis publishes only the already-qualified ordered-apply/reconciliation semantics.
 
