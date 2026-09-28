@@ -1477,17 +1477,24 @@ static mysql_cursor_source_step_t mysql_session_cursor_source_next(
     /* request_receive records the session error */
   }
 
-  if (session->phase == MYSQL_PHASE_WAIT_RESULT_ROW)
+  if (session->phase == MYSQL_PHASE_CURSOR_ROW_READY ||
+      session->phase == MYSQL_PHASE_DONE) {
+    progress_status = MYSQL_SESSION_OK;
+  } else if (session->phase == MYSQL_PHASE_FAILED) {
+    progress_status = session->error != NULL
+                          ? session->error->status
+                          : MYSQL_SESSION_PROTOCOL;
+  } else {
+    /*
+     * Deferred transport bytes may contain the result terminator immediately
+     * after the row. Consuming it transitions through WAIT_CLOSE_SEND, so keep
+     * driving the same session until either another row is ready or CLOSE
+     * reaches DONE. Treating WAIT_CLOSE_SEND as an error drops a valid
+     * deprecate-EOF terminator path.
+     */
     progress_status = mysql_session_progress_until(
         session, MYSQL_PHASE_CURSOR_ROW_READY);
-  else
-    progress_status = session->phase == MYSQL_PHASE_CURSOR_ROW_READY
-                          ? MYSQL_SESSION_OK
-                          : (session->phase == MYSQL_PHASE_DONE
-                                 ? MYSQL_SESSION_OK
-                                 : (session->error != NULL
-                                        ? session->error->status
-                                        : MYSQL_SESSION_PROTOCOL));
+  }
 
   if (session->phase == MYSQL_PHASE_CURSOR_ROW_READY) {
     step.kind = MYSQL_CURSOR_SOURCE_ROW;
