@@ -207,6 +207,55 @@ spec("mysql wire packet stream") {
   }
 }
 
+spec("mysql wire multi-packet continuation") {
+  (void)ttest_config__;
+
+  it("requires a zero-length trailer after an exact 0xffffff payload") {
+    const uint8_t header[] = {0xff, 0xff, 0xff, 0x2a};
+    const uint8_t trailer[] = {0x00, 0x00, 0x00, 0x2b};
+    uint8_t chunk[65536] = {0};
+    mysql_wire_packet_stream_t stream;
+    mysql_wire_packet_event_t event;
+    size_t consumed = 0u;
+    uint32_t remaining = MYSQL_WIRE_PACKET_MAX_PAYLOAD;
+
+    check_equal(mysql_wire_packet_stream_init(
+                    &stream, UINT8_C(0x2a), MYSQL_WIRE_PACKET_MAX_PAYLOAD),
+                MYSQL_WIRE_STATUS_OK);
+    check_equal(mysql_wire_packet_stream_feed(
+                    &stream, header, sizeof(header), &consumed, &event),
+                MYSQL_WIRE_STATUS_NEED_MORE);
+    check_equal(consumed, sizeof(header));
+
+    while (remaining != 0u) {
+      size_t offered = sizeof(chunk);
+      if ((uint32_t)offered > remaining)
+        offered = (size_t)remaining;
+      check_equal(mysql_wire_packet_stream_feed(
+                      &stream, chunk, offered, &consumed, &event),
+                  MYSQL_WIRE_STATUS_OK);
+      check_equal(consumed, offered);
+      remaining -= (uint32_t)offered;
+      if (remaining == 0u) {
+        check_equal(event.packet_end, true);
+        check_equal(event.message_end, false);
+        check_equal(event.sequence_id, UINT8_C(0x2a));
+      } else {
+        check_equal(event.packet_end, false);
+      }
+    }
+
+    check_equal(mysql_wire_packet_stream_feed(
+                    &stream, trailer, sizeof(trailer), &consumed, &event),
+                MYSQL_WIRE_STATUS_OK);
+    check_equal(consumed, sizeof(trailer));
+    check_equal(event.packet_end, true);
+    check_equal(event.message_end, true);
+    check_equal(event.packet_payload_length, UINT32_C(0));
+    check_equal(event.sequence_id, UINT8_C(0x2b));
+  }
+}
+
 spec("mysql wire result packets") {
   (void)ttest_config__;
 
