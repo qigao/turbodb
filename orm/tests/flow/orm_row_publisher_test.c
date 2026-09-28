@@ -54,35 +54,43 @@ static const cmeta_data_desc orm_flow_test_row_data = {
     .shape = &orm_flow_test_row_shape
 };
 
-Struct(orm_flow_validated_row,
-    (uint32_t, id)
-);
+typedef struct orm_flow_validated_row {
+  uint32_t id;
+} orm_flow_validated_row;
 
 static const cmeta_type_identity orm_flow_validated_row_identity =
     CMETA_TYPE_ID_ATOM_INIT("orm.test.ValidatedRow");
-static const cmeta_type_traits orm_flow_validated_row_traits = {
-    .flags = CMETA_TRAIT_TRIVIAL_COPY | CMETA_TRAIT_TRIVIAL_DESTROY
-};
 static const cmeta_type_desc orm_flow_validated_row_type = {
-    .name = "orm_flow_validated_row",
-    .size = sizeof(orm_flow_validated_row),
-    .align = _Alignof(orm_flow_validated_row),
-    .kind = CMETA_T_OBJECT,
-    .pointee = NULL,
-    .traits = &orm_flow_validated_row_traits,
-    .identity = &orm_flow_validated_row_identity
+    "orm_flow_validated_row",
+    sizeof(orm_flow_validated_row),
+    _Alignof(orm_flow_validated_row),
+    CMETA_T_OBJECT,
+    NULL,
+    NULL,
+    &orm_flow_validated_row_identity
+};
+static const cmeta_field_desc orm_flow_validated_row_layout_fields[] = {
+    {"id", "uint32_t", offsetof(orm_flow_validated_row, id),
+     sizeof(uint32_t), _Alignof(uint32_t), &cmeta_type_uint32, NULL}
+};
+static const cmeta_struct_desc orm_flow_validated_row_layout = {
+    "ValidatedRow",
+    sizeof(orm_flow_validated_row),
+    _Alignof(orm_flow_validated_row),
+    orm_flow_validated_row_layout_fields,
+    1u
 };
 static const cmeta_data_field_desc orm_flow_validated_row_fields[] = {
     {"orm.test.ValidatedRow.id", "id",
      offsetof(orm_flow_validated_row, id), &cmeta_data_uint32}
 };
 static const cmeta_data_struct_shape orm_flow_validated_row_shape = {
-    .layout = StructMeta(orm_flow_validated_row),
-    .fields = orm_flow_validated_row_fields,
-    .field_count = 1u
+    &orm_flow_validated_row_layout,
+    orm_flow_validated_row_fields,
+    1u
 };
 static const cmeta_data_desc orm_flow_validated_row_data = {
-    .struct_size = ORM_TEST_DATA_PREFIX_SIZE,
+    .struct_size = sizeof(cmeta_data_desc),
     .abi_version = CMETA_DATA_DESC_ABI_VERSION,
     .stable_id = "orm.test.ValidatedRow.data",
     .display_name = "ValidatedRow",
