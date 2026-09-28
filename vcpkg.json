@@ -45,6 +45,11 @@
       "name": "libbson",
       "version": "2.3.1",
       "port-version": 0
+    },
+    {
+      "name": "utf8proc",
+      "version": "2.11.3",
+      "port-version": 0
     }
   ]
 }
