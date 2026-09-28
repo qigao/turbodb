@@ -4,6 +4,8 @@
 #include "wire/handshake.h"
 #include "wire/packet.h"
 #include "wire/result.h"
+#include "wire/row.h"
+#include "wire/statement.h"
 
 #include <cnet/cnet.h>
 
@@ -16,6 +18,15 @@
 #define MYSQL_SESSION_DEFAULT_TIMEOUT_MS 5000u
 #define MYSQL_SESSION_MAX_PACKET_SIZE UINT32_C(0x01000000)
 #define MYSQL_COM_PING UINT8_C(0x0e)
+#define MYSQL_SESSION_PROBE_COLUMN_COUNT 4u
+
+static const uint8_t MYSQL_SESSION_PROBE_SQL[] =
+    "SELECT s,u,txt,decv FROM m3_probe WHERE s=?";
+
+typedef enum mysql_session_action_t {
+  MYSQL_SESSION_ACTION_PING = 0,
+  MYSQL_SESSION_ACTION_PREPARED_PROBE
+} mysql_session_action_t;
 
 typedef enum mysql_session_phase_t {
   MYSQL_PHASE_WAIT_TCP = 0,
@@ -27,6 +38,15 @@ typedef enum mysql_session_phase_t {
   MYSQL_PHASE_WAIT_AUTH_SEND,
   MYSQL_PHASE_WAIT_PING_SEND,
   MYSQL_PHASE_WAIT_PING_REPLY,
+  MYSQL_PHASE_WAIT_PREPARE_SEND,
+  MYSQL_PHASE_WAIT_PREPARE_OK,
+  MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF,
+  MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF,
+  MYSQL_PHASE_WAIT_EXECUTE_SEND,
+  MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT,
+  MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF,
+  MYSQL_PHASE_WAIT_RESULT_ROW,
+  MYSQL_PHASE_WAIT_CLOSE_SEND,
   MYSQL_PHASE_DONE,
   MYSQL_PHASE_FAILED
 } mysql_session_phase_t;
@@ -36,12 +56,17 @@ typedef enum mysql_session_send_kind_t {
   MYSQL_SEND_SSL_REQUEST,
   MYSQL_SEND_HANDSHAKE_RESPONSE,
   MYSQL_SEND_AUTH_RESPONSE,
-  MYSQL_SEND_PING
+  MYSQL_SEND_PING,
+  MYSQL_SEND_PREPARE,
+  MYSQL_SEND_EXECUTE,
+  MYSQL_SEND_CLOSE
 } mysql_session_send_kind_t;
 
 typedef struct mysql_session_t {
   const mysql_session_config_t *config;
   mysql_session_error_t *error;
+  mysql_session_action_t action;
+  mysql_session_prepared_probe_t *probe;
   cnet_client client;
   cnet_connection connection;
   mysql_wire_packet_stream_t stream;
@@ -57,6 +82,11 @@ typedef struct mysql_session_t {
   uint8_t auth_nonce[MYSQL_AUTH_NONCE_BYTES];
   size_t auth_nonce_size;
   bool tls_established;
+  mysql_stmt_prepare_ok_t prepare_ok;
+  size_t metadata_index;
+  uint64_t result_column_count;
+  mysql_column_definition_t result_columns[MYSQL_SESSION_PROBE_COLUMN_COUNT];
+  uint32_t result_row_count;
 } mysql_session_t;
 
 static void mysql_session_set_error(
@@ -79,7 +109,13 @@ static void mysql_session_set_error(
 static bool mysql_session_waits_for_receive(mysql_session_phase_t phase) {
   return phase == MYSQL_PHASE_WAIT_GREETING ||
          phase == MYSQL_PHASE_WAIT_AUTH ||
-         phase == MYSQL_PHASE_WAIT_PING_REPLY;
+         phase == MYSQL_PHASE_WAIT_PING_REPLY ||
+         phase == MYSQL_PHASE_WAIT_PREPARE_OK ||
+         phase == MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF ||
+         phase == MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF ||
+         phase == MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT ||
+         phase == MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF ||
+         phase == MYSQL_PHASE_WAIT_RESULT_ROW;
 }
 
 static int mysql_session_request_receive(mysql_session_t *session) {
@@ -310,6 +346,82 @@ static void mysql_session_send_ping(mysql_session_t *session) {
       session, UINT8_C(0), &command, 1u, MYSQL_SEND_PING);
 }
 
+static void mysql_session_send_prepare(mysql_session_t *session) {
+  uint8_t payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  size_t payload_size = 0u;
+
+  if ((session->client_capabilities & MYSQL_WIRE_CLIENT_DEPRECATE_EOF) == 0u) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "prepare-capability",
+                            "prepared probe requires CLIENT_DEPRECATE_EOF");
+    return;
+  }
+  if (mysql_wire_build_stmt_prepare(
+          MYSQL_SESSION_PROBE_SQL,
+          sizeof(MYSQL_SESSION_PROBE_SQL) - 1u,
+          payload, sizeof(payload), &payload_size) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "prepare", "failed to encode COM_STMT_PREPARE");
+    return;
+  }
+
+  mysql_wire_packet_stream_reset(&session->stream, UINT8_C(1));
+  session->phase = MYSQL_PHASE_WAIT_PREPARE_SEND;
+  (void)mysql_session_send_packet(
+      session, UINT8_C(0), payload, payload_size, MYSQL_SEND_PREPARE);
+}
+
+static void mysql_session_send_execute(mysql_session_t *session) {
+  const mysql_stmt_value_t value = {
+      .kind = MYSQL_STMT_VALUE_SINT64,
+      .data.sint64_value = INT64_C(-42)};
+  uint8_t payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  size_t payload_size = 0u;
+
+  if (mysql_wire_build_stmt_execute(
+          session->prepare_ok.statement_id, &value, 1u,
+          payload, sizeof(payload), &payload_size) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "execute", "failed to encode COM_STMT_EXECUTE");
+    return;
+  }
+
+  mysql_wire_packet_stream_reset(&session->stream, UINT8_C(1));
+  session->phase = MYSQL_PHASE_WAIT_EXECUTE_SEND;
+  (void)mysql_session_send_packet(
+      session, UINT8_C(0), payload, payload_size, MYSQL_SEND_EXECUTE);
+}
+
+static void mysql_session_send_close(mysql_session_t *session) {
+  uint8_t payload[8];
+  size_t payload_size = 0u;
+
+  if (mysql_wire_build_stmt_close(
+          session->prepare_ok.statement_id,
+          payload, sizeof(payload), &payload_size) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "close", "failed to encode COM_STMT_CLOSE");
+    return;
+  }
+
+  session->phase = MYSQL_PHASE_WAIT_CLOSE_SEND;
+  (void)mysql_session_send_packet(
+      session, UINT8_C(0), payload, payload_size, MYSQL_SEND_CLOSE);
+}
+
+static void mysql_session_begin_action(mysql_session_t *session) {
+  if (session->action == MYSQL_SESSION_ACTION_PING) {
+    mysql_session_begin_action(session);
+    return;
+  }
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_PROBE) {
+    mysql_session_send_prepare(session);
+    return;
+  }
+  mysql_session_set_error(session, MYSQL_SESSION_INVALID,
+                          "action", "invalid MySQL session action");
+}
+
 static void mysql_session_handle_auth(
     mysql_session_t *session, const uint8_t *payload, size_t payload_size,
     uint8_t sequence_id) {
@@ -425,6 +537,174 @@ static void mysql_session_handle_ping_reply(
   session->phase = MYSQL_PHASE_DONE;
 }
 
+static bool mysql_session_decode_server_error(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size,
+    const char *stage) {
+  mysql_wire_err_packet_t server_error;
+  if (payload_size == 0u || payload[0] != UINT8_C(0xff))
+    return false;
+  if (mysql_wire_decode_err_packet(
+          payload, payload_size, session->client_capabilities,
+          &server_error) == MYSQL_WIRE_STATUS_OK &&
+      session->error != NULL) {
+    session->error->server_error = server_error.error_code;
+    if (server_error.has_sql_state)
+      memcpy(session->error->sql_state, server_error.sql_state,
+             sizeof(server_error.sql_state));
+  }
+  mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                          stage, "server rejected prepared statement operation");
+  return true;
+}
+
+static void mysql_session_handle_prepare_ok(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  if (mysql_session_decode_server_error(
+          session, payload, payload_size, "prepare-server"))
+    return;
+  if (mysql_wire_decode_stmt_prepare_ok(
+          payload, payload_size, &session->prepare_ok) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "prepare-ok", "invalid COM_STMT_PREPARE_OK");
+    return;
+  }
+  if (session->prepare_ok.parameter_count != 1u ||
+      session->prepare_ok.column_count != MYSQL_SESSION_PROBE_COLUMN_COUNT) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "prepare-shape",
+                            "unexpected prepared metadata shape");
+    return;
+  }
+  session->metadata_index = 0u;
+  session->phase = MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF;
+}
+
+static void mysql_session_handle_prepare_param_def(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  mysql_column_definition_t definition;
+  if (mysql_wire_decode_column_definition41(
+          payload, payload_size, &definition) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "prepare-param", "invalid parameter metadata");
+    return;
+  }
+  ++session->metadata_index;
+  if (session->metadata_index == session->prepare_ok.parameter_count) {
+    session->metadata_index = 0u;
+    session->phase = MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF;
+  }
+}
+
+static void mysql_session_handle_prepare_column_def(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  mysql_column_definition_t definition;
+  if (mysql_wire_decode_column_definition41(
+          payload, payload_size, &definition) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "prepare-column", "invalid prepared result metadata");
+    return;
+  }
+  ++session->metadata_index;
+  if (session->metadata_index == session->prepare_ok.column_count) {
+    session->metadata_index = 0u;
+    mysql_session_send_execute(session);
+  }
+}
+
+static void mysql_session_handle_result_column_count(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  size_t offset = 0u;
+  uint64_t count = 0u;
+  bool is_null = false;
+
+  if (mysql_session_decode_server_error(
+          session, payload, payload_size, "execute-server"))
+    return;
+  if (mysql_wire_read_lenenc_uint(
+          payload, payload_size, &offset, &count, &is_null) != MYSQL_WIRE_STATUS_OK ||
+      is_null || offset != payload_size ||
+      count != MYSQL_SESSION_PROBE_COLUMN_COUNT) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "result-columns", "unexpected binary result column count");
+    return;
+  }
+  session->result_column_count = count;
+  session->metadata_index = 0u;
+  session->phase = MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF;
+}
+
+static void mysql_session_handle_result_column_def(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  if (session->metadata_index >= MYSQL_SESSION_PROBE_COLUMN_COUNT ||
+      mysql_wire_decode_column_definition41(
+          payload, payload_size,
+          &session->result_columns[session->metadata_index]) !=
+          MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "result-column", "invalid binary result metadata");
+    return;
+  }
+  ++session->metadata_index;
+  if (session->metadata_index == session->result_column_count)
+    session->phase = MYSQL_PHASE_WAIT_RESULT_ROW;
+}
+
+static void mysql_session_handle_result_row(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  mysql_binary_value_t values[MYSQL_SESSION_PROBE_COLUMN_COUNT];
+
+  if (payload_size != 0u && payload[0] == UINT8_C(0xfe) &&
+      payload_size >= 7u) {
+    mysql_wire_ok_packet_t ok;
+    if (mysql_wire_decode_ok_packet(
+            payload, payload_size, session->client_capabilities,
+            &ok) != MYSQL_WIRE_STATUS_OK ||
+        session->result_row_count != 1u) {
+      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                              "result-end", "invalid prepared result terminator");
+      return;
+    }
+    mysql_session_send_close(session);
+    return;
+  }
+  if (mysql_session_decode_server_error(
+          session, payload, payload_size, "result-server"))
+    return;
+  if (session->result_row_count != 0u ||
+      mysql_wire_decode_binary_row(
+          payload, payload_size, session->result_columns,
+          MYSQL_SESSION_PROBE_COLUMN_COUNT, values,
+          MYSQL_SESSION_PROBE_COLUMN_COUNT) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "result-row", "invalid prepared binary row");
+    return;
+  }
+
+  if (values[0].kind != MYSQL_BINARY_VALUE_SINT64 ||
+      values[1].kind != MYSQL_BINARY_VALUE_UINT64 ||
+      values[2].kind != MYSQL_BINARY_VALUE_BYTES ||
+      values[3].kind != MYSQL_BINARY_VALUE_BYTES ||
+      values[2].data.bytes.length >= sizeof(session->probe->text) ||
+      values[3].data.bytes.length >= sizeof(session->probe->decimal)) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "result-shape", "unexpected prepared result types");
+    return;
+  }
+
+  session->probe->signed_value = values[0].data.sint64_value;
+  session->probe->unsigned_value = values[1].data.uint64_value;
+  session->probe->text_size = values[2].data.bytes.length;
+  memcpy(session->probe->text, values[2].data.bytes.data,
+         values[2].data.bytes.length);
+  session->probe->text[values[2].data.bytes.length] = '\0';
+  session->probe->decimal_size = values[3].data.bytes.length;
+  memcpy(session->probe->decimal, values[3].data.bytes.data,
+         values[3].data.bytes.length);
+  session->probe->decimal[values[3].data.bytes.length] = '\0';
+  session->probe->row_count = 1u;
+  session->result_row_count = 1u;
+}
+
 static void mysql_session_handle_message(
     mysql_session_t *session, const uint8_t *payload, size_t payload_size,
     uint8_t sequence_id) {
@@ -439,6 +719,24 @@ static void mysql_session_handle_message(
       break;
     case MYSQL_PHASE_WAIT_PING_REPLY:
       mysql_session_handle_ping_reply(session, payload, payload_size);
+      break;
+    case MYSQL_PHASE_WAIT_PREPARE_OK:
+      mysql_session_handle_prepare_ok(session, payload, payload_size);
+      break;
+    case MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF:
+      mysql_session_handle_prepare_param_def(session, payload, payload_size);
+      break;
+    case MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF:
+      mysql_session_handle_prepare_column_def(session, payload, payload_size);
+      break;
+    case MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT:
+      mysql_session_handle_result_column_count(session, payload, payload_size);
+      break;
+    case MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF:
+      mysql_session_handle_result_column_def(session, payload, payload_size);
+      break;
+    case MYSQL_PHASE_WAIT_RESULT_ROW:
+      mysql_session_handle_result_row(session, payload, payload_size);
       break;
     default:
       mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
@@ -544,6 +842,17 @@ static void mysql_session_on_send(
       session->phase = MYSQL_PHASE_WAIT_PING_REPLY;
       (void)mysql_session_request_receive(session);
       break;
+    case MYSQL_SEND_PREPARE:
+      session->phase = MYSQL_PHASE_WAIT_PREPARE_OK;
+      (void)mysql_session_request_receive(session);
+      break;
+    case MYSQL_SEND_EXECUTE:
+      session->phase = MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT;
+      (void)mysql_session_request_receive(session);
+      break;
+    case MYSQL_SEND_CLOSE:
+      session->phase = MYSQL_PHASE_DONE;
+      break;
     default:
       mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                               "send-state", "unexpected MySQL send completion");
@@ -604,7 +913,7 @@ static void mysql_session_on_state(
       session->phase != MYSQL_PHASE_DONE &&
       session->phase != MYSQL_PHASE_FAILED)
     mysql_session_set_error(session, MYSQL_SESSION_IO,
-                            "closed", "connection closed before COM_PING completed");
+                            "closed", "connection closed before MySQL operation completed");
 }
 
 static cnet_client_config mysql_session_cnet_config(uint32_t timeout_ms) {
@@ -633,8 +942,9 @@ static cnet_client_config mysql_session_cnet_config(uint32_t timeout_ms) {
   return config;
 }
 
-mysql_session_status_t mysql_session_connect_and_ping(
-    const mysql_session_config_t *config, mysql_session_error_t *error) {
+static mysql_session_status_t mysql_session_run(
+    const mysql_session_config_t *config, mysql_session_action_t action,
+    mysql_session_prepared_probe_t *probe, mysql_session_error_t *error) {
   mysql_session_t session;
   cnet_client_config client_config;
   cnet_connect_options options;
@@ -663,6 +973,8 @@ mysql_session_status_t mysql_session_connect_and_ping(
   memset(&session, 0, sizeof(session));
   session.config = config;
   session.error = error;
+  session.action = action;
+  session.probe = probe;
   session.phase = MYSQL_PHASE_WAIT_TCP;
   timeout_ms = config->timeout_ms != 0u
                    ? config->timeout_ms
@@ -757,4 +1069,29 @@ mysql_session_status_t mysql_session_connect_and_ping(
   }
   (void)cnet_client_destroy(&session.client);
   return result;
+}
+
+mysql_session_status_t mysql_session_connect_and_ping(
+    const mysql_session_config_t *config, mysql_session_error_t *error) {
+  return mysql_session_run(
+      config, MYSQL_SESSION_ACTION_PING, NULL, error);
+}
+
+mysql_session_status_t mysql_session_prepared_probe(
+    const mysql_session_config_t *config,
+    mysql_session_prepared_probe_t *out,
+    mysql_session_error_t *error) {
+  if (out == NULL) {
+    if (error != NULL) {
+      memset(error, 0, sizeof(*error));
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s", "probe");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "prepared probe output is required");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+  memset(out, 0, sizeof(*out));
+  return mysql_session_run(
+      config, MYSQL_SESSION_ACTION_PREPARED_PROBE, out, error);
 }
