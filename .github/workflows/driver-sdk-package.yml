@@ -2,6 +2,19 @@ name: Published dependency contract
 on:
   pull_request:
     branches: [master]
+    paths:
+      - "orm/include/**"
+      - "orm/src/abi/**"
+      - "orm/src/driver/**"
+      - "orm/src/runtime/**"
+      - "orm/src/flow/**"
+      - "orm/src/dbs/sql/**"
+      - "orm/driver-sdk/**"
+      - "orm/cmake/**"
+      - "tests/deps/**"
+      - "CMakeLists.txt"
+      - "CMakeOptions.cmake"
+      - "cmake/ci/restore-versioned-native-sdks.ps1"
   push:
     branches: [master]
   workflow_dispatch:

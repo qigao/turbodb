@@ -1,38 +1,36 @@
-name: vcpkg registry contract
+name: PostgreSQL Driver registry contract
 
 on:
   pull_request:
     branches: [master]
     paths:
-      - "vcpkg.json"
       - "vcpkg-configuration.json"
       - "tidesdb/vcpkg.json"
       - "tidesdb/vcpkg-configuration.json"
       - "presets/Options.json"
-      - "orm/CMakeLists.txt"
       - "orm/src/dbs/postgres/**"
+      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/driver/orm_sql_plugin_matrix.c"
       - "orm/src/driver/**"
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
-      - "orm/tests/driver/**"
       - "orm/tests/integration/postgres_live_test.c"
-      - ".github/workflows/vcpkg-registry-contract.yml"
+      - ".github/workflows/postgresql-driver-contract.yml"
   push:
     branches: [master]
     paths:
-      - "vcpkg.json"
       - "vcpkg-configuration.json"
       - "tidesdb/vcpkg.json"
       - "tidesdb/vcpkg-configuration.json"
       - "presets/Options.json"
-      - "orm/CMakeLists.txt"
       - "orm/src/dbs/postgres/**"
+      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/driver/orm_sql_plugin_matrix.c"
       - "orm/src/driver/**"
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
-      - "orm/tests/driver/**"
       - "orm/tests/integration/postgres_live_test.c"
-      - ".github/workflows/vcpkg-registry-contract.yml"
+      - ".github/workflows/postgresql-driver-contract.yml"
   workflow_dispatch:
 
 permissions:

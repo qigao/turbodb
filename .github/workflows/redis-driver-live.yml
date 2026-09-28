@@ -3,8 +3,24 @@ name: Redis Driver live contract
 on:
   pull_request:
     branches: [master]
+    paths:
+      - "orm/src/dbs/redis/**"
+      - "orm/tests/integration/redis_live_driver_test.c"
+      - "redis/**"
+      - "orm/src/driver/**"
+      - "orm/src/runtime/**"
+      - "orm/include/orm/orm_driver_*.h"
+      - ".github/workflows/redis-driver-live.yml"
   push:
     branches: [master]
+    paths:
+      - "orm/src/dbs/redis/**"
+      - "orm/tests/integration/redis_live_driver_test.c"
+      - "redis/**"
+      - "orm/src/driver/**"
+      - "orm/src/runtime/**"
+      - "orm/include/orm/orm_driver_*.h"
+      - ".github/workflows/redis-driver-live.yml"
   workflow_dispatch:
 
 permissions:
