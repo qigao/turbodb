@@ -849,6 +849,28 @@ endif()
 add_test(NAME orm_mysql_plugin COMMAND orm_mysql_plugin_test)
 set_tests_properties(orm_mysql_plugin PROPERTIES
   ENVIRONMENT "ORM_MYSQL_PLUGIN=$<TARGET_FILE:orm_mysql_driver>")
+
+add_executable(orm_mysql_sql_test
+               tests/flow/orm_mysql_sql_test.c
+               src/dbs/mysql/orm_mysql_sql.c)
+target_compile_features(orm_mysql_sql_test PRIVATE c_std_11)
+target_compile_definitions(orm_mysql_sql_test PRIVATE ORM_C_STATIC)
+target_include_directories(
+  orm_mysql_sql_test PRIVATE
+    ${ORM_INCLUDE_DIR}
+    ${ORM_ABI_SOURCE_DIR}
+    ${ORM_SQL_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql)
+orm_link_internal_test(orm_mysql_sql_test Salts::TinyTest)
+set_target_properties(orm_mysql_sql_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_sql_test)
+if(MSVC)
+  target_compile_options(orm_mysql_sql_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_sql_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_sql COMMAND orm_mysql_sql_test)
 endif()
 
 if(ORM_BUILD_MONGODB_DRIVER)
@@ -1682,7 +1704,7 @@ if(WIN32)
   if(ORM_BUILD_MYSQL_DRIVER)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:unofficial::libmysql::libmysql>")
-    list(APPEND ORM_RUNTIME_TESTS orm_mysql_plugin)
+    list(APPEND ORM_RUNTIME_TESTS orm_mysql_plugin orm_mysql_sql)
   endif()
   if(ORM_BUILD_MONGODB_DRIVER)
     if(TARGET mongoc::shared)
