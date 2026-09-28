@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -168,6 +169,12 @@ static orm_status_t orm_mysql_parameters_init(
         bind->buffer_length = sizeof(parameters->scalars[index].uint);
         break;
       case ORM_VALUE_DOUBLE:
+        if (!isfinite(value->data.double_value)) {
+          orm_mysql_parameters_destroy(parameters);
+          orm_error_set(error, ORM_STATUS_OUT_OF_RANGE,
+                        "MySQL double parameter must be finite");
+          return ORM_STATUS_OUT_OF_RANGE;
+        }
         parameters->scalars[index].real = value->data.double_value;
         bind->buffer_type = MYSQL_TYPE_DOUBLE;
         bind->buffer = &parameters->scalars[index].real;
@@ -716,17 +723,21 @@ static orm_status_t orm_mysql_parse_u32(
   for (index = 0u; index < option->value.len; ++index) {
     const unsigned char next =
         (unsigned char)option->value.data[index];
-    if (next < (unsigned char)'0' || next > (unsigned char)'9') {
+    const uint64_t digit =
+        next >= (unsigned char)'0' && next <= (unsigned char)'9'
+            ? (uint64_t)(next - (unsigned char)'0')
+            : UINT64_MAX;
+    if (digit == UINT64_MAX) {
       orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                     "MySQL numeric option is not decimal");
       return ORM_STATUS_INVALID_ARGUMENT;
     }
-    value = value * 10u + (uint64_t)(next - (unsigned char)'0');
-    if (value > maximum) {
+    if (value > ((uint64_t)maximum - digit) / UINT64_C(10)) {
       orm_error_set(error, ORM_STATUS_OUT_OF_RANGE,
                     "MySQL numeric option exceeds supported range");
       return ORM_STATUS_OUT_OF_RANGE;
     }
+    value = value * UINT64_C(10) + digit;
   }
   *out = (unsigned int)value;
   return ORM_STATUS_OK;
@@ -754,6 +765,7 @@ static orm_status_t orm_mysql_connect_options_init(
   if (config == NULL || options == NULL ||
       config->struct_size < sizeof(*config) ||
       config->abi_version != ORM_C_ABI_VERSION ||
+      (config->option_count != 0u && config->options == NULL) ||
       !orm_view_equal_cstr(config->driver, "mysql")) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                   "invalid MySQL connection config");
@@ -880,7 +892,7 @@ orm_status_t orm_mysql_backend_create(
   if (mysql_real_connect(
           connection, options.host, options.user, options.password,
           options.database, options.port, options.unix_socket,
-          CLIENT_FOUND_ROWS) == NULL) {
+          0u) == NULL) {
     status = orm_mysql_connection_error(
         connection, "connect MySQL", error);
     mysql_close(connection);
