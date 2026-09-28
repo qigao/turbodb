@@ -172,14 +172,6 @@ static int read_score(orm_connection_t *connection, long id, long expected,
   redis_live_wait_gate gate = {0};
   int failed = 0;
 
-  salts_mutex_init(&gate.mutex);
-  salts_cond_init(&gate.changed);
-  if (gate.mutex == NULL || gate.changed == NULL) {
-    salts_cond_destroy(&gate.changed);
-    salts_mutex_destroy(&gate.mutex);
-    fprintf(stderr, "initialize Redis SELECT wait gate failed\n");
-    return 1;
-  }
 
   if (fail_status("create Redis SELECT",
                   orm_query_create(connection, orm_view("people"), &query,
@@ -205,6 +197,17 @@ static int read_score(orm_connection_t *connection, long id, long expected,
                   orm_query_open_flow(query, &flow, &publisher, error),
                   ORM_STATUS_OK, error)) {
     orm_query_destroy(query);
+    return 1;
+  }
+
+  salts_mutex_init(&gate.mutex);
+  salts_cond_init(&gate.changed);
+  if (gate.mutex == NULL || gate.changed == NULL) {
+    salts_cond_destroy(&gate.changed);
+    salts_mutex_destroy(&gate.mutex);
+    cflow_publisher_destroy(&publisher);
+    orm_query_destroy(query);
+    fprintf(stderr, "initialize Redis SELECT wait gate failed\n");
     return 1;
   }
 
