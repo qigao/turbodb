@@ -222,6 +222,12 @@ if(ORM_WITH_SQLITE)
       C_VISIBILITY_PRESET hidden
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Keep statically linked SQLite/Salts archive symbols private to the
+    # Driver MODULE. salts_plugin_query is defined by the MODULE object itself
+    # and remains the only intentional generic loader entry.
+    target_link_options(orm_sqlite_driver PRIVATE "LINKER:--exclude-libs,ALL")
+  endif()
 endif()
 
 if(ORM_WITH_REDIS)
@@ -362,6 +368,11 @@ if(ORM_WITH_PGSQL)
       C_VISIBILITY_PRESET hidden
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # libpq/BoringSSL may arrive as static archives. Do not publish their
+    # symbols as part of the TurboDB Driver MODULE surface.
+    target_link_options(orm_postgresql_driver PRIVATE "LINKER:--exclude-libs,ALL")
+  endif()
   get_target_property(ORM_POSTGRESQL_DRIVER_LINK_CONTRACT
                       orm_postgresql_driver LINK_LIBRARIES)
   list(FIND ORM_POSTGRESQL_DRIVER_LINK_CONTRACT "PostgreSQL::PostgreSQL"
@@ -952,6 +963,34 @@ set_target_properties(orm_plugin_bad_abi_fixture PROPERTIES
   WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_plugin_bad_abi_fixture)
 
+add_library(orm_plugin_bad_contract_fixture MODULE
+  tests/driver/orm_module_bad_contract_version_fixture.c)
+target_compile_features(orm_plugin_bad_contract_fixture PRIVATE c_std_11)
+target_include_directories(orm_plugin_bad_contract_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_plugin_bad_contract_fixture PRIVATE
+  Salts::PluginABI Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_plugin_bad_contract_fixture PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_plugin_bad_contract_fixture)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(orm_plugin_bad_contract_fixture PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
+add_library(orm_plugin_bad_shape_fixture MODULE
+  tests/driver/orm_module_bad_interface_fixture.c)
+target_compile_features(orm_plugin_bad_shape_fixture PRIVATE c_std_11)
+target_include_directories(orm_plugin_bad_shape_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_plugin_bad_shape_fixture PRIVATE
+  Salts::PluginABI Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_plugin_bad_shape_fixture PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_plugin_bad_shape_fixture)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(orm_plugin_bad_shape_fixture PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 add_library(orm_runtime_plugin_fixture MODULE
   tests/driver/orm_runtime_plugin_fixture.c)
 target_compile_features(orm_runtime_plugin_fixture PRIVATE c_std_11)
@@ -973,7 +1012,8 @@ target_include_directories(orm_runtime_registry_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_runtime_registry_test PRIVATE turbo_orm Salts::TinyTest)
 add_dependencies(orm_runtime_registry_test
   orm_runtime_plugin_fixture orm_plugin_no_query_fixture
-  orm_plugin_bad_abi_fixture)
+  orm_plugin_bad_abi_fixture orm_plugin_bad_contract_fixture
+  orm_plugin_bad_shape_fixture)
 set_target_properties(orm_runtime_registry_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_runtime_registry_test)
@@ -985,10 +1025,10 @@ endif()
 add_test(NAME orm_runtime_registry COMMAND orm_runtime_registry_test)
 set_tests_properties(orm_runtime_registry PROPERTIES
   ENVIRONMENT
-    "ORM_PLUGIN_FIXTURE=$<TARGET_FILE:orm_runtime_plugin_fixture>;ORM_PLUGIN_NO_QUERY_FIXTURE=$<TARGET_FILE:orm_plugin_no_query_fixture>;ORM_PLUGIN_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_plugin_bad_abi_fixture>")
+    "ORM_PLUGIN_FIXTURE=$<TARGET_FILE:orm_runtime_plugin_fixture>;ORM_PLUGIN_NO_QUERY_FIXTURE=$<TARGET_FILE:orm_plugin_no_query_fixture>;ORM_PLUGIN_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_plugin_bad_abi_fixture>;ORM_PLUGIN_BAD_CONTRACT_FIXTURE=$<TARGET_FILE:orm_plugin_bad_contract_fixture>;ORM_PLUGIN_BAD_SHAPE_FIXTURE=$<TARGET_FILE:orm_plugin_bad_shape_fixture>")
 
 # Dedicated race fixture intentionally exports test-only gate symbols in
-# addition to the Driver ABI bootstrap. It is not the export-surface fixture.
+# addition to canonical salts_plugin_query. It is not the export-surface fixture.
 add_library(orm_runtime_race_fixture MODULE
   tests/driver/orm_runtime_race_fixture.c)
 target_compile_features(orm_runtime_race_fixture PRIVATE c_std_11)

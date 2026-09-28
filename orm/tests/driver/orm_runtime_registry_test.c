@@ -20,6 +20,16 @@ static const char *bad_abi_fixture_path(void) {
   return path == NULL ? "" : path;
 }
 
+static const char *bad_contract_fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_BAD_CONTRACT_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static const char *bad_shape_fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_BAD_SHAPE_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
 static orm_driver_load_config_t load_config_path(const char *id,
                                                  const char *path) {
   orm_driver_load_config_t config;
@@ -92,7 +102,7 @@ spec("runtime driver registry") {
     orm_runtime_release(runtime);
   }
 
-  it("rejects missing entry and bad ABI without disturbing a good driver") {
+  it("distinguishes entry Plugin ABI contract version and CMeta shape failures") {
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
@@ -102,10 +112,16 @@ spec("runtime driver registry") {
         load_config_path("noentry", no_entry_fixture_path());
     orm_driver_load_config_t bad_abi =
         load_config_path("badabi", bad_abi_fixture_path());
+    orm_driver_load_config_t bad_contract =
+        load_config_path("badcontract", bad_contract_fixture_path());
+    orm_driver_load_config_t bad_shape =
+        load_config_path("badshape", bad_shape_fixture_path());
 
     orm_runtime_config_init(&config);
     check_true(no_entry.module_path.len != 0u);
     check_true(bad_abi.module_path.len != 0u);
+    check_true(bad_contract.module_path.len != 0u);
+    check_true(bad_shape.module_path.len != 0u);
     check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
     check_equal(orm_runtime_load_driver(runtime, &good, &error), ORM_STATUS_OK);
 
@@ -117,7 +133,22 @@ spec("runtime driver registry") {
 
     check_equal(orm_runtime_load_driver(runtime, &bad_abi, &error),
                 ORM_STATUS_ABI_MISMATCH);
+    check_not_null(strstr(error.message, "Plugin ABI mismatch"));
     check_equal(orm_runtime_driver_info(runtime, orm_view("badabi"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_load_driver(runtime, &bad_contract, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    check_not_null(strstr(error.message, "contract version mismatch"));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("badcontract"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_load_driver(runtime, &bad_shape, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    check_not_null(strstr(error.message, "CMeta Interface shape mismatch"));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("badshape"),
                                         &info, &error),
                 ORM_STATUS_DRIVER_NOT_REGISTERED);
 
@@ -206,6 +237,73 @@ spec("runtime driver registry") {
     orm_runtime_release(runtime);
   }
 
+  it("keeps the module leased through a standalone query handle") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_create(connection, orm_view("rows"),
+                                 &query, &error),
+                ORM_STATUS_OK);
+
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    orm_query_destroy(query);
+    query = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps the module leased through a standalone transaction handle") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_transaction_t *transaction = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_transaction_begin(connection, ORM_ISOLATION_SERIALIZABLE,
+                                      &transaction, &error),
+                ORM_STATUS_OK);
+
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_OK);
+    orm_transaction_destroy(transaction);
+    transaction = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
   it("does not publish a module lease when connect fails") {
     orm_runtime_config_t runtime_config;
     orm_runtime_t *runtime = NULL;
@@ -229,7 +327,7 @@ spec("runtime driver registry") {
     orm_runtime_release(runtime);
   }
 
-  it("keeps runtime and query leases through a driver row Publisher") {
+  it("keeps the module leased through row Publisher cursor cleanup") {
     orm_runtime_config_t runtime_config;
     orm_runtime_t *runtime = NULL;
     orm_connection_t *connection = NULL;

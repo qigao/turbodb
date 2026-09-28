@@ -14,7 +14,7 @@ on:
       - "orm/src/driver/**"
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
-      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/driver/**"
       - "orm/tests/integration/postgres_live_test.c"
       - ".github/workflows/vcpkg-registry-contract.yml"
   push:
@@ -30,7 +30,7 @@ on:
       - "orm/src/driver/**"
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
-      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/driver/**"
       - "orm/tests/integration/postgres_live_test.c"
       - ".github/workflows/vcpkg-registry-contract.yml"
   workflow_dispatch:
@@ -179,6 +179,15 @@ jobs:
           build="$RUNNER_TEMP/sql-driver-build"
           evidence="$GITHUB_WORKSPACE/evidence/sql-matrix-linux"
           mkdir -p "$evidence"
+          {
+            echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "os=ubuntu-24.04"
+            echo "arch=x64"
+            echo "configuration=Release"
+            echo "Salts.Native=1.7.10"
+            echo "SaltsUtils.Native=4.0.2"
+            echo "PluginABI=2"
+          } > "$evidence/qualification.txt"
           cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
@@ -212,10 +221,76 @@ jobs:
             sha256sum "$core" "$app" > "$evidence/$scenario.sha256"
             cmp "$evidence/baseline.sha256" "$evidence/$scenario.sha256"
           done
+
+          # Stage only the Driver MODULE deployment payload in CI shell (#36):
+          # no test-only CMake install/verify logic and no unrelated package targets.
+          stage="$RUNNER_TEMP/turbodb-driver-install"
+          driver_dir="$stage/lib/turbodb/drivers"
+          rm -rf "$stage"
+          mkdir -p "$driver_dir"
+          cmake -E copy "$sqlite_plugin" "$driver_dir/turbodb_driver_sqlite.so"
+          cmake -E copy "$postgresql_plugin" "$driver_dir/turbodb_driver_postgresql.so"
+          printf '%s\n' \
+            "file(RPATH_REMOVE FILE \"$driver_dir/turbodb_driver_sqlite.so\")" \
+            "file(RPATH_REMOVE FILE \"$driver_dir/turbodb_driver_postgresql.so\")" \
+            > "$RUNNER_TEMP/remove-driver-rpath.cmake"
+          cmake -P "$RUNNER_TEMP/remove-driver-rpath.cmake"
+          installed_sqlite="$stage/lib/turbodb/drivers/turbodb_driver_sqlite.so"
+          installed_postgresql="$stage/lib/turbodb/drivers/turbodb_driver_postgresql.so"
+          test -f "$installed_sqlite"
+          test -f "$installed_postgresql"
+          find "$stage" -type f -print | sort > "$evidence/staged-files.txt"
+          {
+            realpath "$installed_sqlite"
+            realpath "$installed_postgresql"
+          } > "$evidence/installed-module-paths.txt"
+          sha256sum "$installed_sqlite" "$installed_postgresql" > "$evidence/installed-modules.sha256"
+          for scenario in sqlite postgresql both; do
+            "$app" "$scenario" "$installed_sqlite" "$installed_postgresql"
+            sha256sum "$core" "$app" > "$evidence/installed-$scenario.sha256"
+            cmp "$evidence/baseline.sha256" "$evidence/installed-$scenario.sha256"
+          done
+
           readelf -d "$core" > "$evidence/core-dependencies.txt"
+          readelf -d "$installed_sqlite" > "$evidence/sqlite-module-dependencies.txt"
+          readelf -d "$installed_postgresql" > "$evidence/postgresql-module-dependencies.txt"
+          nm -D --defined-only "$core" > "$evidence/core-exports.txt"
+          nm -D --defined-only "$installed_sqlite" > "$evidence/sqlite-module-exports.txt"
+          nm -D --defined-only "$installed_postgresql" > "$evidence/postgresql-module-exports.txt"
+          nm --defined-only "$installed_sqlite" > "$evidence/sqlite-module-symbols.txt"
+          nm --defined-only "$installed_postgresql" > "$evidence/postgresql-module-symbols.txt"
+
+          # Native SQL may be static or shared. In either form, the generic core
+          # must not own it. The Driver binary must contain the native
+          # implementation and its dynamic export surface must remain private.
           if grep -Eiq 'sqlite|libpq|postgres' "$evidence/core-dependencies.txt"; then
             cat "$evidence/core-dependencies.txt"
             echo 'generic core imports a native SQL library' >&2
+            exit 1
+          fi
+          grep -Eq '[[:space:]][Tt][[:space:]]sqlite3_open_v2$' \
+            "$evidence/sqlite-module-symbols.txt"
+          grep -Eq '[[:space:]][Tt][[:space:]]PQconnectdbParams$' \
+            "$evidence/postgresql-module-symbols.txt"
+          grep -Eq '[[:space:]]salts_plugin_query$' "$evidence/sqlite-module-exports.txt"
+          grep -Eq '[[:space:]]salts_plugin_query$' "$evidence/postgresql-module-exports.txt"
+          if grep -Eiq '[[:space:]]sqlite3_[A-Za-z0-9_]*$' \
+              "$evidence/sqlite-module-exports.txt"; then
+            cat "$evidence/sqlite-module-exports.txt"
+            echo 'SQLite archive symbols leaked from Driver MODULE' >&2
+            exit 1
+          fi
+          if grep -Eiq '[[:space:]]PQ[A-Za-z0-9_]*$' \
+              "$evidence/postgresql-module-exports.txt"; then
+            cat "$evidence/postgresql-module-exports.txt"
+            echo 'libpq archive symbols leaked from Driver MODULE' >&2
+            exit 1
+          fi
+          if grep -Hn 'orm_driver_get_api_v1' \
+              "$evidence/core-exports.txt" \
+              "$evidence/sqlite-module-exports.txt" \
+              "$evidence/postgresql-module-exports.txt"; then
+            echo 'legacy TurboDB bootstrap symbol remains in installed binaries' >&2
             exit 1
           fi
 
@@ -227,6 +302,15 @@ jobs:
           $build = Join-Path $env:RUNNER_TEMP "sql-driver-build"
           $evidence = Join-Path $env:GITHUB_WORKSPACE "evidence/sql-matrix-windows"
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          @(
+            "head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "os=windows-2022",
+            "arch=x64",
+            "configuration=Release",
+            "Salts.Native=1.7.10",
+            "SaltsUtils.Native=4.0.2",
+            "PluginABI=2"
+          ) | Set-Content -LiteralPath (Join-Path $evidence "qualification.txt") -Encoding ascii
           $args = @(
             "-S", $env:GITHUB_WORKSPACE,
             "-B", $build,
@@ -273,6 +357,75 @@ jobs:
               throw "core/application hash changed for scenario: $scenario"
             }
           }
+
+          # Stage only the Driver MODULE deployment payload in CI shell (#36).
+          $stage = Join-Path $env:RUNNER_TEMP "turbodb-driver-install"
+          $installedDir = Join-Path $stage "bin/turbodb/drivers"
+          Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $installedDir | Out-Null
+          Copy-Item -LiteralPath $sqlitePlugin -Destination (Join-Path $installedDir "turbodb_driver_sqlite.dll")
+          Copy-Item -LiteralPath $postgresqlPlugin -Destination (Join-Path $installedDir "turbodb_driver_postgresql.dll")
+          $installedSqlite = Join-Path $installedDir "turbodb_driver_sqlite.dll"
+          $installedPostgresql = Join-Path $installedDir "turbodb_driver_postgresql.dll"
+          if (-not (Test-Path -LiteralPath $installedSqlite -PathType Leaf)) { throw "missing installed SQLite Driver" }
+          if (-not (Test-Path -LiteralPath $installedPostgresql -PathType Leaf)) { throw "missing installed PostgreSQL Driver" }
+          Get-ChildItem -LiteralPath $stage -File -Recurse |
+            Sort-Object FullName |
+            ForEach-Object { $_.FullName } |
+            Set-Content -LiteralPath (Join-Path $evidence "staged-files.txt") -Encoding ascii
+          @(
+            (Resolve-Path -LiteralPath $installedSqlite).Path,
+            (Resolve-Path -LiteralPath $installedPostgresql).Path
+          ) | Set-Content -LiteralPath (Join-Path $evidence "installed-module-paths.txt") -Encoding ascii
+          @(
+            "sqlite=$((Get-FileHash -Algorithm SHA256 -LiteralPath $installedSqlite).Hash)",
+            "postgresql=$((Get-FileHash -Algorithm SHA256 -LiteralPath $installedPostgresql).Hash)"
+          ) | Set-Content -LiteralPath (Join-Path $evidence "installed-modules.sha256") -Encoding ascii
+          $env:PATH = "$installedDir;$bin;$vcpkgBin;$env:PATH"
+          foreach ($scenario in @("sqlite", "postgresql", "both")) {
+            & $app $scenario $installedSqlite $installedPostgresql
+            if ($LASTEXITCODE -ne 0) { throw "installed SQL Plugin matrix scenario failed: $scenario" }
+            $coreHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+            $appHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+            "core=$coreHash`napp=$appHash" | Set-Content -LiteralPath (Join-Path $evidence "installed-$scenario.sha256") -Encoding ascii
+            if ($coreHash -ne $baselineCore -or $appHash -ne $baselineApp) {
+              throw "core/application hash changed for installed scenario: $scenario"
+            }
+          }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw "MSVC tools not found" }
+          $dumpbin = Get-ChildItem -Path (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if ($null -eq $dumpbin) { throw "dumpbin.exe not found" }
+
+          $coreDeps = (& $dumpbin.FullName /DEPENDENTS $core | Out-String)
+          $sqliteDeps = (& $dumpbin.FullName /DEPENDENTS $installedSqlite | Out-String)
+          $postgresqlDeps = (& $dumpbin.FullName /DEPENDENTS $installedPostgresql | Out-String)
+          $coreExports = (& $dumpbin.FullName /EXPORTS $core | Out-String)
+          $sqliteExports = (& $dumpbin.FullName /EXPORTS $installedSqlite | Out-String)
+          $postgresqlExports = (& $dumpbin.FullName /EXPORTS $installedPostgresql | Out-String)
+          $coreDeps | Set-Content -LiteralPath (Join-Path $evidence "core-dependencies.txt") -Encoding ascii
+          $sqliteDeps | Set-Content -LiteralPath (Join-Path $evidence "sqlite-module-dependencies.txt") -Encoding ascii
+          $postgresqlDeps | Set-Content -LiteralPath (Join-Path $evidence "postgresql-module-dependencies.txt") -Encoding ascii
+          $coreExports | Set-Content -LiteralPath (Join-Path $evidence "core-exports.txt") -Encoding ascii
+          $sqliteExports | Set-Content -LiteralPath (Join-Path $evidence "sqlite-module-exports.txt") -Encoding ascii
+          $postgresqlExports | Set-Content -LiteralPath (Join-Path $evidence "postgresql-module-exports.txt") -Encoding ascii
+
+          # Native SQL may be statically closed into the MODULE or appear as
+          # a MODULE-private DLL dependency. The generic core must own neither.
+          if ($coreDeps -match "(?i)sqlite|libpq|postgres") { throw "generic core imports a native SQL library" }
+          if ($sqliteDeps -match "(?i)libpq|postgres") { throw "SQLite Driver imports PostgreSQL native libraries" }
+          if ($postgresqlDeps -match "(?i)sqlite") { throw "PostgreSQL Driver imports SQLite native libraries" }
+          if ($sqliteExports -notmatch "(?m)salts_plugin_query") { throw "SQLite Driver does not export salts_plugin_query" }
+          if ($postgresqlExports -notmatch "(?m)salts_plugin_query") { throw "PostgreSQL Driver does not export salts_plugin_query" }
+          if ($sqliteExports -match "(?m)\bsqlite3_[A-Za-z0-9_]*\b") { throw "SQLite native symbols leaked from Driver MODULE exports" }
+          if ($postgresqlExports -match "(?m)\bPQ[A-Za-z0-9_]*\b") { throw "libpq native symbols leaked from Driver MODULE exports" }
+          if (($coreExports + $sqliteExports + $postgresqlExports) -match "orm_driver_get_api_v1") {
+            throw "legacy TurboDB bootstrap symbol remains in installed binaries"
+          }
+
       - name: Verify exact tracked source
         shell: bash
         run: |

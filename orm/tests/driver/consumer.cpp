@@ -1,34 +1,28 @@
-#include <orm_driver_abi.h>
-#include <cstddef>
+#include <orm_driver_plugin.h>
+
 #include <type_traits>
 
-using entry_fn = int32_t (ORM_DRIVER_CALL *)(const orm_driver_host_v1 *,
-    uint32_t, const orm_driver_api_v1 **, uint32_t *);
-static_assert(std::is_same<decltype(&orm_driver_get_api_v1), entry_fn>::value,
-              "bootstrap calling convention changed");
-static_assert(sizeof(orm_driver_header_v1) == 8u, "bootstrap prefix size");
-static_assert(offsetof(orm_driver_header_v1, abi_version) == 4u,
-              "bootstrap version offset");
-static_assert(std::is_standard_layout<orm_driver_api_v1>::value,
-              "driver descriptor must have C layout");
-static_assert(std::is_standard_layout<orm_driver_host_v1>::value,
-              "host descriptor must have C layout");
-static_assert(std::is_trivially_copyable<orm_driver_api_v1>::value,
-              "driver descriptor must remain a POD view");
+using driver_create_type = orm_status_t (ORM_DRIVER_CALL *)(
+    void *, const orm_config_t *, const orm_driver_limits_v1 *,
+    orm_driver_connection_v1 *, orm_error_t *);
+
+static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
+              "TurboDB Driver SDK requires canonical Plugin ABI 2");
+static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 1u,
+              "TurboDb.Driver contract version drift");
+static_assert(std::is_standard_layout<TurboDb_Driver>::value,
+              "Driver interface must keep C layout");
+static_assert(std::is_standard_layout<TurboDb_Driver_vtable>::value,
+              "Driver vtable must keep C layout");
+static_assert(
+    std::is_same<decltype(static_cast<TurboDb_Driver_vtable *>(nullptr)->create),
+                 driver_create_type>::value,
+    "reflected create dispatch must preserve the typed Driver ABI");
 
 int main() {
-  /* Link a C-compiled fixture, not the MODULE or a C++ reimplementation. */
-  entry_fn volatile entry = &orm_driver_get_api_v1;
-  const orm_driver_api_v1 sentinel{};
-  const orm_driver_api_v1 *api = &sentinel;
-  uint32_t bytes = UINT32_MAX;
-  if (entry(nullptr, 0u, &api, &bytes) != ORM_STATUS_INVALID_ARGUMENT ||
-      api != nullptr || bytes != 0u) return 1;
-  bytes = UINT32_MAX;
-  if (entry(nullptr, 0u, nullptr, &bytes) != ORM_STATUS_INVALID_ARGUMENT ||
-      bytes != 0u) return 2;
-  api = &sentinel;
-  if (entry(nullptr, 0u, &api, nullptr) != ORM_STATUS_INVALID_ARGUMENT ||
-      api != nullptr) return 3;
-  return 0;
+  const cmeta_interface_desc *desc = TurboDb_Driver_interface();
+  return desc != nullptr && cmeta_interface_desc_valid(desc) &&
+                 desc->method_count == 1u
+             ? 0
+             : 1;
 }

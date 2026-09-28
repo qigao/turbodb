@@ -8,9 +8,6 @@
 extern "C" {
 #endif
 
-typedef struct orm_driver_host_v1 orm_driver_host_v1;
-typedef struct orm_driver_api_v1 orm_driver_api_v1;
-
 #define ORM_DRIVER_CAP_SELECT (UINT64_C(1) << 0)
 #define ORM_DRIVER_CAP_INSERT (UINT64_C(1) << 1)
 #define ORM_DRIVER_CAP_UPDATE (UINT64_C(1) << 2)
@@ -67,9 +64,6 @@ typedef struct orm_driver_step_v1 {
   cflow_waitable waitable;
 } orm_driver_step_v1;
 
-typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_initialize_fn)(
-    const orm_driver_host_v1 *, void **, orm_error_t *);
-typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_finalize_fn)(void *, orm_error_t *);
 typedef void (ORM_DRIVER_CALL *orm_driver_destroy_fn)(void *);
 typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_open_cursor_fn)(
     void *, const orm_driver_plan_view_v1 *, const orm_driver_limits_v1 *,
@@ -101,11 +95,6 @@ typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_create_fn)(
     void *, const orm_config_t *, const orm_driver_limits_v1 *,
     orm_driver_connection_v1 *, orm_error_t *);
 
-typedef struct orm_driver_module_ops_v1 {
-  orm_driver_header_v1 header;
-  orm_driver_initialize_fn initialize;
-  orm_driver_finalize_fn finalize;
-} orm_driver_module_ops_v1;
 typedef struct orm_driver_connection_ops_v1 {
   orm_driver_header_v1 header;
   orm_driver_destroy_fn destroy;
