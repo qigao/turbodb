@@ -56,13 +56,20 @@ static void orm_mysql_set_error(orm_error_t *error, orm_status_t status,
                      ? message : orm_status_message(status));
 }
 
-static int orm_mysql_binary_type(enum enum_field_types type) {
-  return type == MYSQL_TYPE_TINY_BLOB ||
-         type == MYSQL_TYPE_MEDIUM_BLOB ||
-         type == MYSQL_TYPE_LONG_BLOB ||
-         type == MYSQL_TYPE_BLOB ||
-         type == MYSQL_TYPE_GEOMETRY ||
-         type == MYSQL_TYPE_BIT;
+static int orm_mysql_binary_field(const MYSQL_FIELD *field) {
+  if (field == NULL)
+    return 0;
+  if (field->type == MYSQL_TYPE_TINY_BLOB ||
+      field->type == MYSQL_TYPE_MEDIUM_BLOB ||
+      field->type == MYSQL_TYPE_LONG_BLOB ||
+      field->type == MYSQL_TYPE_BLOB ||
+      field->type == MYSQL_TYPE_GEOMETRY ||
+      field->type == MYSQL_TYPE_BIT)
+    return 1;
+  return (field->flags & BINARY_FLAG) != 0u &&
+         (field->type == MYSQL_TYPE_VARCHAR ||
+          field->type == MYSQL_TYPE_VAR_STRING ||
+          field->type == MYSQL_TYPE_STRING);
 }
 
 static cserde_status orm_mysql_emit_value(
@@ -85,7 +92,7 @@ static cserde_status orm_mysql_emit_value(
     case MYSQL_TYPE_DOUBLE:
       return orm_text_token_float(data, size, 0, out);
     default:
-      if (orm_mysql_binary_type(field->type)) {
+      if (orm_mysql_binary_field(field)) {
         out->kind = CSERDE_BYTES;
       } else {
         out->kind = CSERDE_STRING;
