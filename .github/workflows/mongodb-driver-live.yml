@@ -69,12 +69,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
 
-      - name: Install Linux build prerequisites
+      - name: Install Ninja
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y nasm ninja-build
+          sudo apt-get install -y ninja-build
 
       - name: Build MongoDB Driver live test
         shell: bash
