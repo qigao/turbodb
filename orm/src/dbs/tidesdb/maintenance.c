@@ -52,10 +52,15 @@ static int tidesdb_generation_id_valid(orm_string_view_t value) {
   if (value.data == NULL || value.len == 0u ||
       value.len > ORM_TIDESDB_GENERATION_ID_MAX_BYTES)
     return 0;
-  for (i = 0u; i < value.len; ++i) {
+  {
+    const unsigned char first = (const unsigned char)value.data[0];
+    if (!((first >= 'a' && first <= 'z') ||
+          (first >= '0' && first <= '9')))
+      return 0;
+  }
+  for (i = 1u; i < value.len; ++i) {
     const unsigned char c = (const unsigned char)value.data[i];
     if (!((c >= 'a' && c <= 'z') ||
-          (c >= 'A' && c <= 'Z') ||
           (c >= '0' && c <= '9') || c == '_' || c == '-'))
       return 0;
   }
