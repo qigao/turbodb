@@ -16,8 +16,9 @@ static const TurboDb_Driver_BadShape_vtable bad_shape_vtable = {
     .capabilities = 0u,
     .create = bad_shape_create};
 
+static unsigned bad_shape_state;
 static TurboDb_Driver_BadShape bad_shape_driver = {
-    NULL, &bad_shape_vtable};
+    &bad_shape_state, &bad_shape_vtable};
 
 static const salts_plugin_export bad_shape_exports[] = {{
     .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
