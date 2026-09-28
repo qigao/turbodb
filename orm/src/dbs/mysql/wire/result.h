@@ -48,6 +48,11 @@ mysql_wire_status_t mysql_wire_decode_eof_packet(
     const uint8_t *payload, size_t payload_size, uint32_t capabilities,
     mysql_wire_eof_packet_t *out);
 
+mysql_wire_status_t mysql_wire_decode_text_row(
+    const uint8_t *payload, size_t payload_size,
+    size_t column_count, mysql_wire_bytes_t *out_columns,
+    size_t out_capacity);
+
 #ifdef __cplusplus
 }
 #endif
