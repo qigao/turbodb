@@ -33,8 +33,14 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          if git grep -n "orm_driver_get_api_v1" --               orm/include orm/src orm/tests orm/driver-sdk; then
+          if git grep -n "orm_driver_get_api_v1" -- \
+              orm/include orm/src orm/tests orm/driver-sdk; then
             echo 'legacy orm_driver_get_api_v1 remains in active Driver source' >&2
+            exit 1
+          fi
+          if git grep -n -E '(^|[^A-Za-z0-9_])(dlopen|dlsym|LoadLibrary(A|W|ExA|ExW)?|GetProcAddress)([^A-Za-z0-9_]|$)' -- \
+              orm/include orm/src; then
+            echo 'TurboDB-private generic DSO loader primitive remains in ORM production source' >&2
             exit 1
           fi
 
