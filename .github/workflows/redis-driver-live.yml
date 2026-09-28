@@ -1,0 +1,138 @@
+name: Redis Driver live contract
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: redis-driver-live-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  redis-live:
+    name: Redis Stack live Driver CRUD
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      redis:
+        image: redis/redis-stack-server:7.4.0-v8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Configure shared vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Restore canonical re2c host tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        with:
+          version: "4.6.3"
+
+      - name: Restore published native SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+
+      - name: Install Linux build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nasm ninja-build redis-tools
+
+      - name: Prepare Redis Query Engine fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          redis-cli PING | grep -qx PONG
+          redis-cli --raw COMMAND INFO FT.SEARCH | grep -q 'ft.search'
+          redis-cli FT.DROPINDEX liveidx:people DD >/dev/null 2>&1 || true
+          redis-cli FLUSHDB >/dev/null
+          redis-cli FT.CREATE liveidx:people ON HASH PREFIX 1 'live:{people}:' SCHEMA id NUMERIC score NUMERIC | grep -qx OK
+
+      - name: Build and run Redis live contracts
+        shell: bash
+        env:
+          ORM_REDIS_PORT: "6379"
+          TURBODB_REDIS_TEST_PORT: "6379"
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/redis-driver-live"
+          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed_redis" -DVCPKG_TARGET_TRIPLET=x64-linux -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_REDIS_LIVE_TESTS=ON -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_TESTS=ON -DTURBODB_BUILD_REDIS=ON -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DBUILD_TESTS=ON -DENABLE_TESTS=ON
+          cmake --build "$build" --target orm_redis_live_driver_test test_redis_lua_apply test_redis_lua_apply_batch --parallel 4
+
+          mkdir -p evidence/redis-live
+          {
+            echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "RedisStack=7.4.0-v8"
+            echo "Salts.Native=1.7.10"
+            echo "SaltsUtils.Native=4.0.2"
+            echo "PluginABI=2"
+            echo "TURBODB_REDIS_TEST_PORT=6379"
+          } > evidence/redis-live/qualification.txt
+          redis-cli MODULE LIST > evidence/redis-live/modules.txt
+          redis-cli FT.INFO liveidx:people > evidence/redis-live/index.txt
+
+          ctest --test-dir "$build" -R '^orm_redis_live_driver$' --output-on-failure 2>&1 | tee evidence/redis-live/orm-ctest.log
+          ctest --test-dir "$build" -R '^(test_redis_lua_apply|test_redis_lua_apply_batch)$' --output-on-failure 2>&1 | tee evidence/redis-live/standalone-ctest.log
+
+          core="$build/bin/libturbo_orm.so"
+          driver="$build/bin/turbodb_driver_redis.so"
+          native="$build/bin/libtedis.so.1.0.0"
+          test -f "$core"
+          test -f "$driver"
+          test -f "$native"
+
+          readelf -d "$core" > evidence/redis-live/core-dependencies.txt
+          readelf -d "$driver" > evidence/redis-live/driver-dependencies.txt
+          readelf -d "$native" > evidence/redis-live/native-dependencies.txt
+          nm -D --defined-only "$driver" > evidence/redis-live/driver-exports.txt
+
+          if grep -Eiq 'tedis|redis' evidence/redis-live/core-dependencies.txt; then
+            cat evidence/redis-live/core-dependencies.txt
+            echo 'generic core imports Redis native libraries' >&2
+            exit 1
+          fi
+          grep -Eiq 'tedis' evidence/redis-live/driver-dependencies.txt
+          if grep -q 'NOOPEN' evidence/redis-live/native-dependencies.txt; then
+            cat evidence/redis-live/native-dependencies.txt
+            echo 'Redis native client is marked unavailable to dlopen' >&2
+            exit 1
+          fi
+          grep -Eq '[[:space:]]salts_plugin_query$' evidence/redis-live/driver-exports.txt
+          sha256sum "$core" "$driver" "$native" > evidence/redis-live/binaries.sha256
+
+      - name: Keep Redis live qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redis-driver-live-${{ github.sha }}
+          path: evidence/redis-live/
+          if-no-files-found: warn
