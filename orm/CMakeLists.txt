@@ -69,6 +69,8 @@ option(ORM_REDIS_LIVE_TESTS
        "Run the Redis Driver CRUD test against ORM_REDIS_PORT" OFF)
 option(ORM_POSTGRES_LIVE_TESTS
        "Run tests against TURBODB_ORM_PGSQL_TEST_CONNINFO" OFF)
+option(ORM_SQL_VALIDATION_PARITY_TESTS
+       "Run one ValidationPlan against real SQLite and PostgreSQL Drivers" OFF)
 option(ORM_MYSQL_LIVE_TESTS
        "Qualify MySQL HandshakeV10/CNet/TLS/auth/ping against a real service" OFF)
 
@@ -106,6 +108,22 @@ if(ORM_POSTGRES_LIVE_TESTS)
      "$ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO}" STREQUAL "")
     message(FATAL_ERROR
             "ORM_POSTGRES_LIVE_TESTS requires TURBODB_ORM_PGSQL_TEST_CONNINFO")
+  endif()
+endif()
+
+if(ORM_SQL_VALIDATION_PARITY_TESTS)
+  if(NOT ORM_BUILD_TESTS)
+    message(FATAL_ERROR
+            "ORM_SQL_VALIDATION_PARITY_TESTS requires ORM_BUILD_TESTS=ON")
+  endif()
+  if(NOT ORM_BUILD_SQLITE_DRIVER OR NOT ORM_BUILD_POSTGRESQL_DRIVER)
+    message(FATAL_ERROR
+            "ORM_SQL_VALIDATION_PARITY_TESTS requires SQLite and PostgreSQL Drivers")
+  endif()
+  if(NOT DEFINED ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO} OR
+     "$ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO}" STREQUAL "")
+    message(FATAL_ERROR
+            "ORM_SQL_VALIDATION_PARITY_TESTS requires TURBODB_ORM_PGSQL_TEST_CONNINFO")
   endif()
 endif()
 
@@ -978,6 +996,31 @@ if(ORM_POSTGRES_LIVE_TESTS)
     ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
 endif()
 
+if(ORM_SQL_VALIDATION_PARITY_TESTS)
+  add_executable(orm_sql_validation_parity_test
+                 tests/integration/sql_validation_parity_test.c)
+  target_compile_features(orm_sql_validation_parity_test PRIVATE c_std_11)
+  target_compile_definitions(orm_sql_validation_parity_test PRIVATE ORM_C_STATIC)
+  target_include_directories(orm_sql_validation_parity_test PRIVATE
+                             ${ORM_INCLUDE_DIR})
+  target_link_libraries(orm_sql_validation_parity_test PRIVATE
+                        turbo_orm Salts::DataBind Salts::TinyTest)
+  add_dependencies(orm_sql_validation_parity_test
+                   orm_sqlite_driver orm_postgresql_driver)
+  set_target_properties(orm_sql_validation_parity_test PROPERTIES
+                        C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_sql_validation_parity_test)
+  if(MSVC)
+    target_compile_options(orm_sql_validation_parity_test PRIVATE /WX)
+  else()
+    target_compile_options(orm_sql_validation_parity_test PRIVATE -Werror)
+  endif()
+  add_test(NAME orm_sql_validation_parity
+           COMMAND orm_sql_validation_parity_test)
+  set_tests_properties(orm_sql_validation_parity PROPERTIES
+    ENVIRONMENT "ORM_SQLITE_PLUGIN=$<TARGET_FILE:orm_sqlite_driver>;ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>;TURBODB_ORM_PGSQL_TEST_CONNINFO=$ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO}")
+endif()
+
 add_executable(orm_row_publisher_test tests/flow/orm_row_publisher_test.c)
 target_compile_features(orm_row_publisher_test PRIVATE c_std_11)
 target_compile_definitions(orm_row_publisher_test PRIVATE ORM_C_STATIC)
@@ -1700,6 +1743,9 @@ if(WIN32)
     endif()
     if(ORM_POSTGRES_LIVE_TESTS)
       list(APPEND ORM_RUNTIME_TESTS orm_postgres_live)
+    endif()
+    if(ORM_SQL_VALIDATION_PARITY_TESTS)
+      list(APPEND ORM_RUNTIME_TESTS orm_sql_validation_parity)
     endif()
   endif()
   if(ORM_BUILD_REDIS_DRIVER)
