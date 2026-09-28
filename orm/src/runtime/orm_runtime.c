@@ -56,6 +56,11 @@ struct orm_runtime {
   uint32_t load_active;
 };
 
+struct orm_runtime_driver_extension {
+  orm_runtime_t *runtime;
+  salts_plugin_lease plugin_lease;
+};
+
 static const uint8_t runtime_bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
     ORM_DRIVER_BUNDLE_ID_INIT;
 
@@ -1173,6 +1178,151 @@ fail_reserved:
   free(path);
   runtime_finish_pending(runtime, 1);
   return status;
+}
+
+static orm_status_t runtime_copy_extension_text(
+    orm_string_view_t value, char *out, size_t capacity,
+    const char *role, orm_error_t *error) {
+  if (out == NULL || capacity == 0u || value.data == NULL ||
+      value.len == 0u || value.len >= capacity ||
+      memchr(value.data, '\0', value.len) != NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT, role);
+  memcpy(out, value.data, value.len);
+  out[value.len] = '\0';
+  return ORM_STATUS_OK;
+}
+
+orm_status_t ORM_C_CALL
+orm_runtime_driver_acquire_extension(
+    orm_runtime_t *runtime, orm_string_view_t id,
+    orm_string_view_t export_id, orm_string_view_t contract_id,
+    uint32_t contract_version, const cmeta_interface_desc *interface_desc,
+    orm_runtime_driver_extension_t **out_extension, void **out_binding,
+    orm_error_t *error) {
+  enum { EXTENSION_TEXT_CAPACITY = 256 };
+  char export_text[EXTENSION_TEXT_CAPACITY];
+  char contract_text[EXTENSION_TEXT_CAPACITY];
+  salts_plugin_ref plugin = {0};
+  salts_plugin_lease lease = {0};
+  const salts_plugin_manifest *manifest = NULL;
+  const salts_plugin_export *entry = NULL;
+  orm_runtime_driver_extension_t *extension = NULL;
+  orm_status_t status;
+  salts_plugin_status plugin_status;
+
+  if (out_extension != NULL) *out_extension = NULL;
+  if (out_binding != NULL) *out_binding = NULL;
+  if (runtime == NULL || out_extension == NULL || out_binding == NULL ||
+      interface_desc == NULL || contract_version == 0u ||
+      !runtime_id_valid(id))
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid driver extension request");
+
+  status = runtime_copy_extension_text(
+      export_id, export_text, sizeof(export_text),
+      "invalid driver extension export ID", error);
+  if (status != ORM_STATUS_OK) return status;
+  status = runtime_copy_extension_text(
+      contract_id, contract_text, sizeof(contract_text),
+      "invalid driver extension contract ID", error);
+  if (status != ORM_STATUS_OK) return status;
+
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->closed != ORM_RUNTIME_OPEN) {
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_result(error, ORM_STATUS_INVALID_STATE,
+                          "runtime is closed");
+  }
+  orm_runtime_driver *driver = runtime_find_driver(runtime, id);
+  if (driver == NULL) {
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
+                          "driver is not registered");
+  }
+  if (runtime->dependents == runtime->config.max_connections ||
+      runtime->refs == UINT32_MAX) {
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
+                          "runtime dependent budget is full");
+  }
+  ++runtime->dependents;
+  ++runtime->refs;
+  plugin = driver->plugin;
+  salts_mutex_unlock(&runtime->mutex);
+
+  plugin_status = salts_plugin_registry_acquire(
+      &runtime->plugins, plugin, &lease, &manifest);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(
+        plugin_status, error, "acquire Driver extension Plugin lease");
+    runtime_drop_dependent(runtime);
+    return status;
+  }
+
+  plugin_status = salts_plugin_manifest_find_export(
+      manifest, export_text, &entry);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(
+        plugin_status, error, "find Driver extension export");
+    goto fail;
+  }
+
+  plugin_status = salts_plugin_export_require_interface(
+      entry, contract_text, contract_version, 0u, interface_desc);
+  if (plugin_status != SALTS_PLUGIN_OK) {
+    status = runtime_plugin_status(
+        plugin_status, error, "admit Driver extension interface");
+    goto fail;
+  }
+  if (entry->value.interface.value == NULL) {
+    status = runtime_result(error, ORM_STATUS_ABI_MISMATCH,
+                            "Driver extension binding is null");
+    goto fail;
+  }
+
+  extension = (orm_runtime_driver_extension_t *)calloc(1u, sizeof(*extension));
+  if (extension == NULL) {
+    status = runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
+                            "allocate Driver extension lease");
+    goto fail;
+  }
+  extension->runtime = runtime;
+  extension->plugin_lease = lease;
+  *out_binding = entry->value.interface.value;
+  *out_extension = extension;
+  return runtime_result(error, ORM_STATUS_OK, NULL);
+
+fail:
+  {
+    const salts_plugin_status release_status =
+        salts_plugin_registry_release(&runtime->plugins, &lease);
+    if (release_status != SALTS_PLUGIN_OK)
+      status = runtime_plugin_status(
+          release_status, error, "release failed Driver extension lease");
+  }
+  runtime_drop_dependent(runtime);
+  return status;
+}
+
+orm_status_t ORM_C_CALL
+orm_runtime_driver_release_extension(
+    orm_runtime_driver_extension_t *extension, orm_error_t *error) {
+  if (extension == NULL || extension->runtime == NULL)
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid Driver extension lease");
+
+  orm_runtime_t *runtime = extension->runtime;
+  const salts_plugin_status plugin_status =
+      salts_plugin_registry_release(&runtime->plugins,
+                                    &extension->plugin_lease);
+  if (plugin_status != SALTS_PLUGIN_OK)
+    return runtime_plugin_status(
+        plugin_status, error, "release Driver extension Plugin lease");
+
+  extension->runtime = NULL;
+  free(extension);
+  runtime_drop_dependent(runtime);
+  return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
 orm_status_t ORM_C_CALL
