@@ -14,7 +14,7 @@
 
 static int sqlite_driver_identity;
 
-TurboDb_SqliteMaintenance *orm_sqlite_maintenance_binding(void);
+extern TurboDb_SqliteMaintenance orm_sqlite_maintenance;
 
 static const orm_driver_storage_capabilities_v1 sqlite_storage_capabilities = {
     .header = {(uint32_t)sizeof(orm_driver_storage_capabilities_v1),
@@ -59,7 +59,7 @@ static const TurboDb_Driver_vtable sqlite_driver_vtable = {
 static TurboDb_Driver sqlite_driver = {
     &sqlite_driver_identity, &sqlite_driver_vtable};
 
-static salts_plugin_export sqlite_exports[] = {
+static const salts_plugin_export sqlite_exports[] = {
     {
         .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
         .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
@@ -76,7 +76,7 @@ static salts_plugin_export sqlite_exports[] = {
         .capabilities = 0u,
         .export_id = ORM_SQLITE_MAINTENANCE_EXPORT_ID,
         .contract_id = ORM_SQLITE_MAINTENANCE_CONTRACT_ID,
-        .value.interface = {&TurboDb_SqliteMaintenance_interface_meta, NULL},
+        .value.interface = {&TurboDb_SqliteMaintenance_interface_meta, &orm_sqlite_maintenance},
     }};
 
 static const salts_plugin_manifest sqlite_manifest = {
@@ -89,7 +89,5 @@ static const salts_plugin_manifest sqlite_manifest = {
 
 SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
 salts_plugin_query(uint32_t host_abi) {
-  if (host_abi != SALTS_PLUGIN_ABI_VERSION) return NULL;
-  sqlite_exports[1].value.interface.value = orm_sqlite_maintenance_binding();
-  return &sqlite_manifest;
+  return host_abi == SALTS_PLUGIN_ABI_VERSION ? &sqlite_manifest : NULL;
 }
