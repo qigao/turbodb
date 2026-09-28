@@ -1758,3 +1758,55 @@ mysql_session_status_t mysql_session_prepared_probe(
   return mysql_session_run(
       config, MYSQL_SESSION_ACTION_PREPARED_PROBE, out, error);
 }
+
+mysql_session_status_t mysql_session_execute_prepared(
+    const mysql_session_config_t *config,
+    const uint8_t *sql, size_t sql_size,
+    const mysql_stmt_value_t *parameters, size_t parameter_count,
+    size_t max_command_bytes,
+    mysql_session_command_result_t *out,
+    mysql_session_error_t *error) {
+  mysql_session_t session;
+  mysql_session_status_t status;
+
+  if (out != NULL)
+    memset(out, 0, sizeof(*out));
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+
+  if (!mysql_session_config_valid(config) ||
+      sql == NULL || sql_size == 0u ||
+      (parameters == NULL && parameter_count != 0u) ||
+      parameter_count > (size_t)UINT16_MAX ||
+      max_command_bytes == 0u ||
+      max_command_bytes > MYSQL_WIRE_PACKET_MAX_PAYLOAD ||
+      sql_size + 1u > max_command_bytes ||
+      out == NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "command-config");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "invalid prepared command request or bounds");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  status = mysql_session_start(
+      &session, config, MYSQL_SESSION_ACTION_PREPARED_COMMAND,
+      NULL, error, MYSQL_SESSION_CONTROL_CAPACITY,
+      max_command_bytes);
+  if (status != MYSQL_SESSION_OK)
+    return status;
+
+  session.prepared_sql = sql;
+  session.prepared_sql_size = sql_size;
+  session.prepared_values = parameters;
+  session.prepared_value_count = parameter_count;
+  session.command_result = out;
+
+  status = mysql_session_progress_until(
+      &session, MYSQL_PHASE_DONE);
+  mysql_session_shutdown(&session, session.phase == MYSQL_PHASE_DONE);
+  return status;
+}
