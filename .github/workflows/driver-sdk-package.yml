@@ -48,6 +48,11 @@ jobs:
             echo 'legacy built-in Redis/MongoDB ORM selection remains in active source' >&2
             exit 1
           fi
+          if git grep -n -E 'atexit[[:space:]]*\([[:space:]]*mongoc_cleanup' -- \
+              orm/src; then
+            echo 'MongoDB Driver must not register process-exit native cleanup' >&2
+            exit 1
+          fi
 
       - name: Configure shared vcpkg binary cache
         id: vcpkg_cache
