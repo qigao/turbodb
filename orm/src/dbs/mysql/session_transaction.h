@@ -36,6 +36,21 @@ mysql_session_status_t mysql_transaction_session_rollback(
     mysql_transaction_session_t *transaction,
     mysql_session_error_t *error);
 
+mysql_session_status_t mysql_transaction_session_savepoint(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *name, size_t name_size,
+    mysql_session_error_t *error);
+
+mysql_session_status_t mysql_transaction_session_rollback_to_savepoint(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *name, size_t name_size,
+    mysql_session_error_t *error);
+
+mysql_session_status_t mysql_transaction_session_release_savepoint(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *name, size_t name_size,
+    mysql_session_error_t *error);
+
 /*
  * Destroy retains ownership until CNet reaches terminal stop/destroy.
  * If the transaction is still active it attempts a bounded ROLLBACK first.
