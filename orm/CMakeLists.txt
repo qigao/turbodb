@@ -284,6 +284,7 @@ if(ORM_BUILD_SQLITE_DRIVER)
     src/dbs/sqlite/plugin.c
     src/driver/orm_driver_backend_bridge.c
     src/dbs/sqlite/backend.c
+    src/dbs/sqlite/maintenance.c
     src/dbs/sqlite/orm_sqlite_cursor.c
     src/dbs/sql/orm_sql_render.c)
   target_compile_features(orm_sqlite_driver PRIVATE c_std_11)
@@ -304,7 +305,8 @@ if(ORM_BUILD_SQLITE_DRIVER)
       Salts::Core
       Salts::CSerde
       Salts::CFlow
-      Salts::CSTL)
+      Salts::CSTL
+      Salts::Platform)
   # Runtime MODULE owns the native SQLite dependency. Generic Orm::C must
   # remain independent from SQLite headers, objects and link items.
   get_target_property(ORM_SQLITE_DRIVER_LINK_CONTRACT
@@ -2210,7 +2212,7 @@ if(TARGET orm_mysql_driver)
 endif()
 
 cmake_install_headers(
-  FILES include/orm/orm.h include/orm/orm.hpp
+  FILES include/orm/orm.h include/orm/orm.hpp include/orm/orm_sqlite.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   cmake_install_headers(
