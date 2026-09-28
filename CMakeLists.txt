@@ -117,7 +117,25 @@ if(TURBODB_BUILD_REDIS)
   add_subdirectory(redis)
 endif()
 
+# TidesDB is a private native dependency of the runtime-loaded
+# TurboDb.Driver module. Keep it as a PIC static archive so global shared
+# linker hardening such as -z nodlopen cannot make a transitive TidesDB DSO
+# impossible for Salts::Plugin to load.
+set(TURBODB_BUILD_SHARED_LIBS_WAS_DEFINED FALSE)
+if(DEFINED BUILD_SHARED_LIBS)
+  set(TURBODB_BUILD_SHARED_LIBS_WAS_DEFINED TRUE)
+  set(TURBODB_SAVED_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
+endif()
+set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(tidesdb)
+if(TURBODB_BUILD_SHARED_LIBS_WAS_DEFINED)
+  set(BUILD_SHARED_LIBS "${TURBODB_SAVED_BUILD_SHARED_LIBS}")
+else()
+  unset(BUILD_SHARED_LIBS)
+endif()
+unset(TURBODB_BUILD_SHARED_LIBS_WAS_DEFINED)
+unset(TURBODB_SAVED_BUILD_SHARED_LIBS)
+
 add_subdirectory(orm)
 # Root-enabled instrumentation also requires its runtime on consumer links.
 # Directory link options do not propagate through the Orm::C target.
