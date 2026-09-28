@@ -1105,6 +1105,21 @@ else()
 endif()
 add_test(NAME orm_driver_plan_view COMMAND orm_driver_plan_view_test)
 
+add_executable(orm_driver_deployment_matrix_test
+               tests/driver/orm_driver_deployment_matrix.c)
+target_compile_features(orm_driver_deployment_matrix_test PRIVATE c_std_11)
+target_include_directories(orm_driver_deployment_matrix_test PRIVATE
+                           ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_driver_deployment_matrix_test PRIVATE turbo_orm)
+set_target_properties(orm_driver_deployment_matrix_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_driver_deployment_matrix_test)
+if(MSVC)
+  target_compile_options(orm_driver_deployment_matrix_test PRIVATE /WX)
+else()
+  target_compile_options(orm_driver_deployment_matrix_test PRIVATE -Werror)
+endif()
+
 # MySQL issue #33 M1 is protocol-only. It intentionally does not build or
 # publish a TurboDb.Driver module and therefore advertises no CRUD capability.
 set(ORM_MYSQL_WIRE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql/wire)
