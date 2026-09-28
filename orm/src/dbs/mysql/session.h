@@ -1,6 +1,8 @@
 #ifndef TURBODB_ORM_MYSQL_SESSION_H
 #define TURBODB_ORM_MYSQL_SESSION_H
 
+#include "wire/statement.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -64,6 +66,26 @@ typedef struct mysql_session_prepared_probe_t {
 mysql_session_status_t mysql_session_prepared_probe(
     const mysql_session_config_t *config,
     mysql_session_prepared_probe_t *out,
+    mysql_session_error_t *error);
+
+typedef struct mysql_session_command_result_t {
+  uint64_t affected_rows;
+  uint64_t last_insert_id;
+  uint16_t status_flags;
+  uint16_t warnings;
+} mysql_session_command_result_t;
+
+/*
+ * M4 internal command API. SQL and parameter views are borrowed only for the
+ * call. Data parameters always use COM_STMT_PREPARE/EXECUTE binary binding;
+ * no client-side SQL escaping fallback is permitted.
+ */
+mysql_session_status_t mysql_session_execute_prepared(
+    const mysql_session_config_t *config,
+    const uint8_t *sql, size_t sql_size,
+    const mysql_stmt_value_t *parameters, size_t parameter_count,
+    size_t max_command_bytes,
+    mysql_session_command_result_t *out,
     mysql_session_error_t *error);
 
 #ifdef __cplusplus
