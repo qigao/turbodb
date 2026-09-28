@@ -1273,6 +1273,9 @@ if(ORM_MYSQL_LIVE_TESTS)
   add_executable(orm_mysql_live_test
     tests/integration/mysql_live_test.c
     src/dbs/mysql/session.c
+    src/dbs/mysql/cursor.c
+    src/dbs/mysql/cursor_row.c
+    src/dbs/mysql/row_reader.c
     src/dbs/mysql/wire/codec.c
     src/dbs/mysql/wire/packet.c
     src/dbs/mysql/wire/result.c
@@ -1282,11 +1285,13 @@ if(ORM_MYSQL_LIVE_TESTS)
     src/dbs/mysql/auth/auth.c)
   target_compile_features(orm_mysql_live_test PRIVATE c_std_11)
   target_include_directories(orm_mysql_live_test PRIVATE
+    ${ORM_INCLUDE_DIR}
+    ${ORM_FLOW_SOURCE_DIR}
     ${ORM_MYSQL_SOURCE_DIR}
     ${ORM_MYSQL_WIRE_SOURCE_DIR}
     ${ORM_MYSQL_AUTH_SOURCE_DIR})
   target_link_libraries(orm_mysql_live_test PRIVATE
-    Salts::CNet OpenSSL::Crypto)
+    Salts::CNet Salts::CSerde OpenSSL::Crypto)
   set_target_properties(orm_mysql_live_test PROPERTIES
     C_STANDARD_REQUIRED ON FOLDER "orm/tests")
   orm_enable_strict_warnings(orm_mysql_live_test)
