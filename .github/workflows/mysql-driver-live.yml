@@ -201,7 +201,8 @@ jobs:
           set -euo pipefail
           stage="$RUNNER_TEMP/mysql-installed"
           rm -rf "$stage"
-          cmake --install "$TURBODB_MYSQL_BUILD" --prefix "$stage"
+          cmake --install "$TURBODB_MYSQL_BUILD" \
+            --prefix "$stage" --component OrmMysqlDriver
 
           installed_module="$(find "$stage" -type f \
             \( -name 'turbodb_driver_mysql.so' -o -name 'turbodb_driver_mysql.dll' -o -name 'turbodb_driver_mysql.dylib' \) \
