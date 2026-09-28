@@ -24,8 +24,9 @@ static const TurboDb_Driver_vtable bad_contract_vtable = {
     .capabilities = 0u,
     .create = bad_contract_create};
 
+static unsigned bad_contract_state;
 static TurboDb_Driver bad_contract_driver = {
-    NULL, &bad_contract_vtable};
+    &bad_contract_state, &bad_contract_vtable};
 
 static const salts_plugin_export bad_contract_exports[] = {{
     .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
