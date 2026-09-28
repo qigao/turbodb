@@ -106,6 +106,10 @@ orm_runtime_release(runtime);
 ```
 
 The Driver keeps its Plugin lease while connection-owned native work is live.
+MongoDB's native process runtime is owned by the managed MongoDB Plugin:
+`mongoc_init()` runs from Plugin start and `mongoc_cleanup()` runs only after
+all Driver leases quiesce and before module unload. No process-global
+`atexit` callback is registered by the ORM adapter.
 Unsupported Redis transaction/raw-SQL operations remain explicit backend
 errors; they are not emulated by another database.
 
