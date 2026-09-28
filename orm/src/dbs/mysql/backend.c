@@ -1,6 +1,7 @@
 #include "backend.h"
 
 #include "cursor.h"
+#include "dialect.h"
 #include "parameters.h"
 #include "session.h"
 #include "session_cursor.h"
@@ -550,6 +551,138 @@ fail:
   return status;
 }
 
+
+static orm_status_t orm_mysql_prepare_structured(
+    const orm_query_plan *plan, const orm_limits *limits,
+    orm_mysql_prepared *out, orm_error_t *error) {
+  orm_mysql_rendered_query rendered;
+  size_t execute_bytes = 10u;
+  size_t sql_size;
+  size_t i;
+  orm_status_t status;
+
+  if (out != NULL)
+    memset(out, 0, sizeof(*out));
+  if (plan == NULL || limits == NULL || out == NULL ||
+      plan->kind == ORM_QUERY_RAW)
+    return orm_mysql_fail(
+        error, ORM_STATUS_INVALID_ARGUMENT,
+        "invalid MySQL structured prepare request");
+
+  memset(&rendered, 0, sizeof(rendered));
+  status = orm_mysql_render_plan(
+      plan, limits, &rendered, error);
+  if (status != ORM_STATUS_OK)
+    return status;
+
+  sql_size = tstr_len(rendered.text);
+  if (sql_size == 0u || sql_size > limits->max_query_bytes ||
+      sql_size == SIZE_MAX) {
+    status = orm_mysql_fail(
+        error,
+        sql_size > limits->max_query_bytes
+            ? ORM_STATUS_LIMIT_EXCEEDED
+            : ORM_STATUS_INVALID_ARGUMENT,
+        "MySQL structured SQL exceeds configured bounds");
+    goto fail;
+  }
+
+  out->sql = (uint8_t *)malloc(sql_size + 1u);
+  if (out->sql == NULL) {
+    status = orm_mysql_fail(
+        error, ORM_STATUS_OUT_OF_MEMORY,
+        "allocate MySQL structured SQL");
+    goto fail;
+  }
+  memcpy(out->sql, rendered.text, sql_size);
+  out->sql[sql_size] = 0u;
+  out->sql_size = sql_size;
+  out->value_count = rendered.parameter_count;
+
+  if (out->value_count != 0u) {
+    if (out->value_count > limits->max_parameters ||
+        out->value_count > SIZE_MAX / sizeof(*out->values)) {
+      status = orm_mysql_fail(
+          error, ORM_STATUS_LIMIT_EXCEEDED,
+          "MySQL structured parameter count exceeds configured bounds");
+      goto fail;
+    }
+    out->values = (mysql_stmt_value_t *)calloc(
+        out->value_count, sizeof(*out->values));
+    if (out->values == NULL) {
+      status = orm_mysql_fail(
+          error, ORM_STATUS_OUT_OF_MEMORY,
+          "allocate MySQL structured parameters");
+      goto fail;
+    }
+
+    if (execute_bytes >
+            SIZE_MAX - (out->value_count + 7u) / 8u - 1u ||
+        execute_bytes + (out->value_count + 7u) / 8u + 1u >
+            SIZE_MAX - out->value_count * 2u) {
+      status = orm_mysql_fail(
+          error, ORM_STATUS_LIMIT_EXCEEDED,
+          "MySQL structured execute command exceeds platform range");
+      goto fail;
+    }
+    execute_bytes +=
+        (out->value_count + 7u) / 8u + 1u +
+        out->value_count * 2u;
+
+    for (i = 0u; i < out->value_count; ++i) {
+      size_t encoded = 0u;
+      status = orm_mysql_map_value(
+          rendered.parameters[i], &out->values[i],
+          &encoded, error);
+      if (status != ORM_STATUS_OK)
+        goto fail;
+      if (encoded > SIZE_MAX - execute_bytes) {
+        status = orm_mysql_fail(
+            error, ORM_STATUS_LIMIT_EXCEEDED,
+            "MySQL structured execute payload exceeds platform range");
+        goto fail;
+      }
+      execute_bytes += encoded;
+    }
+  }
+
+  out->command_bytes =
+      out->sql_size + 1u > execute_bytes
+          ? out->sql_size + 1u
+          : execute_bytes;
+  if (out->command_bytes < ORM_MYSQL_CONTROL_COMMAND_BYTES)
+    out->command_bytes = ORM_MYSQL_CONTROL_COMMAND_BYTES;
+  if (out->command_bytes >
+      (size_t)MYSQL_WIRE_PACKET_MAX_PAYLOAD) {
+    status = orm_mysql_fail(
+        error, ORM_STATUS_LIMIT_EXCEEDED,
+        "MySQL structured prepared command exceeds one protocol packet");
+    goto fail;
+  }
+
+  orm_mysql_rendered_query_destroy(&rendered);
+  orm_error_set(error, ORM_STATUS_OK, NULL);
+  return ORM_STATUS_OK;
+
+fail:
+  orm_mysql_rendered_query_destroy(&rendered);
+  orm_mysql_prepared_destroy(out);
+  return status;
+}
+
+static orm_status_t orm_mysql_prepare_plan(
+    const orm_query_plan *plan, const orm_limits *limits,
+    orm_mysql_prepared *out, orm_error_t *error) {
+  if (plan == NULL)
+    return orm_mysql_fail(
+        error, ORM_STATUS_INVALID_ARGUMENT,
+        "MySQL query plan is required");
+  return plan->kind == ORM_QUERY_RAW
+             ? orm_mysql_prepare_raw(plan, limits, out, error)
+             : orm_mysql_prepare_structured(
+                   plan, limits, out, error);
+}
+
 static size_t orm_mysql_size_limit(uint64_t value) {
   return value > (uint64_t)SIZE_MAX ? SIZE_MAX : (size_t)value;
 }
@@ -581,7 +714,7 @@ static orm_status_t orm_mysql_open_impl(
         error, ORM_STATUS_INVALID_STATE,
         "use the MySQL transaction handle while a transaction is active");
 
-  status = orm_mysql_prepare_raw(plan, limits, &prepared, error);
+  status = orm_mysql_prepare_plan(plan, limits, &prepared, error);
   if (status != ORM_STATUS_OK)
     return status;
 
@@ -642,7 +775,7 @@ static orm_status_t orm_mysql_execute_with_session(
 
   if (affected_rows != NULL)
     *affected_rows = 0u;
-  status = orm_mysql_prepare_raw(plan, limits, &prepared, error);
+  status = orm_mysql_prepare_plan(plan, limits, &prepared, error);
   if (status != ORM_STATUS_OK)
     return status;
 

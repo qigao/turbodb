@@ -4,8 +4,10 @@
 #include "orm_driver_backend_bridge.h"
 
 #define ORM_MYSQL_DRIVER_CAPABILITIES                                      \
-  (ORM_DRIVER_CAP_RAW_SQL | ORM_DRIVER_CAP_TRANSACTION |                  \
-   ORM_DRIVER_CAP_SAVEPOINT | ORM_DRIVER_CAP_INCREMENTAL_ROWS |           \
+  (ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_INSERT |                         \
+   ORM_DRIVER_CAP_UPDATE | ORM_DRIVER_CAP_DELETE |                         \
+   ORM_DRIVER_CAP_RAW_SQL | ORM_DRIVER_CAP_TRANSACTION |                   \
+   ORM_DRIVER_CAP_SAVEPOINT | ORM_DRIVER_CAP_INCREMENTAL_ROWS |            \
    ORM_DRIVER_CAP_READ_COMMITTED | ORM_DRIVER_CAP_REPEATABLE_READ)
 
 static int mysql_driver_identity;

@@ -79,6 +79,35 @@ static int run_command(
   return 0;
 }
 
+static int run_command_in_transaction(
+    orm_query_t *query, orm_transaction_t *transaction,
+    orm_error_t *error, uint64_t *affected) {
+  orm_result_t *result = NULL;
+  uint64_t count = 0u;
+  orm_status_t status;
+
+  if (affected != NULL)
+    *affected = 0u;
+  status = orm_query_execute_in_transaction(
+      query, transaction, &result, error);
+  if (status != ORM_STATUS_OK) {
+    orm_result_destroy(result);
+    return fail_status(
+        "execute MySQL transaction command",
+        status, ORM_STATUS_OK, error);
+  }
+  status = orm_result_affected_rows(
+      result, &count, error);
+  orm_result_destroy(result);
+  if (status != ORM_STATUS_OK)
+    return fail_status(
+        "read MySQL transaction affected_rows",
+        status, ORM_STATUS_OK, error);
+  if (affected != NULL)
+    *affected = count;
+  return 0;
+}
+
 static int read_probe(
     orm_connection_t *connection, orm_error_t *error) {
   orm_query_t *query = NULL;
@@ -237,6 +266,151 @@ static int read_driver_value(
   return failed;
 }
 
+
+static int structured_insert(
+    orm_connection_t *connection, int64_t id, int64_t value,
+    orm_error_t *error) {
+  orm_query_t *query = NULL;
+  uint64_t affected = 0u;
+  int failed = 0;
+
+  if (orm_insert(
+          connection, orm_view("structured_items"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("id"), orm_i64(id), error) !=
+          ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("s"), orm_i64(value), error) !=
+          ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("note"), orm_null(), error) !=
+          ORM_STATUS_OK ||
+      run_command(query, error, &affected) != 0 ||
+      affected != UINT64_C(1)) {
+    fprintf(stderr,
+            "MySQL structured INSERT failed affected=%llu message=%s\n",
+            (unsigned long long)affected,
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+  orm_query_destroy(query);
+  return failed;
+}
+
+static int structured_update(
+    orm_connection_t *connection, int64_t id, int64_t value,
+    orm_error_t *error) {
+  orm_query_t *query = NULL;
+  uint64_t affected = 0u;
+  int failed = 0;
+
+  if (orm_update(
+          connection, orm_view("structured_items"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("s"), orm_i64(value), error) !=
+          ORM_STATUS_OK ||
+      orm_query_where(
+          query, orm_view("id"), ORM_COMPARE_EQUAL,
+          orm_i64(id), error) != ORM_STATUS_OK ||
+      run_command(query, error, &affected) != 0 ||
+      affected != UINT64_C(1)) {
+    fprintf(stderr,
+            "MySQL structured UPDATE failed affected=%llu message=%s\n",
+            (unsigned long long)affected,
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+  orm_query_destroy(query);
+  return failed;
+}
+
+static int structured_delete(
+    orm_connection_t *connection, int64_t id,
+    orm_error_t *error) {
+  orm_query_t *query = NULL;
+  uint64_t affected = 0u;
+  int failed = 0;
+
+  if (orm_delete(
+          connection, orm_view("structured_items"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_where(
+          query, orm_view("id"), ORM_COMPARE_EQUAL,
+          orm_i64(id), error) != ORM_STATUS_OK ||
+      run_command(query, error, &affected) != 0 ||
+      affected != UINT64_C(1)) {
+    fprintf(stderr,
+            "MySQL structured DELETE failed affected=%llu message=%s\n",
+            (unsigned long long)affected,
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+  orm_query_destroy(query);
+  return failed;
+}
+
+static int structured_read(
+    orm_connection_t *connection, int64_t id,
+    long expected, int expect_present,
+    orm_error_t *error) {
+  orm_query_t *query = NULL;
+  orm_flow_config_t flow;
+  cflow_publisher publisher = {0};
+  mysql_driver_live_row row = {0};
+  cflow_step step;
+  int failed = 0;
+
+  if (orm_query_create(
+          connection, orm_view("structured_items"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_add_column(
+          query, orm_view("s"), error) != ORM_STATUS_OK ||
+      orm_query_where(
+          query, orm_view("id"), ORM_COMPARE_EQUAL,
+          orm_i64(id), error) != ORM_STATUS_OK) {
+    orm_query_destroy(query);
+    return 1;
+  }
+
+  orm_flow_config(&flow, &mysql_driver_live_row_data);
+  if (orm_query_open_flow(
+          query, &flow, &publisher, error) != ORM_STATUS_OK) {
+    orm_query_destroy(query);
+    return 1;
+  }
+
+  step = cflow_publisher_resume(&publisher, NULL, &row);
+  if (expect_present) {
+    if ((step.kind != CFLOW_STEP_VALUE &&
+         step.kind != CFLOW_STEP_VALUE_AND_DONE) ||
+        row.s != expected) {
+      fprintf(stderr,
+              "MySQL structured SELECT mismatch step=%d got=%ld expected=%ld\n",
+              (int)step.kind, row.s, expected);
+      failed = 1;
+    } else if (step.kind == CFLOW_STEP_VALUE) {
+      step = cflow_publisher_resume(&publisher, NULL, &row);
+      if (step.kind != CFLOW_STEP_DONE) {
+        fprintf(stderr,
+                "MySQL structured SELECT expected DONE got=%d\n",
+                (int)step.kind);
+        failed = 1;
+      }
+    }
+  } else if (step.kind != CFLOW_STEP_DONE) {
+    fprintf(stderr,
+            "MySQL structured SELECT expected empty result got=%d\n",
+            (int)step.kind);
+    failed = 1;
+  }
+
+  cflow_publisher_destroy(&publisher);
+  orm_query_destroy(query);
+  return failed;
+}
+
 int main(void) {
   const char *module = getenv("ORM_MYSQL_PLUGIN");
   const char *host = getenv("ORM_MYSQL_HOST");
@@ -349,6 +523,84 @@ int main(void) {
   if (!failed &&
       (read_driver_value(connection_a, 1L, &error) != 0 ||
        read_driver_value(connection_b, 110L, &error) != 0))
+    failed = 1;
+
+  /*
+   * Structured CRUD is lowered only inside the MySQL Driver. It must use the
+   * same prepared binary command/cursor path as RAW SQL and preserve datasource
+   * isolation under one loaded Driver module.
+   */
+  if (!failed &&
+      (structured_insert(connection_a, INT64_C(1), INT64_C(41), &error) != 0 ||
+       structured_insert(connection_b, INT64_C(1), INT64_C(141), &error) != 0))
+    failed = 1;
+  if (!failed &&
+      (structured_read(connection_a, INT64_C(1), 41L, 1, &error) != 0 ||
+       structured_read(connection_b, INT64_C(1), 141L, 1, &error) != 0))
+    failed = 1;
+
+  if (!failed &&
+      orm_transaction_begin(
+          connection_a, ORM_ISOLATION_READ_COMMITTED,
+          &transaction_a, &error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "begin structured MySQL transaction failed: %s\n",
+            error.message);
+    failed = 1;
+  }
+  if (!failed) {
+    orm_query_t *tx_query = NULL;
+    uint64_t tx_affected = 0u;
+    if (orm_update(
+            connection_a, orm_view("structured_items"),
+            &tx_query, &error) != ORM_STATUS_OK ||
+        orm_query_set(
+            tx_query, orm_view("s"), orm_i64(99), &error) !=
+            ORM_STATUS_OK ||
+        orm_query_where(
+            tx_query, orm_view("id"), ORM_COMPARE_EQUAL,
+            orm_i64(1), &error) != ORM_STATUS_OK ||
+        run_command_in_transaction(
+            tx_query, transaction_a, &error,
+            &tx_affected) != 0 ||
+        tx_affected != UINT64_C(1)) {
+      fprintf(stderr,
+              "structured transaction UPDATE failed affected=%llu message=%s\n",
+              (unsigned long long)tx_affected, error.message);
+      failed = 1;
+    }
+    orm_query_destroy(tx_query);
+  }
+  if (transaction_a != NULL) {
+    if (orm_transaction_rollback(
+            transaction_a, &error) != ORM_STATUS_OK) {
+      fprintf(stderr,
+              "rollback structured MySQL transaction failed: %s\n",
+              error.message);
+      failed = 1;
+    }
+    orm_transaction_destroy(transaction_a);
+    transaction_a = NULL;
+  }
+  if (!failed &&
+      structured_read(
+          connection_a, INT64_C(1), 41L, 1, &error) != 0)
+    failed = 1;
+
+  if (!failed &&
+      structured_update(
+          connection_a, INT64_C(1), INT64_C(42), &error) != 0)
+    failed = 1;
+  if (!failed &&
+      (structured_read(connection_a, INT64_C(1), 42L, 1, &error) != 0 ||
+       structured_read(connection_b, INT64_C(1), 141L, 1, &error) != 0))
+    failed = 1;
+  if (!failed &&
+      structured_delete(connection_a, INT64_C(1), &error) != 0)
+    failed = 1;
+  if (!failed &&
+      (structured_read(connection_a, INT64_C(1), 0L, 0, &error) != 0 ||
+       structured_read(connection_b, INT64_C(1), 141L, 1, &error) != 0))
     failed = 1;
 
   orm_error_init(&error);
