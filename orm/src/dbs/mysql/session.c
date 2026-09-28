@@ -1,6 +1,7 @@
 #include "session.h"
 #include "session_cursor.h"
 #include "session_transaction.h"
+#include "transaction_control.h"
 
 #include "auth/auth.h"
 #include "wire/handshake.h"
@@ -93,6 +94,9 @@ typedef enum mysql_transaction_step_t {
   MYSQL_TRANSACTION_STEP_SET_ISOLATION,
   MYSQL_TRANSACTION_STEP_BEGIN,
   MYSQL_TRANSACTION_STEP_COMMAND,
+  MYSQL_TRANSACTION_STEP_SAVEPOINT,
+  MYSQL_TRANSACTION_STEP_ROLLBACK_TO_SAVEPOINT,
+  MYSQL_TRANSACTION_STEP_RELEASE_SAVEPOINT,
   MYSQL_TRANSACTION_STEP_COMMIT,
   MYSQL_TRANSACTION_STEP_ROLLBACK
 } mysql_transaction_step_t;
@@ -894,6 +898,11 @@ static void mysql_session_handle_control_reply(
       break;
     case MYSQL_TRANSACTION_STEP_BEGIN:
       session->transaction_active = true;
+      session->phase = MYSQL_PHASE_TRANSACTION_READY;
+      break;
+    case MYSQL_TRANSACTION_STEP_SAVEPOINT:
+    case MYSQL_TRANSACTION_STEP_ROLLBACK_TO_SAVEPOINT:
+    case MYSQL_TRANSACTION_STEP_RELEASE_SAVEPOINT:
       session->phase = MYSQL_PHASE_TRANSACTION_READY;
       break;
     case MYSQL_TRANSACTION_STEP_COMMIT:
@@ -2203,6 +2212,97 @@ static mysql_session_status_t mysql_transaction_finish(
   if (error != NULL)
     memset(error, 0, sizeof(*error));
   return MYSQL_SESSION_OK;
+}
+
+static mysql_session_status_t mysql_transaction_savepoint_control(
+    mysql_transaction_session_t *transaction,
+    mysql_transaction_step_t step,
+    mysql_savepoint_control_t control,
+    const uint8_t *name, size_t name_size,
+    mysql_session_error_t *error) {
+  uint8_t sql[96];
+  size_t sql_size = 0u;
+  mysql_wire_status_t wire_status;
+  mysql_session_status_t status;
+
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  if (transaction == NULL ||
+      !transaction->session.transaction_active ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "transaction-savepoint");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "MySQL transaction is not active");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  wire_status = mysql_transaction_build_savepoint_control(
+      control, name, name_size, sql, sizeof(sql), &sql_size);
+  if (wire_status != MYSQL_WIRE_STATUS_OK ||
+      sql_size > transaction->max_command_bytes) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "transaction-savepoint");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     wire_status == MYSQL_WIRE_STATUS_LIMIT ||
+                             sql_size > transaction->max_command_bytes
+                         ? "MySQL savepoint control exceeds configured bound"
+                         : "invalid MySQL savepoint identifier");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  memset(&transaction->session.owned_error, 0,
+         sizeof(transaction->session.owned_error));
+  transaction->session.error = &transaction->session.owned_error;
+  transaction->session.transaction_step = step;
+  mysql_session_send_control(
+      &transaction->session, sql, sql_size);
+  status = mysql_session_progress_until(
+      &transaction->session, MYSQL_PHASE_TRANSACTION_READY);
+  if (status != MYSQL_SESSION_OK ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY) {
+    mysql_transaction_copy_error(transaction, error);
+    return status != MYSQL_SESSION_OK
+               ? status
+               : MYSQL_SESSION_PROTOCOL;
+  }
+
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  return MYSQL_SESSION_OK;
+}
+
+mysql_session_status_t mysql_transaction_session_savepoint(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *name, size_t name_size,
+    mysql_session_error_t *error) {
+  return mysql_transaction_savepoint_control(
+      transaction, MYSQL_TRANSACTION_STEP_SAVEPOINT,
+      MYSQL_SAVEPOINT_CREATE, name, name_size, error);
+}
+
+mysql_session_status_t mysql_transaction_session_rollback_to_savepoint(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *name, size_t name_size,
+    mysql_session_error_t *error) {
+  return mysql_transaction_savepoint_control(
+      transaction, MYSQL_TRANSACTION_STEP_ROLLBACK_TO_SAVEPOINT,
+      MYSQL_SAVEPOINT_ROLLBACK_TO, name, name_size, error);
+}
+
+mysql_session_status_t mysql_transaction_session_release_savepoint(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *name, size_t name_size,
+    mysql_session_error_t *error) {
+  return mysql_transaction_savepoint_control(
+      transaction, MYSQL_TRANSACTION_STEP_RELEASE_SAVEPOINT,
+      MYSQL_SAVEPOINT_RELEASE, name, name_size, error);
 }
 
 mysql_session_status_t mysql_transaction_session_commit(
