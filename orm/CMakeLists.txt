@@ -539,7 +539,7 @@ if(ORM_BUILD_POSTGRESQL_DRIVER)
   endif()
 endif()
 
-set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::Core Salts::DataBind)
+set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::DataBind)
 
 # Runtime dependency scanning is independent from the consumer CMake contract.
 # Include enabled backend and codec target directories so standalone installs
