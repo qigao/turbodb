@@ -48,10 +48,11 @@ static bool mysql_sql_keyword_equal(
 bool mysql_sql_reject_managed_transaction(
     const uint8_t *sql, size_t sql_size) {
   static const char *const rejected[] = {
-      "ALTER", "ANALYZE", "BEGIN", "COMMIT", "CREATE",
-      "DROP", "FLUSH", "GRANT", "INSTALL", "LOCK",
-      "OPTIMIZE", "RENAME", "REPAIR", "RESET", "REVOKE",
-      "ROLLBACK", "SAVEPOINT", "START", "TRUNCATE",
+      "ALTER", "ANALYZE", "BEGIN", "CACHE", "CHANGE",
+      "CHECK", "COMMIT", "CREATE", "DROP", "FLUSH",
+      "GRANT", "INSTALL", "LOAD", "LOCK", "OPTIMIZE",
+      "RENAME", "REPAIR", "RESET", "REVOKE", "ROLLBACK",
+      "SAVEPOINT", "SET", "START", "STOP", "TRUNCATE",
       "UNINSTALL", "UNLOCK", "XA"};
   size_t cursor = 0u;
   size_t begin;
