@@ -549,6 +549,19 @@ int block_manager_validate_last_block(block_manager_t *bm,
  */
 void block_manager_set_max_safe_block_bytes(uint64_t bytes);
 
+#if defined(_WIN32)
+/**
+ * block_manager_thread_cache_shutdown
+ * releases the Win32 FLS key used by the process-local block read cache.
+ *
+ * This is required before unloading a DLL that statically embeds TidesDB:
+ * FlsAlloc retains the destructor callback address until FlsFree, so leaving
+ * the key live across FreeLibrary would leave a callback into unmapped code.
+ * Call only after all TidesDB worker/caller activity has quiesced.
+ */
+void block_manager_thread_cache_shutdown(void);
+#endif
+
 /**
  * convert_sync_mode
  * converts TidesDB sync mode enum values to block manager sync mode enum values
