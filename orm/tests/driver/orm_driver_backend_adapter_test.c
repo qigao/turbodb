@@ -34,6 +34,7 @@ typedef struct fake_backend_state {
 
 typedef struct fake_cursor {
   fake_backend_state *state;
+  const orm_query_plan *borrowed_plan;
   uint32_t emitted;
 } fake_cursor;
 
@@ -148,6 +149,15 @@ static orm_row_cursor_step fake_cursor_next(
     void *context, cserde_reader *reader) {
   fake_cursor *cursor = (fake_cursor *)context;
   orm_row_cursor_step step = ORM_ROW_CURSOR_STEP_INIT;
+  if (cursor->borrowed_plan == NULL ||
+      cursor->borrowed_plan->kind != ORM_QUERY_RAW ||
+      cursor->borrowed_plan->raw_sql == NULL ||
+      strcmp(cursor->borrowed_plan->raw_sql, "select 1") != 0) {
+    step.kind = ORM_ROW_CURSOR_ERROR;
+    step.status = ORM_STATUS_INVALID_STATE;
+    step.message = "borrowed cursor plan did not survive open_cursor";
+    return step;
+  }
   if (cursor->emitted == 0u) {
     check_equal(cserde_reader_init(reader, &fake_reader_ops, cursor),
                 CSERDE_OK);
@@ -208,6 +218,7 @@ static orm_status_t fake_open_cursor(
   fake_cursor *cursor = (fake_cursor *)calloc(1u, sizeof(*cursor));
   if (cursor == NULL) return ORM_STATUS_OUT_OF_MEMORY;
   cursor->state = state;
+  cursor->borrowed_plan = plan;
   out->ops = &fake_cursor_ops;
   out->context = cursor;
   orm_error_init(error);
@@ -378,7 +389,7 @@ spec("Driver backend DTO bridge") {
     check_equal(backend_state.destroy_calls, 1u);
   }
 
-  it("maps private row cursors into Driver cursor DTOs") {
+  it("keeps the exact materialized plan alive for cursor lifetime") {
     orm_driver_connection_v1 c = connection();
     const orm_driver_connection_ops_v1 *ops =
         (const orm_driver_connection_ops_v1 *)c.ops.data;
