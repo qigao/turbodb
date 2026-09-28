@@ -615,7 +615,8 @@ if(WIN32)
     RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
     DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
     PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
-                        "clang_rt.asan_dynamic-.*" "salts_utils\\.dll"
+                        "clang_rt.asan_dynamic-.*" "salts\\.dll"
+                        "salts_utils\\.dll"
     POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 else()
