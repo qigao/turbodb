@@ -38,41 +38,26 @@ as text.
 
 ## C API
 
-Load the installed Orm package, include `orm.h`, and link `Orm::C`. The
-generic shared core owns query planning, result/Publisher plumbing and the
-canonical Driver runtime. Database-native dependencies stay in their
-components/Driver modules rather than the generic core.
+Load the installed Orm package, include `orm.h` /
+`orm_runtime.h`, and link `Orm::C`. The generic shared core owns query
+planning, result/Publisher plumbing and the canonical Driver runtime.
+Database-native dependencies stay in Driver modules rather than the generic
+core.
 
 ```cmake
 find_package(Orm CONFIG REQUIRED)
 target_link_libraries(app PRIVATE Orm::C)
 ```
 
-```c
-#include <orm.h>
-
-orm_error_t error;
-orm_config_t config;
-orm_option_t filename;
-orm_connection_t *connection = NULL;
-
-orm_error_init(&error);
-orm_config(&config);
-filename.keyword = orm_view("filename");
-filename.value = orm_view(":memory:");
-config.driver = orm_view("sqlite");
-config.options = &filename;
-config.option_count = 1u;
-
-if (orm_connect(&config, &connection, &error) != ORM_STATUS_OK) {
-  /* error.status and error.message describe the failed boundary. */
-}
-```
+New connections use an explicit `orm_runtime_t` and an explicitly supplied
+Driver module path. The installed `Orm` CMake package does not advertise
+SQLite/PostgreSQL capability flags because Driver deployment is independent of
+the core package.
 
 
 ### Runtime-loaded Drivers
 
-Redis, TidesDB, and MongoDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
+SQLite, PostgreSQL, Redis, TidesDB, and MongoDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
 The application loads an exact module path into an `orm_runtime_t`, then
 connects by the canonical Plugin manifest ID. Runtime loading does not scan
 directories, infer aliases, retry older ABIs, or fall back to a built-in
@@ -255,11 +240,13 @@ must outlive that Publisher.
 Backend options are validated at connection creation. Unknown options are
 rejected instead of silently enabling a fallback.
 
-### PostgreSQL component
+### Legacy PostgreSQL compatibility component (2.1.x)
 
-PostgreSQL is an explicit optional component rather than part of
-`turbo_orm`. It is exported by the same Orm package, so consumers still find
-only Orm and link the component target when needed:
+For 2.1.x source compatibility, `ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=ON`
+may additionally export `Orm::PostgreSQL` and `orm_postgresql_connect()`.
+This is not the runtime Driver architecture and new code should not use it.
+It is retained only as a migration component and is scheduled for removal at
+the 3.0 connection-API cutover:
 
 ```cmake
 find_package(Orm CONFIG REQUIRED)
@@ -302,12 +289,13 @@ unchanged.
 
 ## Build and test
 
-Backend/component build options include `ORM_WITH_SQLITE`,
-`ORM_WITH_PGSQL`, `ORM_BUILD_REDIS_DRIVER`,
-`ORM_BUILD_TIDESDB_DRIVER`, and `ORM_BUILD_MONGODB_DRIVER`. Redis, TidesDB,
-and MongoDB ORM adapters are independent runtime-loaded Driver modules;
-enabling them does not put native client/storage implementations back into
-generic `Orm::C`.
+Runtime Driver build options are `ORM_BUILD_SQLITE_DRIVER`,
+`ORM_BUILD_POSTGRESQL_DRIVER`, `ORM_BUILD_REDIS_DRIVER`,
+`ORM_BUILD_TIDESDB_DRIVER`, and `ORM_BUILD_MONGODB_DRIVER`. The optional
+`ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT` switch controls only the 2.1.x direct
+connector compatibility target. Driver options do not change the generic
+`Orm::C` package contract or put native database libraries into its link
+closure.
 
 ```sh
 cmake --preset win-dev-user
