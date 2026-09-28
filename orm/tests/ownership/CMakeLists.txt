@@ -4,7 +4,7 @@ if(NOT TARGET orm_c_test_static)
   message(FATAL_ERROR "Native ownership tests require the real ORM test library")
 endif()
 # Backend imports are directory-scoped; use the same required packages/preset.
-if(ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
   find_package(SQLite3 REQUIRED)
 endif()
 get_target_property(owner_source_dir orm_c_test_static SOURCE_DIR)
@@ -83,7 +83,7 @@ if(ORM_POSTGRES_LIVE_TESTS)
       ../../src/dbs/postgres/orm_postgres_libpq.c
       ../../src/dbs/postgres/orm_postgres_cursor.c)
     target_compile_definitions(${pg_target} PRIVATE
-      ORM_POSTGRESQL_STATIC ORM_WITH_PGSQL)
+      ORM_POSTGRESQL_STATIC)
     target_include_directories(${pg_target} PRIVATE
       ../../src/abi ../../src/flow ../../src/dbs/sql ../../src/dbs/postgres)
     target_link_libraries(${pg_target} PRIVATE orm_owner_test_core
@@ -107,14 +107,14 @@ endif()
 
 # Real libpq failure handles need no service. Keep the adapter and cursor on the
 # same private layout as this test core instead of linking the installed DLL.
-if(ORM_WITH_PGSQL)
+if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   find_package(PostgreSQL REQUIRED)
   add_executable(orm_postgres_connection_test
     ../flow/orm_postgres_connection_test.c
     ../../src/dbs/postgres/orm_postgres_libpq.c
     ../../src/dbs/postgres/orm_postgres_cursor.c)
   target_compile_definitions(orm_postgres_connection_test PRIVATE
-    ORM_POSTGRESQL_STATIC ORM_WITH_PGSQL)
+    ORM_POSTGRESQL_STATIC)
   target_include_directories(orm_postgres_connection_test PRIVATE
     ../../src/abi ../../src/flow ../../src/dbs/postgres)
   target_link_libraries(orm_postgres_connection_test PRIVATE orm_owner_test_core
