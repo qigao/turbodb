@@ -15,6 +15,11 @@ on:
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
       - "orm/tests/integration/postgres_live_test.c"
+      - "orm/tests/integration/sql_validation_parity_test.c"
+      - "orm/include/orm/orm.h"
+      - "orm/src/abi/orm_core.c"
+      - "orm/src/flow/**"
+      - "orm/CMakeLists.txt"
       - ".github/workflows/postgresql-driver-contract.yml"
   push:
     branches: [master]
@@ -30,6 +35,11 @@ on:
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
       - "orm/tests/integration/postgres_live_test.c"
+      - "orm/tests/integration/sql_validation_parity_test.c"
+      - "orm/include/orm/orm.h"
+      - "orm/src/abi/orm_core.c"
+      - "orm/src/flow/**"
+      - "orm/CMakeLists.txt"
       - ".github/workflows/postgresql-driver-contract.yml"
   workflow_dispatch:
 
@@ -42,6 +52,150 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validation-parity:
+    name: PostgreSQL 17.6 + SQLite ValidationPlan parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17.6-alpine3.22
+        env:
+          POSTGRES_DB: turbodb
+          POSTGRES_USER: turbodb
+          POSTGRES_PASSWORD: turbodb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U turbodb -d turbodb"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure canonical vcpkg tool and shared cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Restore canonical re2c host tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        with:
+          version: "4.6.3"
+
+      - name: Set up Go for BoringSSL
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+
+      - name: Prepare Linux host dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake bison flex libtool nasm ninja-build pkg-config perl
+
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+
+      - name: Resolve SQLite and PostgreSQL native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset VCPKG_OVERLAY_PORTS
+          install_root="$RUNNER_TEMP/sql-validation-vcpkg"
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$GITHUB_WORKSPACE" \
+            --x-install-root="$install_root" \
+            --triplet=x64-linux \
+            --x-feature=postgresql \
+            --x-feature=sqlite
+          status="$install_root/vcpkg/status"
+          test -f "$status"
+          grep -F "Package: libpq" "$status"
+          grep -F "Package: sqlite3" "$status"
+          echo "TURBODB_VALIDATION_VCPKG_ROOT=$install_root" >> "$GITHUB_ENV"
+
+      - name: Build and run cross-Driver ValidationPlan parity
+        shell: bash
+        env:
+          TURBODB_ORM_PGSQL_TEST_CONNINFO: "host=127.0.0.1 port=5432 dbname=turbodb user=turbodb password=turbodb"
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/sql-validation-parity"
+          evidence="$GITHUB_WORKSPACE/evidence/sql-validation-parity"
+          mkdir -p "$evidence"
+
+          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_MANIFEST_INSTALL=OFF \
+            -DVCPKG_INSTALLED_DIR="$TURBODB_VALIDATION_VCPKG_ROOT" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DORM_BUILD_TESTS=ON \
+            -DORM_BUILD_SQLITE_DRIVER=ON \
+            -DORM_BUILD_POSTGRESQL_DRIVER=ON \
+            -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF \
+            -DORM_BUILD_REDIS_DRIVER=OFF \
+            -DORM_BUILD_MONGODB_DRIVER=OFF \
+            -DORM_BUILD_TIDESDB_DRIVER=OFF \
+            -DORM_POSTGRES_LIVE_TESTS=OFF \
+            -DORM_SQL_VALIDATION_PARITY_TESTS=ON \
+            -DTURBODB_BUILD_REDIS=OFF \
+            -DTURBODB_BUILD_DBTOOLS=OFF \
+            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
+            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
+
+          cmake --build "$build" --target orm_sql_validation_parity_test --parallel 4
+
+          export LD_LIBRARY_PATH="$build/bin:$TURBODB_VALIDATION_VCPKG_ROOT/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir "$build" -R '^orm_sql_validation_parity$' \
+            --output-on-failure 2>&1 | tee "$evidence/ctest.log"
+
+          core="$build/bin/libturbo_orm.so"
+          app="$build/bin/orm_sql_validation_parity_test"
+          sqlite_driver="$build/bin/turbodb_driver_sqlite.so"
+          postgresql_driver="$build/bin/turbodb_driver_postgresql.so"
+          sha256sum "$core" "$app" "$sqlite_driver" "$postgresql_driver" \
+            > "$evidence/binaries.sha256"
+
+          cid="$(docker ps --filter ancestor=postgres:17.6-alpine3.22 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+          {
+            echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "os=ubuntu-24.04"
+            echo "arch=x64"
+            echo "configuration=Release"
+            echo "Salts.Native=1.8.0"
+            echo "SaltsUtils.Native=4.1.0"
+            echo "PluginABI=2"
+            echo "validation=DataBindMessagePlan/ValidationPlan"
+            echo "sqlite=:memory:"
+            echo "postgres_image=postgres:17.6-alpine3.22"
+            docker exec "$cid" postgres --version
+          } > "$evidence/qualification.txt"
+
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git diff --exit-code
+
+      - name: Keep SQL validation parity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-validation-parity-${{ github.sha }}
+          path: evidence/sql-validation-parity/
+          if-no-files-found: warn
+
   registry-contract:
     name: ${{ matrix.os }} central registry
     strategy:
