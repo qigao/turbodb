@@ -12,6 +12,12 @@ if(ORM_BUILD_MONGODB_DRIVER)
   list(APPEND VCPKG_MANIFEST_FEATURES mongodb)
 endif()
 
+option(ORM_BUILD_MYSQL_DRIVER
+       "Build the independent MySQL TurboDb.Driver module" OFF)
+if(ORM_BUILD_MYSQL_DRIVER)
+  list(APPEND VCPKG_MANIFEST_FEATURES mysql)
+endif()
+
 option(ORM_WITH_SQLITE "Enable SQLite backend" ON)
 option(TURBODB_DBTOOLS_WITH_SQLITE
        "Enable SQLite standalone database tools" ON)
