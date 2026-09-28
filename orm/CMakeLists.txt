@@ -627,7 +627,7 @@ else()
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
-if(ORM_WITH_PGSQL)
+if(TARGET orm_postgresql)
   set(ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES)
   orm_collect_runtime_search_directories(
     PostgreSQL::PostgreSQL ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES)
@@ -697,14 +697,14 @@ if(TARGET orm_mongodb_driver)
 endif()
 
 orm_enable_strict_warnings(turbo_orm)
-if(ORM_WITH_PGSQL)
+if(TARGET orm_postgresql)
   orm_enable_strict_warnings(orm_postgresql)
 endif()
 
 set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
 if(ORM_BUILD_TESTS)
   set(ORM_TEST_STATIC_SOURCES ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
-  if(ORM_WITH_SQLITE)
+  if(ORM_BUILD_SQLITE_DRIVER)
     list(APPEND ORM_TEST_STATIC_SOURCES
          src/dbs/sqlite/backend.c
          src/dbs/sqlite/orm_sqlite_cursor.c)
@@ -726,8 +726,8 @@ if(ORM_BUILD_TESTS)
     orm_c_test_static PUBLIC Salts::Core
     PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin Salts::CFlow
             Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
-  if(ORM_WITH_SQLITE)
-    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
+  if(ORM_BUILD_SQLITE_DRIVER)
+    target_compile_definitions(orm_c_test_static PRIVATE ORM_LEGACY_SQLITE_FACTORY)
     target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
   endif()
   set_target_properties(orm_c_test_static PROPERTIES C_STANDARD_REQUIRED ON)
@@ -753,8 +753,6 @@ add_test(
     "-DORM_PACKAGE_TEST_SALTS_ROOT=$ENV{SALTS_ROOT}"
     "-DORM_PACKAGE_TEST_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
     "-DORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR=${ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR}"
-    "-DORM_PACKAGE_TEST_EXPECT_SQLITE=${ORM_WITH_SQLITE}"
-    "-DORM_PACKAGE_TEST_EXPECT_POSTGRESQL=${ORM_WITH_PGSQL}"
     "-DORM_PACKAGE_TEST_CONFIG=$<CONFIG>"
     "-DORM_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}"
     "-DORM_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
@@ -768,14 +766,14 @@ function(orm_link_internal_test TARGET_NAME)
   set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
 endfunction()
 
-if(ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
   list(APPEND ORM_TEST_PRIVATE_LIBS SQLite::SQLite3 Salts::CSerde
                                     Salts::CFlow)
 endif()
 list(APPEND ORM_TEST_PRIVATE_LIBS TidesDB::tidesdb)
 set(ORM_TEST_DEFINITIONS ORM_C_STATIC)
-if(ORM_WITH_SQLITE)
-  list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
+  list(APPEND ORM_TEST_DEFINITIONS ORM_LEGACY_SQLITE_FACTORY)
 endif()
 list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_TIDESDB)
 
@@ -986,7 +984,7 @@ add_executable(orm_backend_profile_test tests/abi/backend_profile_test.c)
 target_compile_features(orm_backend_profile_test PRIVATE c_std_11)
 target_compile_definitions(
   orm_backend_profile_test
-  PRIVATE ORM_C_STATIC ORM_EXPECT_SQLITE=$<BOOL:${ORM_WITH_SQLITE}>)
+  PRIVATE ORM_C_STATIC ORM_EXPECT_SQLITE=$<BOOL:${ORM_BUILD_SQLITE_DRIVER}>)
 orm_link_internal_test(orm_backend_profile_test Salts::TinyTest)
 set_target_properties(orm_backend_profile_test
                       PROPERTIES FOLDER "orm/tests")
@@ -1366,7 +1364,7 @@ if(ORM_BUILD_TIDESDB_DRIVER)
     ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
 endif()
 
-if(ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
 add_executable(orm_sqlite_flow_test tests/flow/orm_sqlite_flow_test.c)
 target_compile_features(orm_sqlite_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_sqlite_flow_test PRIVATE ORM_C_STATIC)
@@ -1550,7 +1548,7 @@ if(WIN32)
                         orm_row_publisher orm_pure_c_build orm_sql_render
                         orm_driver_plan_view orm_driver_owner_bridge
                         orm_postgres_flow orm_backend_profile)
-  if(ORM_WITH_SQLITE)
+  if(ORM_BUILD_SQLITE_DRIVER)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
     if(SQLite3_LIBRARY)
@@ -1568,11 +1566,11 @@ if(WIN32)
                                   orm_sqlite_provider_atomicity orm_cpp_flow
                                   orm_public_ownership orm_public_ownership_cpp)
   endif()
-  if(ORM_WITH_PGSQL)
+  if(ORM_BUILD_POSTGRESQL_DRIVER OR ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:PostgreSQL::PostgreSQL>")
     list(APPEND ORM_RUNTIME_TESTS orm_postgres_libpq)
-    if(ORM_WITH_SQLITE)
+    if(ORM_BUILD_SQLITE_DRIVER)
       list(APPEND ORM_RUNTIME_TESTS
            orm_sql_plugin_matrix_sqlite
            orm_sql_plugin_matrix_postgresql
@@ -1682,7 +1680,7 @@ endif()
 cmake_install_headers(
   FILES include/orm/orm.h include/orm/orm.hpp
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
-if(ORM_WITH_PGSQL)
+if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   cmake_install_headers(
     FILES include/orm/orm_postgresql.h include/orm/orm_postgresql.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
