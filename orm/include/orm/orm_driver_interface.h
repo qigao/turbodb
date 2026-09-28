@@ -114,12 +114,12 @@ CMETA_LOCAL const cmeta_type_desc
         &orm_driver_storage_capabilities_ptr_type_identity};
 
 /*
- * Minimal stable capability: create one native Driver connection.
+ * Canonical typed Driver control plane.
  *
  * Connection/query/transaction/cursor semantics continue through the existing
- * typed operation tables.  They are deliberately not flattened into generic
- * Plugin Function exports.  F4 makes FunctionDesc + FunctionAbi part of the
- * same declaration as typed vtable dispatch.
+ * typed operation tables. They are deliberately not flattened into generic
+ * Plugin Function exports. Storage capability publication reports local
+ * durability facts only; it does not add storage operations to this interface.
  */
 #define ORM_DRIVER_INTERFACE_METHODS(X, I)                                      \
   X(I, F4, orm_status_t, create, io,                                            \
@@ -143,6 +143,12 @@ CMETA_LOCAL const cmeta_type_desc
 
 CMETA_INTERFACE(TurboDb_Driver, ORM_DRIVER_INTERFACE_METHODS);
 
+typedef TurboDb_Driver orm_driver_interface_v3;
+typedef TurboDb_Driver_vtable orm_driver_interface_vtable_v3;
+
+/* Historical source aliases retained for existing SDK consumers. Contract
+ * admission is governed by ORM_DRIVER_INTERFACE_CONTRACT_VERSION, not these
+ * typedef suffixes. */
 typedef TurboDb_Driver orm_driver_interface_v1;
 typedef TurboDb_Driver_vtable orm_driver_interface_vtable_v1;
 
