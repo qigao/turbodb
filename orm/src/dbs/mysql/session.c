@@ -1546,7 +1546,9 @@ static mysql_session_status_t mysql_session_start(
 
   if (mysql_wire_packet_stream_init(
           &session->stream, UINT8_C(0),
-          message_capacity) != MYSQL_WIRE_STATUS_OK) {
+          message_capacity > (size_t)MYSQL_WIRE_PACKET_MAX_PAYLOAD
+              ? MYSQL_WIRE_PACKET_MAX_PAYLOAD
+              : (uint32_t)message_capacity) != MYSQL_WIRE_STATUS_OK) {
     if (error != NULL) {
       error->status = MYSQL_SESSION_PROTOCOL;
       (void)snprintf(error->stage, sizeof(error->stage), "%s", "packet-stream");
