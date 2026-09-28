@@ -179,6 +179,15 @@ jobs:
           build="$RUNNER_TEMP/sql-driver-build"
           evidence="$GITHUB_WORKSPACE/evidence/sql-matrix-linux"
           mkdir -p "$evidence"
+          {
+            echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "os=ubuntu-24.04"
+            echo "arch=x64"
+            echo "configuration=Release"
+            echo "Salts.Native=1.7.10"
+            echo "SaltsUtils.Native=4.0.2"
+            echo "PluginABI=2"
+          } > "$evidence/qualification.txt"
           cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
@@ -223,6 +232,11 @@ jobs:
           installed_postgresql="$stage/lib/turbodb/drivers/turbodb_driver_postgresql.so"
           test -f "$installed_sqlite"
           test -f "$installed_postgresql"
+          find "$stage" -type f -print | sort > "$evidence/staged-files.txt"
+          {
+            realpath "$installed_sqlite"
+            realpath "$installed_postgresql"
+          } > "$evidence/installed-module-paths.txt"
           sha256sum "$installed_sqlite" "$installed_postgresql" > "$evidence/installed-modules.sha256"
           for scenario in sqlite postgresql both; do
             "$app" "$scenario" "$installed_sqlite" "$installed_postgresql"
@@ -272,6 +286,15 @@ jobs:
           $build = Join-Path $env:RUNNER_TEMP "sql-driver-build"
           $evidence = Join-Path $env:GITHUB_WORKSPACE "evidence/sql-matrix-windows"
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          @(
+            "head=${{ github.event.pull_request.head.sha || github.sha }}",
+            "os=windows-2022",
+            "arch=x64",
+            "configuration=Release",
+            "Salts.Native=1.7.10",
+            "SaltsUtils.Native=4.0.2",
+            "PluginABI=2"
+          ) | Set-Content -LiteralPath (Join-Path $evidence "qualification.txt") -Encoding ascii
           $args = @(
             "-S", $env:GITHUB_WORKSPACE,
             "-B", $build,
@@ -331,6 +354,14 @@ jobs:
           $installedPostgresql = Join-Path $installedDir "turbodb_driver_postgresql.dll"
           if (-not (Test-Path -LiteralPath $installedSqlite -PathType Leaf)) { throw "missing installed SQLite Driver" }
           if (-not (Test-Path -LiteralPath $installedPostgresql -PathType Leaf)) { throw "missing installed PostgreSQL Driver" }
+          Get-ChildItem -LiteralPath $stage -File -Recurse |
+            Sort-Object FullName |
+            ForEach-Object { $_.FullName } |
+            Set-Content -LiteralPath (Join-Path $evidence "staged-files.txt") -Encoding ascii
+          @(
+            (Resolve-Path -LiteralPath $installedSqlite).Path,
+            (Resolve-Path -LiteralPath $installedPostgresql).Path
+          ) | Set-Content -LiteralPath (Join-Path $evidence "installed-module-paths.txt") -Encoding ascii
           @(
             "sqlite=$((Get-FileHash -Algorithm SHA256 -LiteralPath $installedSqlite).Hash)",
             "postgresql=$((Get-FileHash -Algorithm SHA256 -LiteralPath $installedPostgresql).Hash)"
