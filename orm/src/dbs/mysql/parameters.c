@@ -19,6 +19,107 @@ static bool mysql_parameter_is_space(uint8_t value) {
          value == (uint8_t)'\f';
 }
 
+static bool mysql_sql_is_alpha(uint8_t value) {
+  return (value >= (uint8_t)'A' && value <= (uint8_t)'Z') ||
+         (value >= (uint8_t)'a' && value <= (uint8_t)'z');
+}
+
+static uint8_t mysql_sql_upper(uint8_t value) {
+  return value >= (uint8_t)'a' && value <= (uint8_t)'z'
+             ? (uint8_t)(value - ((uint8_t)'a' - (uint8_t)'A'))
+             : value;
+}
+
+static bool mysql_sql_keyword_equal(
+    const uint8_t *sql, size_t begin, size_t end,
+    const char *keyword) {
+  size_t i = 0u;
+  if (sql == NULL || keyword == NULL)
+    return false;
+  while (keyword[i] != '\0' && begin + i < end) {
+    if (mysql_sql_upper(sql[begin + i]) !=
+        (uint8_t)keyword[i])
+      return false;
+    ++i;
+  }
+  return keyword[i] == '\0' && begin + i == end;
+}
+
+bool mysql_sql_reject_managed_transaction(
+    const uint8_t *sql, size_t sql_size) {
+  static const char *const rejected[] = {
+      "ALTER", "ANALYZE", "BEGIN", "COMMIT", "CREATE",
+      "DROP", "FLUSH", "GRANT", "INSTALL", "LOCK",
+      "OPTIMIZE", "RENAME", "REPAIR", "RESET", "REVOKE",
+      "ROLLBACK", "SAVEPOINT", "START", "TRUNCATE",
+      "UNINSTALL", "UNLOCK", "XA"};
+  size_t cursor = 0u;
+  size_t begin;
+  size_t i;
+
+  if (sql == NULL || sql_size == 0u)
+    return false;
+
+  for (;;) {
+    while (cursor < sql_size &&
+           mysql_parameter_is_space(sql[cursor]))
+      ++cursor;
+    if (cursor >= sql_size)
+      return false;
+
+    if (sql[cursor] == (uint8_t)'#') {
+      while (cursor < sql_size &&
+             sql[cursor] != (uint8_t)'\n' &&
+             sql[cursor] != (uint8_t)'\r')
+        ++cursor;
+      continue;
+    }
+
+    if (cursor + 1u < sql_size &&
+        sql[cursor] == (uint8_t)'-' &&
+        sql[cursor + 1u] == (uint8_t)'-' &&
+        (cursor + 2u == sql_size ||
+         mysql_parameter_is_space(sql[cursor + 2u]))) {
+      cursor += 2u;
+      while (cursor < sql_size &&
+             sql[cursor] != (uint8_t)'\n' &&
+             sql[cursor] != (uint8_t)'\r')
+        ++cursor;
+      continue;
+    }
+
+    if (cursor + 1u < sql_size &&
+        sql[cursor] == (uint8_t)'/' &&
+        sql[cursor + 1u] == (uint8_t)'*') {
+      size_t end = cursor + 2u;
+      if (end < sql_size && sql[end] == (uint8_t)'!')
+        return true;
+      while (end + 1u < sql_size &&
+             !(sql[end] == (uint8_t)'*' &&
+               sql[end + 1u] == (uint8_t)'/'))
+        ++end;
+      if (end + 1u >= sql_size)
+        return true;
+      cursor = end + 2u;
+      continue;
+    }
+    break;
+  }
+
+  begin = cursor;
+  while (cursor < sql_size && mysql_sql_is_alpha(sql[cursor]))
+    ++cursor;
+  if (cursor == begin)
+    return false;
+
+  for (i = 0u; i < sizeof(rejected) / sizeof(rejected[0]); ++i) {
+    if (mysql_sql_keyword_equal(
+            sql, begin, cursor, rejected[i]))
+      return true;
+  }
+  return false;
+}
+
 static mysql_wire_status_t mysql_parameter_emit(
     uint8_t *out, size_t capacity, size_t *used,
     const uint8_t *data, size_t size) {
