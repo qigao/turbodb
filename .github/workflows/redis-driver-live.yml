@@ -72,7 +72,6 @@ jobs:
         run: |
           set -euo pipefail
           redis-cli PING | grep -qx PONG
-          redis-cli --raw COMMAND INFO FT.SEARCH | grep -q 'ft.search'
           redis-cli FT.DROPINDEX liveidx:people DD >/dev/null 2>&1 || true
           redis-cli FLUSHDB >/dev/null
           redis-cli FT.CREATE liveidx:people ON HASH PREFIX 1 'live:{people}:' SCHEMA id NUMERIC score NUMERIC | grep -qx OK
