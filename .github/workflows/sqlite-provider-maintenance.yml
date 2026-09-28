@@ -68,13 +68,13 @@ jobs:
           $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
           ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid $rid
 
-      - name: Install Linux prerequisites
+      - name: Install Ninja
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y nasm ninja-build
+          sudo apt-get install -y ninja-build
 
       - name: Locate MSVC
         if: runner.os == 'Windows'
@@ -86,10 +86,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
           "VSINSTALL=$vs" >> $env:GITHUB_ENV
 
-      - name: Install Windows prerequisites
+      - name: Install Ninja
         if: runner.os == 'Windows'
         shell: pwsh
-        run: choco install nasm ninja -y --no-progress
+        run: choco install ninja -y --no-progress
 
       - name: Configure preset paths
         shell: pwsh
