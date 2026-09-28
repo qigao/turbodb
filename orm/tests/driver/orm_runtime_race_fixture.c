@@ -178,10 +178,16 @@ static orm_status_t ORM_DRIVER_CALL race_create_connection(
   return ORM_STATUS_LIMIT_EXCEEDED;
 }
 
+static uint64_t ORM_DRIVER_CALL race_execution_models(void *self) {
+  return self == &module_context ? ORM_DRIVER_EXEC_CALLER_BLOCKING
+                                 : UINT64_C(0);
+}
+
 static const TurboDb_Driver_vtable driver_vtable = {
     .implementation = driver_id,
     .capabilities = 0u,
-    .create = race_create_connection};
+    .create = race_create_connection,
+    .execution_models = race_execution_models};
 
 static TurboDb_Driver driver = {
     &module_context, &driver_vtable};
