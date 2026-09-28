@@ -125,7 +125,15 @@ if(ORM_BUILD_TIDESDB_DRIVER AND NOT TARGET TidesDB::tidesdb)
 endif()
 
 if(ORM_BUILD_MONGODB_DRIVER)
-  find_package(mongoc-1.0 CONFIG REQUIRED)
+  find_package(mongoc CONFIG REQUIRED)
+  find_package(bson CONFIG REQUIRED)
+  if(TARGET bson::shared)
+    set(ORM_MONGODB_BSON_TARGET bson::shared)
+  elseif(TARGET bson::static)
+    set(ORM_MONGODB_BSON_TARGET bson::static)
+  else()
+    message(FATAL_ERROR "MongoDB Driver requires a canonical bson target")
+  endif()
 endif()
 
 set(ORM_VERSION 2.1.0)
@@ -176,8 +184,8 @@ foreach(ORM_FORBIDDEN_CORE_LINK IN ITEMS SQLite::SQLite3
                                          PostgreSQL::PostgreSQL
                                          TidesDB::tidesdb
                                          TurboDB::Redis
-                                         mongo::mongoc_shared
-                                         mongo::bson_shared)
+                                         mongoc::mongoc
+                                         ${ORM_MONGODB_BSON_TARGET})
   list(FIND ORM_CORE_LINK_CONTRACT "${ORM_FORBIDDEN_CORE_LINK}"
        ORM_FORBIDDEN_CORE_LINK_INDEX)
   if(NOT ORM_FORBIDDEN_CORE_LINK_INDEX EQUAL -1)
@@ -346,8 +354,8 @@ if(ORM_BUILD_MONGODB_DRIVER)
   target_link_libraries(
     orm_mongodb_driver PRIVATE
       turbo_orm
-      mongo::mongoc_shared
-      mongo::bson_shared
+      mongoc::mongoc
+      ${ORM_MONGODB_BSON_TARGET}
       Salts::PluginABI
       Salts::Core
       Salts::CSerde
@@ -759,7 +767,7 @@ target_include_directories(
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
 orm_link_internal_test(orm_mongo_query_test Salts::TinyTest
-                       mongo::bson_shared)
+                       ${ORM_MONGODB_BSON_TARGET})
 set_target_properties(orm_mongo_query_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_mongo_query_test)
@@ -1561,7 +1569,7 @@ if(WIN32)
   endif()
   if(ORM_BUILD_MONGODB_DRIVER)
     string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::mongoc_shared>;PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::bson_shared>")
+           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongoc::mongoc>;PATH=path_list_prepend:$<TARGET_FILE_DIR:${ORM_MONGODB_BSON_TARGET}>")
     list(APPEND ORM_RUNTIME_TESTS orm_mongo_query orm_mongodb_plugin)
   endif()
 
