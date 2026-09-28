@@ -363,6 +363,49 @@ if(ORM_BUILD_REDIS_DRIVER)
   endif()
 endif()
 
+if(ORM_BUILD_MYSQL_DRIVER)
+  add_library(orm_mysql_driver MODULE
+    src/dbs/mysql/plugin.c
+    src/driver/orm_driver_backend_bridge.c
+    src/dbs/mysql/backend.c
+    src/dbs/mysql/orm_mysql_cursor.c
+    src/dbs/sql/orm_sql_render.c
+    src/flow/orm_text_token.c)
+  target_compile_features(orm_mysql_driver PRIVATE c_std_11)
+  target_compile_definitions(
+    orm_mysql_driver PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
+  target_include_directories(
+    orm_mysql_driver PRIVATE
+      ${ORM_INCLUDE_DIR}
+      ${ORM_ABI_SOURCE_DIR}
+      ${ORM_FLOW_SOURCE_DIR}
+      ${ORM_SQL_SOURCE_DIR}
+      ${ORM_DRIVER_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql)
+  target_link_libraries(
+    orm_mysql_driver PRIVATE
+      turbo_orm
+      unofficial::libmysql::libmysql
+      Salts::PluginABI
+      Salts::Core
+      Salts::CSerde
+      Salts::CFlow
+      Salts::CSTL)
+  set_target_properties(
+    orm_mysql_driver PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "turbodb_driver_mysql"
+      C_STANDARD_REQUIRED ON
+      LINKER_LANGUAGE CXX
+      C_VISIBILITY_PRESET hidden
+      WINDOWS_EXPORT_ALL_SYMBOLS OFF
+      FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(orm_mysql_driver PRIVATE
+      "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
+  endif()
+endif()
+
 if(ORM_BUILD_MONGODB_DRIVER)
   add_library(orm_mongodb_driver MODULE
     src/dbs/mongo/plugin.c
@@ -786,6 +829,27 @@ if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_SQLITE)
 endif()
 list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_TIDESDB)
+
+if(ORM_BUILD_MYSQL_DRIVER)
+add_executable(orm_mysql_plugin_test
+               tests/driver/orm_mysql_plugin_test.c)
+target_compile_features(orm_mysql_plugin_test PRIVATE c_std_11)
+target_compile_definitions(orm_mysql_plugin_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mysql_plugin_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mysql_plugin_test PRIVATE turbo_orm Salts::TinyTest)
+add_dependencies(orm_mysql_plugin_test orm_mysql_driver)
+set_target_properties(orm_mysql_plugin_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_plugin_test)
+if(MSVC)
+  target_compile_options(orm_mysql_plugin_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_plugin_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_plugin COMMAND orm_mysql_plugin_test)
+set_tests_properties(orm_mysql_plugin PROPERTIES
+  ENVIRONMENT "ORM_MYSQL_PLUGIN=$<TARGET_FILE:orm_mysql_driver>")
+endif()
 
 if(ORM_BUILD_MONGODB_DRIVER)
 add_executable(orm_mongo_query_test
@@ -1615,6 +1679,11 @@ if(WIN32)
     endif()
     list(APPEND ORM_RUNTIME_TESTS orm_tidesdb_public_flow)
   endif()
+  if(ORM_BUILD_MYSQL_DRIVER)
+    string(APPEND ORM_TEST_RUNTIME_PATH
+           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:unofficial::libmysql::libmysql>")
+    list(APPEND ORM_RUNTIME_TESTS orm_mysql_plugin)
+  endif()
   if(ORM_BUILD_MONGODB_DRIVER)
     if(TARGET mongoc::shared)
       string(APPEND ORM_TEST_RUNTIME_PATH
@@ -1683,6 +1752,12 @@ endif()
 if(TARGET orm_postgresql_driver)
   install(
     TARGETS orm_postgresql_driver
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+endif()
+if(TARGET orm_mysql_driver)
+  install(
+    TARGETS orm_mysql_driver
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
 endif()
