@@ -5,7 +5,7 @@
 This document records the original pure-C direct PostgreSQL component. The
 canonical architecture is now the runtime-loaded
 `turbodb_driver_postgresql` module published as the reflected
-`TurboDb.Driver` Interface through Salts 1.8.0 Plugin ABI 2.
+`TurboDb.Driver` Interface through Salts 1.8.3 Plugin ABI 2.
 
 `Orm::PostgreSQL` / `orm_postgresql_connect()` remain only as a 2.1.x source
 compatibility component controlled by

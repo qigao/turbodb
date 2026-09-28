@@ -84,6 +84,7 @@ jobs:
             --x-manifest-root="$GITHUB_WORKSPACE" \
             --x-install-root="$install_root" \
             --triplet=x64-linux \
+            --only-binarycaching \
             --x-feature=mysql
           status="$install_root/vcpkg/status"
           test -f "$status"
@@ -261,8 +262,8 @@ jobs:
             echo "arch=x64"
             echo "configuration=Release"
             echo "mysql=8.0.40"
-            echo "salts=1.8.0"
-            echo "saltsutils=4.1.0"
+            echo "salts=1.8.3"
+            echo "saltsutils=4.1.3"
             echo "transport=Salts::CNet"
             echo "tls=required"
             echo "auth=caching_sha2_password,mysql_native_password"

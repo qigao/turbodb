@@ -99,6 +99,7 @@ jobs:
             --x-manifest-root="$GITHUB_WORKSPACE" \
             --x-install-root="$install_root" \
             --triplet=x64-linux \
+            --only-binarycaching \
             --x-feature=mysql \
             --x-feature=postgresql
           status="$install_root/vcpkg/status"
@@ -206,8 +207,8 @@ jobs:
             echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
             echo "mysql=8.0.40"
             echo "postgresql=17.6"
-            echo "salts=1.8.0"
-            echo "saltsutils=4.1.0"
+            echo "salts=1.8.3"
+            echo "saltsutils=4.1.3"
             echo "runtime=one"
             echo "drivers=mysql,postgresql"
           } > "$evidence/qualification.txt"
