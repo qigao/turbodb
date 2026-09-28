@@ -15,6 +15,14 @@
 
 static int mongodb_driver_identity;
 
+static const orm_driver_storage_capabilities_v1 mongodb_storage_capabilities =
+    ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
+
+static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
+mongodb_driver_storage_capabilities(void *self) {
+  return self == &mongodb_driver_identity ? &mongodb_storage_capabilities : NULL;
+}
+
 typedef struct mongodb_plugin_lifecycle {
   int started;
   int stopping;
@@ -83,7 +91,8 @@ static const TurboDb_Driver_vtable mongodb_driver_vtable = {
     .implementation = "mongodb",
     .capabilities = ORM_MONGODB_DRIVER_CAPABILITIES,
     .create = mongodb_driver_create,
-    .execution_models = mongodb_driver_execution_models};
+    .execution_models = mongodb_driver_execution_models,
+    .storage_capabilities = mongodb_driver_storage_capabilities};
 
 static TurboDb_Driver mongodb_driver = {
     &mongodb_driver_identity, &mongodb_driver_vtable};
