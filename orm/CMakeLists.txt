@@ -830,7 +830,7 @@ if(ORM_MONGODB_LIVE_TESTS)
 endif()
 endif()
 
-if(ORM_WITH_PGSQL)
+if(ORM_BUILD_POSTGRESQL_DRIVER OR ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
 add_executable(
   orm_postgres_libpq_test tests/flow/orm_postgres_libpq_test.c
                            tests/abi/c_api_fake_libpq.cpp
@@ -854,7 +854,9 @@ if(MSVC)
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
 add_test(NAME orm_postgres_libpq COMMAND orm_postgres_libpq_test)
+endif()
 
+if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
 add_executable(orm_postgresql_component_test
                tests/flow/orm_postgresql_component_test.c)
 target_compile_features(orm_postgresql_component_test PRIVATE c_std_11)
@@ -868,7 +870,9 @@ if(MSVC)
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
 add_test(NAME orm_postgresql_component COMMAND orm_postgresql_component_test)
+endif()
 
+if(ORM_BUILD_POSTGRESQL_DRIVER)
 add_executable(orm_postgresql_plugin_test
   tests/driver/orm_postgresql_plugin_test.c)
 target_compile_features(orm_postgresql_plugin_test PRIVATE c_std_11)
@@ -888,8 +892,9 @@ endif()
 add_test(NAME orm_postgresql_plugin COMMAND orm_postgresql_plugin_test)
 set_tests_properties(orm_postgresql_plugin PROPERTIES
   ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
+endif()
 
-if(ORM_WITH_SQLITE AND ORM_WITH_PGSQL)
+if(ORM_BUILD_SQLITE_DRIVER AND ORM_BUILD_POSTGRESQL_DRIVER)
   add_executable(orm_sql_plugin_matrix_test
     tests/driver/orm_sql_plugin_matrix.c)
   target_compile_features(orm_sql_plugin_matrix_test PRIVATE c_std_11)
@@ -944,8 +949,6 @@ if(ORM_POSTGRES_LIVE_TESTS)
   add_test(NAME orm_postgres_live COMMAND orm_postgres_live_test)
   set_tests_properties(orm_postgres_live PROPERTIES
     ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
-endif()
-
 endif()
 
 add_executable(orm_row_publisher_test tests/flow/orm_row_publisher_test.c)
