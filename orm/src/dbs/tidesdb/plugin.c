@@ -15,6 +15,14 @@
 
 static int tidesdb_driver_identity;
 
+static const orm_driver_storage_capabilities_v1 tidesdb_storage_capabilities =
+    ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
+
+static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
+tidesdb_driver_storage_capabilities(void *self) {
+  return self == &tidesdb_driver_identity ? &tidesdb_storage_capabilities : NULL;
+}
+
 typedef struct tidesdb_plugin_lifecycle {
   int started;
   int stopping;
@@ -82,7 +90,8 @@ static const TurboDb_Driver_vtable tidesdb_driver_vtable = {
     .implementation = "tidesdb",
     .capabilities = ORM_TIDESDB_DRIVER_CAPABILITIES,
     .create = tidesdb_driver_create,
-    .execution_models = tidesdb_driver_execution_models};
+    .execution_models = tidesdb_driver_execution_models,
+    .storage_capabilities = tidesdb_driver_storage_capabilities};
 
 static TurboDb_Driver tidesdb_driver = {
     &tidesdb_driver_identity, &tidesdb_driver_vtable};
