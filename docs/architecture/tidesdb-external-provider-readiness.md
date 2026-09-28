@@ -1,9 +1,9 @@
 # TidesDB readiness for external replicated-state adapters
 
-Status: design review  
+Status: current implementation qualification  
 Tracking: #45, #46, #48  
 Publication prerequisite: qigao/salts#308  
-Baseline: `master@2e0c0d5138063ff3f23455932ad133f7cf52cef3`
+Baseline: `master@9b048c8ab81b7bf56f83e8d1c2473bf25e892102` (#143 merged)
 
 ## Purpose
 
@@ -96,17 +96,19 @@ Open flow:
 2. resolve the corresponding generation directory;
 3. open TidesDB there.
 
-Restore flow:
+Restore publication flow:
 
-1. allocate a fresh generation identifier;
-2. build/copy the checkpoint into `generations/<new>/`;
-3. open the new generation as TidesDB;
-4. run validation/read probes;
-5. close all validation handles;
-6. create a staging ACTIVE pointer;
-7. durably replace `ACTIVE` using qigao/salts#308;
-8. future opens use the new generation;
-9. old generations are retained until their handles are gone, then may be garbage-collected.
+1. the caller allocates a canonical bounded generation identifier;
+2. the caller fully materializes and closes the checkpoint at `generations/<new>/`;
+3. `TurboDb.TidesMaintenance.publish_generation()` validates the candidate before authority changes;
+4. validation handles are closed;
+5. the Driver serializes publication with a provider-local advisory lock;
+6. the Driver writes a bounded staging ACTIVE pointer;
+7. `salts_fs_replace_durable()` publishes `ACTIVE`;
+8. future `resolve_active()` calls select the new generation;
+9. already-open old generation handles remain valid because no directory is replaced or deleted.
+
+The first maintenance contract deliberately exposes no generation garbage-collection API. Generation retention/deletion can be added later only with explicit ownership evidence; #145 cannot remove an active or old still-open generation.
 
 This converts a hard cross-platform directory-swap problem into one durable small-file publication.
 
@@ -133,7 +135,7 @@ The result from Salts #308 must be preserved:
 - PUBLISHED_DURABLE: the new generation is authoritative;
 - DURABILITY_UNKNOWN: do not blindly publish another generation; reconcile by reading/validating ACTIVE and the referenced generation.
 
-A failed restore before ACTIVE publication simply deletes or quarantines the new unpublished generation according to explicit cleanup policy.
+A failed publication before ACTIVE replacement leaves the prepared generation caller-owned and unpublished. TurboDB does not silently delete or repurpose it.
 
 ## Ordered apply metadata
 
@@ -158,34 +160,31 @@ Do not invoke the TidesDB commit hook to finish or repair this metadata.
 
 ## Capability outcome
 
-After exact-head qualification the TidesDB adapter may advertise:
+After #145 exact-head qualification the TidesDB Driver advertises:
 
 - ATOMIC_STATE_METADATA;
 - ORDERED_REPLAY_CLASSIFICATION;
-- BOUNDED_BATCH, if explicit operation/byte limits are enforced;
 - FILE_BACKED_CHECKPOINT;
-- STAGED_RESTORE;
-- RECONCILE only if a separate read-only reconcile operation is implemented.
+- STAGED_RESTORE.
+
+`STAGED_RESTORE` is publication-only: the maintenance interface does not ingest restore payload bytes, therefore `max_restore_chunk_bytes == 0`. `BOUNDED_BATCH`, `AMBIGUOUS_COMMIT`, `RECONCILE`, and `STREAMING_CHECKPOINT` remain absent.
 
 It must not advertise:
 
 - AMBIGUOUS_COMMIT without a real ambiguous outcome contract;
 - STREAMING_CHECKPOINT merely because checkpoint files can later be read.
 
-Machine-readable advertisement uses #46/#63's optional storage capability descriptor when that driver-SDK stack is available.
+Machine-readable advertisement uses the canonical #46 / CMeta `TurboDb.Driver v3` storage descriptor. Historical #63 is not an implementation dependency.
 
 ## Limits
 
-The provider-facing local primitive must expose bounded limits for:
+The staged-generation maintenance path enforces:
+- generation identifier <= 63 canonical lowercase ASCII bytes;
+- ACTIVE pointer <= the same generation-ID bound;
+- provider/generation filesystem paths <= 4096 bytes;
+- no restore payload chunks are accepted by the maintenance interface.
 
-- operations per batch;
-- aggregate key bytes;
-- aggregate value bytes;
-- provider metadata bytes;
-- generation identifier bytes;
-- ACTIVE pointer bytes.
-
-The adapter rejects over-budget work before starting a native transaction.
+Other operation/batch/data limits remain owned by their existing TidesDB paths and are not implied by `STAGED_RESTORE`.
 
 ## Tests
 
@@ -218,13 +217,12 @@ Install a hook that deliberately fails after a native commit and prove:
 
 ### Restore generation tests
 
-- restore a valid checkpoint into a new generation;
-- validate before ACTIVE publication;
-- failed validation leaves old ACTIVE unchanged;
-- successful durable pointer replacement switches future opens;
-- DURABILITY_UNKNOWN is reconciled by reading ACTIVE;
-- old open generation remains valid until its owner closes;
-- garbage collection never removes an active generation.
+- publish a valid prepared generation and resolve it through ACTIVE;
+- failed validation/unprepared generation leaves old ACTIVE unchanged;
+- successful durable pointer replacement switches future resolves;
+- `DURABILITY_UNKNOWN` returns `ORM_STATUS_COMMIT_UNKNOWN` and is reconciled by `resolve_active()`;
+- an old open generation remains valid after a newer generation is published;
+- no generation GC API exists in this first slice, so publication cannot delete active/open generations.
 
 ## Non-goals
 
