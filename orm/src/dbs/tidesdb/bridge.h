@@ -47,6 +47,7 @@ orm_tidesdb_config_t orm_tidesdb_default_config(void);
 orm_tidesdb_column_family_config_t orm_tidesdb_default_column_family_config(void);
 int orm_tidesdb_open(const orm_tidesdb_config_t *, orm_tidesdb_database_t **);
 int orm_tidesdb_close(orm_tidesdb_database_t *);
+int orm_tidesdb_checkpoint(orm_tidesdb_database_t *, const char *);
 int orm_tidesdb_create_column_family(orm_tidesdb_database_t *, const char *,
                                      const orm_tidesdb_column_family_config_t *);
 orm_tidesdb_column_family_t *orm_tidesdb_get_column_family(orm_tidesdb_database_t *,
