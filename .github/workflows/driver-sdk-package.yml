@@ -270,11 +270,19 @@ jobs:
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
 
           redis_module="$(find build -type f -name 'turbodb_driver_redis.so' -print -quit)"
+          redis_native="$(find build -type f -name 'libtedis.so.1*' ! -type l -print -quit)"
           core_module="$(find build -type f -name 'libturbo_orm.so' -print -quit)"
           test -n "$redis_module"
+          test -n "$redis_native"
           test -n "$core_module"
           readelf -d "$redis_module" > evidence/deps/redis-driver-dependencies.txt
+          readelf -d "$redis_native" > evidence/deps/redis-native-dependencies.txt
           readelf -d "$core_module" > evidence/deps/root-core-dependencies.txt
+          if grep -q 'NOOPEN' evidence/deps/redis-native-dependencies.txt; then
+            cat evidence/deps/redis-native-dependencies.txt
+            echo 'Redis native client is marked unavailable to dlopen' >&2
+            exit 1
+          fi
           nm -D --defined-only "$redis_module" > evidence/deps/redis-driver-exports.txt
           grep -Eiq 'tedis' evidence/deps/redis-driver-dependencies.txt
           if grep -Eiq 'tedis|redis' evidence/deps/root-core-dependencies.txt; then
