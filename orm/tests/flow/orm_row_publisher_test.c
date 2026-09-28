@@ -1,9 +1,13 @@
 #include "orm_row_publisher.h"
 
 #include <cmeta/struct.h>
+#include <data_bind.h>
+#include <data_bind_message_plan.h>
+#include <data_bind_native_binding.h>
 #include "tinytest.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #define ORM_TEST_DATA_PREFIX_SIZE \
@@ -49,6 +53,79 @@ static const cmeta_data_desc orm_flow_test_row_data = {
     .storage_type = &orm_flow_test_row_type,
     .shape = &orm_flow_test_row_shape
 };
+
+typedef struct orm_flow_validated_row {
+  uint32_t id;
+} orm_flow_validated_row;
+
+static const cmeta_type_identity orm_flow_validated_row_identity =
+    CMETA_TYPE_ID_ATOM_INIT("orm.test.ValidatedRow");
+static const cmeta_type_desc orm_flow_validated_row_type = {
+    "orm_flow_validated_row",
+    sizeof(orm_flow_validated_row),
+    _Alignof(orm_flow_validated_row),
+    CMETA_T_OBJECT,
+    NULL,
+    NULL,
+    &orm_flow_validated_row_identity
+};
+static const cmeta_field_desc orm_flow_validated_row_layout_fields[] = {
+    {"id", "uint32_t", offsetof(orm_flow_validated_row, id),
+     sizeof(uint32_t), _Alignof(uint32_t), &cmeta_type_uint32, NULL}
+};
+static const cmeta_struct_desc orm_flow_validated_row_layout = {
+    "ValidatedRow",
+    sizeof(orm_flow_validated_row),
+    _Alignof(orm_flow_validated_row),
+    orm_flow_validated_row_layout_fields,
+    1u
+};
+static const cmeta_data_field_desc orm_flow_validated_row_fields[] = {
+    {"orm.test.ValidatedRow.id", "id",
+     offsetof(orm_flow_validated_row, id), &cmeta_data_uint32}
+};
+static const cmeta_data_struct_shape orm_flow_validated_row_shape = {
+    &orm_flow_validated_row_layout,
+    orm_flow_validated_row_fields,
+    1u
+};
+static const cmeta_data_desc orm_flow_validated_row_data = {
+    .struct_size = sizeof(cmeta_data_desc),
+    .abi_version = CMETA_DATA_DESC_ABI_VERSION,
+    .stable_id = "orm.test.ValidatedRow.data",
+    .display_name = "ValidatedRow",
+    .kind = CMETA_DATA_STRUCT,
+    .storage_type = &orm_flow_validated_row_type,
+    .shape = &orm_flow_validated_row_shape
+};
+
+static DataBindMessagePlan *orm_flow_validation_plan(
+    DataBindNativeTypeBinding *native) {
+  static const char schema[] =
+      "message ValidatedRow { @Min(10) uint32 id; }";
+  DataBind *codec = NULL;
+  DataBindMessagePlan *plan = NULL;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindMessagePlanDiagnostic diagnostic =
+      DATA_BIND_MESSAGE_PLAN_DIAGNOSTIC_INIT;
+
+  *native = (DataBindNativeTypeBinding)
+      DATA_BIND_NATIVE_TYPE_BINDING_INIT(
+          "ValidatedRow", &orm_flow_validated_row_data);
+  check_equal(
+      data_bind_create_from_text(
+          schema, sizeof(schema) - 1u, &codec, &error),
+      DATA_BIND_OK);
+  if (codec == NULL)
+    return NULL;
+  check_equal(
+      data_bind_message_plan_compile(
+          codec, "ValidatedRow", native, &plan, &diagnostic),
+      DATA_BIND_OK);
+  /* MessagePlan owns logical validation facts after control-plane compile. */
+  data_bind_free(codec);
+  return plan;
+}
 
 typedef struct orm_flow_test_reader_state {
   const cserde_token *tokens;
@@ -177,6 +254,111 @@ static void orm_flow_test_sink_done(void *context) {
 }
 
 spec("ORM DataBind CFlow publisher") {
+  it("executes one immutable DataBind ValidationPlan on row reads") {
+    static const unsigned char id_name[] = "id";
+    const cserde_token valid_tokens[] = {
+        {.kind = CSERDE_MAP_BEGIN},
+        {.kind = CSERDE_STRING,
+         .value.slice = {id_name, sizeof(id_name) - 1u,
+                         CSERDE_VIEW_STABLE}},
+        {.kind = CSERDE_UINT, .value.uint = 11u},
+        {.kind = CSERDE_MAP_END}};
+    const cserde_token invalid_tokens[] = {
+        {.kind = CSERDE_MAP_BEGIN},
+        {.kind = CSERDE_STRING,
+         .value.slice = {id_name, sizeof(id_name) - 1u,
+                         CSERDE_VIEW_STABLE}},
+        {.kind = CSERDE_UINT, .value.uint = 5u},
+        {.kind = CSERDE_MAP_END}};
+    DataBindNativeTypeBinding native = {0};
+    DataBindMessagePlan *plan = orm_flow_validation_plan(&native);
+    orm_flow_test_cursor_state valid_state = {
+        .reader_state = {valid_tokens,
+                         sizeof(valid_tokens) / sizeof(valid_tokens[0]), 0u},
+        .next_kind = ORM_ROW_CURSOR_ROW_AND_DONE};
+    orm_flow_test_cursor_state invalid_state = {
+        .reader_state = {invalid_tokens,
+                         sizeof(invalid_tokens) / sizeof(invalid_tokens[0]), 0u},
+        .next_kind = ORM_ROW_CURSOR_ROW_AND_DONE};
+    orm_row_cursor valid_cursor = {
+        .ops = &orm_flow_test_cursor_ops, .context = &valid_state};
+    orm_row_cursor invalid_cursor = {
+        .ops = &orm_flow_test_cursor_ops, .context = &invalid_state};
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_validated_row_data, 64u, 1u, 64u, 64u);
+    cflow_publisher valid_source = {0};
+    cflow_publisher invalid_source = {0};
+    orm_flow_validated_row valid_row = {0};
+    orm_flow_validated_row invalid_row = {UINT32_MAX};
+    orm_error_t error;
+    cflow_step step;
+
+    check_not_null(plan);
+    if (plan == NULL)
+      return;
+    config.message_plan = plan;
+
+    orm_error_init(&error);
+    check_equal(
+        orm_row_publisher_init(
+            &valid_source, &valid_cursor, &config, &error),
+        ORM_STATUS_OK);
+    step = cflow_publisher_resume(&valid_source, NULL, &valid_row);
+    check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(valid_row.id, UINT32_C(11));
+    cflow_publisher_destroy(&valid_source);
+    check_equal(valid_state.cancel_count, (size_t)0u);
+    check_equal(valid_state.destroy_count, (size_t)1u);
+
+    orm_error_init(&error);
+    check_equal(
+        orm_row_publisher_init(
+            &invalid_source, &invalid_cursor, &config, &error),
+        ORM_STATUS_OK);
+    step = cflow_publisher_resume(&invalid_source, NULL, &invalid_row);
+    check_equal(step.kind, CFLOW_STEP_ERROR);
+    check_not_null(step.error);
+    check_contains(step.error, "row validation failed");
+    check_equal(invalid_row.id, UINT32_C(0));
+    check_equal(invalid_state.cancel_count, (size_t)1u);
+    cflow_publisher_destroy(&invalid_source);
+    check_equal(invalid_state.destroy_count, (size_t)1u);
+
+    data_bind_message_plan_free(plan);
+  }
+
+  it("rejects a MessagePlan with the wrong native row shape before cursor work") {
+    DataBindNativeTypeBinding native = {0};
+    DataBindMessagePlan *plan = orm_flow_validation_plan(&native);
+    orm_flow_test_cursor_state state = {
+        .next_kind = ORM_ROW_CURSOR_DONE};
+    orm_row_cursor cursor = {
+        .ops = &orm_flow_test_cursor_ops, .context = &state};
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_test_row_data, 64u, 1u, 64u, 64u);
+    cflow_publisher source = {0};
+    orm_error_t error;
+
+    check_not_null(plan);
+    if (plan == NULL)
+      return;
+    config.message_plan = plan;
+    orm_error_init(&error);
+    check_equal(
+        orm_row_publisher_init(&source, &cursor, &config, &error),
+        ORM_STATUS_TYPE_ERROR);
+    check_contains(error.message, "does not match ORM row_shape");
+    check_equal(state.next_count, (size_t)0u);
+    check_equal(state.cancel_count, (size_t)0u);
+    check_equal(state.destroy_count, (size_t)0u);
+    check_not_null(cursor.context);
+    check_null(source.self);
+
+    orm_row_cursor_dispose(&cursor);
+    check_equal(state.destroy_count, (size_t)1u);
+    data_bind_message_plan_free(plan);
+  }
+
   it("disposes a partially initialized cursor from a failed backend contract") {
     orm_flow_test_cursor_state state = {0};
     orm_row_cursor cursor = {.ops = &orm_flow_test_partial_cursor_ops,

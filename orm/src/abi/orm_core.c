@@ -935,11 +935,13 @@ release_query:
   return status;
 }
 
-static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
-                                  orm_transaction_t *transaction,
-                                  const orm_flow_config_t *config,
-                                  cflow_publisher *out_publisher,
-                                  orm_error_t *error) {
+static orm_status_t orm_open_rows(
+    orm_query_t *query, orm_backend *database,
+    orm_transaction_t *transaction,
+    const orm_flow_config_t *config,
+    const struct DataBindMessagePlan *message_plan,
+    cflow_publisher *out_publisher,
+    orm_error_t *error) {
   orm_row_cursor cursor = {0};
   orm_row_publisher_config publisher_config;
   orm_row_publisher_prepared *prepared = NULL;
@@ -994,6 +996,7 @@ static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
   publisher_config = (orm_row_publisher_config)ORM_ROW_PUBLISHER_CONFIG_INIT(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
+  publisher_config.message_plan = message_plan;
   status = orm_row_publisher_prepare(&publisher_config, &prepared, error);
   if (status != ORM_STATUS_OK) goto release_query;
   status = database != NULL
@@ -1092,6 +1095,7 @@ const char *ORM_C_CALL orm_status_message(orm_status_t status) {
     case ORM_STATUS_UNSUPPORTED: return "unsupported";
     case ORM_STATUS_DATASTORE_ERROR: return "datastore error";
     case ORM_STATUS_CONSTRAINT: return "constraint violation";
+    case ORM_STATUS_VALIDATION_ERROR: return "validation error";
     default: return "unknown ORM status";
   }
 }
@@ -1666,7 +1670,7 @@ orm_status_t ORM_C_CALL orm_query_open_flow(
     cflow_publisher *out_publisher, orm_error_t *error) {
   return orm_open_rows(query,
                        query != NULL ? &query->connection->backend : NULL,
-                       NULL, config, out_publisher, error);
+                       NULL, config, NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
@@ -1682,8 +1686,46 @@ orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_rows(query, NULL, transaction, config, out_publisher,
-                       error);
+  return orm_open_rows(query, NULL, transaction, config, NULL,
+                       out_publisher, error);
+}
+
+orm_status_t ORM_C_CALL orm_query_open_validated_flow(
+    orm_query_t *query, const orm_flow_config_t *config,
+    const struct DataBindMessagePlan *message_plan,
+    cflow_publisher *out_publisher, orm_error_t *error) {
+  if (message_plan == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                  "validated row flow requires a DataBind MessagePlan");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  return orm_open_rows(
+      query, query != NULL ? &query->connection->backend : NULL,
+      NULL, config, message_plan, out_publisher, error);
+}
+
+orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
+    orm_query_t *query, orm_transaction_t *transaction,
+    const orm_flow_config_t *config,
+    const struct DataBindMessagePlan *message_plan,
+    cflow_publisher *out_publisher, orm_error_t *error) {
+  if (message_plan == NULL) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                  "validated row flow requires a DataBind MessagePlan");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  if (query == NULL || transaction == NULL ||
+#if !defined(ORM_NATIVE_OWNER_CANDIDATE)
+      transaction->state != ORM_TRANSACTION_ACTIVE ||
+#endif
+      query->connection != transaction->connection) {
+    orm_error_set(error, ORM_STATUS_INVALID_STATE,
+                  "query and transaction do not share an active connection");
+    return ORM_STATUS_INVALID_STATE;
+  }
+  return orm_open_rows(
+      query, NULL, transaction, config, message_plan,
+      out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_command_flow(
