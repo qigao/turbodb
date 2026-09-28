@@ -15,7 +15,7 @@ typedef struct mysql_row_reader_state mysql_row_reader_state;
 
 size_t mysql_row_reader_state_size(void);
 
-int mysql_row_reader_init(
+cserde_status mysql_row_reader_init(
     void *state_storage, size_t state_storage_size,
     const mysql_column_definition_t *columns,
     const mysql_binary_value_t *values,
