@@ -115,6 +115,11 @@ typedef struct mysql_session_t {
   const uint8_t *control_sql;
   size_t control_sql_size;
   bool transaction_active;
+  bool commit_write_completed;
+#if defined(ORM_MYSQL_ENABLE_FAULT_INJECTION)
+  bool test_drop_commit_ack;
+  unsigned test_commit_send_count;
+#endif
   mysql_session_cursor_limits_t cursor_limits;
   cnet_client client;
   cnet_connection connection;
@@ -172,6 +177,28 @@ static void mysql_session_set_error(
                    "%s", message);
 }
 
+static bool mysql_session_commit_ack_pending(
+    const mysql_session_t *session) {
+  return session != NULL &&
+         session->action == MYSQL_SESSION_ACTION_TRANSACTION &&
+         session->transaction_step == MYSQL_TRANSACTION_STEP_COMMIT &&
+         session->commit_write_completed &&
+         session->phase != MYSQL_PHASE_DONE;
+}
+
+static void mysql_session_set_transport_error(
+    mysql_session_t *session, mysql_session_status_t fallback_status,
+    const char *stage, const char *message) {
+  if (mysql_session_commit_ack_pending(session)) {
+    mysql_session_set_error(
+        session, MYSQL_SESSION_COMMIT_UNKNOWN,
+        "commit-unknown",
+        "COMMIT acknowledgement was lost after send completion");
+    return;
+  }
+  mysql_session_set_error(session, fallback_status, stage, message);
+}
+
 static bool mysql_session_waits_for_receive(mysql_session_phase_t phase) {
   return phase == MYSQL_PHASE_WAIT_GREETING ||
          phase == MYSQL_PHASE_WAIT_AUTH ||
@@ -192,8 +219,9 @@ static int mysql_session_request_receive(mysql_session_t *session) {
   if (status != SALTS_OK) {
     if (session->error != NULL)
       session->error->cnet_status = status;
-    mysql_session_set_error(session, MYSQL_SESSION_IO,
-                            "receive", "CNet receive admission failed");
+    mysql_session_set_transport_error(
+        session, MYSQL_SESSION_IO,
+        "receive", "CNet receive admission failed");
   }
   return status;
 }
@@ -906,6 +934,10 @@ static void mysql_session_handle_control_reply(
       session->phase = MYSQL_PHASE_TRANSACTION_READY;
       break;
     case MYSQL_TRANSACTION_STEP_COMMIT:
+      session->commit_write_completed = false;
+      session->transaction_active = false;
+      session->phase = MYSQL_PHASE_DONE;
+      break;
     case MYSQL_TRANSACTION_STEP_ROLLBACK:
       session->transaction_active = false;
       session->phase = MYSQL_PHASE_DONE;
@@ -1314,6 +1346,18 @@ static void mysql_session_on_send(
       (void)mysql_session_request_receive(session);
       break;
     case MYSQL_SEND_CONTROL:
+      if (session->action == MYSQL_SESSION_ACTION_TRANSACTION &&
+          session->transaction_step == MYSQL_TRANSACTION_STEP_COMMIT) {
+        session->commit_write_completed = true;
+#if defined(ORM_MYSQL_ENABLE_FAULT_INJECTION)
+        ++session->test_commit_send_count;
+        if (session->test_drop_commit_ack) {
+          session->phase = MYSQL_PHASE_WAIT_CONTROL_REPLY;
+          (void)cnet_close(&session->client, session->connection);
+          break;
+        }
+#endif
+      }
       session->phase = MYSQL_PHASE_WAIT_CONTROL_REPLY;
       (void)mysql_session_request_receive(session);
       break;
@@ -1383,12 +1427,13 @@ static void mysql_session_on_state(
                        sizeof(session->error->stage), "%s",
                        cnet_error->stage);
     }
-    mysql_session_set_error(session, MYSQL_SESSION_IO,
-                            session->error != NULL &&
-                                    session->error->stage[0] != '\0'
-                                ? session->error->stage
-                                : "cnet",
-                            "CNet connection failed");
+    mysql_session_set_transport_error(
+        session, MYSQL_SESSION_IO,
+        session->error != NULL &&
+                session->error->stage[0] != '\0'
+            ? session->error->stage
+            : "cnet",
+        "CNet connection failed");
     return;
   }
 
@@ -1399,9 +1444,10 @@ static void mysql_session_on_state(
       session->phase = MYSQL_PHASE_DONE;
       return;
     }
-    mysql_session_set_error(session, MYSQL_SESSION_IO,
-                            "closed",
-                            "connection closed before MySQL operation completed");
+    mysql_session_set_transport_error(
+        session, MYSQL_SESSION_IO,
+        "closed",
+        "connection closed before MySQL operation completed");
   }
 }
 
@@ -1561,8 +1607,9 @@ static mysql_session_status_t mysql_session_progress_until(
     if (status != SALTS_OK) {
       if (session->error != NULL)
         session->error->cnet_status = status;
-      mysql_session_set_error(session, MYSQL_SESSION_IO,
-                              "poll", "CNet progress failed");
+      mysql_session_set_transport_error(
+          session, MYSQL_SESSION_IO,
+          "poll", "CNet progress failed");
       break;
     }
     elapsed += slice;
@@ -1571,8 +1618,9 @@ static mysql_session_status_t mysql_session_progress_until(
   if (session->phase != target &&
       session->phase != MYSQL_PHASE_DONE &&
       session->phase != MYSQL_PHASE_FAILED)
-    mysql_session_set_error(session, MYSQL_SESSION_TIMEOUT,
-                            "timeout", "MySQL session deadline expired");
+    mysql_session_set_transport_error(
+        session, MYSQL_SESSION_TIMEOUT,
+        "timeout", "MySQL session deadline expired");
 
   if (session->phase == target ||
       (target == MYSQL_PHASE_DONE &&
@@ -1640,6 +1688,8 @@ static orm_status_t mysql_session_source_status(
       return ORM_STATUS_CONNECTION_ERROR;
     case MYSQL_SESSION_PROTOCOL:
       return ORM_STATUS_DATASTORE_ERROR;
+    case MYSQL_SESSION_COMMIT_UNKNOWN:
+      return ORM_STATUS_COMMIT_UNKNOWN;
     case MYSQL_SESSION_OK:
       return ORM_STATUS_OK;
     default:
@@ -2197,6 +2247,8 @@ static mysql_session_status_t mysql_transaction_finish(
          sizeof(transaction->session.owned_error));
   transaction->session.error = &transaction->session.owned_error;
   transaction->session.transaction_step = step;
+  if (step == MYSQL_TRANSACTION_STEP_COMMIT)
+    transaction->session.commit_write_completed = false;
   mysql_session_send_control(
       &transaction->session, sql, sql_size);
   status = mysql_session_progress_until(
@@ -2338,3 +2390,19 @@ void mysql_transaction_session_destroy(
       transaction->session.phase != MYSQL_PHASE_FAILED);
   free(transaction);
 }
+
+#if defined(ORM_MYSQL_ENABLE_FAULT_INJECTION)
+void mysql_transaction_session_test_drop_commit_ack(
+    mysql_transaction_session_t *transaction, int enabled) {
+  if (transaction == NULL)
+    return;
+  transaction->session.test_drop_commit_ack = enabled != 0;
+}
+
+unsigned mysql_transaction_session_test_commit_send_count(
+    const mysql_transaction_session_t *transaction) {
+  return transaction != NULL
+             ? transaction->session.test_commit_send_count
+             : 0u;
+}
+#endif
