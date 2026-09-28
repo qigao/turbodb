@@ -56,11 +56,16 @@ option(ORM_BUILD_TIDESDB_DRIVER
        ${ORM_BUILD_TIDESDB_DRIVER_DEFAULT})
 option(ORM_MONGODB_LIVE_TESTS
        "Run the MongoDB Driver CRUD test against ORM_MONGODB_URI" OFF)
+option(ORM_REDIS_LIVE_TESTS
+       "Run the Redis Driver CRUD test against ORM_REDIS_PORT" OFF)
 option(ORM_POSTGRES_LIVE_TESTS
        "Run tests against TURBODB_ORM_PGSQL_TEST_CONNINFO" OFF)
 
 if(ORM_MONGODB_LIVE_TESTS AND NOT ORM_BUILD_MONGODB_DRIVER)
   message(FATAL_ERROR "ORM_MONGODB_LIVE_TESTS requires ORM_BUILD_MONGODB_DRIVER=ON")
+endif()
+if(ORM_REDIS_LIVE_TESTS AND NOT ORM_BUILD_REDIS_DRIVER)
+  message(FATAL_ERROR "ORM_REDIS_LIVE_TESTS requires ORM_BUILD_REDIS_DRIVER=ON")
 endif()
 
 if(ORM_POSTGRES_LIVE_TESTS)
@@ -1507,6 +1512,23 @@ add_test(NAME orm_redis_backend_contract
          COMMAND orm_redis_backend_contract_test)
 set_tests_properties(orm_redis_backend_contract PROPERTIES
   ENVIRONMENT "ORM_REDIS_PLUGIN=$<TARGET_FILE:orm_redis_driver>")
+
+add_executable(orm_redis_live_driver_test
+               tests/integration/redis_live_driver_test.c)
+target_compile_features(orm_redis_live_driver_test PRIVATE c_std_11)
+target_compile_definitions(orm_redis_live_driver_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_redis_live_driver_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_redis_live_driver_test PRIVATE
+                      turbo_orm Salts::CFlow)
+add_dependencies(orm_redis_live_driver_test orm_redis_driver)
+set_target_properties(orm_redis_live_driver_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_redis_live_driver_test)
+if(ORM_REDIS_LIVE_TESTS)
+  add_test(NAME orm_redis_live_driver COMMAND orm_redis_live_driver_test)
+  set_tests_properties(orm_redis_live_driver PROPERTIES
+    ENVIRONMENT "ORM_REDIS_PLUGIN=$<TARGET_FILE:orm_redis_driver>;ORM_REDIS_PORT=$ENV{ORM_REDIS_PORT}")
+endif()
 
 endif()
 
