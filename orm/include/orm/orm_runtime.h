@@ -3,6 +3,7 @@
 
 #include <orm_driver_ops.h>
 #include <orm_driver_storage.h>
+#include <cmeta/interface.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,6 +19,7 @@ extern "C" {
 #define ORM_RUNTIME_DRIVER_ID_CAPACITY (ORM_DRIVER_ID_MAX_BYTES + UINT32_C(1))
 
 typedef struct orm_runtime orm_runtime_t;
+typedef struct orm_runtime_driver_extension orm_runtime_driver_extension_t;
 
 typedef void (ORM_C_CALL *orm_runtime_cleanup_error_fn)(
     void *context, const orm_error_t *error);
@@ -97,6 +99,24 @@ ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_driver_storage_info(
     orm_runtime_t *runtime, orm_string_view_t id,
     orm_driver_storage_capabilities_v1 *out_storage, orm_error_t *error);
+
+/* Acquires one typed secondary interface from an already-loaded Driver Plugin.
+ * This never loads, scans, aliases, or falls back to another module. Success
+ * retains both the runtime dependent and the Salts::Plugin lease until the
+ * returned extension is released. */
+ORM_C_API orm_status_t ORM_C_CALL
+orm_runtime_driver_acquire_extension(
+    orm_runtime_t *runtime, orm_string_view_t id,
+    orm_string_view_t export_id, orm_string_view_t contract_id,
+    uint32_t contract_version, const cmeta_interface_desc *interface_desc,
+    orm_runtime_driver_extension_t **out_extension, void **out_binding,
+    orm_error_t *error);
+
+/* Releases a previously acquired Driver extension. On failure the extension
+ * remains owned by the caller and may be retried. */
+ORM_C_API orm_status_t ORM_C_CALL
+orm_runtime_driver_release_extension(
+    orm_runtime_driver_extension_t *extension, orm_error_t *error);
 
 /* Creates one ORM connection from an already registered driver ID/alias.
  * This never loads modules implicitly. Success holds a runtime/module lease

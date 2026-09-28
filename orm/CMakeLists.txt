@@ -284,6 +284,7 @@ if(ORM_BUILD_SQLITE_DRIVER)
     src/dbs/sqlite/plugin.c
     src/driver/orm_driver_backend_bridge.c
     src/dbs/sqlite/backend.c
+    src/dbs/sqlite/maintenance.c
     src/dbs/sqlite/orm_sqlite_cursor.c
     src/dbs/sql/orm_sql_render.c)
   target_compile_features(orm_sqlite_driver PRIVATE c_std_11)
@@ -1932,6 +1933,31 @@ endif()
 add_test(NAME orm_sqlite_provider_atomicity
          COMMAND orm_sqlite_provider_atomicity_test)
 
+add_executable(orm_sqlite_plugin_maintenance_test
+               tests/integration/sqlite_plugin_maintenance_test.c)
+target_compile_features(orm_sqlite_plugin_maintenance_test PRIVATE c_std_11)
+target_compile_definitions(orm_sqlite_plugin_maintenance_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_sqlite_plugin_maintenance_test PRIVATE
+                           ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_sqlite_plugin_maintenance_test
+                      PRIVATE turbo_orm Salts::TinyTest)
+add_dependencies(orm_sqlite_plugin_maintenance_test orm_sqlite_driver)
+set_target_properties(
+  orm_sqlite_plugin_maintenance_test
+  PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_sqlite_plugin_maintenance_test)
+if(MSVC)
+  target_compile_options(orm_sqlite_plugin_maintenance_test
+                         PRIVATE /WX /std:c11)
+else()
+  target_compile_options(orm_sqlite_plugin_maintenance_test
+                         PRIVATE -Werror)
+endif()
+add_test(NAME orm_sqlite_plugin_maintenance
+         COMMAND orm_sqlite_plugin_maintenance_test)
+set_tests_properties(orm_sqlite_plugin_maintenance PROPERTIES
+  ENVIRONMENT "ORM_SQLITE_PLUGIN=$<TARGET_FILE:orm_sqlite_driver>")
+
 add_executable(orm_cpp_flow_test tests/flow/orm_cpp_flow_test.cpp)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
 target_compile_definitions(orm_cpp_flow_test PRIVATE ORM_C_STATIC)
@@ -2058,7 +2084,8 @@ if(WIN32)
     endif()
     list(APPEND ORM_RUNTIME_TESTS orm_sqlite_flow orm_sqlite_plugin
                                   orm_public_flow
-                                  orm_sqlite_provider_atomicity orm_cpp_flow
+                                  orm_sqlite_provider_atomicity
+                                  orm_sqlite_plugin_maintenance orm_cpp_flow
                                   orm_public_ownership orm_public_ownership_cpp)
   endif()
   if(ORM_BUILD_POSTGRESQL_DRIVER OR ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
@@ -2210,7 +2237,16 @@ if(TARGET orm_mysql_driver)
 endif()
 
 cmake_install_headers(
-  FILES include/orm/orm.h include/orm/orm.hpp
+  FILES
+    include/orm/orm.h
+    include/orm/orm.hpp
+    include/orm/orm_driver_base.h
+    include/orm/orm_driver_plan.h
+    include/orm/orm_driver_ops.h
+    include/orm/orm_driver_storage.h
+    include/orm/orm_driver_interface.h
+    include/orm/orm_runtime.h
+    include/orm/orm_sqlite.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   cmake_install_headers(

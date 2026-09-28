@@ -1,0 +1,136 @@
+name: SQLite provider maintenance contract
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "orm/include/orm/orm_sqlite.h"
+      - "orm/include/orm/orm_runtime.h"
+      - "orm/src/runtime/**"
+      - "orm/src/dbs/sqlite/**"
+      - "orm/tests/integration/sqlite_plugin_maintenance_test.c"
+      - "orm/tests/driver/orm_sqlite_plugin_test.c"
+      - "orm/CMakeLists.txt"
+      - ".github/workflows/sqlite-provider-maintenance.yml"
+  push:
+    branches: [master]
+    paths:
+      - "orm/include/orm/orm_sqlite.h"
+      - "orm/include/orm/orm_runtime.h"
+      - "orm/src/runtime/**"
+      - "orm/src/dbs/sqlite/**"
+      - "orm/tests/integration/sqlite_plugin_maintenance_test.c"
+      - "orm/tests/driver/orm_sqlite_plugin_test.c"
+      - "orm/CMakeLists.txt"
+      - ".github/workflows/sqlite-provider-maintenance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: sqlite-provider-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    name: SQLite provider (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure shared vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Restore canonical re2c host tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        with:
+          version: "4.6.3"
+
+      - name: Restore published native SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
+          ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid $rid
+
+      - name: Install Linux prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nasm ninja-build
+
+      - name: Locate MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+
+      - name: Install Windows prerequisites
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nasm ninja -y --no-progress
+
+      - name: Configure preset paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $preset = Get-Content CMakeUserPresets.json -Raw | ConvertFrom-Json -AsHashtable
+          foreach ($item in $preset.configurePresets) {
+            if ($item.name -eq 'win-toolchain') {
+              $item.environment.PROJECT_ROOT = $env:GITHUB_WORKSPACE
+              $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
+              $item.environment.VCPKG_ROOT = $env:VCPKG_ROOT
+            }
+            if ($item.name -in @('win-paths', 'linux-paths')) {
+              $item.toolchainFile = $env:QIGAO_VCPKG_TOOLCHAIN_FILE
+            }
+            if ($item.name -eq 'linux-paths') {
+              $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
+              $item.environment.VCPKG_ROOT = $env:VCPKG_ROOT
+            }
+          }
+          $preset | ConvertTo-Json -Depth 30 | Set-Content CMakeUserPresets.json -Encoding utf8NoBOM
+
+      - name: Qualify on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile=linux-release-user
+          cmake --preset "$profile"             -DORM_BUILD_SQLITE_DRIVER=ON             -DORM_BUILD_POSTGRESQL_DRIVER=OFF             -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF             -DORM_BUILD_REDIS_DRIVER=OFF             -DORM_BUILD_MONGODB_DRIVER=OFF             -DORM_BUILD_TIDESDB_DRIVER=OFF             -DTURBODB_BUILD_REDIS=OFF             -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
+          cmake --build --preset "$profile" --parallel 4             --target orm_sqlite_plugin_test orm_sqlite_plugin_maintenance_test
+          ctest --preset "$profile" --output-on-failure             -R "^(orm_sqlite_plugin|orm_sqlite_plugin_maintenance)$"
+
+      - name: Qualify on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          cmake --preset win-release-user -DORM_BUILD_SQLITE_DRIVER=ON -DORM_BUILD_POSTGRESQL_DRIVER=OFF -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build --preset win-release-user --parallel 4 --target orm_sqlite_plugin_test orm_sqlite_plugin_maintenance_test
+          if errorlevel 1 exit /b 1
+          ctest --preset win-release-user --output-on-failure -R "^(orm_sqlite_plugin|orm_sqlite_plugin_maintenance)$"
+          if errorlevel 1 exit /b 1

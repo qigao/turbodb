@@ -1,4 +1,5 @@
 #include <orm_runtime.h>
+#include <orm_sqlite.h>
 
 #include <cmeta/struct.h>
 #include <tinytest.h>
@@ -88,12 +89,16 @@ static orm_runtime_t *sqlite_plugin_runtime(orm_error_t *error) {
                   runtime, orm_view("sqlite"), &storage, error),
               ORM_STATUS_OK);
   check_true(orm_driver_storage_capabilities_valid(&storage));
-  check_equal(storage.capabilities,
-              (uint64_t)ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA);
+  check_equal(
+      storage.capabilities,
+      (uint64_t)(ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA |
+                 ORM_DRIVER_STORAGE_CAP_FILE_BACKED_CHECKPOINT |
+                 ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE));
   check_equal(storage.max_progress_metadata_bytes,
               (uint64_t)ORM_DRIVER_STORAGE_LIMIT_CONFIGURED);
   check_equal(storage.max_checkpoint_chunk_bytes, (uint64_t)0u);
-  check_equal(storage.max_restore_chunk_bytes, (uint64_t)0u);
+  check_equal(storage.max_restore_chunk_bytes,
+              (uint64_t)ORM_SQLITE_MAX_RESTORE_CHUNK_BYTES);
   return runtime;
 }
 
