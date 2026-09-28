@@ -178,6 +178,14 @@ static orm_status_t ORM_DRIVER_CALL race_create_connection(
   return ORM_STATUS_LIMIT_EXCEEDED;
 }
 
+static const orm_driver_storage_capabilities_v1 race_storage_capabilities =
+    ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
+
+static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
+race_driver_storage_capabilities(void *self) {
+  return self == &module_context ? &race_storage_capabilities : NULL;
+}
+
 static uint64_t ORM_DRIVER_CALL race_execution_models(void *self) {
   return self == &module_context ? ORM_DRIVER_EXEC_CALLER_BLOCKING
                                  : UINT64_C(0);
@@ -187,7 +195,8 @@ static const TurboDb_Driver_vtable driver_vtable = {
     .implementation = driver_id,
     .capabilities = 0u,
     .create = race_create_connection,
-    .execution_models = race_execution_models};
+    .execution_models = race_execution_models,
+    .storage_capabilities = race_driver_storage_capabilities};
 
 static TurboDb_Driver driver = {
     &module_context, &driver_vtable};
