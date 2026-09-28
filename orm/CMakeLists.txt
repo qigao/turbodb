@@ -30,15 +30,17 @@ endif()
 if(NOT DEFINED ORM_WITH_PGSQL_DEFAULT)
   set(ORM_WITH_PGSQL_DEFAULT ON)
 endif()
-if(NOT DEFINED ORM_WITH_REDIS_DEFAULT)
-  set(ORM_WITH_REDIS_DEFAULT OFF)
+if(NOT DEFINED ORM_BUILD_REDIS_DRIVER_DEFAULT)
+  set(ORM_BUILD_REDIS_DRIVER_DEFAULT OFF)
 endif()
 if(NOT DEFINED ORM_WITH_MONGODB_DEFAULT)
   set(ORM_WITH_MONGODB_DEFAULT OFF)
 endif()
 option(ORM_WITH_SQLITE "Enable SQLite backend" ${ORM_WITH_SQLITE_DEFAULT})
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
-option(ORM_WITH_REDIS "Enable Redis backend" ${ORM_WITH_REDIS_DEFAULT})
+option(ORM_BUILD_REDIS_DRIVER
+       "Build the independent Redis TurboDb.Driver module"
+       ${ORM_BUILD_REDIS_DRIVER_DEFAULT})
 option(ORM_WITH_MONGODB "Enable MongoDB backend" ${ORM_WITH_MONGODB_DEFAULT})
 if(NOT DEFINED ORM_BUILD_TIDESDB_DRIVER_DEFAULT)
   if(TARGET TidesDB::tidesdb)
@@ -106,7 +108,7 @@ if(ORM_WITH_PGSQL)
   find_package(PostgreSQL REQUIRED)
 endif()
 
-if(ORM_WITH_REDIS AND NOT TARGET TurboDB::Redis)
+if(ORM_BUILD_REDIS_DRIVER AND NOT TARGET TurboDB::Redis)
   find_package(TurboDB CONFIG REQUIRED)
 endif()
 
@@ -137,13 +139,7 @@ set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
                      src/flow/orm_text_token.c
-                     src/dbs/redis/orm_redis_cursor.c
                      src/dbs/mongo/orm_mongo_cursor.c)
-if(ORM_WITH_REDIS)
-  list(APPEND ORM_C_SOURCES src/dbs/redis/backend.c
-                             src/dbs/redis/query.c
-                             src/dbs/redis/orm_redis_lib.c)
-endif()
 if(ORM_WITH_MONGODB)
   list(APPEND ORM_C_SOURCES src/dbs/mongo/backend.c
                              src/dbs/mongo/query.c
@@ -174,14 +170,15 @@ target_link_libraries(
           Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
 
 get_target_property(ORM_CORE_LINK_CONTRACT turbo_orm LINK_LIBRARIES)
-foreach(ORM_FORBIDDEN_SQL_CORE_LINK IN ITEMS SQLite::SQLite3
-                                             PostgreSQL::PostgreSQL
-                                             TidesDB::tidesdb)
-  list(FIND ORM_CORE_LINK_CONTRACT "${ORM_FORBIDDEN_SQL_CORE_LINK}"
-       ORM_FORBIDDEN_SQL_CORE_LINK_INDEX)
-  if(NOT ORM_FORBIDDEN_SQL_CORE_LINK_INDEX EQUAL -1)
+foreach(ORM_FORBIDDEN_CORE_LINK IN ITEMS SQLite::SQLite3
+                                         PostgreSQL::PostgreSQL
+                                         TidesDB::tidesdb
+                                         TurboDB::Redis)
+  list(FIND ORM_CORE_LINK_CONTRACT "${ORM_FORBIDDEN_CORE_LINK}"
+       ORM_FORBIDDEN_CORE_LINK_INDEX)
+  if(NOT ORM_FORBIDDEN_CORE_LINK_INDEX EQUAL -1)
     message(FATAL_ERROR
-            "generic turbo_orm must not link ${ORM_FORBIDDEN_SQL_CORE_LINK}")
+            "generic turbo_orm must not link ${ORM_FORBIDDEN_CORE_LINK}")
   endif()
 endforeach()
 
@@ -279,9 +276,48 @@ if(ORM_BUILD_TIDESDB_DRIVER)
   endif()
 endif()
 
-if(ORM_WITH_REDIS)
-  target_compile_definitions(turbo_orm PRIVATE ORM_WITH_REDIS)
-  target_link_libraries(turbo_orm PRIVATE TurboDB::Redis)
+if(ORM_BUILD_REDIS_DRIVER)
+  add_library(orm_redis_driver MODULE
+    src/dbs/redis/plugin.c
+    src/driver/orm_driver_backend_bridge.c
+    src/dbs/redis/backend.c
+    src/dbs/redis/query.c
+    src/dbs/redis/orm_redis_lib.c
+    src/dbs/redis/orm_redis_cursor.c
+    src/flow/orm_text_token.c)
+  target_compile_features(orm_redis_driver PRIVATE c_std_11)
+  target_compile_definitions(
+    orm_redis_driver PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
+  target_include_directories(
+    orm_redis_driver PRIVATE
+      ${ORM_INCLUDE_DIR}
+      ${ORM_ABI_SOURCE_DIR}
+      ${ORM_FLOW_SOURCE_DIR}
+      ${ORM_DRIVER_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/redis)
+  target_link_libraries(
+    orm_redis_driver PRIVATE
+      turbo_orm
+      TurboDB::Redis
+      Salts::PluginABI
+      Salts::Core
+      Salts::CSerde
+      Salts::CFlow
+      Salts::DataBind
+      Salts::CSTL
+      Salts::Platform)
+  set_target_properties(
+    orm_redis_driver PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "turbodb_driver_redis"
+      C_STANDARD_REQUIRED ON
+      C_VISIBILITY_PRESET hidden
+      WINDOWS_EXPORT_ALL_SYMBOLS OFF
+      FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(orm_redis_driver PRIVATE
+      "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
+  endif()
 endif()
 
 if(ORM_WITH_MONGODB)
@@ -430,9 +466,6 @@ if(ORM_WITH_PGSQL)
 endif()
 
 set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::DataBind)
-if(ORM_WITH_REDIS)
-  list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS TurboDB::Redis)
-endif()
 if(ORM_WITH_MONGODB)
   list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS mongo::mongoc_shared
                                               mongo::bson_shared)
@@ -586,6 +619,9 @@ endif()
 if(TARGET orm_tidesdb_driver)
   orm_enable_strict_warnings(orm_tidesdb_driver)
 endif()
+if(TARGET orm_redis_driver)
+  orm_enable_strict_warnings(orm_redis_driver)
+endif()
 
 orm_enable_strict_warnings(turbo_orm)
 if(ORM_WITH_PGSQL)
@@ -620,10 +656,6 @@ if(ORM_BUILD_TESTS)
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
     target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
-  endif()
-  if(ORM_WITH_REDIS)
-    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_REDIS)
-    target_link_libraries(orm_c_test_static PRIVATE TurboDB::Redis)
   endif()
   if(ORM_WITH_MONGODB)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_MONGO)
@@ -671,9 +703,6 @@ if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_PRIVATE_LIBS SQLite::SQLite3 Salts::CSerde
                                     Salts::CFlow)
 endif()
-if(ORM_WITH_REDIS)
-  list(APPEND ORM_TEST_PRIVATE_LIBS TurboDB::Redis)
-endif()
 list(APPEND ORM_TEST_PRIVATE_LIBS TidesDB::tidesdb)
 if(ORM_WITH_MONGODB)
   list(APPEND ORM_TEST_PRIVATE_LIBS mongo::mongoc_shared)
@@ -681,9 +710,6 @@ endif()
 set(ORM_TEST_DEFINITIONS ORM_C_STATIC)
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_SQLITE)
-endif()
-if(ORM_WITH_REDIS)
-  list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_REDIS)
 endif()
 list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_TIDESDB)
 if(ORM_WITH_MONGODB)
@@ -1148,7 +1174,9 @@ if(MSVC)
 endif()
 add_test(NAME orm_postgres_flow COMMAND orm_postgres_flow_test)
 
-add_executable(orm_redis_flow_test tests/flow/orm_redis_flow_test.c)
+add_executable(orm_redis_flow_test
+               tests/flow/orm_redis_flow_test.c
+               src/dbs/redis/orm_redis_cursor.c)
 target_compile_features(orm_redis_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_redis_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
@@ -1356,8 +1384,10 @@ add_test(NAME orm_public_ownership_cpp COMMAND orm_public_ownership_cpp_test)
 
 endif()
 
-if(ORM_WITH_REDIS)
-add_executable(orm_redis_query_test tests/abi/redis_query_test.c)
+if(ORM_BUILD_REDIS_DRIVER)
+add_executable(orm_redis_query_test
+               tests/abi/redis_query_test.c
+               src/dbs/redis/query.c)
 target_compile_features(orm_redis_query_test PRIVATE c_std_11)
 target_compile_definitions(orm_redis_query_test PRIVATE ORM_C_STATIC)
 target_include_directories(
@@ -1376,7 +1406,10 @@ add_test(NAME orm_redis_query COMMAND orm_redis_query_test)
 add_executable(orm_redis_backend_contract_test
                tests/abi/redis_backend_contract_test.c)
 target_compile_features(orm_redis_backend_contract_test PRIVATE c_std_11)
-orm_link_internal_test(orm_redis_backend_contract_test)
+target_include_directories(orm_redis_backend_contract_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_redis_backend_contract_test PRIVATE
+                      turbo_orm Salts::Core)
+add_dependencies(orm_redis_backend_contract_test orm_redis_driver)
 if(WIN32)
   target_link_libraries(orm_redis_backend_contract_test PRIVATE ws2_32)
 endif()
@@ -1391,6 +1424,8 @@ endif()
 set_target_properties(orm_redis_backend_contract_test PROPERTIES FOLDER "orm/tests")
 add_test(NAME orm_redis_backend_contract
          COMMAND orm_redis_backend_contract_test)
+set_tests_properties(orm_redis_backend_contract PROPERTIES
+  ENVIRONMENT "ORM_REDIS_PLUGIN=$<TARGET_FILE:orm_redis_driver>")
 
 endif()
 
@@ -1433,7 +1468,7 @@ if(WIN32)
       list(APPEND ORM_RUNTIME_TESTS orm_postgres_live)
     endif()
   endif()
-  if(ORM_WITH_REDIS)
+  if(ORM_BUILD_REDIS_DRIVER)
     string(
       APPEND
       ORM_TEST_RUNTIME_PATH
