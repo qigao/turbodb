@@ -3,6 +3,7 @@
 
 #include <cserde/cserde.h>
 #include <cflow/cflow.h>
+#include <data_bind_message_plan.h>
 #include <orm.h>
 
 #include <stddef.h>
@@ -13,7 +14,7 @@ extern "C" {
 #endif
 
 enum { ORM_ROW_CURSOR_OPS_ABI_VERSION = 3u };
-enum { ORM_ROW_PUBLISHER_CONFIG_ABI_VERSION = 1u };
+enum { ORM_ROW_PUBLISHER_CONFIG_ABI_VERSION = 2u };
 
 typedef enum orm_row_cursor_step_kind {
   ORM_ROW_CURSOR_ROW = 0,
@@ -109,13 +110,15 @@ typedef struct orm_row_publisher_config {
   size_t max_depth;
   size_t max_container_items;
   size_t max_buffer_bytes;
+  /* Optional borrowed immutable control-plane artifact. */
+  const DataBindMessagePlan *message_plan;
 } orm_row_publisher_config;
 
 #define ORM_ROW_PUBLISHER_CONFIG_INIT(row_shape_, scratch_bytes_, max_depth_, \
                                      max_container_items_, max_buffer_bytes_) \
   { sizeof(orm_row_publisher_config), ORM_ROW_PUBLISHER_CONFIG_ABI_VERSION,     \
-    (row_shape_), (scratch_bytes_), (max_depth_), (max_container_items_),    \
-    (max_buffer_bytes_) }
+    (row_shape_), (scratch_bytes_), (max_depth_), (max_container_items_),       \
+    (max_buffer_bytes_), NULL }
 
 /*
  * On success, moves cursor into out_publisher and clears cursor. On failure,
