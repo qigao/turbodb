@@ -352,10 +352,16 @@ static orm_status_t ORM_DRIVER_CALL fixture_create_connection(
   (ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_INSERT | \
    ORM_DRIVER_CAP_TRANSACTION | ORM_DRIVER_CAP_INCREMENTAL_ROWS)
 
+static uint64_t ORM_DRIVER_CALL fixture_execution_models(void *self) {
+  return self == &fixture_module ? ORM_DRIVER_EXEC_CALLER_BLOCKING
+                                 : UINT64_C(0);
+}
+
 static const TurboDb_Driver_vtable fixture_driver_vtable = {
     .implementation = "fixture",
     .capabilities = FIXTURE_CAPABILITIES,
-    .create = fixture_create_connection};
+    .create = fixture_create_connection,
+    .execution_models = fixture_execution_models};
 
 static TurboDb_Driver fixture_driver = {
     &fixture_module, &fixture_driver_vtable};
