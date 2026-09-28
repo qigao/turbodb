@@ -1,9 +1,11 @@
 #include "orm.h"
+#include <orm_runtime.h>
 #include "salts_error.h"
 #include "salts_thread.h"
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(_WIN32)
@@ -34,6 +36,64 @@ typedef struct orm_redis_test_server {
 
 static orm_string_view_t view(const char *text) {
   return orm_view(text);
+}
+
+static const char *orm_redis_plugin_path(void) {
+  const char *path = getenv("ORM_REDIS_PLUGIN");
+  return path != NULL ? path : "";
+}
+
+static orm_runtime_t *orm_redis_test_runtime(orm_error_t *error) {
+  orm_runtime_config_t config;
+  orm_runtime_t *runtime = NULL;
+  orm_driver_load_config_t load;
+  orm_driver_info_t info;
+  const uint64_t required =
+      ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_INSERT |
+      ORM_DRIVER_CAP_UPDATE | ORM_DRIVER_CAP_DELETE |
+      ORM_DRIVER_CAP_INCREMENTAL_ROWS;
+  const uint64_t forbidden =
+      ORM_DRIVER_CAP_TRANSACTION | ORM_DRIVER_CAP_RAW_SQL;
+
+  if (orm_redis_plugin_path()[0] == '\0') {
+    fprintf(stderr, "ORM_REDIS_PLUGIN is not configured\n");
+    return NULL;
+  }
+
+  orm_runtime_config_init(&config);
+  orm_error_init(error);
+  if (orm_runtime_create(&config, &runtime, error) != ORM_STATUS_OK ||
+      runtime == NULL) {
+    fprintf(stderr, "create Redis Plugin runtime failed: %s\n", error->message);
+    return NULL;
+  }
+
+  memset(&load, 0, sizeof(load));
+  load.struct_size = (uint32_t)sizeof(load);
+  load.abi_version = ORM_RUNTIME_ABI_VERSION;
+  load.module_path = view(orm_redis_plugin_path());
+  load.expected_driver_id = view("redis");
+  if (orm_runtime_load_driver(runtime, &load, error) != ORM_STATUS_OK) {
+    fprintf(stderr, "load Redis Driver Plugin failed: %s\n", error->message);
+    (void)orm_runtime_close(runtime, error);
+    orm_runtime_release(runtime);
+    return NULL;
+  }
+
+  memset(&info, 0, sizeof(info));
+  if (orm_runtime_driver_info(runtime, view("redis"), &info, error) !=
+          ORM_STATUS_OK ||
+      info.canonical_id_size != 5u ||
+      memcmp(info.canonical_id, "redis", 5u) != 0 ||
+      (info.capabilities & required) != required ||
+      (info.capabilities & forbidden) != 0u) {
+    fprintf(stderr, "Redis Driver capability contract mismatch: %s\n",
+            error->message);
+    (void)orm_runtime_close(runtime, error);
+    orm_runtime_release(runtime);
+    return NULL;
+  }
+  return runtime;
 }
 
 static int orm_redis_test_socket_runtime_init(void) {
@@ -140,7 +200,7 @@ static void orm_redis_missing_command_server_main(void *argument) {
   orm_redis_test_close_socket(client);
 }
 
-static int orm_redis_test_missing_query_engine(void) {
+static int orm_redis_test_missing_query_engine(orm_runtime_t *runtime) {
   orm_redis_test_server server = {0};
   orm_config_t config;
   orm_error_t error;
@@ -177,7 +237,7 @@ static int orm_redis_test_missing_query_engine(void) {
   config.driver = view("redis");
   config.options = options;
   config.option_count = sizeof(options) / sizeof(options[0]);
-  status = orm_connect(&config, &connection, &error);
+  status = orm_runtime_connect(runtime, &config, &connection, &error);
   orm_disconnect(connection);
 
   orm_redis_test_close_socket(server.listener);
@@ -203,20 +263,30 @@ static int orm_redis_test_missing_query_engine(void) {
 }
 
 int main(void) {
+  orm_runtime_t *runtime;
   orm_config_t config;
   orm_error_t error;
   orm_connection_t *connection = NULL;
   orm_option_t invalid_option = {view("scan_fallback"), view("true")};
+  int failed = 0;
+
+  runtime = orm_redis_test_runtime(&error);
+  if (runtime == NULL)
+    return 1;
 
   orm_config(&config);
   orm_error_init(&error);
   config.driver = view("redis");
   config.options = &invalid_option;
   config.option_count = 1;
-  if (orm_connect(&config, &connection, &error) != ORM_STATUS_INVALID_ARGUMENT ||
+  if (orm_runtime_connect(runtime, &config, &connection, &error) !=
+          ORM_STATUS_INVALID_ARGUMENT ||
       connection != NULL) {
-    fprintf(stderr, "Redis ORM accepted an unknown/fallback option: %s\n", error.message);
-    return 1;
+    fprintf(stderr, "Redis ORM accepted an unknown/fallback option: %s\n",
+            error.message);
+    orm_disconnect(connection);
+    connection = NULL;
+    failed = 1;
   }
 
   invalid_option.keyword = view("port");
@@ -224,12 +294,24 @@ int main(void) {
   config.options = &invalid_option;
   config.option_count = 1;
   orm_error_init(&error);
-  if (orm_connect(&config, &connection, &error) != ORM_STATUS_CONNECTION_ERROR ||
+  if (orm_runtime_connect(runtime, &config, &connection, &error) !=
+          ORM_STATUS_CONNECTION_ERROR ||
       connection != NULL || strstr(error.message, "CFlow") == NULL) {
     fprintf(stderr, "Redis ORM did not report its CFlow connect failure: %s\n",
             error.message);
     orm_disconnect(connection);
-    return 1;
+    connection = NULL;
+    failed = 1;
   }
-  return orm_redis_test_missing_query_engine();
+
+  if (orm_redis_test_missing_query_engine(runtime) != 0)
+    failed = 1;
+
+  orm_error_init(&error);
+  if (orm_runtime_close(runtime, &error) != ORM_STATUS_OK) {
+    fprintf(stderr, "close Redis Plugin runtime failed: %s\n", error.message);
+    failed = 1;
+  }
+  orm_runtime_release(runtime);
+  return failed;
 }
