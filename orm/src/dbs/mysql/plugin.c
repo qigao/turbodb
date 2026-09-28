@@ -12,6 +12,14 @@
 
 static int mysql_driver_identity;
 
+static const orm_driver_storage_capabilities_v1 mysql_storage_capabilities =
+    ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
+
+static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
+mysql_driver_storage_capabilities(void *self) {
+  return self == &mysql_driver_identity ? &mysql_storage_capabilities : NULL;
+}
+
 static uint64_t ORM_DRIVER_CALL mysql_driver_execution_models(
     void *self) {
   return self == &mysql_driver_identity
@@ -35,7 +43,8 @@ static const TurboDb_Driver_vtable mysql_driver_vtable = {
     .implementation = "mysql",
     .capabilities = ORM_MYSQL_DRIVER_CAPABILITIES,
     .create = mysql_driver_create,
-    .execution_models = mysql_driver_execution_models};
+    .execution_models = mysql_driver_execution_models,
+    .storage_capabilities = mysql_driver_storage_capabilities};
 
 static TurboDb_Driver mysql_driver = {
     &mysql_driver_identity, &mysql_driver_vtable};
