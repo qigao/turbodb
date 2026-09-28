@@ -16,7 +16,7 @@
       ]
     },
     "mongodb": {
-      "description": "Build the optional MongoDB ORM backend",
+      "description": "Build the optional runtime-loaded MongoDB ORM Driver",
       "dependencies": [
         "mongo-c-driver"
       ]
