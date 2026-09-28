@@ -89,9 +89,16 @@ endif()
 
 # Find required base dependencies
 if(NOT TARGET Salts::Core)
-  find_package(Salts 1.7.10 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
+  find_package(Salts 1.8.0 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
+
+foreach(required_salts_target IN ITEMS Salts::Core Salts::PluginABI Salts::Plugin)
+  if(NOT TARGET ${required_salts_target})
+    message(FATAL_ERROR
+            "The selected Salts 1.8.0 installation must export ${required_salts_target}")
+  endif()
+endforeach()
 
 if(NOT TARGET Salts::DataBind)
   if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
@@ -102,15 +109,13 @@ if(NOT TARGET Salts::DataBind)
   endif()
   unset(SaltsUtils_DIR CACHE)
   unset(SaltsUtils_DIR)
-  find_package(SaltsUtils 4.0.2 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
+  find_package(SaltsUtils 4.1.0 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
-foreach(required_salts_utils_target IN ITEMS Salts::DataBind Salts::PluginABI Salts::Plugin)
-  if(NOT TARGET ${required_salts_utils_target})
-    message(FATAL_ERROR
-            "The selected SaltsUtils installation must export ${required_salts_utils_target}")
-  endif()
-endforeach()
+if(NOT TARGET Salts::DataBind)
+  message(FATAL_ERROR
+          "The selected SaltsUtils 4.1.0 installation must export Salts::DataBind")
+endif()
 
 # Find backend-specific dependencies based on enabled options
 if(ORM_WITH_SQLITE)
