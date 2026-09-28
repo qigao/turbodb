@@ -1,7 +1,7 @@
 #ifndef ORM_RUNTIME_H
 #define ORM_RUNTIME_H
 
-#include <orm_driver_abi.h>
+#include <orm_driver_ops.h>
 
 #ifdef __cplusplus
 extern "C" {
