@@ -145,14 +145,14 @@ endif()
 
 # Find required base dependencies
 if(NOT TARGET Salts::Core)
-  find_package(Salts 1.8.0 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
+  find_package(Salts 1.8.3 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
 
 foreach(required_salts_target IN ITEMS Salts::Core Salts::PluginABI Salts::Plugin)
   if(NOT TARGET ${required_salts_target})
     message(FATAL_ERROR
-            "The selected Salts 1.8.0 installation must export ${required_salts_target}")
+            "The selected Salts 1.8.3 installation must export ${required_salts_target}")
   endif()
 endforeach()
 
@@ -165,18 +165,18 @@ if(NOT TARGET Salts::DataBind)
   endif()
   unset(SaltsUtils_DIR CACHE)
   unset(SaltsUtils_DIR)
-  find_package(SaltsUtils 4.1.0 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
+  find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
                NO_DEFAULT_PATH)
 endif()
 if(NOT TARGET Salts::DataBind)
   message(FATAL_ERROR
-          "The selected SaltsUtils 4.1.0 installation must export Salts::DataBind")
+          "The selected SaltsUtils 4.1.3 installation must export Salts::DataBind")
 endif()
 
 if(ORM_BUILD_MYSQL_DRIVER OR ORM_MYSQL_LIVE_TESTS)
   if(NOT TARGET Salts::CNet)
     message(FATAL_ERROR
-            "The selected Salts 1.8.0 installation must export Salts::CNet for the MySQL Driver")
+            "The selected Salts 1.8.3 installation must export Salts::CNet for the MySQL Driver")
   endif()
   find_package(OpenSSL REQUIRED)
 endif()
