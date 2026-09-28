@@ -7,6 +7,9 @@
 #include "bridge.h"
 
 #include <tidesdb.h>
+#if defined(_WIN32)
+#include <block_manager.h>
+#endif
 
 #define ORM_TDB_ASSERT_VALUE(native_name, bridge_name) \
     _Static_assert((int)(native_name) == (int)(bridge_name), #native_name " value changed")
@@ -232,4 +235,11 @@ void orm_tidesdb_iter_free(orm_tidesdb_iterator_t *iterator)
 void orm_tidesdb_free(void *pointer)
 {
     tidesdb_free(pointer);
+}
+
+void orm_tidesdb_module_cleanup(void)
+{
+#if defined(_WIN32)
+    block_manager_thread_cache_shutdown();
+#endif
 }
