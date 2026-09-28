@@ -78,9 +78,15 @@ static orm_status_t orm_sql_push_parameter(
     return status;
   }
   one_based = vec_size(&query->parameters);
-  length = snprintf(placeholder, sizeof(placeholder),
-                    dialect == ORM_SQL_POSTGRES ? "$%zu" : "?%zu",
-                    one_based);
+  if (dialect == ORM_SQL_MYSQL) {
+    placeholder[0] = '?';
+    placeholder[1] = '\0';
+    length = 1;
+  } else {
+    length = snprintf(placeholder, sizeof(placeholder),
+                      dialect == ORM_SQL_POSTGRES ? "$%zu" : "?%zu",
+                      one_based);
+  }
   if (length <= 0 || (size_t)length >= sizeof(placeholder)) {
     orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
                   "format SQL placeholder failed");
@@ -213,6 +219,10 @@ static orm_status_t orm_sql_render_select(const orm_query_plan *plan,
   } else if (status == ORM_STATUS_OK && plan->has_offset &&
              dialect == ORM_SQL_SQLITE) {
     status = orm_sql_append_cstr(query, limits, " limit -1", error);
+  } else if (status == ORM_STATUS_OK && plan->has_offset &&
+             dialect == ORM_SQL_MYSQL) {
+    status = orm_sql_append_cstr(
+        query, limits, " limit 18446744073709551615", error);
   }
   if (status == ORM_STATUS_OK && plan->has_offset) {
     status = orm_sql_append_cstr(query, limits, " offset ", error);
@@ -326,7 +336,8 @@ typedef enum orm_sql_scan_state {
   ORM_SQL_SCAN_DOUBLE_QUOTE,
   ORM_SQL_SCAN_LINE_COMMENT,
   ORM_SQL_SCAN_BLOCK_COMMENT,
-  ORM_SQL_SCAN_DOLLAR_QUOTE
+  ORM_SQL_SCAN_DOLLAR_QUOTE,
+  ORM_SQL_SCAN_BACKTICK
 } orm_sql_scan_state;
 
 static size_t orm_sql_dollar_delimiter(const char *sql, size_t size,
@@ -443,6 +454,196 @@ static void orm_sql_normalize_raw_placeholders(tstr sql,
   }
 }
 
+static orm_status_t orm_sql_mysql_normalize_raw_placeholders(
+    const orm_query_plan *plan, const orm_limits *limits,
+    orm_sql_query *query, orm_error_t *error) {
+  orm_sql_scan_state state = ORM_SQL_SCAN_NORMAL;
+  orm_sql_query normalized;
+  unsigned char *seen = NULL;
+  size_t index = 0u;
+  size_t copy_start = 0u;
+  const size_t source_size = tstr_len(query->text);
+  const size_t parameter_count = vec_size(&plan->raw_parameters);
+  orm_status_t status = ORM_STATUS_OK;
+
+  memset(&normalized, 0, sizeof(normalized));
+  if (vec_init_bytes(&normalized.parameters,
+                     sizeof(const orm_owned_value *),
+                     _Alignof(const orm_owned_value *),
+                     limits->max_parameters) != STL_OK) {
+    orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
+                  "initialize MySQL parameter order");
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+  normalized.text = tstr_new();
+  if (normalized.text == NULL) {
+    orm_sql_query_destroy(&normalized);
+    orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
+                  "initialize MySQL SQL text");
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+  if (parameter_count != 0u) {
+    seen = (unsigned char *)calloc(parameter_count, sizeof(*seen));
+    if (seen == NULL) {
+      orm_sql_query_destroy(&normalized);
+      orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
+                    "track MySQL raw parameters");
+      return ORM_STATUS_OUT_OF_MEMORY;
+    }
+  }
+
+  while (index < source_size && status == ORM_STATUS_OK) {
+    const char next = query->text[index];
+    const char after =
+        index + 1u < source_size ? query->text[index + 1u] : '\0';
+    switch (state) {
+      case ORM_SQL_SCAN_NORMAL:
+        if (next == '\'') {
+          state = ORM_SQL_SCAN_SINGLE_QUOTE;
+        } else if (next == '"') {
+          state = ORM_SQL_SCAN_DOUBLE_QUOTE;
+        } else if (next == '`') {
+          state = ORM_SQL_SCAN_BACKTICK;
+        } else if (next == '#') {
+          state = ORM_SQL_SCAN_LINE_COMMENT;
+        } else if (next == '-' && after == '-') {
+          state = ORM_SQL_SCAN_LINE_COMMENT;
+          ++index;
+        } else if (next == '/' && after == '*') {
+          state = ORM_SQL_SCAN_BLOCK_COMMENT;
+          ++index;
+        } else if (next == '?') {
+          size_t end = index + 1u;
+          size_t one_based = 0u;
+          const orm_owned_value *value;
+          stl_status pushed;
+          if (end >= source_size || query->text[end] < '1' ||
+              query->text[end] > '9') {
+            orm_error_set(
+                error, ORM_STATUS_INVALID_ARGUMENT,
+                "MySQL raw SQL requires one-based ?N placeholders");
+            status = ORM_STATUS_INVALID_ARGUMENT;
+            break;
+          }
+          while (end < source_size && query->text[end] >= '0' &&
+                 query->text[end] <= '9') {
+            const size_t digit = (size_t)(query->text[end] - '0');
+            if (one_based > (SIZE_MAX - digit) / 10u) {
+              orm_error_set(error, ORM_STATUS_OUT_OF_RANGE,
+                            "MySQL raw SQL placeholder index overflow");
+              status = ORM_STATUS_OUT_OF_RANGE;
+              break;
+            }
+            one_based = one_based * 10u + digit;
+            ++end;
+          }
+          if (status != ORM_STATUS_OK)
+            break;
+          if (one_based == 0u || one_based > parameter_count) {
+            orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "MySQL raw SQL placeholder has no matching bind");
+            status = ORM_STATUS_INVALID_ARGUMENT;
+            break;
+          }
+          status = orm_sql_append(&normalized, limits,
+                                  query->text + copy_start,
+                                  index - copy_start, error);
+          if (status != ORM_STATUS_OK)
+            break;
+          status = orm_sql_append_cstr(&normalized, limits, "?", error);
+          if (status != ORM_STATUS_OK)
+            break;
+          value = (const orm_owned_value *)vec_at_const(
+              &plan->raw_parameters, one_based - 1u);
+          if (value == NULL) {
+            orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
+                          "MySQL raw SQL bind storage is invalid");
+            status = ORM_STATUS_INTERNAL_ERROR;
+            break;
+          }
+          pushed = vec_push(&normalized.parameters, &value);
+          if (pushed != STL_OK) {
+            status = pushed == STL_CAPACITY_EXCEEDED
+                         ? ORM_STATUS_LIMIT_EXCEEDED
+                         : ORM_STATUS_OUT_OF_MEMORY;
+            orm_error_set(error, status,
+                          "MySQL positional parameter count exceeds limits");
+            break;
+          }
+          seen[one_based - 1u] = 1u;
+          index = end - 1u;
+          copy_start = end;
+        }
+        break;
+      case ORM_SQL_SCAN_SINGLE_QUOTE:
+        if (next == '\\' && after != '\0')
+          ++index;
+        else if (next == '\'' && after == '\'')
+          ++index;
+        else if (next == '\'')
+          state = ORM_SQL_SCAN_NORMAL;
+        break;
+      case ORM_SQL_SCAN_DOUBLE_QUOTE:
+        if (next == '\\' && after != '\0')
+          ++index;
+        else if (next == '"' && after == '"')
+          ++index;
+        else if (next == '"')
+          state = ORM_SQL_SCAN_NORMAL;
+        break;
+      case ORM_SQL_SCAN_BACKTICK:
+        if (next == '`' && after == '`')
+          ++index;
+        else if (next == '`')
+          state = ORM_SQL_SCAN_NORMAL;
+        break;
+      case ORM_SQL_SCAN_LINE_COMMENT:
+        if (next == '\n' || next == '\r')
+          state = ORM_SQL_SCAN_NORMAL;
+        break;
+      case ORM_SQL_SCAN_BLOCK_COMMENT:
+        if (next == '*' && after == '/') {
+          ++index;
+          state = ORM_SQL_SCAN_NORMAL;
+        }
+        break;
+      case ORM_SQL_SCAN_DOLLAR_QUOTE:
+      default:
+        break;
+    }
+    ++index;
+  }
+
+  if (status == ORM_STATUS_OK) {
+    size_t parameter;
+    status = orm_sql_append(&normalized, limits, query->text + copy_start,
+                            source_size - copy_start, error);
+    for (parameter = 0u;
+         status == ORM_STATUS_OK && parameter < parameter_count;
+         ++parameter) {
+      if (seen[parameter] == 0u) {
+        orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                      "MySQL raw SQL contains an unused bound parameter");
+        status = ORM_STATUS_INVALID_ARGUMENT;
+      }
+    }
+  }
+
+  free(seen);
+  if (status != ORM_STATUS_OK) {
+    orm_sql_query_destroy(&normalized);
+    return status;
+  }
+
+  tstr_freep(&query->text);
+  vec_destroy(&query->parameters);
+  query->text = normalized.text;
+  query->parameters = normalized.parameters;
+  memset(&normalized, 0, sizeof(normalized));
+  return ORM_STATUS_OK;
+}
+
+
 static orm_status_t orm_sql_render_raw(const orm_query_plan *plan,
                                        const orm_limits *limits,
                                        orm_sql_dialect dialect,
@@ -451,6 +652,9 @@ static orm_status_t orm_sql_render_raw(const orm_query_plan *plan,
   size_t index;
   orm_status_t status = orm_sql_append_tstr(query, limits, plan->raw_sql,
                                              error);
+  if (status == ORM_STATUS_OK && dialect == ORM_SQL_MYSQL)
+    return orm_sql_mysql_normalize_raw_placeholders(
+        plan, limits, query, error);
   if (status == ORM_STATUS_OK)
     orm_sql_normalize_raw_placeholders(query->text, dialect);
   for (index = 0u; status == ORM_STATUS_OK &&
@@ -474,7 +678,8 @@ orm_status_t orm_sql_render(const orm_query_plan *plan,
                             orm_error_t *error) {
   orm_status_t status;
   if (plan == NULL || limits == NULL || out_query == NULL ||
-      (dialect != ORM_SQL_SQLITE && dialect != ORM_SQL_POSTGRES)) {
+      (dialect != ORM_SQL_SQLITE && dialect != ORM_SQL_POSTGRES &&
+       dialect != ORM_SQL_MYSQL)) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                   "invalid SQL render request");
     return ORM_STATUS_INVALID_ARGUMENT;
