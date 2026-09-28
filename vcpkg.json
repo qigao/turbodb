@@ -38,11 +38,13 @@
   "overrides": [
     {
       "name": "mongo-c-driver",
-      "version": "2.5.5"
+      "version": "2.3.1",
+      "port-version": 2
     },
     {
       "name": "libbson",
-      "version": "2.5.5"
+      "version": "2.3.1",
+      "port-version": 0
     }
   ]
 }
