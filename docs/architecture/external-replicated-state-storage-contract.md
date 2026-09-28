@@ -1,8 +1,8 @@
 # External Replicated-State Storage Capability Contract
 
-Status: design review  
+Status: active contract implementation  
 Tracking: #45, #46, #47, #48, #49  
-Baseline: `master@faf7ac2edb8646aa10fbf9afb8bf1c2efc74c36c`
+Runtime publication: canonical `Salts::Plugin` + CMeta `TurboDb.Driver`
 
 ## Purpose
 
@@ -38,7 +38,9 @@ TurboDB MUST NOT gain `leader`, `term`, `quorum`, `group_id`, `membership`, `sha
 
 ## Capability vocabulary
 
-The future machine-readable descriptor SHALL use versioned size-prefixed data and capability bits. Exact public symbol placement is intentionally coordinated with #29/#30 so TurboDB does not create a second runtime/loader registry.
+The machine-readable descriptor uses versioned, size-prefixed data and a storage-specific capability bitset. It is published by the canonical CMeta `TurboDb.Driver` interface; TurboDB does not create a second loader, registry, or backend-name switch.
+
+The SQL/CRUD capability word already carried by the Driver vtable remains separate. Storage durability capabilities describe different semantics and MUST NOT be packed into the SQL capability namespace.
 
 Semantic capabilities:
 
@@ -66,7 +68,9 @@ Semantic capabilities:
 - **RECONCILE**  
   A read-only operation can determine whether a previously ambiguous or repeated logical operation is already committed, retryable, conflicting, or missing.
 
-The descriptor MUST also expose limits needed for admission. A capability bit without its required limits or callbacks is invalid.
+The descriptor also exposes limits needed for admission. A capability bit without its required limits is invalid.
+
+`ORM_DRIVER_STORAGE_LIMIT_CONFIGURED` means the Driver has a real finite bound, but its exact value comes from connection/operation configuration rather than from a module-wide constant. It never means unlimited.
 
 ## Result semantics
 
@@ -121,13 +125,13 @@ An API that writes directly into the authoritative database while bytes are stil
 
 ## Current capability matrix
 
-This matrix records facts at the baseline head. “Primitive” means useful building blocks exist but the provider-grade contract is not yet proven.
+This matrix records the currently claimed semantics. “Primitive” means useful building blocks exist but the provider-grade contract is not yet proven. A backend does not publish a capability bit until that backend's current implementation and tests qualify it.
 
 | Backend | Local transaction | Atomic state + caller metadata | Replay/conflict classes | Commit ambiguity | Checkpoint export | Staged restore | Qualification |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | SQLite ORM | yes | primitive only | no | no explicit class | missing provider-grade path | missing | #47 |
 | TidesDB | yes | primitive/candidate | no generic classification | no explicit class | `tidesdb_checkpoint` exists | not yet provider-grade | #48 |
-| Redis ordered apply | specialized atomic Lua path | yes for current ordered-apply metadata/state operation | APPLIED / REPLAYED / GAP / CONFLICT / PENDING | COMMIT_UNKNOWN | no generic snapshot capability claimed | no generic restore capability claimed | #49 |
+| Redis ordered apply | specialized atomic Lua path | yes for current ordered-apply metadata/state operation | APPLIED / REPLAYED / GAP / CONFLICT / PENDING | COMMIT_UNKNOWN | no generic snapshot capability claimed | no generic restore capability claimed | machine-readable via Driver v3; #49 |
 | PostgreSQL ORM | yes | primitive only | no | no explicit class | no provider-grade path in current scope | no | informational / future |
 
 ### SQLite
@@ -164,6 +168,16 @@ The operation atomically advances durable applied metadata and mutates state; th
 
 #49 maps these existing facts into the generic capability vocabulary without weakening reconciliation or COMMIT_UNKNOWN semantics.
 
+The current Redis Driver publishes:
+
+- `ATOMIC_STATE_METADATA`;
+- `ORDERED_REPLAY_CLASSIFICATION`;
+- `AMBIGUOUS_COMMIT`;
+- `BOUNDED_BATCH`;
+- `RECONCILE`.
+
+Its batch-operation ceiling is the existing `REDIS_LUA_APPLY_BATCH_MAX_RECORDS`. Batch-byte and progress-metadata limits are connection/operation configured and are reported with `ORM_DRIVER_STORAGE_LIMIT_CONFIGURED`. Redis does not claim generic checkpoint or restore capabilities.
+
 ### PostgreSQL
 
 The ORM PostgreSQL backend supports normal transaction commit/rollback and serializable transactions. No provider-grade replay classification, ambiguous-commit reconciliation contract, checkpoint export, or staged restore is currently claimed.
@@ -172,18 +186,31 @@ PostgreSQL remains transaction-capable but outside the initial R1 provider-readi
 
 ## Machine-readable exposure
 
-TurboDB needs one capability truth source, but it must not duplicate #29/#30's runtime driver registry.
+There is one publication path:
+
+```text
+Salts::Plugin
+  -> reflected TurboDb.Driver contract v3
+       -> storage_capabilities()
+            -> orm_driver_storage_capabilities_v1
+  -> orm_runtime_load_driver() validates + copies the descriptor
+  -> orm_runtime_driver_storage_info() returns the cached value
+```
 
 Rules:
 
-- capability data SHALL attach to the versioned driver/backend descriptor once #30 freezes the public driver SDK, or to a single provider-neutral extension referenced from that descriptor;
-- no second global registry;
-- no backend-name switch in generic code;
-- descriptor is size/version checked before optional fields are read;
-- capability bits and callbacks/limits must be self-consistent;
-- unsupported capabilities are absent, not emulated by fallback.
+- `storage_capabilities()` returns module-owned borrowed static data while the Plugin admission lease is held;
+- runtime admission validates the complete descriptor before registering the Driver;
+- the runtime copies the descriptor, so later capability queries do not retain a raw pointer into Plugin memory;
+- malformed bit/limit combinations fail admission and leave no partial registration;
+- no second global registry exists;
+- generic code contains no backend-name switch;
+- SQL/CRUD Driver capability bits and storage durability capability bits remain separate namespaces;
+- unsupported storage semantics are represented by absent bits, never by fallback or emulation;
+- currently SQLite, PostgreSQL, MySQL, MongoDB, and TidesDB publish a valid empty storage descriptor until their provider-grade semantics are separately qualified;
+- Redis publishes only the already-qualified ordered-apply/reconciliation semantics.
 
-TurboFabric will select a provider profile by checking required capability bits and limits at startup.
+TurboFabric may select a provider profile by checking required capability bits and limits at startup. That selection policy remains outside TurboDB.
 
 ## Provider profiles are external
 
@@ -218,7 +245,7 @@ All adapter-facing handles must document:
 - exact release responsibility on success, failure, and cancel;
 - bounded memory ownership for checkpoint/export/restore paths.
 
-This contract reuses the ownership work already tracked by #28/#29 and must not create a second independent lifetime system.
+This contract reuses the current runtime/Plugin lease ownership model and must not create a second independent lifetime system. Historical #28/#29 material remains reference evidence only.
 
 ## Acceptance for #46
 
@@ -226,7 +253,7 @@ This contract reuses the ownership work already tracked by #28/#29 and must not 
 
 1. this capability vocabulary and matrix are reviewed;
 2. each R1 backend issue (#47/#48/#49) maps its implementation to these semantic capabilities;
-3. the runtime driver SDK has one machine-readable exposure point for the capabilities needed by external providers;
+3. the runtime Driver SDK has one machine-readable CMeta exposure point for the capabilities needed by external providers;
 4. startup can reject a backend that lacks a required capability without trying another backend implicitly;
 5. tests prove descriptor/limit consistency and reject invalid capability combinations;
 6. no public TurboDB API contains Raft/TurboFabric topology concepts.
