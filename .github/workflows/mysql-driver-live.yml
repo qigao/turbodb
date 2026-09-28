@@ -225,6 +225,7 @@ jobs:
             echo "live_boundaries=null,uint64,blob,decimal,date,time,datetime,constraint,row_limit"
             echo "wire_text_rows=lenenc,null,embedded-nul,truncation,trailing"
             echo "com_query_text_session=real-mysql-8.0.40"
+            echo "managed_transaction_ddl=reject-before-dispatch"
           } > "$GITHUB_WORKSPACE/evidence/mysql/qualification.txt"
 
       - name: Keep MySQL qualification evidence
