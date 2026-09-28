@@ -134,31 +134,134 @@ static int read_probe(
   return failed;
 }
 
+
+static orm_connection_t *connect_database(
+    orm_runtime_t *runtime,
+    const char *host, const char *port,
+    const char *user, const char *password,
+    const char *database, const char *ca_file,
+    const char *server_name, orm_error_t *error) {
+  orm_config_t config;
+  orm_option_t options[8];
+  orm_connection_t *connection = NULL;
+
+  orm_config(&config);
+  options[0] = (orm_option_t){orm_view("host"), orm_view(host)};
+  options[1] = (orm_option_t){orm_view("port"), orm_view(port)};
+  options[2] = (orm_option_t){orm_view("username"), orm_view(user)};
+  options[3] = (orm_option_t){orm_view("password"), orm_view(password)};
+  options[4] = (orm_option_t){orm_view("database"), orm_view(database)};
+  options[5] = (orm_option_t){orm_view("ca_file"), orm_view(ca_file)};
+  options[6] = (orm_option_t){orm_view("server_name"), orm_view(server_name)};
+  options[7] = (orm_option_t){orm_view("timeout_ms"), orm_view("5000")};
+  config.driver = orm_view("mysql");
+  config.options = options;
+  config.option_count = 8u;
+
+  if (orm_runtime_connect(runtime, &config, &connection, error) !=
+      ORM_STATUS_OK)
+    return NULL;
+  return connection;
+}
+
+static int update_driver_value(
+    orm_connection_t *connection, int64_t delta,
+    orm_error_t *error) {
+  orm_query_t *query = NULL;
+  uint64_t affected = 0u;
+  int failed = 0;
+
+  if (orm_raw(
+          connection,
+          orm_view("UPDATE m4_driver SET n=n+?1 WHERE s=?2"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_bind(query, orm_i64(delta), error) != ORM_STATUS_OK ||
+      orm_query_bind(query, orm_i64(-13), error) != ORM_STATUS_OK ||
+      run_command(query, error, &affected) != 0 ||
+      affected != UINT64_C(1)) {
+    fprintf(stderr,
+            "MySQL datasource UPDATE failed affected=%llu message=%s\n",
+            (unsigned long long)affected,
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+  orm_query_destroy(query);
+  return failed;
+}
+
+static int read_driver_value(
+    orm_connection_t *connection, long expected,
+    orm_error_t *error) {
+  orm_query_t *query = NULL;
+  orm_flow_config_t flow;
+  cflow_publisher publisher = {0};
+  mysql_driver_live_row row = {0};
+  cflow_step step;
+  int failed = 0;
+
+  if (orm_raw(
+          connection,
+          orm_view("SELECT n AS s FROM m4_driver WHERE s=?1"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_bind(query, orm_i64(-13), error) != ORM_STATUS_OK) {
+    orm_query_destroy(query);
+    return 1;
+  }
+
+  orm_flow_config(&flow, &mysql_driver_live_row_data);
+  if (orm_query_open_flow(query, &flow, &publisher, error) !=
+      ORM_STATUS_OK) {
+    orm_query_destroy(query);
+    return 1;
+  }
+
+  step = cflow_publisher_resume(&publisher, NULL, &row);
+  if (step.kind != CFLOW_STEP_VALUE || row.s != expected) {
+    fprintf(stderr,
+            "MySQL datasource SELECT mismatch step=%d got=%ld expected=%ld\n",
+            (int)step.kind, row.s, expected);
+    failed = 1;
+  }
+  if (!failed) {
+    step = cflow_publisher_resume(&publisher, NULL, &row);
+    if (step.kind != CFLOW_STEP_DONE) {
+      fprintf(stderr,
+              "MySQL datasource SELECT expected DONE got=%d\n",
+              (int)step.kind);
+      failed = 1;
+    }
+  }
+
+  cflow_publisher_destroy(&publisher);
+  orm_query_destroy(query);
+  return failed;
+}
+
 int main(void) {
   const char *module = getenv("ORM_MYSQL_PLUGIN");
   const char *host = getenv("ORM_MYSQL_HOST");
   const char *port = getenv("ORM_MYSQL_PORT");
   const char *user = getenv("ORM_MYSQL_USER");
   const char *password = getenv("ORM_MYSQL_PASSWORD");
-  const char *database = getenv("ORM_MYSQL_DATABASE");
+  const char *database_a = getenv("ORM_MYSQL_DATABASE");
+  const char *database_b = getenv("ORM_MYSQL_DATABASE_B");
   const char *ca_file = getenv("ORM_MYSQL_CA_FILE");
   const char *server_name = getenv("ORM_MYSQL_SERVER_NAME");
   orm_runtime_config_t runtime_config;
   orm_runtime_t *runtime = NULL;
   orm_driver_load_config_t load;
-  orm_config_t config;
-  orm_option_t options[8];
-  orm_connection_t *connection = NULL;
-  orm_query_t *query = NULL;
+  orm_connection_t *connection_a = NULL;
+  orm_connection_t *connection_b = NULL;
+  orm_transaction_t *transaction_a = NULL;
   orm_error_t error;
-  uint64_t affected = 0u;
   int failed = 0;
 
   if (module == NULL || module[0] == '\0' ||
       host == NULL || host[0] == '\0' ||
       port == NULL || port[0] == '\0' ||
       user == NULL || password == NULL ||
-      database == NULL || database[0] == '\0' ||
+      database_a == NULL || database_a[0] == '\0' ||
+      database_b == NULL || database_b[0] == '\0' ||
       ca_file == NULL || ca_file[0] == '\0' ||
       server_name == NULL || server_name[0] == '\0') {
     fprintf(stderr, "MySQL Driver live environment is incomplete\n");
@@ -169,8 +272,7 @@ int main(void) {
   orm_runtime_config_init(&runtime_config);
   if (fail_status(
           "create MySQL runtime",
-          orm_runtime_create(
-              &runtime_config, &runtime, &error),
+          orm_runtime_create(&runtime_config, &runtime, &error),
           ORM_STATUS_OK, &error))
     return 1;
 
@@ -187,66 +289,103 @@ int main(void) {
     return 1;
   }
 
-  orm_config(&config);
-  options[0] = (orm_option_t){orm_view("host"), orm_view(host)};
-  options[1] = (orm_option_t){orm_view("port"), orm_view(port)};
-  options[2] = (orm_option_t){orm_view("username"), orm_view(user)};
-  options[3] = (orm_option_t){orm_view("password"), orm_view(password)};
-  options[4] = (orm_option_t){orm_view("database"), orm_view(database)};
-  options[5] = (orm_option_t){orm_view("ca_file"), orm_view(ca_file)};
-  options[6] = (orm_option_t){orm_view("server_name"), orm_view(server_name)};
-  options[7] = (orm_option_t){orm_view("timeout_ms"), orm_view("5000")};
-  config.driver = orm_view("mysql");
-  config.options = options;
-  config.option_count = 8u;
-
-  if (fail_status(
-          "connect MySQL Driver",
-          orm_runtime_connect(
-              runtime, &config, &connection, &error),
-          ORM_STATUS_OK, &error)) {
-    (void)orm_runtime_close(runtime, &error);
-    orm_runtime_release(runtime);
-    return 1;
+  connection_a = connect_database(
+      runtime, host, port, user, password,
+      database_a, ca_file, server_name, &error);
+  if (connection_a == NULL) {
+    fprintf(stderr, "connect MySQL datasource A failed: %s\n", error.message);
+    failed = 1;
+    goto cleanup;
   }
 
-  if (read_probe(connection, &error) != 0)
+  connection_b = connect_database(
+      runtime, host, port, user, password,
+      database_b, ca_file, server_name, &error);
+  if (connection_b == NULL) {
+    fprintf(stderr, "connect MySQL datasource B failed: %s\n", error.message);
+    failed = 1;
+    goto cleanup;
+  }
+
+  if (read_probe(connection_a, &error) != 0)
     failed = 1;
 
-  if (!failed) {
-    if (orm_raw(
-            connection,
-            orm_view(
-                "UPDATE m4_driver SET n=n+?1 WHERE s=?2"),
-            &query, &error) != ORM_STATUS_OK ||
-        orm_query_bind(query, orm_i64(1), &error) != ORM_STATUS_OK ||
-        orm_query_bind(query, orm_i64(-13), &error) != ORM_STATUS_OK ||
-        run_command(query, &error, &affected) != 0 ||
-        affected != UINT64_C(1)) {
-      fprintf(stderr,
-              "MySQL runtime Driver UPDATE failed affected=%llu message=%s\n",
-              (unsigned long long)affected, error.message);
+  if (!failed && update_driver_value(connection_a, INT64_C(1), &error) != 0)
+    failed = 1;
+  if (!failed &&
+      (read_driver_value(connection_a, 1L, &error) != 0 ||
+       read_driver_value(connection_b, 100L, &error) != 0))
+    failed = 1;
+
+  /*
+   * A transaction on datasource A must be private to A. While A owns a
+   * persistent transaction session, datasource B must still admit and execute
+   * its own command through the same loaded Driver module.
+   */
+  if (!failed &&
+      orm_transaction_begin(
+          connection_a, ORM_ISOLATION_READ_COMMITTED,
+          &transaction_a, &error) != ORM_STATUS_OK) {
+    fprintf(stderr, "begin datasource A transaction failed: %s\n",
+            error.message);
+    failed = 1;
+  }
+
+  if (!failed && update_driver_value(connection_b, INT64_C(10), &error) != 0)
+    failed = 1;
+  if (!failed && read_driver_value(connection_b, 110L, &error) != 0)
+    failed = 1;
+
+  if (transaction_a != NULL) {
+    if (orm_transaction_rollback(transaction_a, &error) != ORM_STATUS_OK) {
+      fprintf(stderr, "rollback datasource A transaction failed: %s\n",
+              error.message);
       failed = 1;
     }
-    orm_query_destroy(query);
-    query = NULL;
+    orm_transaction_destroy(transaction_a);
+    transaction_a = NULL;
   }
+
+  if (!failed &&
+      (read_driver_value(connection_a, 1L, &error) != 0 ||
+       read_driver_value(connection_b, 110L, &error) != 0))
+    failed = 1;
 
   orm_error_init(&error);
   if (orm_runtime_close(runtime, &error) != ORM_STATUS_BUSY) {
     fprintf(stderr,
-            "live MySQL connection did not retain Plugin lease: %s\n",
+            "two live MySQL connections did not retain Plugin leases: %s\n",
             error.message);
     failed = 1;
   }
 
-  orm_disconnect(connection);
-  connection = NULL;
+  orm_disconnect(connection_a);
+  connection_a = NULL;
+
   orm_error_init(&error);
-  if (orm_runtime_close(runtime, &error) != ORM_STATUS_OK) {
+  if (orm_runtime_close(runtime, &error) != ORM_STATUS_BUSY) {
     fprintf(stderr,
-            "close MySQL runtime failed: %s\n",
+            "datasource B did not retain its independent Plugin lease: %s\n",
             error.message);
+    failed = 1;
+  }
+  if (read_driver_value(connection_b, 110L, &error) != 0)
+    failed = 1;
+
+cleanup:
+  if (transaction_a != NULL) {
+    (void)orm_transaction_rollback(transaction_a, &error);
+    orm_transaction_destroy(transaction_a);
+  }
+  orm_disconnect(connection_b);
+  orm_disconnect(connection_a);
+  connection_b = NULL;
+  connection_a = NULL;
+
+  orm_error_init(&error);
+  if (runtime != NULL &&
+      orm_runtime_close(runtime, &error) != ORM_STATUS_OK) {
+    fprintf(stderr, "close MySQL runtime failed: %s\n", error.message);
     failed = 1;
   }
   orm_runtime_release(runtime);
