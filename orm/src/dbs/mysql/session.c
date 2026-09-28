@@ -76,6 +76,7 @@ typedef enum mysql_session_phase_t {
   MYSQL_PHASE_CURSOR_READY,
   MYSQL_PHASE_CURSOR_ROW_READY,
   MYSQL_PHASE_WAIT_CLOSE_SEND,
+  MYSQL_PHASE_WAIT_QUIT_SEND,
   MYSQL_PHASE_DONE,
   MYSQL_PHASE_FAILED
 } mysql_session_phase_t;
@@ -90,7 +91,8 @@ typedef enum mysql_session_send_kind_t {
   MYSQL_SEND_CONTROL,
   MYSQL_SEND_PREPARE,
   MYSQL_SEND_EXECUTE,
-  MYSQL_SEND_CLOSE
+  MYSQL_SEND_CLOSE,
+  MYSQL_SEND_QUIT
 } mysql_session_send_kind_t;
 
 typedef enum mysql_transaction_step_t {
@@ -512,6 +514,22 @@ static void mysql_session_send_text_query(mysql_session_t *session) {
   session->phase = MYSQL_PHASE_WAIT_QUERY_SEND;
   (void)mysql_session_send_packet(
       session, UINT8_C(0), payload, payload_size, MYSQL_SEND_QUERY);
+}
+
+static bool mysql_session_send_quit(mysql_session_t *session) {
+  uint8_t payload[1];
+  size_t payload_size = 0u;
+
+  if (session == NULL ||
+      mysql_wire_build_quit(
+          payload, sizeof(payload), &payload_size) !=
+          MYSQL_WIRE_STATUS_OK)
+    return false;
+
+  session->phase = MYSQL_PHASE_WAIT_QUIT_SEND;
+  return mysql_session_send_packet(
+             session, UINT8_C(0), payload, payload_size,
+             MYSQL_SEND_QUIT) == SALTS_OK;
 }
 
 static mysql_session_status_t mysql_session_isolation_sql(
@@ -1527,6 +1545,10 @@ static void mysql_session_on_send(
         session->phase = MYSQL_PHASE_DONE;
       }
       break;
+    case MYSQL_SEND_QUIT:
+      session->phase = MYSQL_PHASE_DONE;
+      (void)cnet_close(&session->client, session->connection);
+      break;
     default:
       mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                               "send-state", "unexpected MySQL send completion");
@@ -1803,9 +1825,18 @@ static void mysql_session_shutdown(
     mysql_session_t *session, bool request_close) {
   if (session == NULL)
     return;
+
   if (request_close &&
-      session->phase != MYSQL_PHASE_FAILED)
+      session->phase == MYSQL_PHASE_DONE &&
+      !session->cancel_requested) {
+    if (mysql_session_send_quit(session))
+      (void)mysql_session_progress_until(
+          session, MYSQL_PHASE_DONE);
+  } else if (request_close &&
+             session->phase != MYSQL_PHASE_FAILED) {
     (void)cnet_close(&session->client, session->connection);
+  }
+
   (void)cnet_client_stop(&session->client, session->timeout_ms);
   (void)cnet_client_destroy(&session->client);
 }

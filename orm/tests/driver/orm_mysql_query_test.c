@@ -7,6 +7,23 @@
 spec("mysql COM_QUERY control packet") {
   (void)ttest_config__;
 
+  it("encodes COM_QUIT as exactly one command byte") {
+    uint8_t out[2] = {0};
+    size_t size = 99u;
+
+    check_equal(mysql_wire_build_quit(
+                    out, sizeof(out), &size),
+                MYSQL_WIRE_STATUS_OK);
+    check_equal(size, (size_t)1u);
+    check_equal(out[0], MYSQL_COM_QUIT);
+
+    size = 99u;
+    check_equal(mysql_wire_build_quit(
+                    out, 0u, &size),
+                MYSQL_WIRE_STATUS_LIMIT);
+    check_equal(size, (size_t)0u);
+  }
+
   it("encodes command byte plus raw SQL") {
     static const uint8_t sql[] = "START TRANSACTION";
     uint8_t out[64] = {0};
