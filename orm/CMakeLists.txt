@@ -36,6 +36,9 @@ endif()
 if(NOT DEFINED ORM_BUILD_MONGODB_DRIVER_DEFAULT)
   set(ORM_BUILD_MONGODB_DRIVER_DEFAULT OFF)
 endif()
+if(NOT DEFINED ORM_BUILD_MYSQL_DRIVER_DEFAULT)
+  set(ORM_BUILD_MYSQL_DRIVER_DEFAULT OFF)
+endif()
 option(ORM_WITH_SQLITE "Enable SQLite backend" ${ORM_WITH_SQLITE_DEFAULT})
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_BUILD_REDIS_DRIVER
@@ -44,6 +47,9 @@ option(ORM_BUILD_REDIS_DRIVER
 option(ORM_BUILD_MONGODB_DRIVER
        "Build the independent MongoDB TurboDb.Driver module"
        ${ORM_BUILD_MONGODB_DRIVER_DEFAULT})
+option(ORM_BUILD_MYSQL_DRIVER
+       "Build the independent MySQL TurboDb.Driver module"
+       ${ORM_BUILD_MYSQL_DRIVER_DEFAULT})
 if(NOT DEFINED ORM_BUILD_TIDESDB_DRIVER_DEFAULT)
   if(TARGET TidesDB::tidesdb)
     set(ORM_BUILD_TIDESDB_DRIVER_DEFAULT ON)
@@ -82,7 +88,7 @@ if(ORM_POSTGRES_LIVE_TESTS)
   endif()
 endif()
 
-if((ORM_BUILD_TESTS OR ORM_WITH_PGSQL) AND
+if((ORM_BUILD_TESTS OR ORM_WITH_PGSQL OR ORM_BUILD_MYSQL_DRIVER) AND
    NOT CMAKE_CXX_COMPILER_LOADED)
   enable_language(CXX)
 endif()
@@ -132,6 +138,14 @@ endif()
 
 if(ORM_BUILD_TIDESDB_DRIVER AND NOT TARGET TidesDB::tidesdb)
   find_package(TidesDB CONFIG REQUIRED)
+endif()
+
+if(ORM_BUILD_MYSQL_DRIVER)
+  find_package(unofficial-libmysql CONFIG REQUIRED)
+  if(NOT TARGET unofficial::libmysql::libmysql)
+    message(FATAL_ERROR
+            "MySQL Driver requires unofficial::libmysql::libmysql")
+  endif()
 endif()
 
 if(ORM_BUILD_MONGODB_DRIVER)
