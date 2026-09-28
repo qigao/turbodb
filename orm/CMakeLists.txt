@@ -601,6 +601,7 @@ if(ORM_BUILD_MYSQL_DRIVER)
     src/dbs/mysql/plugin.c
     src/driver/orm_driver_backend_bridge.c
     src/dbs/mysql/backend.c
+    src/dbs/mysql/dialect.c
     src/dbs/mysql/parameters.c
     src/dbs/mysql/session.c
     src/dbs/mysql/transaction_control.c
@@ -1268,6 +1269,27 @@ else()
   target_compile_options(orm_mysql_parameters_test PRIVATE -Werror)
 endif()
 add_test(NAME orm_mysql_parameters COMMAND orm_mysql_parameters_test)
+
+add_executable(orm_mysql_dialect_test
+  tests/driver/orm_mysql_dialect_test.c
+  src/dbs/mysql/dialect.c)
+target_compile_features(orm_mysql_dialect_test PRIVATE c_std_11)
+target_compile_definitions(orm_mysql_dialect_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mysql_dialect_test PRIVATE
+  ${ORM_INCLUDE_DIR}
+  ${ORM_ABI_SOURCE_DIR}
+  ${ORM_FLOW_SOURCE_DIR}
+  ${ORM_MYSQL_SOURCE_DIR})
+orm_link_internal_test(orm_mysql_dialect_test Salts::TinyTest)
+set_target_properties(orm_mysql_dialect_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_dialect_test)
+if(MSVC)
+  target_compile_options(orm_mysql_dialect_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_dialect_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_dialect COMMAND orm_mysql_dialect_test)
 
 add_executable(orm_mysql_statement_test
   tests/driver/orm_mysql_statement_test.c
