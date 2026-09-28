@@ -1,5 +1,6 @@
 #include "orm.h"
 #include <orm_runtime.h>
+#include <salts/thread.h>
 
 #include <cmeta/struct.h>
 
@@ -114,6 +115,53 @@ static int reject_raw_sql(orm_connection_t *connection, orm_error_t *error) {
   return 0;
 }
 
+typedef struct redis_live_wait_gate {
+  salts_mutex_t mutex;
+  salts_cond_t changed;
+  int signaled;
+} redis_live_wait_gate;
+
+static void redis_live_wake(void *user) {
+  redis_live_wait_gate *gate = (redis_live_wait_gate *)user;
+  salts_mutex_lock(&gate->mutex);
+  gate->signaled = 1;
+  salts_cond_broadcast(&gate->changed);
+  salts_mutex_unlock(&gate->mutex);
+}
+
+static int redis_live_wait(cflow_waitable *waitable,
+                           redis_live_wait_gate *gate) {
+  int wait_status = 0;
+  salts_mutex_lock(&gate->mutex);
+  gate->signaled = 0;
+  salts_mutex_unlock(&gate->mutex);
+
+  if (!cflow_waitable_valid(waitable) ||
+      !cflow_waitable_arm(
+          waitable, (cflow_waker){redis_live_wake, gate})) {
+    fprintf(stderr, "Redis SELECT returned an invalid/unarmable waitable\n");
+    return 1;
+  }
+
+  salts_mutex_lock(&gate->mutex);
+  while (!gate->signaled) {
+    wait_status =
+        salts_cond_timedwait(&gate->changed, &gate->mutex,
+                             UINT64_C(5000000000));
+    if (wait_status != 0)
+      break;
+  }
+  const int signaled = gate->signaled;
+  salts_mutex_unlock(&gate->mutex);
+
+  if (!signaled) {
+    cflow_waitable_cancel(waitable);
+    fprintf(stderr, "Redis SELECT WAIT timed out: status=%d\n", wait_status);
+    return 1;
+  }
+  return 0;
+}
+
 static int read_score(orm_connection_t *connection, long id, long expected,
                       orm_error_t *error) {
   orm_query_t *query = NULL;
@@ -121,7 +169,17 @@ static int read_score(orm_connection_t *connection, long id, long expected,
   cflow_publisher publisher = {0};
   redis_live_row row = {0};
   cflow_step step;
+  redis_live_wait_gate gate = {0};
   int failed = 0;
+
+  salts_mutex_init(&gate.mutex);
+  salts_cond_init(&gate.changed);
+  if (gate.mutex == NULL || gate.changed == NULL) {
+    salts_cond_destroy(&gate.changed);
+    salts_mutex_destroy(&gate.mutex);
+    fprintf(stderr, "initialize Redis SELECT wait gate failed\n");
+    return 1;
+  }
 
   if (fail_status("create Redis SELECT",
                   orm_query_create(connection, orm_view("people"), &query,
@@ -150,8 +208,18 @@ static int read_score(orm_connection_t *connection, long id, long expected,
     return 1;
   }
 
-  step = cflow_publisher_resume(&publisher, NULL, &row);
-  if (step.kind != CFLOW_STEP_VALUE || row.id != id || row.score != expected) {
+  for (;;) {
+    step = cflow_publisher_resume(&publisher, NULL, &row);
+    if (step.kind != CFLOW_STEP_WAIT)
+      break;
+    if (redis_live_wait(&step.waitable, &gate) != 0) {
+      failed = 1;
+      break;
+    }
+  }
+  if (!failed &&
+      (step.kind != CFLOW_STEP_VALUE || row.id != id ||
+       row.score != expected)) {
     fprintf(stderr,
             "Redis SELECT mismatch: step=%d id=%ld score=%ld error=%s\n",
             (int)step.kind, row.id, row.score,
@@ -159,8 +227,16 @@ static int read_score(orm_connection_t *connection, long id, long expected,
     failed = 1;
   }
   if (!failed) {
-    step = cflow_publisher_resume(&publisher, NULL, &row);
-    if (step.kind != CFLOW_STEP_DONE) {
+    for (;;) {
+      step = cflow_publisher_resume(&publisher, NULL, &row);
+      if (step.kind != CFLOW_STEP_WAIT)
+        break;
+      if (redis_live_wait(&step.waitable, &gate) != 0) {
+        failed = 1;
+        break;
+      }
+    }
+    if (!failed && step.kind != CFLOW_STEP_DONE) {
       fprintf(stderr, "Redis SELECT expected DONE, got=%d error=%s\n",
               (int)step.kind, step.error != NULL ? step.error : "");
       failed = 1;
@@ -169,6 +245,8 @@ static int read_score(orm_connection_t *connection, long id, long expected,
 
   cflow_publisher_destroy(&publisher);
   orm_query_destroy(query);
+  salts_cond_destroy(&gate.changed);
+  salts_mutex_destroy(&gate.mutex);
   return failed;
 }
 
