@@ -14,7 +14,7 @@ on:
       - "orm/src/driver/**"
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
-      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/driver/**"
       - "orm/tests/integration/postgres_live_test.c"
       - ".github/workflows/vcpkg-registry-contract.yml"
   push:
@@ -30,7 +30,7 @@ on:
       - "orm/src/driver/**"
       - "orm/src/runtime/**"
       - "orm/include/orm/orm_driver_*.h"
-      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "orm/tests/driver/**"
       - "orm/tests/integration/postgres_live_test.c"
       - ".github/workflows/vcpkg-registry-contract.yml"
   workflow_dispatch:
@@ -212,10 +212,243 @@ jobs:
             sha256sum "$core" "$app" > "$evidence/$scenario.sha256"
             cmp "$evidence/baseline.sha256" "$evidence/$scenario.sha256"
           done
+
+          stage="$RUNNER_TEMP/turbodb-driver-install"
+          rm -rf "$stage"
+          cmake --install "$build" --prefix "$stage" --component TurboDbDrivers
+          installed_sqlite="$stage/lib/turbodb/drivers/turbodb_driver_sqlite.so"
+          installed_postgresql="$stage/lib/turbodb/drivers/turbodb_driver_postgresql.so"
+          test -f "$installed_sqlite"
+          test -f "$installed_postgresql"
+          sha256sum "$installed_sqlite" "$installed_postgresql"             > "$evidence/installed-modules.sha256"
+          for scenario in sqlite postgresql both; do
+            "$app" "$scenario" "$installed_sqlite" "$installed_postgresql"
+            sha256sum "$core" "$app" > "$evidence/installed-$scenario.sha256"
+            cmp "$evidence/baseline.sha256" "$evidence/installed-$scenario.sha256"
+          done
+
           readelf -d "$core" > "$evidence/core-dependencies.txt"
+          readelf -d "$installed_sqlite" > "$evidence/sqlite-module-dependencies.txt"
+          readelf -d "$installed_postgresql" > "$evidence/postgresql-module-dependencies.txt"
+          nm -D --defined-only "$core" > "$evidence/core-exports.txt"
+          nm -D --defined-only "$installed_sqlite" > "$evidence/sqlite-module-exports.txt"
+          nm -D --defined-only "$installed_postgresql" > "$evidence/postgresql-module-exports.txt"
+
           if grep -Eiq 'sqlite|libpq|postgres' "$evidence/core-dependencies.txt"; then
             cat "$evidence/core-dependencies.txt"
             echo 'generic core imports a native SQL library' >&2
+            exit 1
+          fi
+          grep -Eiq 'sqlite' "$evidence/sqlite-module-dependencies.txt"
+          if grep -Eiq 'libpq|postgres' "$evidence/sqlite-module-dependencies.txt"; then
+            cat "$evidence/sqlite-module-dependencies.txt"
+            echo 'SQLite Driver imports PostgreSQL native libraries' >&2
+            exit 1
+          fi
+          grep -Eiq 'libpq' "$evidence/postgresql-module-dependencies.txt"
+          if grep -Eiq 'sqlite' "$evidence/postgresql-module-dependencies.txt"; then
+            cat "$evidence/postgresql-module-dependencies.txt"
+            echo 'PostgreSQL Driver imports SQLite native libraries' >&2
+            exit 1
+          fi
+          grep -Eq '[[:space:]]salts_plugin_query
+      - name: Build SQL runtime Driver matrix on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $build = Join-Path $env:RUNNER_TEMP "sql-driver-build"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "evidence/sql-matrix-windows"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $args = @(
+            "-S", $env:GITHUB_WORKSPACE,
+            "-B", $build,
+            "-G", "Visual Studio 17 2022",
+            "-A", "x64",
+            "-DCMAKE_TOOLCHAIN_FILE=$env:QIGAO_VCPKG_TOOLCHAIN_FILE",
+            "-DVCPKG_MANIFEST_INSTALL=OFF",
+            "-DVCPKG_APPLOCAL_DEPS=OFF",
+            "-DVCPKG_INSTALLED_DIR=$env:TURBODB_REGISTRY_INSTALL_ROOT",
+            "-DVCPKG_TARGET_TRIPLET=x64-windows",
+            "-DORM_WITH_SQLITE=ON",
+            "-DORM_WITH_PGSQL=ON",
+            "-DORM_WITH_REDIS=OFF",
+            "-DTURBODB_BUILD_REDIS=OFF",
+            "-DORM_WITH_MONGODB=OFF",
+            "-DORM_BUILD_TESTS=ON",
+            "-DTURBODB_DBTOOLS_WITH_SQLITE=OFF",
+            "-DTURBODB_DBTOOLS_WITH_PGSQL=OFF"
+          )
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix configure failed" }
+          & cmake --build $build --config Release --target orm_sqlite_driver orm_postgresql_driver orm_sqlite_plugin_test orm_postgresql_plugin_test orm_sql_plugin_matrix_test --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix build failed" }
+          & ctest --test-dir $build -C Release -R "^(orm_sqlite_plugin|orm_postgresql_plugin|orm_sql_plugin_matrix_(sqlite|postgresql|both))$" --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix contract failed" }
+
+          $bin = Join-Path $build "bin/Release"
+          $core = Join-Path $bin "turbo_orm.dll"
+          $app = Join-Path $bin "orm_sql_plugin_matrix_test.exe"
+          $sqlitePlugin = Join-Path $bin "turbodb_driver_sqlite.dll"
+          $postgresqlPlugin = Join-Path $bin "turbodb_driver_postgresql.dll"
+          $vcpkgBin = Join-Path $env:TURBODB_REGISTRY_INSTALL_ROOT "x64-windows/bin"
+          $env:PATH = "$bin;$vcpkgBin;$env:PATH"
+          $baselineCore = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+          $baselineApp = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+          "core=$baselineCore`napp=$baselineApp" | Set-Content -LiteralPath (Join-Path $evidence "baseline.sha256") -Encoding ascii
+          foreach ($scenario in @("sqlite", "postgresql", "both")) {
+            & $app $scenario $sqlitePlugin $postgresqlPlugin
+            if ($LASTEXITCODE -ne 0) { throw "SQL Plugin matrix scenario failed: $scenario" }
+            $coreHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+            $appHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+            "core=$coreHash`napp=$appHash" | Set-Content -LiteralPath (Join-Path $evidence "$scenario.sha256") -Encoding ascii
+            if ($coreHash -ne $baselineCore -or $appHash -ne $baselineApp) {
+              throw "core/application hash changed for scenario: $scenario"
+            }
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "turbodb-driver-install"
+          Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+          & cmake --install $build --prefix $stage --component TurboDbDrivers --config Release
+          if ($LASTEXITCODE -ne 0) { throw "installed Driver module staging failed" }
+          $installedDir = Join-Path $stage "bin/turbodb/drivers"
+          $installedSqlite = Join-Path $installedDir "turbodb_driver_sqlite.dll"
+          $installedPostgresql = Join-Path $installedDir "turbodb_driver_postgresql.dll"
+          if (-not (Test-Path -LiteralPath $installedSqlite -PathType Leaf)) { throw "missing installed SQLite Driver" }
+          if (-not (Test-Path -LiteralPath $installedPostgresql -PathType Leaf)) { throw "missing installed PostgreSQL Driver" }
+          @(
+            "sqlite=$((Get-FileHash -Algorithm SHA256 -LiteralPath $installedSqlite).Hash)",
+            "postgresql=$((Get-FileHash -Algorithm SHA256 -LiteralPath $installedPostgresql).Hash)"
+          ) | Set-Content -LiteralPath (Join-Path $evidence "installed-modules.sha256") -Encoding ascii
+          $env:PATH = "$installedDir;$bin;$vcpkgBin;$env:PATH"
+          foreach ($scenario in @("sqlite", "postgresql", "both")) {
+            & $app $scenario $installedSqlite $installedPostgresql
+            if ($LASTEXITCODE -ne 0) { throw "installed SQL Plugin matrix scenario failed: $scenario" }
+            $coreHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+            $appHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+            "core=$coreHash`napp=$appHash" | Set-Content -LiteralPath (Join-Path $evidence "installed-$scenario.sha256") -Encoding ascii
+            if ($coreHash -ne $baselineCore -or $appHash -ne $baselineApp) {
+              throw "core/application hash changed for installed scenario: $scenario"
+            }
+          }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw "MSVC tools not found" }
+          $dumpbin = Get-ChildItem -Path (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if ($null -eq $dumpbin) { throw "dumpbin.exe not found" }
+
+          $coreDeps = (& $dumpbin.FullName /DEPENDENTS $core | Out-String)
+          $sqliteDeps = (& $dumpbin.FullName /DEPENDENTS $installedSqlite | Out-String)
+          $postgresqlDeps = (& $dumpbin.FullName /DEPENDENTS $installedPostgresql | Out-String)
+          $coreExports = (& $dumpbin.FullName /EXPORTS $core | Out-String)
+          $sqliteExports = (& $dumpbin.FullName /EXPORTS $installedSqlite | Out-String)
+          $postgresqlExports = (& $dumpbin.FullName /EXPORTS $installedPostgresql | Out-String)
+          $coreDeps | Set-Content -LiteralPath (Join-Path $evidence "core-dependencies.txt") -Encoding ascii
+          $sqliteDeps | Set-Content -LiteralPath (Join-Path $evidence "sqlite-module-dependencies.txt") -Encoding ascii
+          $postgresqlDeps | Set-Content -LiteralPath (Join-Path $evidence "postgresql-module-dependencies.txt") -Encoding ascii
+          $coreExports | Set-Content -LiteralPath (Join-Path $evidence "core-exports.txt") -Encoding ascii
+          $sqliteExports | Set-Content -LiteralPath (Join-Path $evidence "sqlite-module-exports.txt") -Encoding ascii
+          $postgresqlExports | Set-Content -LiteralPath (Join-Path $evidence "postgresql-module-exports.txt") -Encoding ascii
+
+          if ($coreDeps -match "(?i)sqlite|libpq|postgres") { throw "generic core imports a native SQL library" }
+          if ($sqliteDeps -notmatch "(?i)sqlite") { throw "SQLite Driver does not import SQLite" }
+          if ($sqliteDeps -match "(?i)libpq|postgres") { throw "SQLite Driver imports PostgreSQL native libraries" }
+          if ($postgresqlDeps -notmatch "(?i)libpq") { throw "PostgreSQL Driver does not import libpq" }
+          if ($postgresqlDeps -match "(?i)sqlite") { throw "PostgreSQL Driver imports SQLite native libraries" }
+          if ($sqliteExports -notmatch "(?m)salts_plugin_query") { throw "SQLite Driver does not export salts_plugin_query" }
+          if ($postgresqlExports -notmatch "(?m)salts_plugin_query") { throw "PostgreSQL Driver does not export salts_plugin_query" }
+          if (($coreExports + $sqliteExports + $postgresqlExports) -match "orm_driver_get_api_v1") {
+            throw "legacy TurboDB bootstrap symbol remains in installed binaries"
+          }
+      - name: Verify exact tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git diff --exit-code
+
+      - name: Keep SQL Plugin matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-plugin-matrix-${{ matrix.os }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: warn
+ "$evidence/sqlite-module-exports.txt"
+          grep -Eq '[[:space:]]salts_plugin_query
+      - name: Build SQL runtime Driver matrix on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $build = Join-Path $env:RUNNER_TEMP "sql-driver-build"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "evidence/sql-matrix-windows"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $args = @(
+            "-S", $env:GITHUB_WORKSPACE,
+            "-B", $build,
+            "-G", "Visual Studio 17 2022",
+            "-A", "x64",
+            "-DCMAKE_TOOLCHAIN_FILE=$env:QIGAO_VCPKG_TOOLCHAIN_FILE",
+            "-DVCPKG_MANIFEST_INSTALL=OFF",
+            "-DVCPKG_APPLOCAL_DEPS=OFF",
+            "-DVCPKG_INSTALLED_DIR=$env:TURBODB_REGISTRY_INSTALL_ROOT",
+            "-DVCPKG_TARGET_TRIPLET=x64-windows",
+            "-DORM_WITH_SQLITE=ON",
+            "-DORM_WITH_PGSQL=ON",
+            "-DORM_WITH_REDIS=OFF",
+            "-DTURBODB_BUILD_REDIS=OFF",
+            "-DORM_WITH_MONGODB=OFF",
+            "-DORM_BUILD_TESTS=ON",
+            "-DTURBODB_DBTOOLS_WITH_SQLITE=OFF",
+            "-DTURBODB_DBTOOLS_WITH_PGSQL=OFF"
+          )
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix configure failed" }
+          & cmake --build $build --config Release --target orm_sqlite_driver orm_postgresql_driver orm_sqlite_plugin_test orm_postgresql_plugin_test orm_sql_plugin_matrix_test --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix build failed" }
+          & ctest --test-dir $build -C Release -R "^(orm_sqlite_plugin|orm_postgresql_plugin|orm_sql_plugin_matrix_(sqlite|postgresql|both))$" --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "SQL Driver matrix contract failed" }
+
+          $bin = Join-Path $build "bin/Release"
+          $core = Join-Path $bin "turbo_orm.dll"
+          $app = Join-Path $bin "orm_sql_plugin_matrix_test.exe"
+          $sqlitePlugin = Join-Path $bin "turbodb_driver_sqlite.dll"
+          $postgresqlPlugin = Join-Path $bin "turbodb_driver_postgresql.dll"
+          $vcpkgBin = Join-Path $env:TURBODB_REGISTRY_INSTALL_ROOT "x64-windows/bin"
+          $env:PATH = "$bin;$vcpkgBin;$env:PATH"
+          $baselineCore = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+          $baselineApp = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+          "core=$baselineCore`napp=$baselineApp" | Set-Content -LiteralPath (Join-Path $evidence "baseline.sha256") -Encoding ascii
+          foreach ($scenario in @("sqlite", "postgresql", "both")) {
+            & $app $scenario $sqlitePlugin $postgresqlPlugin
+            if ($LASTEXITCODE -ne 0) { throw "SQL Plugin matrix scenario failed: $scenario" }
+            $coreHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+            $appHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+            "core=$coreHash`napp=$appHash" | Set-Content -LiteralPath (Join-Path $evidence "$scenario.sha256") -Encoding ascii
+            if ($coreHash -ne $baselineCore -or $appHash -ne $baselineApp) {
+              throw "core/application hash changed for scenario: $scenario"
+            }
+          }
+      - name: Verify exact tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git diff --exit-code
+
+      - name: Keep SQL Plugin matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-plugin-matrix-${{ matrix.os }}-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: warn
+ "$evidence/postgresql-module-exports.txt"
+          if grep -R -n 'orm_driver_get_api_v1'               "$evidence/core-exports.txt"               "$evidence/sqlite-module-exports.txt"               "$evidence/postgresql-module-exports.txt"; then
+            echo 'legacy TurboDB bootstrap symbol remains in installed binaries' >&2
             exit 1
           fi
 
