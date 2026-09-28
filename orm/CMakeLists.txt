@@ -38,6 +38,9 @@ endif()
 if(NOT DEFINED ORM_BUILD_MONGODB_DRIVER_DEFAULT)
   set(ORM_BUILD_MONGODB_DRIVER_DEFAULT OFF)
 endif()
+if(NOT DEFINED ORM_BUILD_MYSQL_DRIVER_DEFAULT)
+  set(ORM_BUILD_MYSQL_DRIVER_DEFAULT OFF)
+endif()
 option(ORM_BUILD_SQLITE_DRIVER
        "Build the independent SQLite TurboDb.Driver module"
        ${ORM_BUILD_SQLITE_DRIVER_DEFAULT})
@@ -53,6 +56,9 @@ option(ORM_BUILD_REDIS_DRIVER
 option(ORM_BUILD_MONGODB_DRIVER
        "Build the independent MongoDB TurboDb.Driver module"
        ${ORM_BUILD_MONGODB_DRIVER_DEFAULT})
+option(ORM_BUILD_MYSQL_DRIVER
+       "Build the independent MySQL TurboDb.Driver module"
+       ${ORM_BUILD_MYSQL_DRIVER_DEFAULT})
 if(NOT DEFINED ORM_BUILD_TIDESDB_DRIVER_DEFAULT)
   if(TARGET TidesDB::tidesdb)
     set(ORM_BUILD_TIDESDB_DRIVER_DEFAULT ON)
@@ -84,6 +90,10 @@ endif()
 if(ORM_MYSQL_LIVE_TESTS)
   if(NOT ORM_BUILD_TESTS)
     message(FATAL_ERROR "ORM_MYSQL_LIVE_TESTS requires ORM_BUILD_TESTS=ON")
+  endif()
+  if(NOT ORM_BUILD_MYSQL_DRIVER)
+    message(FATAL_ERROR
+            "ORM_MYSQL_LIVE_TESTS requires ORM_BUILD_MYSQL_DRIVER=ON")
   endif()
   foreach(ORM_MYSQL_REQUIRED_ENV IN ITEMS
           ORM_MYSQL_HOST ORM_MYSQL_PORT ORM_MYSQL_USER ORM_MYSQL_PASSWORD
@@ -163,10 +173,10 @@ if(NOT TARGET Salts::DataBind)
           "The selected SaltsUtils 4.1.0 installation must export Salts::DataBind")
 endif()
 
-if(ORM_MYSQL_LIVE_TESTS)
+if(ORM_BUILD_MYSQL_DRIVER OR ORM_MYSQL_LIVE_TESTS)
   if(NOT TARGET Salts::CNet)
     message(FATAL_ERROR
-            "The selected Salts 1.8.0 installation must export Salts::CNet for MySQL M2")
+            "The selected Salts 1.8.0 installation must export Salts::CNet for the MySQL Driver")
   endif()
   find_package(OpenSSL REQUIRED)
 endif()
@@ -214,6 +224,9 @@ set(ORM_FLOW_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/flow)
 set(ORM_SQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/sql)
 set(ORM_DRIVER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/driver)
 set(ORM_RUNTIME_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime)
+set(ORM_MYSQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql)
+set(ORM_MYSQL_WIRE_SOURCE_DIR ${ORM_MYSQL_SOURCE_DIR}/wire)
+set(ORM_MYSQL_AUTH_SOURCE_DIR ${ORM_MYSQL_SOURCE_DIR}/auth)
 set(ORM_ABI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/abi)
 set(ORM_TEST_SUPPORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
 
@@ -253,6 +266,7 @@ target_link_libraries(
 get_target_property(ORM_CORE_LINK_CONTRACT turbo_orm LINK_LIBRARIES)
 foreach(ORM_FORBIDDEN_CORE_LINK IN ITEMS SQLite::SQLite3
                                          PostgreSQL::PostgreSQL
+                                         Salts::CNet
                                          TidesDB::tidesdb
                                          TurboDB::Redis
                                          ${ORM_MONGODB_MONGOC_TARGET}
@@ -582,6 +596,69 @@ if(ORM_BUILD_POSTGRESQL_DRIVER)
   endif()
 endif()
 
+if(ORM_BUILD_MYSQL_DRIVER)
+  add_library(orm_mysql_driver MODULE
+    src/dbs/mysql/plugin.c
+    src/driver/orm_driver_backend_bridge.c
+    src/dbs/mysql/backend.c
+    src/dbs/mysql/parameters.c
+    src/dbs/mysql/session.c
+    src/dbs/mysql/transaction_control.c
+    src/dbs/mysql/cursor.c
+    src/dbs/mysql/cursor_row.c
+    src/dbs/mysql/row_reader.c
+    src/dbs/mysql/wire/codec.c
+    src/dbs/mysql/wire/packet.c
+    src/dbs/mysql/wire/query.c
+    src/dbs/mysql/wire/result.c
+    src/dbs/mysql/wire/handshake.c
+    src/dbs/mysql/wire/statement.c
+    src/dbs/mysql/wire/row.c
+    src/dbs/mysql/auth/auth.c)
+  target_compile_features(orm_mysql_driver PRIVATE c_std_11)
+  target_compile_definitions(
+    orm_mysql_driver PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
+  target_include_directories(
+    orm_mysql_driver PRIVATE
+      ${ORM_INCLUDE_DIR}
+      ${ORM_ABI_SOURCE_DIR}
+      ${ORM_FLOW_SOURCE_DIR}
+      ${ORM_DRIVER_SOURCE_DIR}
+      ${ORM_MYSQL_SOURCE_DIR}
+      ${ORM_MYSQL_WIRE_SOURCE_DIR}
+      ${ORM_MYSQL_AUTH_SOURCE_DIR})
+  target_link_libraries(
+    orm_mysql_driver PRIVATE
+      turbo_orm
+      Salts::PluginABI
+      Salts::Core
+      Salts::CSerde
+      Salts::CFlow
+      Salts::CSTL
+      Salts::CNet
+      OpenSSL::Crypto)
+  set_target_properties(
+    orm_mysql_driver PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "turbodb_driver_mysql"
+      C_STANDARD_REQUIRED ON
+      C_VISIBILITY_PRESET hidden
+      WINDOWS_EXPORT_ALL_SYMBOLS OFF
+      FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(orm_mysql_driver PRIVATE
+      "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
+  endif()
+  get_target_property(ORM_MYSQL_DRIVER_LINK_CONTRACT
+                      orm_mysql_driver LINK_LIBRARIES)
+  list(FIND ORM_MYSQL_DRIVER_LINK_CONTRACT "Salts::CNet"
+       ORM_MYSQL_DRIVER_CNET_LINK_INDEX)
+  if(ORM_MYSQL_DRIVER_CNET_LINK_INDEX EQUAL -1)
+    message(FATAL_ERROR
+            "orm_mysql_driver must directly link Salts::CNet")
+  endif()
+endif()
+
 set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::DataBind)
 
 # Runtime dependency scanning is independent from the consumer CMake contract.
@@ -738,6 +815,9 @@ if(TARGET orm_redis_driver)
 endif()
 if(TARGET orm_mongodb_driver)
   orm_enable_strict_warnings(orm_mongodb_driver)
+endif()
+if(TARGET orm_mysql_driver)
+  orm_enable_strict_warnings(orm_mysql_driver)
 endif()
 
 orm_enable_strict_warnings(turbo_orm)
@@ -939,6 +1019,52 @@ set_tests_properties(orm_postgresql_plugin PROPERTIES
   ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
 endif()
 
+if(ORM_BUILD_MYSQL_DRIVER)
+add_executable(orm_mysql_plugin_test
+  tests/driver/orm_mysql_plugin_test.c)
+target_compile_features(orm_mysql_plugin_test PRIVATE c_std_11)
+target_compile_definitions(orm_mysql_plugin_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mysql_plugin_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mysql_plugin_test PRIVATE
+  turbo_orm Salts::TinyTest)
+add_dependencies(orm_mysql_plugin_test orm_mysql_driver)
+set_target_properties(orm_mysql_plugin_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_plugin_test)
+if(MSVC)
+  target_compile_options(orm_mysql_plugin_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_plugin_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_plugin COMMAND orm_mysql_plugin_test)
+set_tests_properties(orm_mysql_plugin PROPERTIES
+  ENVIRONMENT "ORM_MYSQL_PLUGIN=$<TARGET_FILE:orm_mysql_driver>")
+endif()
+
+if(ORM_BUILD_MYSQL_DRIVER)
+add_executable(orm_mysql_driver_live_test
+  tests/integration/mysql_driver_live_test.c)
+target_compile_features(orm_mysql_driver_live_test PRIVATE c_std_11)
+target_compile_definitions(orm_mysql_driver_live_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mysql_driver_live_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mysql_driver_live_test PRIVATE
+  turbo_orm Salts::CFlow)
+add_dependencies(orm_mysql_driver_live_test orm_mysql_driver)
+set_target_properties(orm_mysql_driver_live_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_driver_live_test)
+if(MSVC)
+  target_compile_options(orm_mysql_driver_live_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_driver_live_test PRIVATE -Werror)
+endif()
+if(ORM_MYSQL_LIVE_TESTS)
+  add_test(NAME orm_mysql_driver_live COMMAND orm_mysql_driver_live_test)
+  set_tests_properties(orm_mysql_driver_live PROPERTIES ENVIRONMENT
+    "ORM_MYSQL_PLUGIN=$<TARGET_FILE:orm_mysql_driver>;ORM_MYSQL_HOST=$ENV{ORM_MYSQL_HOST};ORM_MYSQL_PORT=$ENV{ORM_MYSQL_PORT};ORM_MYSQL_USER=$ENV{ORM_MYSQL_USER};ORM_MYSQL_PASSWORD=$ENV{ORM_MYSQL_PASSWORD};ORM_MYSQL_DATABASE=$ENV{ORM_MYSQL_DATABASE};ORM_MYSQL_CA_FILE=$ENV{ORM_MYSQL_CA_FILE};ORM_MYSQL_SERVER_NAME=$ENV{ORM_MYSQL_SERVER_NAME}")
+endif()
+endif()
+
 if(ORM_BUILD_SQLITE_DRIVER AND ORM_BUILD_POSTGRESQL_DRIVER)
   add_executable(orm_sql_plugin_matrix_test
     tests/driver/orm_sql_plugin_matrix.c)
@@ -1105,9 +1231,7 @@ else()
 endif()
 add_test(NAME orm_driver_plan_view COMMAND orm_driver_plan_view_test)
 
-# MySQL issue #33 M1 is protocol-only. It intentionally does not build or
-# publish a TurboDb.Driver module and therefore advertises no CRUD capability.
-set(ORM_MYSQL_WIRE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql/wire)
+# MySQL issue #33 focused protocol and Driver qualification.
 add_executable(orm_mysql_wire_test
   tests/driver/orm_mysql_wire_test.c
   src/dbs/mysql/wire/codec.c
@@ -1282,9 +1406,6 @@ endif()
 add_test(NAME orm_mysql_cursor COMMAND orm_mysql_cursor_test)
 
 if(ORM_MYSQL_LIVE_TESTS)
-  set(ORM_MYSQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql)
-  set(ORM_MYSQL_AUTH_SOURCE_DIR ${ORM_MYSQL_SOURCE_DIR}/auth)
-
   add_executable(orm_mysql_handshake_test
     tests/driver/orm_mysql_handshake_test.c
     src/dbs/mysql/wire/codec.c
@@ -1990,6 +2111,36 @@ if(TARGET orm_postgresql_driver)
     TARGETS orm_postgresql_driver
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+endif()
+if(TARGET orm_mysql_driver)
+  set(ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  orm_collect_runtime_search_directories(
+    Salts::CNet ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  orm_collect_runtime_search_directories(
+    OpenSSL::Crypto ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  list(REMOVE_DUPLICATES ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  install(
+    TARGETS orm_mysql_driver
+    RUNTIME_DEPENDENCY_SET OrmMysqlDriverRuntimeDependencies
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+  if(WIN32)
+    install(
+      RUNTIME_DEPENDENCY_SET OrmMysqlDriverRuntimeDependencies
+      DIRECTORIES ${ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES}
+      PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                          "clang_rt.asan_dynamic-.*"
+                          "turbo_orm\\.dll" "salts_.*\\.dll"
+      POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers)
+  else()
+    install(
+      RUNTIME_DEPENDENCY_SET OrmMysqlDriverRuntimeDependencies
+      DIRECTORIES ${ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES}
+      PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libsalts_.*"
+      POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+  endif()
 endif()
 
 cmake_install_headers(
