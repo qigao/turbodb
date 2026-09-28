@@ -236,7 +236,9 @@ static cflow_step orm_row_publisher_resume_admitted(
       char message[ORM_C_ERROR_MESSAGE_CAPACITY];
       (void)snprintf(
           message, sizeof(message),
-          "row binding failed: databind=%d field=%s detail=%s",
+          bind_status == DATA_BIND_ERR_VALIDATION
+              ? "row validation failed: databind=%d field=%s detail=%s"
+              : "row binding failed: databind=%d field=%s detail=%s",
           (int)bind_status,
           diagnostic.schema_field[0] != '\0' ? diagnostic.schema_field : "-",
           diagnostic.message[0] != '\0' ? diagnostic.message : "-");
