@@ -30,6 +30,7 @@ struct orm_mysql_cursor_state {
   bool *is_null;
   bool *errors;
   unsigned char **buffers;
+  unsigned char **expanded;
   size_t *capacities;
   size_t column_count;
   uint64_t max_result_rows;
@@ -129,7 +130,9 @@ static cserde_status orm_mysql_reader_next(void *context, cserde_token *out) {
         out->kind = CSERDE_NULL;
       } else if (orm_mysql_emit_value(
                      &state->fields[reader->column],
-                     state->buffers[reader->column],
+                     state->expanded[reader->column] != NULL
+                         ? state->expanded[reader->column]
+                         : state->buffers[reader->column],
                      (size_t)state->lengths[reader->column],
                      out) != CSERDE_OK) {
         return CSERDE_SOURCE_ERROR;
@@ -175,12 +178,12 @@ static orm_status_t orm_mysql_expand_column(
   const size_t length = (size_t)state->lengths[column];
   if (length <= state->capacities[column])
     return ORM_STATUS_OK;
-  next = (unsigned char *)realloc(
-      state->buffers[column], length != 0u ? length : 1u);
+
+  next = (unsigned char *)malloc(length != 0u ? length : 1u);
   if (next == NULL)
     return ORM_STATUS_OUT_OF_MEMORY;
-  state->buffers[column] = next;
-  state->capacities[column] = length;
+  free(state->expanded[column]);
+  state->expanded[column] = next;
 
   fetch = state->binds[column];
   fetch.buffer = next;
@@ -218,6 +221,10 @@ static orm_row_cursor_step orm_mysql_cursor_next(
     return step;
   }
 
+  for (column = 0u; column < state->column_count; ++column) {
+    free(state->expanded[column]);
+    state->expanded[column] = NULL;
+  }
   memset(state->is_null, 0, state->column_count * sizeof(*state->is_null));
   memset(state->errors, 0, state->column_count * sizeof(*state->errors));
   fetch_status = mysql_stmt_fetch(state->statement);
@@ -294,9 +301,12 @@ static void orm_mysql_cursor_destroy(void *context) {
     (void)mysql_stmt_close(state->statement);
   if (state->metadata != NULL)
     mysql_free_result(state->metadata);
-  for (column = 0u; column < state->column_count; ++column)
+  for (column = 0u; column < state->column_count; ++column) {
     free(state->buffers[column]);
+    free(state->expanded[column]);
+  }
   free(state->buffers);
+  free(state->expanded);
   free(state->capacities);
   free(state->binds);
   free(state->lengths);
@@ -386,11 +396,14 @@ orm_status_t orm_mysql_cursor_from_statement(
         state->column_count, sizeof(*state->errors));
     state->buffers = (unsigned char **)calloc(
         state->column_count, sizeof(*state->buffers));
+    state->expanded = (unsigned char **)calloc(
+        state->column_count, sizeof(*state->expanded));
     state->capacities = (size_t *)calloc(
         state->column_count, sizeof(*state->capacities));
     if (state->binds == NULL || state->lengths == NULL ||
         state->is_null == NULL || state->errors == NULL ||
-        state->buffers == NULL || state->capacities == NULL) {
+        state->buffers == NULL || state->expanded == NULL ||
+        state->capacities == NULL) {
       orm_mysql_cursor_destroy(state);
       orm_mysql_set_error(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate MySQL result bindings");
