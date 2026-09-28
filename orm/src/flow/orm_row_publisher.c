@@ -5,6 +5,7 @@
 #endif
 
 #include <data_bind_native.h>
+#include <data_bind_message_plan.h>
 
 #include <stdio.h>
 #include <stdlib.h>
