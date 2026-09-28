@@ -24,6 +24,7 @@
 #define MYSQL_SESSION_MAX_PACKET_SIZE UINT32_C(0x01000000)
 #define MYSQL_COM_PING UINT8_C(0x0e)
 #define MYSQL_SESSION_PROBE_COLUMN_COUNT 4u
+#define MYSQL_SERVER_ER_CLIENT_INTERACTION_TIMEOUT UINT16_C(4031)
 
 static const uint8_t MYSQL_SESSION_PROBE_SQL[] =
     "SELECT s,u,txt,decv FROM m3_probe WHERE s=?";
@@ -141,6 +142,10 @@ typedef struct mysql_session_t {
   uint8_t pending_sequence;
   uint8_t control[MYSQL_SESSION_CONTROL_CAPACITY];
   size_t control_used;
+  bool unsolicited_error_pending;
+  uint32_t unsolicited_error_payload_size;
+  size_t unsolicited_error_used;
+  uint8_t unsolicited_error[MYSQL_SESSION_CONTROL_CAPACITY];
   uint8_t message_last_sequence;
   char auth_plugin[MYSQL_WIRE_AUTH_PLUGIN_NAME_CAPACITY];
   uint8_t auth_nonce[MYSQL_AUTH_NONCE_BYTES];
@@ -1386,6 +1391,129 @@ static bool mysql_session_pause_receive(mysql_session_phase_t phase) {
          phase == MYSQL_PHASE_CURSOR_ROW_READY;
 }
 
+static void mysql_session_fail_packet_framing(
+    mysql_session_t *session) {
+  if (session == NULL)
+    return;
+  session->unsolicited_error_pending = false;
+  session->unsolicited_error_payload_size = 0u;
+  session->unsolicited_error_used = 0u;
+  mysql_session_set_error(
+      session, MYSQL_SESSION_PROTOCOL,
+      "packet", "invalid MySQL packet framing");
+}
+
+static void mysql_session_finish_unsolicited_error(
+    mysql_session_t *session) {
+  mysql_wire_err_packet_t server_error;
+
+  if (session == NULL || !session->unsolicited_error_pending ||
+      session->unsolicited_error_used !=
+          (size_t)session->unsolicited_error_payload_size) {
+    mysql_session_fail_packet_framing(session);
+    return;
+  }
+
+  if (mysql_wire_decode_err_packet(
+          session->unsolicited_error,
+          session->unsolicited_error_used,
+          session->client_capabilities,
+          &server_error) != MYSQL_WIRE_STATUS_OK ||
+      server_error.error_code !=
+          MYSQL_SERVER_ER_CLIENT_INTERACTION_TIMEOUT) {
+    mysql_session_fail_packet_framing(session);
+    return;
+  }
+
+  session->unsolicited_error_pending = false;
+  session->unsolicited_error_payload_size = 0u;
+  session->unsolicited_error_used = 0u;
+  if (session->error != NULL) {
+    session->error->server_error = server_error.error_code;
+    if (server_error.has_sql_state)
+      memcpy(session->error->sql_state, server_error.sql_state,
+             sizeof(server_error.sql_state));
+    (void)snprintf(
+        session->error->message, sizeof(session->error->message),
+        "%.*s",
+        (int)(server_error.message.length <
+                      sizeof(session->error->message) - 1u
+                  ? server_error.message.length
+                  : sizeof(session->error->message) - 1u),
+        (const char *)server_error.message.data);
+  }
+  mysql_session_set_transport_error(
+      session, MYSQL_SESSION_IO,
+      "server-timeout",
+      session->error != NULL &&
+              session->error->message[0] != '\0'
+          ? session->error->message
+          : "MySQL server closed the idle connection");
+}
+
+static bool mysql_session_feed_unsolicited_error(
+    mysql_session_t *session,
+    const uint8_t *data, size_t size) {
+  size_t remaining;
+  size_t copy;
+
+  if (session == NULL || !session->unsolicited_error_pending ||
+      (data == NULL && size != 0u))
+    return false;
+  if (session->unsolicited_error_used >
+          (size_t)session->unsolicited_error_payload_size) {
+    mysql_session_fail_packet_framing(session);
+    return true;
+  }
+
+  remaining =
+      (size_t)session->unsolicited_error_payload_size -
+      session->unsolicited_error_used;
+  copy = size < remaining ? size : remaining;
+  if (copy != 0u) {
+    memcpy(session->unsolicited_error +
+               session->unsolicited_error_used,
+           data, copy);
+    session->unsolicited_error_used += copy;
+  }
+
+  if (size > copy) {
+    mysql_session_fail_packet_framing(session);
+    return true;
+  }
+  if (session->unsolicited_error_used ==
+      (size_t)session->unsolicited_error_payload_size)
+    mysql_session_finish_unsolicited_error(session);
+  return true;
+}
+
+static bool mysql_session_begin_unsolicited_error(
+    mysql_session_t *session,
+    const uint8_t *data, size_t size) {
+  uint32_t payload_size;
+
+  if (session == NULL ||
+      session->stream.header_used !=
+          MYSQL_WIRE_PACKET_HEADER_SIZE ||
+      session->stream.header[3] != UINT8_C(0))
+    return false;
+
+  payload_size =
+      (uint32_t)session->stream.header[0] |
+      ((uint32_t)session->stream.header[1] << 8u) |
+      ((uint32_t)session->stream.header[2] << 16u);
+  if (payload_size < 3u ||
+      payload_size > MYSQL_SESSION_CONTROL_CAPACITY)
+    return false;
+
+  session->unsolicited_error_pending = true;
+  session->unsolicited_error_payload_size = payload_size;
+  session->unsolicited_error_used = 0u;
+  (void)mysql_session_feed_unsolicited_error(
+      session, data, size);
+  return true;
+}
+
 static void mysql_session_on_receive(
     void *user, cnet_connection connection, const cnet_receive_view *view) {
   mysql_session_t *session = (mysql_session_t *)user;
@@ -1403,6 +1531,16 @@ static void mysql_session_on_receive(
   }
 
   input = (const uint8_t *)view->data;
+  if (session->unsolicited_error_pending) {
+    (void)mysql_session_feed_unsolicited_error(
+        session, input, view->size);
+    if (session->phase != MYSQL_PHASE_FAILED &&
+        session->unsolicited_error_pending &&
+        mysql_session_waits_for_receive(session->phase))
+      (void)mysql_session_request_receive(session);
+    return;
+  }
+
   while (offset < view->size && session->phase != MYSQL_PHASE_FAILED) {
     mysql_wire_packet_event_t event;
     size_t consumed = 0u;
@@ -1413,8 +1551,17 @@ static void mysql_session_on_receive(
 
     if (status != MYSQL_WIRE_STATUS_OK &&
         status != MYSQL_WIRE_STATUS_NEED_MORE) {
-      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
-                              "packet", "invalid MySQL packet framing");
+      if (status == MYSQL_WIRE_STATUS_SEQUENCE &&
+          mysql_session_begin_unsolicited_error(
+              session, input + offset,
+              view->size - offset)) {
+        if (session->phase != MYSQL_PHASE_FAILED &&
+            session->unsolicited_error_pending &&
+            mysql_session_waits_for_receive(session->phase))
+          (void)mysql_session_request_receive(session);
+        return;
+      }
+      mysql_session_fail_packet_framing(session);
       return;
     }
 
