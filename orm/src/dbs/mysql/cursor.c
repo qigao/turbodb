@@ -108,7 +108,7 @@ static orm_row_cursor_step mysql_cursor_next(
   }
 
   if (state->result_rows >= state->config.max_result_rows ||
-      source_step.row_size > (size_t)state->config.max_result_bytes ||
+      (uint64_t)source_step.row_size > state->config.max_result_bytes ||
       state->result_bytes > state->config.max_result_bytes ||
       (uint64_t)source_step.row_size >
           state->config.max_result_bytes - state->result_bytes) {
