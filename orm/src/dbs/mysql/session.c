@@ -1,9 +1,11 @@
 #include "session.h"
 #include "session_cursor.h"
+#include "session_transaction.h"
 
 #include "auth/auth.h"
 #include "wire/handshake.h"
 #include "wire/packet.h"
+#include "wire/query.h"
 #include "wire/result.h"
 #include "wire/row.h"
 #include "wire/statement.h"
@@ -25,11 +27,24 @@
 static const uint8_t MYSQL_SESSION_PROBE_SQL[] =
     "SELECT s,u,txt,decv FROM m3_probe WHERE s=?";
 
+static const uint8_t MYSQL_TXN_READ_UNCOMMITTED[] =
+    "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED";
+static const uint8_t MYSQL_TXN_READ_COMMITTED[] =
+    "SET TRANSACTION ISOLATION LEVEL READ COMMITTED";
+static const uint8_t MYSQL_TXN_REPEATABLE_READ[] =
+    "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ";
+static const uint8_t MYSQL_TXN_SERIALIZABLE[] =
+    "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE";
+static const uint8_t MYSQL_TXN_BEGIN[] = "START TRANSACTION";
+static const uint8_t MYSQL_TXN_COMMIT[] = "COMMIT";
+static const uint8_t MYSQL_TXN_ROLLBACK[] = "ROLLBACK";
+
 typedef enum mysql_session_action_t {
   MYSQL_SESSION_ACTION_PING = 0,
   MYSQL_SESSION_ACTION_PREPARED_PROBE,
   MYSQL_SESSION_ACTION_PREPARED_CURSOR,
-  MYSQL_SESSION_ACTION_PREPARED_COMMAND
+  MYSQL_SESSION_ACTION_PREPARED_COMMAND,
+  MYSQL_SESSION_ACTION_TRANSACTION
 } mysql_session_action_t;
 
 typedef enum mysql_session_phase_t {
@@ -42,6 +57,9 @@ typedef enum mysql_session_phase_t {
   MYSQL_PHASE_WAIT_AUTH_SEND,
   MYSQL_PHASE_WAIT_PING_SEND,
   MYSQL_PHASE_WAIT_PING_REPLY,
+  MYSQL_PHASE_WAIT_CONTROL_SEND,
+  MYSQL_PHASE_WAIT_CONTROL_REPLY,
+  MYSQL_PHASE_TRANSACTION_READY,
   MYSQL_PHASE_WAIT_PREPARE_SEND,
   MYSQL_PHASE_WAIT_PREPARE_OK,
   MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF,
@@ -64,10 +82,20 @@ typedef enum mysql_session_send_kind_t {
   MYSQL_SEND_HANDSHAKE_RESPONSE,
   MYSQL_SEND_AUTH_RESPONSE,
   MYSQL_SEND_PING,
+  MYSQL_SEND_CONTROL,
   MYSQL_SEND_PREPARE,
   MYSQL_SEND_EXECUTE,
   MYSQL_SEND_CLOSE
 } mysql_session_send_kind_t;
+
+typedef enum mysql_transaction_step_t {
+  MYSQL_TRANSACTION_STEP_NONE = 0,
+  MYSQL_TRANSACTION_STEP_SET_ISOLATION,
+  MYSQL_TRANSACTION_STEP_BEGIN,
+  MYSQL_TRANSACTION_STEP_COMMAND,
+  MYSQL_TRANSACTION_STEP_COMMIT,
+  MYSQL_TRANSACTION_STEP_ROLLBACK
+} mysql_transaction_step_t;
 
 typedef struct mysql_session_t {
   const mysql_session_config_t *config;
@@ -79,6 +107,10 @@ typedef struct mysql_session_t {
   size_t prepared_sql_size;
   const mysql_stmt_value_t *prepared_values;
   size_t prepared_value_count;
+  mysql_transaction_step_t transaction_step;
+  const uint8_t *control_sql;
+  size_t control_sql_size;
+  bool transaction_active;
   mysql_session_cursor_limits_t cursor_limits;
   cnet_client client;
   cnet_connection connection;
@@ -114,6 +146,11 @@ typedef struct mysql_session_t {
   mysql_session_error_t owned_error;
 } mysql_session_t;
 
+struct mysql_transaction_session_t {
+  mysql_session_t session;
+  size_t max_command_bytes;
+};
+
 static void mysql_session_set_error(
     mysql_session_t *session, mysql_session_status_t status,
     const char *stage, const char *message) {
@@ -135,6 +172,7 @@ static bool mysql_session_waits_for_receive(mysql_session_phase_t phase) {
   return phase == MYSQL_PHASE_WAIT_GREETING ||
          phase == MYSQL_PHASE_WAIT_AUTH ||
          phase == MYSQL_PHASE_WAIT_PING_REPLY ||
+         phase == MYSQL_PHASE_WAIT_CONTROL_REPLY ||
          phase == MYSQL_PHASE_WAIT_PREPARE_OK ||
          phase == MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF ||
          phase == MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF ||
@@ -389,6 +427,86 @@ static void mysql_session_send_ping(mysql_session_t *session) {
       session, UINT8_C(0), &command, 1u, MYSQL_SEND_PING);
 }
 
+static mysql_session_status_t mysql_session_isolation_sql(
+    orm_isolation_t isolation,
+    const uint8_t **out_sql, size_t *out_size) {
+  if (out_sql == NULL || out_size == NULL)
+    return MYSQL_SESSION_INVALID;
+
+  switch (isolation) {
+    case ORM_ISOLATION_READ_UNCOMMITTED:
+      *out_sql = MYSQL_TXN_READ_UNCOMMITTED;
+      *out_size = sizeof(MYSQL_TXN_READ_UNCOMMITTED) - 1u;
+      return MYSQL_SESSION_OK;
+    case ORM_ISOLATION_READ_COMMITTED:
+      *out_sql = MYSQL_TXN_READ_COMMITTED;
+      *out_size = sizeof(MYSQL_TXN_READ_COMMITTED) - 1u;
+      return MYSQL_SESSION_OK;
+    case ORM_ISOLATION_REPEATABLE_READ:
+      *out_sql = MYSQL_TXN_REPEATABLE_READ;
+      *out_size = sizeof(MYSQL_TXN_REPEATABLE_READ) - 1u;
+      return MYSQL_SESSION_OK;
+    case ORM_ISOLATION_SERIALIZABLE:
+      *out_sql = MYSQL_TXN_SERIALIZABLE;
+      *out_size = sizeof(MYSQL_TXN_SERIALIZABLE) - 1u;
+      return MYSQL_SESSION_OK;
+    case ORM_ISOLATION_SNAPSHOT:
+    default:
+      *out_sql = NULL;
+      *out_size = 0u;
+      return MYSQL_SESSION_INVALID;
+  }
+}
+
+static void mysql_session_send_control(
+    mysql_session_t *session,
+    const uint8_t *sql, size_t sql_size) {
+  uint8_t stack_payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  uint8_t *payload = stack_payload;
+  const size_t capacity =
+      session->command_capacity != 0u
+          ? session->command_capacity
+          : MYSQL_SESSION_CONTROL_CAPACITY;
+  size_t payload_size = 0u;
+  mysql_wire_status_t status;
+
+  if (sql == NULL || sql_size == 0u || sql_size + 1u > capacity) {
+    mysql_session_set_error(session, MYSQL_SESSION_INVALID,
+                            "control",
+                            "invalid or oversized MySQL control statement");
+    return;
+  }
+  if (capacity > sizeof(stack_payload)) {
+    payload = (uint8_t *)malloc(capacity);
+    if (payload == NULL) {
+      mysql_session_set_error(session, MYSQL_SESSION_IO,
+                              "control",
+                              "allocate MySQL control command buffer");
+      return;
+    }
+  }
+
+  status = mysql_wire_build_query(
+      sql, sql_size, payload, capacity, &payload_size);
+  if (status != MYSQL_WIRE_STATUS_OK) {
+    if (payload != stack_payload)
+      free(payload);
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "control",
+                            "failed to encode COM_QUERY control statement");
+    return;
+  }
+
+  session->control_sql = sql;
+  session->control_sql_size = sql_size;
+  mysql_wire_packet_stream_reset(&session->stream, UINT8_C(1));
+  session->phase = MYSQL_PHASE_WAIT_CONTROL_SEND;
+  (void)mysql_session_send_packet(
+      session, UINT8_C(0), payload, payload_size, MYSQL_SEND_CONTROL);
+  if (payload != stack_payload)
+    free(payload);
+}
+
 static void mysql_session_send_prepare(mysql_session_t *session) {
   uint8_t stack_payload[MYSQL_SESSION_CONTROL_CAPACITY];
   uint8_t *payload = stack_payload;
@@ -408,7 +526,8 @@ static void mysql_session_send_prepare(mysql_session_t *session) {
     return;
   }
   if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR ||
-      session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
+      session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND ||
+      session->action == MYSQL_SESSION_ACTION_TRANSACTION) {
     sql = session->prepared_sql;
     sql_size = session->prepared_sql_size;
   }
@@ -460,7 +579,8 @@ static void mysql_session_send_execute(mysql_session_t *session) {
   mysql_wire_status_t wire_status;
 
   if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR ||
-      session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
+      session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND ||
+      session->action == MYSQL_SESSION_ACTION_TRANSACTION) {
     values = session->prepared_values;
     value_count = session->prepared_value_count;
   }
@@ -518,6 +638,12 @@ static void mysql_session_begin_action(mysql_session_t *session) {
       session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR ||
       session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
     mysql_session_send_prepare(session);
+    return;
+  }
+  if (session->action == MYSQL_SESSION_ACTION_TRANSACTION) {
+    session->transaction_step = MYSQL_TRANSACTION_STEP_SET_ISOLATION;
+    mysql_session_send_control(
+        session, session->control_sql, session->control_sql_size);
     return;
   }
   mysql_session_set_error(session, MYSQL_SESSION_INVALID,
@@ -681,7 +807,8 @@ static void mysql_session_handle_prepare_ok(
                               "prepared cursor metadata exceeds expected shape");
       return;
     }
-  } else if (session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
+  } else if (session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND ||
+             session->action == MYSQL_SESSION_ACTION_TRANSACTION) {
     if ((size_t)session->prepare_ok.parameter_count !=
             session->prepared_value_count ||
         session->prepare_ok.column_count != 0u) {
@@ -740,6 +867,45 @@ static void mysql_session_handle_prepare_column_def(
   if (session->metadata_index == session->prepare_ok.column_count) {
     session->metadata_index = 0u;
     mysql_session_send_execute(session);
+  }
+}
+
+static void mysql_session_handle_control_reply(
+    mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
+  mysql_wire_ok_packet_t ok;
+
+  if (mysql_session_decode_server_error(
+          session, payload, payload_size, "control-server"))
+    return;
+  if (mysql_wire_decode_ok_packet(
+          payload, payload_size, session->client_capabilities,
+          &ok) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "control-ok",
+                            "invalid MySQL control OK packet");
+    return;
+  }
+
+  switch (session->transaction_step) {
+    case MYSQL_TRANSACTION_STEP_SET_ISOLATION:
+      session->transaction_step = MYSQL_TRANSACTION_STEP_BEGIN;
+      mysql_session_send_control(
+          session, MYSQL_TXN_BEGIN, sizeof(MYSQL_TXN_BEGIN) - 1u);
+      break;
+    case MYSQL_TRANSACTION_STEP_BEGIN:
+      session->transaction_active = true;
+      session->phase = MYSQL_PHASE_TRANSACTION_READY;
+      break;
+    case MYSQL_TRANSACTION_STEP_COMMIT:
+    case MYSQL_TRANSACTION_STEP_ROLLBACK:
+      session->transaction_active = false;
+      session->phase = MYSQL_PHASE_DONE;
+      break;
+    default:
+      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                              "control-state",
+                              "unexpected transaction control reply");
+      break;
   }
 }
 
@@ -979,6 +1145,9 @@ static void mysql_session_handle_message(
     case MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF:
       mysql_session_handle_prepare_column_def(session, payload, payload_size);
       break;
+    case MYSQL_PHASE_WAIT_CONTROL_REPLY:
+      mysql_session_handle_control_reply(session, payload, payload_size);
+      break;
     case MYSQL_PHASE_WAIT_COMMAND_REPLY:
       mysql_session_handle_command_reply(session, payload, payload_size);
       break;
@@ -1135,19 +1304,28 @@ static void mysql_session_on_send(
       session->phase = MYSQL_PHASE_WAIT_PING_REPLY;
       (void)mysql_session_request_receive(session);
       break;
+    case MYSQL_SEND_CONTROL:
+      session->phase = MYSQL_PHASE_WAIT_CONTROL_REPLY;
+      (void)mysql_session_request_receive(session);
+      break;
     case MYSQL_SEND_PREPARE:
       session->phase = MYSQL_PHASE_WAIT_PREPARE_OK;
       (void)mysql_session_request_receive(session);
       break;
     case MYSQL_SEND_EXECUTE:
       session->phase =
-          session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND
+          session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND ||
+                  session->action == MYSQL_SESSION_ACTION_TRANSACTION
               ? MYSQL_PHASE_WAIT_COMMAND_REPLY
               : MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT;
       (void)mysql_session_request_receive(session);
       break;
     case MYSQL_SEND_CLOSE:
-      session->phase = MYSQL_PHASE_DONE;
+      if (session->action == MYSQL_SESSION_ACTION_TRANSACTION &&
+          session->transaction_step == MYSQL_TRANSACTION_STEP_COMMAND)
+        session->phase = MYSQL_PHASE_TRANSACTION_READY;
+      else
+        session->phase = MYSQL_PHASE_DONE;
       break;
     default:
       mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
@@ -1809,4 +1987,254 @@ mysql_session_status_t mysql_session_execute_prepared(
       &session, MYSQL_PHASE_DONE);
   mysql_session_shutdown(&session, session.phase == MYSQL_PHASE_DONE);
   return status;
+}
+
+
+static void mysql_transaction_copy_error(
+    mysql_transaction_session_t *transaction,
+    mysql_session_error_t *error) {
+  if (error == NULL)
+    return;
+  if (transaction == NULL) {
+    memset(error, 0, sizeof(*error));
+    error->status = MYSQL_SESSION_INVALID;
+    return;
+  }
+  *error = transaction->session.owned_error;
+}
+
+mysql_session_status_t mysql_transaction_session_begin(
+    const mysql_session_config_t *config,
+    orm_isolation_t isolation,
+    size_t max_command_bytes,
+    mysql_transaction_session_t **out_transaction,
+    mysql_session_error_t *error) {
+  mysql_transaction_session_t *transaction = NULL;
+  const uint8_t *isolation_sql = NULL;
+  size_t isolation_sql_size = 0u;
+  mysql_session_status_t status;
+
+  if (out_transaction != NULL)
+    *out_transaction = NULL;
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+
+  if (out_transaction == NULL ||
+      max_command_bytes == 0u ||
+      max_command_bytes > MYSQL_WIRE_PACKET_MAX_PAYLOAD ||
+      mysql_session_isolation_sql(
+          isolation, &isolation_sql, &isolation_sql_size) !=
+          MYSQL_SESSION_OK ||
+      isolation_sql_size + 1u > max_command_bytes) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "transaction-config");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     isolation == ORM_ISOLATION_SNAPSHOT
+                         ? "MySQL does not expose ORM snapshot isolation"
+                         : "invalid transaction request or command bound");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  transaction = (mysql_transaction_session_t *)calloc(
+      1u, sizeof(*transaction));
+  if (transaction == NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_IO;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "transaction-allocate");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "allocate MySQL transaction session");
+    }
+    return MYSQL_SESSION_IO;
+  }
+
+  transaction->max_command_bytes = max_command_bytes;
+  status = mysql_session_start(
+      &transaction->session, config,
+      MYSQL_SESSION_ACTION_TRANSACTION,
+      NULL, &transaction->session.owned_error,
+      MYSQL_SESSION_CONTROL_CAPACITY,
+      max_command_bytes);
+  if (status != MYSQL_SESSION_OK) {
+    mysql_transaction_copy_error(transaction, error);
+    free(transaction);
+    return status;
+  }
+
+  transaction->session.control_sql = isolation_sql;
+  transaction->session.control_sql_size = isolation_sql_size;
+  transaction->session.transaction_step =
+      MYSQL_TRANSACTION_STEP_SET_ISOLATION;
+
+  status = mysql_session_progress_until(
+      &transaction->session, MYSQL_PHASE_TRANSACTION_READY);
+  if (status != MYSQL_SESSION_OK ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY ||
+      !transaction->session.transaction_active)
+    goto fail;
+
+  transaction->session.config = NULL;
+  transaction->session.control_sql = NULL;
+  transaction->session.control_sql_size = 0u;
+  transaction->session.error = &transaction->session.owned_error;
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  *out_transaction = transaction;
+  return MYSQL_SESSION_OK;
+
+fail:
+  mysql_transaction_copy_error(transaction, error);
+  if (transaction != NULL) {
+    mysql_session_shutdown(&transaction->session, true);
+    free(transaction);
+  }
+  return status != MYSQL_SESSION_OK
+             ? status
+             : MYSQL_SESSION_PROTOCOL;
+}
+
+mysql_session_status_t mysql_transaction_session_execute_prepared(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *sql, size_t sql_size,
+    const mysql_stmt_value_t *parameters, size_t parameter_count,
+    mysql_session_command_result_t *out,
+    mysql_session_error_t *error) {
+  mysql_session_status_t status;
+
+  if (out != NULL)
+    memset(out, 0, sizeof(*out));
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+
+  if (transaction == NULL ||
+      !transaction->session.transaction_active ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY ||
+      sql == NULL || sql_size == 0u ||
+      sql_size + 1u > transaction->max_command_bytes ||
+      (parameters == NULL && parameter_count != 0u) ||
+      parameter_count > (size_t)UINT16_MAX ||
+      out == NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "transaction-command");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "invalid active MySQL transaction command");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  memset(&transaction->session.owned_error, 0,
+         sizeof(transaction->session.owned_error));
+  transaction->session.error = &transaction->session.owned_error;
+  transaction->session.transaction_step =
+      MYSQL_TRANSACTION_STEP_COMMAND;
+  transaction->session.prepared_sql = sql;
+  transaction->session.prepared_sql_size = sql_size;
+  transaction->session.prepared_values = parameters;
+  transaction->session.prepared_value_count = parameter_count;
+  transaction->session.command_result = out;
+
+  mysql_session_send_prepare(&transaction->session);
+  status = mysql_session_progress_until(
+      &transaction->session, MYSQL_PHASE_TRANSACTION_READY);
+
+  transaction->session.prepared_sql = NULL;
+  transaction->session.prepared_sql_size = 0u;
+  transaction->session.prepared_values = NULL;
+  transaction->session.prepared_value_count = 0u;
+  transaction->session.command_result = NULL;
+
+  if (status != MYSQL_SESSION_OK ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY) {
+    mysql_transaction_copy_error(transaction, error);
+    return status != MYSQL_SESSION_OK
+               ? status
+               : MYSQL_SESSION_PROTOCOL;
+  }
+
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  return MYSQL_SESSION_OK;
+}
+
+static mysql_session_status_t mysql_transaction_finish(
+    mysql_transaction_session_t *transaction,
+    mysql_transaction_step_t step,
+    const uint8_t *sql, size_t sql_size,
+    mysql_session_error_t *error) {
+  mysql_session_status_t status;
+
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  if (transaction == NULL ||
+      !transaction->session.transaction_active ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY ||
+      sql == NULL || sql_size == 0u) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "transaction-finish");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "MySQL transaction is not active");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  memset(&transaction->session.owned_error, 0,
+         sizeof(transaction->session.owned_error));
+  transaction->session.error = &transaction->session.owned_error;
+  transaction->session.transaction_step = step;
+  mysql_session_send_control(
+      &transaction->session, sql, sql_size);
+  status = mysql_session_progress_until(
+      &transaction->session, MYSQL_PHASE_DONE);
+  if (status != MYSQL_SESSION_OK ||
+      transaction->session.phase != MYSQL_PHASE_DONE) {
+    mysql_transaction_copy_error(transaction, error);
+    return status != MYSQL_SESSION_OK
+               ? status
+               : MYSQL_SESSION_PROTOCOL;
+  }
+
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  return MYSQL_SESSION_OK;
+}
+
+mysql_session_status_t mysql_transaction_session_commit(
+    mysql_transaction_session_t *transaction,
+    mysql_session_error_t *error) {
+  return mysql_transaction_finish(
+      transaction, MYSQL_TRANSACTION_STEP_COMMIT,
+      MYSQL_TXN_COMMIT, sizeof(MYSQL_TXN_COMMIT) - 1u, error);
+}
+
+mysql_session_status_t mysql_transaction_session_rollback(
+    mysql_transaction_session_t *transaction,
+    mysql_session_error_t *error) {
+  return mysql_transaction_finish(
+      transaction, MYSQL_TRANSACTION_STEP_ROLLBACK,
+      MYSQL_TXN_ROLLBACK, sizeof(MYSQL_TXN_ROLLBACK) - 1u, error);
+}
+
+void mysql_transaction_session_destroy(
+    mysql_transaction_session_t *transaction) {
+  if (transaction == NULL)
+    return;
+
+  if (transaction->session.transaction_active &&
+      transaction->session.phase == MYSQL_PHASE_TRANSACTION_READY) {
+    mysql_session_error_t ignored;
+    (void)mysql_transaction_session_rollback(
+        transaction, &ignored);
+  }
+
+  mysql_session_shutdown(
+      &transaction->session,
+      transaction->session.phase != MYSQL_PHASE_FAILED);
+  free(transaction);
 }

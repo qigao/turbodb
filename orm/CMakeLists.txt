@@ -1163,6 +1163,23 @@ else()
 endif()
 add_test(NAME orm_mysql_statement COMMAND orm_mysql_statement_test)
 
+add_executable(orm_mysql_query_test
+  tests/driver/orm_mysql_query_test.c
+  src/dbs/mysql/wire/query.c)
+target_compile_features(orm_mysql_query_test PRIVATE c_std_11)
+target_include_directories(orm_mysql_query_test PRIVATE
+  ${ORM_MYSQL_WIRE_SOURCE_DIR})
+target_link_libraries(orm_mysql_query_test PRIVATE Salts::TinyTest)
+set_target_properties(orm_mysql_query_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_query_test)
+if(MSVC)
+  target_compile_options(orm_mysql_query_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_query_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_query COMMAND orm_mysql_query_test)
+
 add_executable(orm_mysql_binary_row_test
   tests/driver/orm_mysql_binary_row_test.c
   src/dbs/mysql/wire/codec.c
@@ -1278,6 +1295,7 @@ if(ORM_MYSQL_LIVE_TESTS)
     src/dbs/mysql/row_reader.c
     src/dbs/mysql/wire/codec.c
     src/dbs/mysql/wire/packet.c
+    src/dbs/mysql/wire/query.c
     src/dbs/mysql/wire/result.c
     src/dbs/mysql/wire/handshake.c
     src/dbs/mysql/wire/statement.c

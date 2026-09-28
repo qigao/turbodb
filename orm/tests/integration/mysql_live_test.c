@@ -1,5 +1,6 @@
 #include "session.h"
 #include "session_cursor.h"
+#include "session_transaction.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -254,6 +255,132 @@ int main(void) {
               (unsigned int)command_result.warnings);
       return 1;
     }
+  }
+
+  {
+    static const uint8_t update_sql[] =
+        "UPDATE m4_txn SET txt=? WHERE s=?";
+    static const uint8_t verify_sql[] =
+        "SELECT txt FROM m4_txn WHERE s=?";
+    static const uint8_t changed[] =
+        {'c','h','a','n','g','e','d'};
+    const mysql_stmt_value_t update_parameters[2] = {
+      {.kind = MYSQL_STMT_VALUE_TEXT,
+       .data.bytes = {changed, sizeof(changed)}},
+      {.kind = MYSQL_STMT_VALUE_SINT64,
+       .data.sint64_value = INT64_C(-9)}
+    };
+    const mysql_stmt_value_t verify_parameter = {
+      .kind = MYSQL_STMT_VALUE_SINT64,
+      .data.sint64_value = INT64_C(-9)};
+    mysql_transaction_session_t *transaction = NULL;
+    mysql_session_command_result_t command_result;
+    const mysql_session_cursor_limits_t source_limits = {
+      .max_columns = 4u,
+      .max_metadata_bytes = 512u,
+      .max_row_bytes = 1024u,
+      .max_command_bytes = 4096u};
+    mysql_cursor_source_t source = {0};
+    const mysql_column_definition_t *columns = NULL;
+    size_t column_count = 0u;
+    mysql_cursor_config_t cursor_config =
+        MYSQL_CURSOR_CONFIG_INIT(2u, 4096u, 4u, 512u, 1024u);
+    orm_row_cursor cursor = {0};
+    orm_error_t cursor_error = {
+      .struct_size = (uint32_t)sizeof(orm_error_t),
+      .status = ORM_STATUS_OK,
+      .message = {0}};
+    cserde_reader reader = {0};
+    cserde_token token;
+    orm_row_cursor_step step;
+
+    status = mysql_transaction_session_begin(
+        &config, ORM_ISOLATION_READ_COMMITTED, 4096u,
+        &transaction, &error);
+    if (status != MYSQL_SESSION_OK) {
+      fprintf(stderr,
+              "mysql transaction begin failed status=%d stage=%s cnet=%d native=%d "
+              "server=%u sqlstate=%s message=%s\n",
+              (int)status, error.stage, error.cnet_status,
+              error.cnet_native_status, (unsigned int)error.server_error,
+              error.sql_state, error.message);
+      return 1;
+    }
+
+    status = mysql_transaction_session_execute_prepared(
+        transaction, update_sql, sizeof(update_sql) - 1u,
+        update_parameters, 2u, &command_result, &error);
+    if (status != MYSQL_SESSION_OK ||
+        command_result.affected_rows != UINT64_C(1)) {
+      fprintf(stderr,
+              "mysql transaction update failed status=%d affected=%llu "
+              "stage=%s message=%s\n",
+              (int)status,
+              (unsigned long long)command_result.affected_rows,
+              error.stage, error.message);
+      mysql_transaction_session_destroy(transaction);
+      return 1;
+    }
+
+    status = mysql_transaction_session_rollback(
+        transaction, &error);
+    if (status != MYSQL_SESSION_OK) {
+      fprintf(stderr,
+              "mysql transaction rollback failed status=%d stage=%s message=%s\n",
+              (int)status, error.stage, error.message);
+      mysql_transaction_session_destroy(transaction);
+      return 1;
+    }
+    mysql_transaction_session_destroy(transaction);
+
+    status = mysql_session_open_prepared_source(
+        &config, verify_sql, sizeof(verify_sql) - 1u,
+        &verify_parameter, 1u, &source_limits,
+        &source, &columns, &column_count, &error);
+    if (status != MYSQL_SESSION_OK || column_count != 1u) {
+      fprintf(stderr,
+              "mysql rollback verification source failed status=%d columns=%zu "
+              "stage=%s message=%s\n",
+              (int)status, column_count, error.stage, error.message);
+      if (source.ops != NULL && source.context != NULL)
+        source.ops->destroy(source.context);
+      return 1;
+    }
+
+    if (mysql_cursor_start(
+            &cursor, &source, columns, column_count,
+            &cursor_config, &cursor_error) != ORM_STATUS_OK) {
+      fprintf(stderr,
+              "mysql rollback verification cursor failed status=%d message=%s\n",
+              (int)cursor_error.status, cursor_error.message);
+      if (source.ops != NULL && source.context != NULL)
+        source.ops->destroy(source.context);
+      return 1;
+    }
+
+    step = cursor.ops->next(cursor.context, &reader);
+    if (step.kind != ORM_ROW_CURSOR_ROW ||
+        !expect_token_kind(&reader, CSERDE_MAP_BEGIN, &token) ||
+        !expect_token_text(&reader, "txt") ||
+        !expect_token_text(&reader, "seed") ||
+        !expect_token_kind(&reader, CSERDE_MAP_END, &token) ||
+        cserde_reader_next(&reader, &token) != CSERDE_DONE) {
+      fprintf(stderr, "MySQL rollback did not preserve transaction fixture\n");
+      cursor.ops->destroy(cursor.context);
+      return 1;
+    }
+
+    memset(&reader, 0, sizeof(reader));
+    step = cursor.ops->next(cursor.context, &reader);
+    if (step.kind != ORM_ROW_CURSOR_DONE) {
+      fprintf(stderr,
+              "mysql rollback verification expected DONE got=%d status=%d\n",
+              (int)step.kind, (int)step.status);
+      cursor.ops->destroy(cursor.context);
+      return 1;
+    }
+
+    cursor.ops->destroy(cursor.context);
   }
 
   return 0;
