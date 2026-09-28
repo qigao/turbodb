@@ -3,7 +3,6 @@
 
 #include <cserde/cserde.h>
 #include <cflow/cflow.h>
-#include <data_bind_message_plan.h>
 #include <orm.h>
 
 #include <stddef.h>
@@ -12,6 +11,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct DataBindMessagePlan DataBindMessagePlan;
 
 enum { ORM_ROW_CURSOR_OPS_ABI_VERSION = 3u };
 enum { ORM_ROW_PUBLISHER_CONFIG_ABI_VERSION = 2u };
