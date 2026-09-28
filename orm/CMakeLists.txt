@@ -21,14 +21,16 @@ option(ORM_WARNINGS_AS_ERRORS "Treat ORM compiler warnings as errors"
        ${ORM_BUILD_TESTS_DEFAULT})
 
 # Keep the installed Orm::C contract identical whether ORM is built on its own
-# or as a TurboDB subdirectory. The public target is always shared so backend
-# development packages never enter the consumer's CMake package boundary.
-if(NOT DEFINED ORM_WITH_SQLITE_DEFAULT)
-  set(ORM_WITH_SQLITE_DEFAULT ON)
+# or as a TurboDB subdirectory. Database Drivers are deployment/build products;
+# they are not capabilities of the generic core package.
+if(NOT DEFINED ORM_BUILD_SQLITE_DRIVER_DEFAULT)
+  set(ORM_BUILD_SQLITE_DRIVER_DEFAULT ON)
 endif()
-
-if(NOT DEFINED ORM_WITH_PGSQL_DEFAULT)
-  set(ORM_WITH_PGSQL_DEFAULT ON)
+if(NOT DEFINED ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT)
+  set(ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT ON)
+endif()
+if(NOT DEFINED ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT)
+  set(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT ON)
 endif()
 if(NOT DEFINED ORM_BUILD_REDIS_DRIVER_DEFAULT)
   set(ORM_BUILD_REDIS_DRIVER_DEFAULT OFF)
@@ -36,8 +38,15 @@ endif()
 if(NOT DEFINED ORM_BUILD_MONGODB_DRIVER_DEFAULT)
   set(ORM_BUILD_MONGODB_DRIVER_DEFAULT OFF)
 endif()
-option(ORM_WITH_SQLITE "Enable SQLite backend" ${ORM_WITH_SQLITE_DEFAULT})
-option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
+option(ORM_BUILD_SQLITE_DRIVER
+       "Build the independent SQLite TurboDb.Driver module"
+       ${ORM_BUILD_SQLITE_DRIVER_DEFAULT})
+option(ORM_BUILD_POSTGRESQL_DRIVER
+       "Build the independent PostgreSQL TurboDb.Driver module"
+       ${ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT})
+option(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT
+       "Build the legacy Orm::PostgreSQL direct connector compatibility component"
+       ${ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT})
 option(ORM_BUILD_REDIS_DRIVER
        "Build the independent Redis TurboDb.Driver module"
        ${ORM_BUILD_REDIS_DRIVER_DEFAULT})
@@ -72,8 +81,9 @@ if(ORM_POSTGRES_LIVE_TESTS)
   if(NOT ORM_BUILD_TESTS)
     message(FATAL_ERROR "ORM_POSTGRES_LIVE_TESTS requires ORM_BUILD_TESTS=ON")
   endif()
-  if(NOT ORM_WITH_PGSQL)
-    message(FATAL_ERROR "ORM_POSTGRES_LIVE_TESTS requires ORM_WITH_PGSQL=ON")
+  if(NOT ORM_BUILD_POSTGRESQL_DRIVER)
+    message(FATAL_ERROR
+            "ORM_POSTGRES_LIVE_TESTS requires ORM_BUILD_POSTGRESQL_DRIVER=ON")
   endif()
   if(NOT DEFINED ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO} OR
      "$ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO}" STREQUAL "")
@@ -82,7 +92,8 @@ if(ORM_POSTGRES_LIVE_TESTS)
   endif()
 endif()
 
-if((ORM_BUILD_TESTS OR ORM_WITH_PGSQL) AND
+if((ORM_BUILD_TESTS OR ORM_BUILD_POSTGRESQL_DRIVER OR
+    ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT) AND
    NOT CMAKE_CXX_COMPILER_LOADED)
   enable_language(CXX)
 endif()
@@ -117,12 +128,12 @@ if(NOT TARGET Salts::DataBind)
           "The selected SaltsUtils 4.1.0 installation must export Salts::DataBind")
 endif()
 
-# Find backend-specific dependencies based on enabled options
-if(ORM_WITH_SQLITE)
+# Driver/component-native dependencies remain outside the generic core.
+if(ORM_BUILD_SQLITE_DRIVER)
   find_package(SQLite3 REQUIRED)
 endif()
 
-if(ORM_WITH_PGSQL)
+if(ORM_BUILD_POSTGRESQL_DRIVER OR ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   find_package(PostgreSQL REQUIRED)
 endif()
 
