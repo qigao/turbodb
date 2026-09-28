@@ -9,8 +9,7 @@ extern "C" {
 
 typedef enum orm_sql_dialect {
   ORM_SQL_SQLITE = 0,
-  ORM_SQL_POSTGRES = 1,
-  ORM_SQL_MYSQL = 2
+  ORM_SQL_POSTGRES = 1
 } orm_sql_dialect;
 
 /* text owns the SQL bytes. parameters contains borrowed orm_owned_value*. */
