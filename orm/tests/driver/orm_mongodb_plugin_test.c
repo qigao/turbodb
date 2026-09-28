@@ -10,7 +10,7 @@ static const char *plugin_path(void) {
   return path != NULL ? path : "";
 }
 
-int main(void) {
+static int run_cycle(void) {
   orm_runtime_config_t runtime_config;
   orm_runtime_t *runtime = NULL;
   orm_driver_load_config_t load;
@@ -29,11 +29,6 @@ int main(void) {
       ORM_DRIVER_CAP_SERIALIZABLE;
   const uint64_t forbidden =
       ORM_DRIVER_CAP_SAVEPOINT | ORM_DRIVER_CAP_RAW_SQL;
-
-  if (plugin_path()[0] == '\0') {
-    fprintf(stderr, "ORM_MONGODB_PLUGIN is not configured\n");
-    return 1;
-  }
 
   orm_error_init(&error);
   orm_runtime_config_init(&runtime_config);
@@ -67,8 +62,8 @@ int main(void) {
     return 1;
   }
 
-  /* Invalid configuration is rejected before a network connection is useful;
-   * this qualifies Driver dispatch/error mapping without requiring a service. */
+  /* Reject before network I/O; this still enters the real Driver factory and
+   * verifies runtime -> Plugin -> backend error mapping. */
   orm_config(&config);
   option = (orm_option_t){orm_view("unknown_option"), orm_view("x")};
   config.driver = orm_view("mongodb");
@@ -92,4 +87,14 @@ int main(void) {
   }
   orm_runtime_release(runtime);
   return 0;
+}
+
+int main(void) {
+  if (plugin_path()[0] == '\0') {
+    fprintf(stderr, "ORM_MONGODB_PLUGIN is not configured\n");
+    return 1;
+  }
+  if (run_cycle() != 0)
+    return 1;
+  return run_cycle();
 }
