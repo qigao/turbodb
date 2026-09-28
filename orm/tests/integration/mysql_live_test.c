@@ -218,5 +218,43 @@ int main(void) {
     cursor.ops->destroy(cursor.context);
   }
 
+  {
+    static const uint8_t sql[] =
+        "UPDATE m3_probe SET txt=? WHERE s=?";
+    static const uint8_t changed[] = {'c','h','a','n','g','e','d'};
+    const mysql_stmt_value_t parameters[2] = {
+      {.kind = MYSQL_STMT_VALUE_TEXT,
+       .data.bytes = {changed, sizeof(changed)}},
+      {.kind = MYSQL_STMT_VALUE_SINT64,
+       .data.sint64_value = INT64_C(-42)}
+    };
+    mysql_session_command_result_t command_result;
+
+    status = mysql_session_execute_prepared(
+        &config, sql, sizeof(sql) - 1u,
+        parameters, 2u, 4096u,
+        &command_result, &error);
+    if (status != MYSQL_SESSION_OK) {
+      fprintf(stderr,
+              "mysql prepared command failed status=%d stage=%s cnet=%d native=%d "
+              "server=%u sqlstate=%s message=%s\n",
+              (int)status, error.stage, error.cnet_status,
+              error.cnet_native_status, (unsigned int)error.server_error,
+              error.sql_state, error.message);
+      return 1;
+    }
+    if (command_result.affected_rows != UINT64_C(1) ||
+        command_result.last_insert_id != UINT64_C(0)) {
+      fprintf(stderr,
+              "unexpected prepared command result affected=%llu insert_id=%llu "
+              "status_flags=%u warnings=%u\n",
+              (unsigned long long)command_result.affected_rows,
+              (unsigned long long)command_result.last_insert_id,
+              (unsigned int)command_result.status_flags,
+              (unsigned int)command_result.warnings);
+      return 1;
+    }
+  }
+
   return 0;
 }
