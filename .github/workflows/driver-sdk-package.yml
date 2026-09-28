@@ -206,6 +206,7 @@ jobs:
             -DORM_WITH_PGSQL=OFF \
             -DORM_BUILD_REDIS_DRIVER=OFF \
             -DORM_BUILD_MONGODB_DRIVER=OFF \
+            -DORM_BUILD_MYSQL_DRIVER=OFF \
             -DORM_BUILD_TIDESDB_DRIVER=OFF \
             -DORM_BUILD_TESTS=OFF \
             -DBUILD_TESTS=OFF \
@@ -349,7 +350,7 @@ jobs:
           set "BUILD=build\Msvc-Release"
           if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
           if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DORM_BUILD_MYSQL_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
           findstr /c:"z-applocal" "%BUILD%\build.ninja" >nul
           if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
