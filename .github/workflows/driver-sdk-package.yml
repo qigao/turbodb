@@ -262,6 +262,16 @@ jobs:
           if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
           cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
+          tides_module="$(find build -type f -name 'turbodb_driver_tidesdb.so' -print -quit)"
+          if [[ -n "$tides_module" ]]; then
+            readelf -d "$tides_module" > evidence/deps/tidesdb-driver-dynamic.txt
+            tides_native="$(find build -type f -name 'libtidesdb.so*' ! -type l -print -quit)"
+            if [[ -n "$tides_native" ]]; then
+              readelf -d "$tides_native" > evidence/deps/tidesdb-native-dynamic.txt
+            fi
+            ldd -r "$tides_module" > evidence/deps/tidesdb-driver-ldd.txt 2>&1 || true
+            python3 -c 'import ctypes,sys; ctypes.CDLL(sys.argv[1])' "$tides_module"               > evidence/deps/tidesdb-driver-dlopen.txt 2>&1 || true
+          fi
           ctest --preset "$profile" --output-on-failure 2>&1 | tee evidence/deps/root-ctest.log
 
       - name: Build and test TurboDB on Windows
@@ -280,6 +290,10 @@ jobs:
           if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
           cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
           if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-build.log & exit /b 1)
+          for /r "%BUILD%" %%F in (turbodb_driver_tidesdb.dll) do (
+            dumpbin /DEPENDENTS "%%F" > evidence\deps\tidesdb-driver-dependencies.txt 2>&1
+            dumpbin /EXPORTS "%%F" > evidence\deps\tidesdb-driver-exports.txt 2>&1
+          )
           ctest --preset "%PROFILE%" --output-on-failure > evidence\deps\root-ctest.log 2>&1
           if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-ctest.log & exit /b 1)
 
