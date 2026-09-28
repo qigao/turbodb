@@ -15,6 +15,13 @@ const cmeta_interface_desc *orm_driver_interface_peer_b(void);
 CMETA_INTERFACE(TurboDb_Driver_Wrong, ORM_DRIVER_WRONG_METHODS);
 
 static unsigned create_calls;
+static const orm_driver_storage_capabilities_v1 fixture_storage =
+    ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
+
+static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
+fixture_storage_capabilities(void *self) {
+  return self == &create_calls ? &fixture_storage : NULL;
+}
 
 static uint64_t ORM_DRIVER_CALL fixture_execution_models(void *self) {
   return self == &create_calls ? ORM_DRIVER_EXEC_CALLER_BLOCKING
@@ -49,7 +56,7 @@ int main(void) {
   REQUIRE(cmeta_interface_desc_equal(local, peer_a));
   REQUIRE(cmeta_interface_desc_equal(peer_a, peer_b));
   REQUIRE(strcmp(local->name, "TurboDb_Driver") == 0);
-  REQUIRE(local->method_count == 2u);
+  REQUIRE(local->method_count == 3u);
 
   method = &local->methods[0];
   REQUIRE(cmeta_interface_method_reflection_valid(method));
@@ -89,11 +96,24 @@ int main(void) {
   REQUIRE(abi->return_carrier == CMETA_ABI_SCALAR);
   REQUIRE(abi->param_count == 0u);
 
+  method = &local->methods[2];
+  REQUIRE(cmeta_interface_method_reflection_valid(method));
+  REQUIRE(strcmp(method->name, "storage_capabilities") == 0);
+  REQUIRE(method->dispatch_arity == 0u);
+  function = method->function;
+  abi = method->abi;
+  REQUIRE(function != NULL && abi != NULL);
+  REQUIRE(strcmp(function->name, "TurboDb_Driver.storage_capabilities") == 0);
+  REQUIRE(function->param_count == 0u);
+  REQUIRE(abi->return_carrier == CMETA_ABI_OBJECT_POINTER);
+  REQUIRE(abi->param_count == 0u);
+
   static const TurboDb_Driver_vtable vtable = {
       .implementation = "fixture",
       .capabilities = ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_TRANSACTION,
       .create = fixture_create,
-      .execution_models = fixture_execution_models};
+      .execution_models = fixture_execution_models,
+      .storage_capabilities = fixture_storage_capabilities};
   TurboDb_Driver driver = TurboDb_Driver_bind(&create_calls, &vtable);
   orm_config_t config = {0};
   orm_driver_limits_v1 limits = {0};
@@ -107,6 +127,9 @@ int main(void) {
   REQUIRE(connection.context == &create_calls);
   REQUIRE(TurboDb_Driver_execution_models(&driver) ==
           ORM_DRIVER_EXEC_CALLER_BLOCKING);
+  REQUIRE(TurboDb_Driver_storage_capabilities(&driver) == &fixture_storage);
+  REQUIRE(orm_driver_storage_capabilities_valid(
+              TurboDb_Driver_storage_capabilities(&driver)));
 
   salts_plugin_export entry = orm_driver_plugin_export(
       &driver, ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_TRANSACTION);
@@ -161,6 +184,14 @@ int main(void) {
   manifest.abi_version = SALTS_PLUGIN_ABI_VERSION + 1u;
   REQUIRE(salts_plugin_manifest_validate(&manifest) ==
          SALTS_PLUGIN_UNSUPPORTED_ABI);
+
+  orm_driver_storage_capabilities_v1 invalid = fixture_storage;
+  invalid.capabilities = ORM_DRIVER_STORAGE_CAP_AMBIGUOUS_COMMIT;
+  REQUIRE(!orm_driver_storage_capabilities_valid(&invalid));
+  invalid = fixture_storage;
+  invalid.capabilities = ORM_DRIVER_STORAGE_CAP_BOUNDED_BATCH;
+  invalid.max_batch_operations = 1u;
+  REQUIRE(!orm_driver_storage_capabilities_valid(&invalid));
 
   return 0;
 }
