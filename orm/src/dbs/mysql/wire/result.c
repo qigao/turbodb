@@ -138,3 +138,35 @@ mysql_wire_status_t mysql_wire_decode_eof_packet(
   return offset == payload_size ? MYSQL_WIRE_STATUS_OK
                                 : MYSQL_WIRE_STATUS_INVALID;
 }
+
+mysql_wire_status_t mysql_wire_decode_text_row(
+    const uint8_t *payload, size_t payload_size,
+    size_t column_count, mysql_wire_bytes_t *out_columns,
+    size_t out_capacity) {
+  size_t offset = 0u;
+  size_t index;
+  mysql_wire_status_t status;
+
+  if (payload == NULL || column_count == 0u ||
+      out_columns == NULL)
+    return MYSQL_WIRE_STATUS_INVALID;
+  if (column_count > out_capacity)
+    return MYSQL_WIRE_STATUS_LIMIT;
+
+  memset(out_columns, 0, column_count * sizeof(*out_columns));
+  for (index = 0u; index < column_count; ++index) {
+    status = mysql_wire_complete_packet_status(
+        mysql_wire_read_lenenc_bytes(
+            payload, payload_size, &offset, &out_columns[index]));
+    if (status != MYSQL_WIRE_STATUS_OK) {
+      memset(out_columns, 0, column_count * sizeof(*out_columns));
+      return status;
+    }
+  }
+
+  if (offset != payload_size) {
+    memset(out_columns, 0, column_count * sizeof(*out_columns));
+    return MYSQL_WIRE_STATUS_INVALID;
+  }
+  return MYSQL_WIRE_STATUS_OK;
+}
