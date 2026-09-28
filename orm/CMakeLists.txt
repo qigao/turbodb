@@ -1519,7 +1519,7 @@ target_compile_features(orm_redis_live_driver_test PRIVATE c_std_11)
 target_compile_definitions(orm_redis_live_driver_test PRIVATE ORM_C_STATIC)
 target_include_directories(orm_redis_live_driver_test PRIVATE ${ORM_INCLUDE_DIR})
 target_link_libraries(orm_redis_live_driver_test PRIVATE
-                      turbo_orm Salts::CFlow)
+                      turbo_orm Salts::CFlow Salts::Platform)
 add_dependencies(orm_redis_live_driver_test orm_redis_driver)
 set_target_properties(orm_redis_live_driver_test PROPERTIES
                       C_STANDARD_REQUIRED ON FOLDER "orm/tests")
