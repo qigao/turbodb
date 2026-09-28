@@ -1,5 +1,5 @@
 #include "orm_driver_contract.h"
-#include "orm_driver_abi.h"
+#include <orm_driver_ops.h>
 
 #include <stddef.h>
 #include <string.h>
@@ -81,61 +81,6 @@ static orm_status_t driver_check_capabilities(uint64_t caps) {
   return ORM_STATUS_OK;
 }
 
-static orm_status_t driver_check_id(orm_driver_bytes_v1 id) {
-  const unsigned char *text;
-  orm_status_t status = orm_driver_check_bytes(id, ORM_DRIVER_ID_MAX_BYTES);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (id.size == 0u)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  text = (const unsigned char *)id.data;
-  if (text[0] < 'a' || text[0] > 'z')
-    return ORM_STATUS_INVALID_ARGUMENT;
-  for (uint64_t i = 1u; i < id.size; ++i) {
-    unsigned char c = text[i];
-    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
-      return ORM_STATUS_INVALID_ARGUMENT;
-  }
-  return ORM_STATUS_OK;
-}
-
-static int driver_same_id(orm_driver_bytes_v1 a, orm_driver_bytes_v1 b) {
-  return a.size == b.size && memcmp(a.data, b.data, (size_t)a.size) == 0;
-}
-
-static orm_driver_bytes_v1 driver_alias_at(const orm_driver_api_v1 *api, uint32_t i) {
-  orm_driver_bytes_v1 alias;
-  memcpy(&alias, (const unsigned char *)api->aliases + (size_t)i * sizeof(alias),
-         sizeof(alias));
-  return alias;
-}
-
-static orm_status_t driver_check_aliases(const orm_driver_api_v1 *api,
-                                         uint32_t max_aliases) {
-  uint64_t used = sizeof(*api) + api->canonical_id.size +
-      (uint64_t)api->alias_count * sizeof(orm_driver_bytes_v1);
-  if (api->alias_count > max_aliases || used > ORM_DRIVER_DESCRIPTOR_MAX_BYTES)
-    return ORM_STATUS_LIMIT_EXCEEDED;
-  if (api->alias_count != 0u && api->aliases == NULL)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  for (uint32_t i = 0u; i < api->alias_count; ++i) {
-    orm_driver_bytes_v1 alias = driver_alias_at(api, i);
-    orm_status_t status = driver_check_id(alias);
-    if (status != ORM_STATUS_OK)
-      return status;
-    if (alias.size > ORM_DRIVER_DESCRIPTOR_MAX_BYTES - used)
-      return ORM_STATUS_LIMIT_EXCEEDED;
-    used += alias.size;
-    if (driver_same_id(alias, api->canonical_id))
-      return ORM_STATUS_INVALID_ARGUMENT;
-    for (uint32_t j = 0u; j < i; ++j) {
-      if (driver_same_id(alias, driver_alias_at(api, j)))
-        return ORM_STATUS_INVALID_ARGUMENT;
-    }
-  }
-  return ORM_STATUS_OK;
-}
-
 static orm_status_t driver_check_connection_ops(orm_driver_table_v1 table,
                                                 uint64_t caps) {
   orm_driver_connection_ops_v1 ops = {0};
@@ -204,98 +149,6 @@ static orm_status_t driver_check_cursor_ops(orm_driver_table_v1 table) {
   return ORM_STATUS_OK;
 }
 
-static orm_status_t driver_check_host(const void *buffer, uint32_t bytes,
-    const uint8_t expected_bundle[ORM_DRIVER_BUNDLE_ID_BYTES]) {
-  orm_driver_host_v1 host = {0};
-  orm_driver_plan_metadata_ops_v1 metadata = {0};
-  orm_driver_plan_value_ops_v1 values = {0};
-  orm_driver_lifetime_ops_v1 lifetime = {0};
-  orm_driver_execution_ops_v1 execution = {0};
-  uint32_t declared = 0u;
-  orm_status_t status;
-  if (expected_bundle == NULL)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  status = driver_copy_prefix(buffer, bytes,
-      DRIVER_FIELD_END(orm_driver_host_v1, execution), &host, &declared);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (memcmp(host.bundle_id, expected_bundle, sizeof(host.bundle_id)) != 0)
-    return ORM_STATUS_ABI_MISMATCH;
-  status = driver_copy_table(host.plan_metadata,
-      DRIVER_FIELD_END(orm_driver_plan_metadata_ops_v1, ordering), &metadata, &declared);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (metadata.describe == NULL || metadata.column_at == NULL || metadata.ordering == NULL)
-    return ORM_STATUS_ABI_MISMATCH;
-  status = driver_copy_table(host.plan_values,
-      DRIVER_FIELD_END(orm_driver_plan_value_ops_v1, raw_parameter_at), &values, &declared);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (values.assignment_at == NULL || values.predicate_at == NULL || values.raw_parameter_at == NULL)
-    return ORM_STATUS_ABI_MISMATCH;
-  status = driver_copy_table(host.lifetime,
-      DRIVER_FIELD_END(orm_driver_lifetime_ops_v1, release), &lifetime, &declared);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (lifetime.acquire == NULL || lifetime.release == NULL)
-    return ORM_STATUS_ABI_MISMATCH;
-  if (host.execution.reserved != 0u)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  if (host.execution.data == NULL && host.execution.bytes == 0u)
-    return ORM_STATUS_OK;
-  status = driver_copy_table(host.execution,
-      DRIVER_FIELD_END(orm_driver_execution_ops_v1, release_task), &execution, &declared);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (execution.submit == NULL || execution.request_cancel == NULL || execution.release_task == NULL)
-    return ORM_STATUS_ABI_MISMATCH;
-  return ORM_STATUS_OK;
-}
-
-static orm_status_t driver_check_api(const void *buffer, uint32_t bytes,
-    const uint8_t expected_bundle[ORM_DRIVER_BUNDLE_ID_BYTES],
-    orm_driver_bytes_v1 expected_id, uint32_t max_aliases) {
-  orm_driver_api_v1 api = {0};
-  orm_driver_module_ops_v1 module = {0};
-  uint32_t declared = 0u;
-  orm_status_t status;
-  if (expected_bundle == NULL)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  status = driver_copy_prefix(buffer, bytes,
-      DRIVER_FIELD_END(orm_driver_api_v1, connection_ops), &api, &declared);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (memcmp(api.bundle_id, expected_bundle, sizeof(api.bundle_id)) != 0)
-    return ORM_STATUS_ABI_MISMATCH;
-  if (api.reserved != 0u)
-    return ORM_STATUS_INVALID_ARGUMENT;
-  status = driver_check_capabilities(api.capabilities);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if ((api.execution_models & ~ORM_DRIVER_EXEC_KNOWN_MASK) != 0u)
-    return ORM_STATUS_UNSUPPORTED;
-  if (api.execution_models == 0u)
-    return ORM_STATUS_ABI_MISMATCH;
-  status = driver_check_id(api.canonical_id);
-  if (status != ORM_STATUS_OK)
-    return status;
-  status = driver_check_id(expected_id);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (!driver_same_id(api.canonical_id, expected_id))
-    return ORM_STATUS_INVALID_ARGUMENT;
-  status = driver_check_aliases(&api, max_aliases);
-  if (status != ORM_STATUS_OK)
-    return status;
-  status = driver_copy_table(api.module_ops,
-      DRIVER_FIELD_END(orm_driver_module_ops_v1, finalize), &module, &declared);
-  if (status != ORM_STATUS_OK)
-    return status;
-  if (module.initialize == NULL || module.finalize == NULL || api.create_connection == NULL)
-    return ORM_STATUS_ABI_MISMATCH;
-  return driver_check_connection_ops(api.connection_ops, api.capabilities);
-}
-
 static orm_status_t driver_result(orm_error_t *error, orm_status_t status) {
   const char *message = "";
   if (error == NULL)
@@ -313,20 +166,6 @@ static orm_status_t driver_result(orm_error_t *error, orm_status_t status) {
   error->status = status;
   memcpy(error->message, message, strlen(message));
   return status;
-}
-
-orm_status_t ORM_DRIVER_CALL orm_driver_validate_host_v1(
-    const void *host, uint32_t bytes,
-    const uint8_t expected_bundle[ORM_DRIVER_BUNDLE_ID_BYTES], orm_error_t *error) {
-  return driver_result(error, driver_check_host(host, bytes, expected_bundle));
-}
-
-orm_status_t ORM_DRIVER_CALL orm_driver_validate_api_v1(
-    const void *api, uint32_t bytes,
-    const uint8_t expected_bundle[ORM_DRIVER_BUNDLE_ID_BYTES],
-    orm_driver_bytes_v1 expected_id, uint32_t max_aliases, orm_error_t *error) {
-  return driver_result(error, driver_check_api(api, bytes, expected_bundle,
-                                              expected_id, max_aliases));
 }
 
 orm_status_t ORM_DRIVER_CALL orm_driver_validate_connection_v1(
