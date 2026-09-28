@@ -239,7 +239,7 @@ jobs:
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
           set "BUILD=%GITHUB_WORKSPACE%\build\core-only-windows"
-          cmake -S "%GITHUB_WORKSPACE%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_TESTS=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_mongoc=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_bson=TRUE > evidence\deps\core-only-configure.log 2>&1
+          cmake -S "%GITHUB_WORKSPACE%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_MYSQL_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_TESTS=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_mongoc=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_bson=TRUE > evidence\deps\core-only-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\core-only-configure.log & exit /b 1)
           cmake --build "%BUILD%" --target turbo_orm --parallel 4 > evidence\deps\core-only-build.log 2>&1
           if errorlevel 1 (type evidence\deps\core-only-build.log & exit /b 1)
@@ -277,7 +277,7 @@ jobs:
           set -euo pipefail
           profile=linux-release-user
           if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
-          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DORM_BUILD_MYSQL_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
 
           core_module="$(find build -type f -name 'libturbo_orm.so' -print -quit)"
