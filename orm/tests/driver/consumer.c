@@ -1,27 +1,45 @@
-#include <orm_driver_abi.h>
-#include <stddef.h>
+#include <orm_driver_plugin.h>
 
-/* No fixture or private core headers: the C linker must resolve the real entry. */
-typedef int32_t (ORM_DRIVER_CALL *entry_fn)(const orm_driver_host_v1 *,
-    uint32_t, const orm_driver_api_v1 **, uint32_t *);
-_Static_assert(sizeof(orm_driver_header_v1) == 8u, "bootstrap prefix size");
-_Static_assert(offsetof(orm_driver_header_v1, abi_version) == 4u,
-               "bootstrap version offset");
-_Static_assert(_Generic(&orm_driver_get_api_v1, entry_fn: 1, default: 0),
-               "bootstrap calling convention changed");
+#include <string.h>
+
+#define REQUIRE(condition) do { if (!(condition)) return __LINE__; } while (0)
+
+static orm_status_t ORM_DRIVER_CALL consumer_create(
+    void *self, const orm_config_t *config,
+    const orm_driver_limits_v1 *limits,
+    orm_driver_connection_v1 *out_connection, orm_error_t *error) {
+  (void)self;
+  if (config == NULL || limits == NULL ||
+      out_connection == NULL || error == NULL)
+    return ORM_STATUS_INVALID_ARGUMENT;
+  memset(out_connection, 0, sizeof(*out_connection));
+  orm_error_init(error);
+  return ORM_STATUS_OK;
+}
 
 int main(void) {
-  entry_fn volatile entry = &orm_driver_get_api_v1;
-  const orm_driver_api_v1 sentinel = {0};
-  const orm_driver_api_v1 *api = &sentinel;
-  uint32_t bytes = UINT32_MAX;
-  if (entry(NULL, 0u, &api, &bytes) != ORM_STATUS_INVALID_ARGUMENT ||
-      api != NULL || bytes != 0u) return 1;
-  bytes = UINT32_MAX;
-  if (entry(NULL, 0u, NULL, &bytes) != ORM_STATUS_INVALID_ARGUMENT ||
-      bytes != 0u) return 2;
-  api = &sentinel;
-  if (entry(NULL, 0u, &api, NULL) != ORM_STATUS_INVALID_ARGUMENT ||
-      api != NULL) return 3;
+  static const TurboDb_Driver_vtable vtable = {
+      .implementation = "sdk-consumer",
+      .capabilities = ORM_DRIVER_CAP_SELECT,
+      .create = consumer_create};
+  TurboDb_Driver driver = TurboDb_Driver_bind(NULL, &vtable);
+  salts_plugin_export entry =
+      orm_driver_plugin_export(&driver, ORM_DRIVER_CAP_SELECT);
+  salts_plugin_manifest manifest = {
+      .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
+      .abi_version = SALTS_PLUGIN_ABI_VERSION,
+      .plugin_id = "sdk-consumer",
+      .version = {1u, 0u, 0u},
+      .exports = &entry,
+      .export_count = 1u};
+
+  REQUIRE(SALTS_PLUGIN_ABI_VERSION == 2u);
+  REQUIRE(TurboDb_Driver_valid(&driver));
+  REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_OK);
+  REQUIRE(salts_plugin_export_require_interface(
+              &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
+              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
+              ORM_DRIVER_CAP_SELECT,
+              TurboDb_Driver_interface()) == SALTS_PLUGIN_OK);
   return 0;
 }
