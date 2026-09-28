@@ -82,7 +82,10 @@ enum {
    * unresolved native dependencies or an invalid module image. */
   ORM_STATUS_DRIVER_LOAD_ERROR = 21,
   ORM_STATUS_DRIVER_ENTRY_MISSING = 22,
-  ORM_STATUS_DRIVER_ID_MISMATCH = 23
+  ORM_STATUS_DRIVER_ID_MISMATCH = 23,
+  /* A complete logical value violated the canonical SaltsUtils DataBind
+   * ValidationPlan. This is distinct from database/native constraint errors. */
+  ORM_STATUS_VALIDATION_ERROR = 24
 };
 
 typedef int32_t orm_value_kind_t;
@@ -383,6 +386,28 @@ ORM_C_API orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
     orm_query_t *query, orm_transaction_t *transaction,
     const orm_flow_config_t *config, cflow_publisher *out_publisher,
     orm_error_t *error);
+
+/*
+ * Optional canonical DataBind validation path.
+ *
+ * message_plan is a control-plane artifact compiled by SaltsUtils from one
+ * exact logical DataBind contract and its generated native binding. The plan,
+ * row_shape and reachable metadata are borrowed through Publisher destruction.
+ * Runtime execution performs no schema/constraint/reflection lookup.
+ *
+ * Existing orm_query_open_flow* entry points remain unchanged and perform
+ * native DataBind decoding without logical ValidationPlan execution.
+ */
+struct DataBindMessagePlan;
+ORM_C_API orm_status_t ORM_C_CALL orm_query_open_validated_flow(
+    orm_query_t *query, const orm_flow_config_t *config,
+    const struct DataBindMessagePlan *message_plan,
+    cflow_publisher *out_publisher, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
+    orm_query_t *query, orm_transaction_t *transaction,
+    const orm_flow_config_t *config,
+    const struct DataBindMessagePlan *message_plan,
+    cflow_publisher *out_publisher, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_command_flow(
     orm_query_t *query, cflow_publisher *out_publisher, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_command_flow_in_transaction(
