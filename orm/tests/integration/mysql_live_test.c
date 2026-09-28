@@ -6,6 +6,22 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
+static void mysql_live_sleep_ms(unsigned milliseconds) {
+#if defined(_WIN32)
+  Sleep((DWORD)milliseconds);
+#else
+  struct timespec delay;
+  delay.tv_sec = (time_t)(milliseconds / 1000u);
+  delay.tv_nsec = (long)(milliseconds % 1000u) * 1000000L;
+  (void)nanosleep(&delay, NULL);
+#endif
+}
 
 static const char *required_env(const char *name) {
   const char *value = getenv(name);
@@ -578,6 +594,80 @@ int main(void) {
     }
 
     cursor.ops->destroy(cursor.context);
+  }
+
+  {
+    static const uint8_t timeout_sql[] =
+        "SET SESSION wait_timeout=1";
+    static const uint8_t update_sql[] =
+        "UPDATE m5_disconnect SET n=n+1 WHERE id=1";
+    static const uint8_t verify_sql[] =
+        "SELECT CAST(n AS CHAR) FROM m5_disconnect WHERE id=1";
+    mysql_transaction_session_t *transaction = NULL;
+    mysql_session_command_result_t command_result;
+    mysql_session_text_probe_t probe;
+
+    status = mysql_transaction_session_begin(
+        &config, ORM_ISOLATION_READ_COMMITTED, 4096u,
+        &transaction, &error);
+    if (status != MYSQL_SESSION_OK) {
+      fprintf(stderr,
+              "mysql disconnect transaction begin failed status=%d "
+              "stage=%s message=%s\n",
+              (int)status, error.stage, error.message);
+      return 1;
+    }
+
+    status = mysql_transaction_session_execute_prepared(
+        transaction, timeout_sql, sizeof(timeout_sql) - 1u,
+        NULL, 0u, &command_result, &error);
+    if (status != MYSQL_SESSION_OK) {
+      fprintf(stderr,
+              "mysql wait_timeout setup failed status=%d stage=%s message=%s\n",
+              (int)status, error.stage, error.message);
+      mysql_transaction_session_destroy(transaction);
+      return 1;
+    }
+
+    mysql_live_sleep_ms(2500u);
+
+    status = mysql_transaction_session_execute_prepared(
+        transaction, update_sql, sizeof(update_sql) - 1u,
+        NULL, 0u, &command_result, &error);
+    if (status != MYSQL_SESSION_IO &&
+        status != MYSQL_SESSION_TIMEOUT) {
+      fprintf(stderr,
+              "mysql real disconnect expected IO/TIMEOUT got=%d "
+              "affected=%llu stage=%s message=%s\n",
+              (int)status,
+              (unsigned long long)command_result.affected_rows,
+              error.stage, error.message);
+      mysql_transaction_session_destroy(transaction);
+      return 1;
+    }
+
+    mysql_transaction_session_destroy(transaction);
+
+    status = mysql_session_text_query_probe(
+        &config, verify_sql, sizeof(verify_sql) - 1u,
+        &probe, &error);
+    if (status != MYSQL_SESSION_OK ||
+        probe.row_count != 1u ||
+        probe.column_count != 1u ||
+        probe.columns[0].is_null ||
+        probe.columns[0].size != 1u ||
+        probe.columns[0].data[0] != (uint8_t)'0') {
+      fprintf(stderr,
+              "mysql disconnect no-replay verification failed status=%d "
+              "rows=%u columns=%u value=%.*s stage=%s message=%s\n",
+              (int)status,
+              (unsigned int)probe.row_count,
+              (unsigned int)probe.column_count,
+              (int)probe.columns[0].size,
+              probe.columns[0].data,
+              error.stage, error.message);
+      return 1;
+    }
   }
 
   {
