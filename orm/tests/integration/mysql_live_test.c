@@ -119,7 +119,7 @@ int main(void) {
         "SELECT s,u,txt,decv FROM m3_probe WHERE s=?";
     const mysql_stmt_value_t parameter = {
         .kind = MYSQL_STMT_VALUE_SINT64,
-        .data.sint64_value = INT64_C(-7)};
+        .data.sint64_value = INT64_C(-42)};
     const mysql_session_cursor_limits_t source_limits = {
         .max_columns = 8u,
         .max_metadata_bytes = 1024u,
@@ -226,7 +226,7 @@ int main(void) {
       {.kind = MYSQL_STMT_VALUE_TEXT,
        .data.bytes = {changed, sizeof(changed)}},
       {.kind = MYSQL_STMT_VALUE_SINT64,
-       .data.sint64_value = INT64_C(-42)}
+       .data.sint64_value = INT64_C(-7)}
     };
     mysql_session_command_result_t command_result;
 
