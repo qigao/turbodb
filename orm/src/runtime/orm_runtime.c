@@ -31,6 +31,7 @@ typedef struct orm_runtime_driver {
   orm_runtime_id canonical;
   uint64_t capabilities;
   uint64_t execution_models;
+  orm_driver_storage_capabilities_v1 storage;
   uint8_t bundle_id[ORM_DRIVER_BUNDLE_ID_BYTES];
 } orm_runtime_driver;
 
@@ -1084,6 +1085,15 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     goto fail_admission;
   }
 
+  const orm_driver_storage_capabilities_v1 *storage_capabilities =
+      TurboDb_Driver_storage_capabilities(binding);
+  if (!orm_driver_storage_capabilities_valid(storage_capabilities)) {
+    status = runtime_result(
+        error, ORM_STATUS_ABI_MISMATCH,
+        "TurboDb.Driver storage capability descriptor is invalid");
+    goto fail_admission;
+  }
+
   if (runtime_id_conflicts(
           runtime,
           (orm_driver_bytes_v1){manifest->plugin_id,
@@ -1131,6 +1141,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
       (orm_driver_bytes_v1){manifest->plugin_id, (uint64_t)plugin_id_size});
   driver->capabilities = entry->capabilities;
   driver->execution_models = execution_models;
+  driver->storage = *storage_capabilities;
   memcpy(driver->bundle_id, runtime_bundle, sizeof(driver->bundle_id));
   ++runtime->driver_count;
   --runtime->pending_operations;
@@ -1190,6 +1201,35 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
   out_info->execution_models = driver->execution_models;
   memcpy(out_info->bundle_id, driver->bundle_id,
          sizeof(out_info->bundle_id));
+  salts_mutex_unlock(&runtime->mutex);
+  return runtime_result(error, ORM_STATUS_OK, NULL);
+}
+
+orm_status_t ORM_C_CALL
+orm_runtime_driver_storage_info(
+    orm_runtime_t *runtime, orm_string_view_t id,
+    orm_driver_storage_capabilities_v1 *out_storage, orm_error_t *error) {
+  if (out_storage != NULL)
+    memset(out_storage, 0, sizeof(*out_storage));
+  if (runtime == NULL || out_storage == NULL || !runtime_id_valid(id))
+    return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
+                          "invalid driver storage info request");
+
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->closed != ORM_RUNTIME_OPEN) {
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_result(error, ORM_STATUS_INVALID_STATE,
+                          "runtime is closed");
+  }
+
+  orm_runtime_driver *driver = runtime_find_driver(runtime, id);
+  if (driver == NULL) {
+    salts_mutex_unlock(&runtime->mutex);
+    return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
+                          "driver is not registered");
+  }
+
+  *out_storage = driver->storage;
   salts_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
