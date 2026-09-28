@@ -411,7 +411,7 @@ static void mysql_session_send_close(mysql_session_t *session) {
 
 static void mysql_session_begin_action(mysql_session_t *session) {
   if (session->action == MYSQL_SESSION_ACTION_PING) {
-    mysql_session_begin_action(session);
+    mysql_session_send_ping(session);
     return;
   }
   if (session->action == MYSQL_SESSION_ACTION_PREPARED_PROBE) {
@@ -440,7 +440,7 @@ static void mysql_session_handle_auth(
                               "auth-ok", "invalid authentication OK packet");
       return;
     }
-    mysql_session_send_ping(session);
+    mysql_session_begin_action(session);
     return;
   }
 
