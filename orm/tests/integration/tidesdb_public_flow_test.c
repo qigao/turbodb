@@ -77,6 +77,7 @@ static orm_runtime_t *orm_tides_plugin_runtime(orm_error_t *error) {
 }
 
 spec("TidesDB public reactive C facade") {
+  (void)ttest_config__;
   it("executes a demanded command and streams the stored typed row") {
     char *path = tt_make_temp_dir("orm-tides-public-flow");
     orm_option_t options[4];
@@ -280,6 +281,8 @@ spec("TidesDB public reactive C facade") {
     cflow_publisher_destroy(&source);
     orm_query_destroy(query);
     orm_disconnect(connection);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
     check_equal(tt_remove_tree(path), 0);
     free(path);
   }
