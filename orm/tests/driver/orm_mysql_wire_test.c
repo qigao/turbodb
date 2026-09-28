@@ -211,6 +211,8 @@ spec("MySQL wire foundation") {
 
     check_true(mysql_wire_is_eof_packet(eof, sizeof(eof)));
     check_true(!mysql_wire_is_eof_packet(not_eof, sizeof(not_eof)));
+    check_equal(mysql_wire_decode_ok(eof, sizeof(eof), &ok_packet),
+                MYSQL_WIRE_PROTOCOL_ERROR);
     check_equal(mysql_wire_decode_eof(eof, sizeof(eof), &eof_packet),
                 MYSQL_WIRE_OK);
     check_equal(eof_packet.warning_count, UINT16_C(1));
