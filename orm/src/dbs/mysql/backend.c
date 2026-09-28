@@ -719,6 +719,7 @@ static orm_status_t orm_mysql_open_impl(
     return status;
 
   config = orm_mysql_session_config(&state->settings);
+  source_limits.max_result_rows = limits->max_result_rows;
   source_limits.max_columns = limits->max_columns;
   source_limits.max_metadata_bytes =
       orm_mysql_size_limit(
@@ -857,14 +858,78 @@ static orm_status_t orm_mysql_transaction_open(
     void *context, const orm_query_plan *plan,
     const orm_limits *limits, orm_row_cursor *out_cursor,
     orm_error_t *error) {
-  (void)context;
-  (void)plan;
-  (void)limits;
+  orm_mysql_transaction_state *transaction =
+      (orm_mysql_transaction_state *)context;
+  orm_mysql_prepared prepared;
+  mysql_session_cursor_limits_t source_limits;
+  mysql_cursor_source_t source = {0};
+  const mysql_column_definition_t *columns = NULL;
+  size_t column_count = 0u;
+  mysql_cursor_config_t cursor_config;
+  mysql_session_error_t native_error;
+  mysql_session_status_t native_status;
+  orm_status_t status;
+
   if (out_cursor != NULL)
     memset(out_cursor, 0, sizeof(*out_cursor));
-  return orm_mysql_fail(
-      error, ORM_STATUS_UNSUPPORTED,
-      "MySQL row Publishers inside transactions are not published yet");
+  if (transaction == NULL || !transaction->active ||
+      transaction->session == NULL || plan == NULL ||
+      limits == NULL || out_cursor == NULL)
+    return orm_mysql_fail(
+        error, ORM_STATUS_INVALID_STATE,
+        "MySQL transaction is no longer active");
+
+  status = orm_mysql_prepare_plan(
+      plan, limits, &prepared, error);
+  if (status != ORM_STATUS_OK)
+    return status;
+
+  memset(&source_limits, 0, sizeof(source_limits));
+  source_limits.max_result_rows = limits->max_result_rows;
+  source_limits.max_columns = limits->max_columns;
+  source_limits.max_metadata_bytes =
+      orm_mysql_size_limit(
+          limits->max_result_bytes < (uint64_t)limits->max_query_bytes
+              ? limits->max_result_bytes
+              : (uint64_t)limits->max_query_bytes);
+  source_limits.max_row_bytes =
+      orm_mysql_size_limit(limits->max_result_bytes);
+  source_limits.max_command_bytes = prepared.command_bytes;
+  if (source_limits.max_result_rows == 0u ||
+      source_limits.max_columns == 0u ||
+      source_limits.max_metadata_bytes == 0u ||
+      source_limits.max_row_bytes == 0u) {
+    orm_mysql_prepared_destroy(&prepared);
+    return orm_mysql_fail(
+        error, ORM_STATUS_INVALID_ARGUMENT,
+        "MySQL transaction cursor limits must be nonzero");
+  }
+
+  memset(&native_error, 0, sizeof(native_error));
+  native_status =
+      mysql_transaction_session_open_prepared_source(
+          transaction->session,
+          prepared.sql, prepared.sql_size,
+          prepared.values, prepared.value_count,
+          &source_limits, &source, &columns,
+          &column_count, &native_error);
+  orm_mysql_prepared_destroy(&prepared);
+  if (native_status != MYSQL_SESSION_OK)
+    return orm_mysql_session_status(
+        native_status, &native_error, error);
+
+  cursor_config = (mysql_cursor_config_t)MYSQL_CURSOR_CONFIG_INIT(
+      limits->max_result_rows, limits->max_result_bytes,
+      limits->max_columns,
+      source_limits.max_metadata_bytes,
+      source_limits.max_row_bytes);
+  status = mysql_cursor_start(
+      out_cursor, &source, columns, column_count,
+      &cursor_config, error);
+  if (status != ORM_STATUS_OK &&
+      source.ops != NULL && source.context != NULL)
+    source.ops->destroy(source.context);
+  return status;
 }
 
 static orm_status_t orm_mysql_transaction_execute(
