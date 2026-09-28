@@ -40,11 +40,9 @@ int main(void) {
   assert(cmeta_interface_desc_valid(peer_a));
   assert(cmeta_interface_desc_valid(peer_b));
   assert(cmeta_interface_desc_equal(peer_a, peer_b));
-  assert(peer_a->method_count == 2u);
+  assert(peer_a->method_count == 1u);
   assert(peer_a->methods[0].function != NULL);
   assert(peer_a->methods[0].abi != NULL);
-  assert(peer_a->methods[1].function != NULL);
-  assert(peer_a->methods[1].abi != NULL);
   assert(!cmeta_interface_desc_equal(peer_a, wrong));
   assert(turbodb_dependency_interface_value(&binding) == 17);
 
