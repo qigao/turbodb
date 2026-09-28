@@ -91,6 +91,7 @@ static _Atomic(uint64_t) bm_max_safe_block_bytes = 0;
 
 static pthread_key_t bm_tls_key;
 static pthread_once_t bm_tls_once = PTHREAD_ONCE_INIT;
+static int bm_tls_key_ready;
 
 /**
  * bm_tls_read_buf_t
@@ -130,8 +131,34 @@ static void bm_tls_destructor(void *ptr)
  */
 static void bm_tls_init_key(void)
 {
-    pthread_key_create(&bm_tls_key, bm_tls_destructor);
+    bm_tls_key_ready =
+        pthread_key_create(&bm_tls_key, bm_tls_destructor) == 0;
 }
+
+#if defined(_WIN32)
+void block_manager_thread_cache_shutdown(void)
+{
+    bm_tls_read_buf_t *tls;
+
+    if (!bm_tls_key_ready) return;
+
+    /*
+     * pthread_key_delete/FlsFree owns the Win32 wrapper allocated by
+     * pthread_setspecific. Clear its payload first, destroy the caller-thread
+     * cache explicitly, then release the FLS slot while this DLL is still
+     * mapped. Worker-thread slots have already run their FLS destructors when
+     * the joined workers exited.
+     */
+    tls = (bm_tls_read_buf_t *)pthread_getspecific(bm_tls_key);
+    if (tls != NULL)
+    {
+        (void)pthread_setspecific(bm_tls_key, NULL);
+        bm_tls_destructor(tls);
+    }
+    (void)pthread_key_delete(bm_tls_key);
+    bm_tls_key_ready = 0;
+}
+#endif
 
 /**
  * bm_get_read_buf
@@ -145,6 +172,7 @@ static void bm_tls_init_key(void)
 static uint8_t *bm_get_read_buf(const size_t needed)
 {
     pthread_once(&bm_tls_once, bm_tls_init_key);
+    if (!bm_tls_key_ready) return NULL;
 
     bm_tls_read_buf_t *tls = (bm_tls_read_buf_t *)pthread_getspecific(bm_tls_key);
     if (!tls)

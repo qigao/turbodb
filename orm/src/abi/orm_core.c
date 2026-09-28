@@ -667,11 +667,6 @@ static orm_status_t orm_backend_create(const orm_config_t *config,
     status = orm_redis_backend_create(config, limits, backend, error);
   else
 #endif
-#if defined(ORM_WITH_TIDESDB)
-  if (orm_view_equal_cstr(config->driver, "tidesdb"))
-    status = orm_tidesdb_backend_create(config, limits, backend, error);
-  else
-#endif
 #if defined(ORM_WITH_MONGO)
   if (orm_view_equal_cstr(config->driver, "mongo") ||
       orm_view_equal_cstr(config->driver, "mongodb"))

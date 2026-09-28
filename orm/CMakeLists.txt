@@ -40,6 +40,16 @@ option(ORM_WITH_SQLITE "Enable SQLite backend" ${ORM_WITH_SQLITE_DEFAULT})
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_WITH_REDIS "Enable Redis backend" ${ORM_WITH_REDIS_DEFAULT})
 option(ORM_WITH_MONGODB "Enable MongoDB backend" ${ORM_WITH_MONGODB_DEFAULT})
+if(NOT DEFINED ORM_BUILD_TIDESDB_DRIVER_DEFAULT)
+  if(TARGET TidesDB::tidesdb)
+    set(ORM_BUILD_TIDESDB_DRIVER_DEFAULT ON)
+  else()
+    set(ORM_BUILD_TIDESDB_DRIVER_DEFAULT OFF)
+  endif()
+endif()
+option(ORM_BUILD_TIDESDB_DRIVER
+       "Build the independent TidesDB TurboDb.Driver module"
+       ${ORM_BUILD_TIDESDB_DRIVER_DEFAULT})
 option(ORM_POSTGRES_LIVE_TESTS
        "Run tests against TURBODB_ORM_PGSQL_TEST_CONNINFO" OFF)
 
@@ -100,7 +110,7 @@ if(ORM_WITH_REDIS AND NOT TARGET TurboDB::Redis)
   find_package(TurboDB CONFIG REQUIRED)
 endif()
 
-if(NOT TARGET TidesDB::tidesdb)
+if(ORM_BUILD_TIDESDB_DRIVER AND NOT TARGET TidesDB::tidesdb)
   find_package(TidesDB CONFIG REQUIRED)
 endif()
 
@@ -128,16 +138,12 @@ set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
                      src/flow/orm_text_token.c
                      src/dbs/redis/orm_redis_cursor.c
-                     src/dbs/mongo/orm_mongo_cursor.c
-                     src/dbs/tidesdb/orm_tidesdb_cursor.c)
+                     src/dbs/mongo/orm_mongo_cursor.c)
 if(ORM_WITH_REDIS)
   list(APPEND ORM_C_SOURCES src/dbs/redis/backend.c
                              src/dbs/redis/query.c
                              src/dbs/redis/orm_redis_lib.c)
 endif()
-list(APPEND ORM_C_SOURCES src/dbs/tidesdb/bridge.c
-                           src/dbs/tidesdb/backend.c
-                           src/dbs/tidesdb/row.c)
 if(ORM_WITH_MONGODB)
   list(APPEND ORM_C_SOURCES src/dbs/mongo/backend.c
                              src/dbs/mongo/query.c
@@ -169,7 +175,8 @@ target_link_libraries(
 
 get_target_property(ORM_CORE_LINK_CONTRACT turbo_orm LINK_LIBRARIES)
 foreach(ORM_FORBIDDEN_SQL_CORE_LINK IN ITEMS SQLite::SQLite3
-                                             PostgreSQL::PostgreSQL)
+                                             PostgreSQL::PostgreSQL
+                                             TidesDB::tidesdb)
   list(FIND ORM_CORE_LINK_CONTRACT "${ORM_FORBIDDEN_SQL_CORE_LINK}"
        ORM_FORBIDDEN_SQL_CORE_LINK_INDEX)
   if(NOT ORM_FORBIDDEN_SQL_CORE_LINK_INDEX EQUAL -1)
@@ -230,13 +237,52 @@ if(ORM_WITH_SQLITE)
   endif()
 endif()
 
+if(ORM_BUILD_TIDESDB_DRIVER)
+  add_library(orm_tidesdb_driver MODULE
+    src/dbs/tidesdb/plugin.c
+    src/driver/orm_driver_backend_bridge.c
+    src/dbs/tidesdb/backend.c
+    src/dbs/tidesdb/bridge.c
+    src/dbs/tidesdb/row.c
+    src/dbs/tidesdb/orm_tidesdb_cursor.c)
+  target_compile_features(orm_tidesdb_driver PRIVATE c_std_11)
+  target_compile_definitions(
+    orm_tidesdb_driver PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
+  target_include_directories(
+    orm_tidesdb_driver PRIVATE
+      ${ORM_INCLUDE_DIR}
+      ${ORM_ABI_SOURCE_DIR}
+      ${ORM_FLOW_SOURCE_DIR}
+      ${ORM_DRIVER_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/tidesdb)
+  target_link_libraries(
+    orm_tidesdb_driver PRIVATE
+      turbo_orm
+      TidesDB::tidesdb
+      Salts::PluginABI
+      Salts::Core
+      Salts::CSerde
+      Salts::CFlow
+      Salts::DataBind
+      Salts::CSTL)
+  set_target_properties(
+    orm_tidesdb_driver PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "turbodb_driver_tidesdb"
+      C_STANDARD_REQUIRED ON
+      C_VISIBILITY_PRESET hidden
+      WINDOWS_EXPORT_ALL_SYMBOLS OFF
+      FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(orm_tidesdb_driver PRIVATE
+      "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
+  endif()
+endif()
+
 if(ORM_WITH_REDIS)
   target_compile_definitions(turbo_orm PRIVATE ORM_WITH_REDIS)
   target_link_libraries(turbo_orm PRIVATE TurboDB::Redis)
 endif()
-
-target_compile_definitions(turbo_orm PRIVATE ORM_WITH_TIDESDB)
-target_link_libraries(turbo_orm PRIVATE TidesDB::tidesdb)
 
 if(ORM_WITH_MONGODB)
   target_compile_definitions(turbo_orm PRIVATE ORM_WITH_MONGO)
@@ -387,7 +433,6 @@ set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::DataBind)
 if(ORM_WITH_REDIS)
   list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS TurboDB::Redis)
 endif()
-list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS TidesDB::tidesdb)
 if(ORM_WITH_MONGODB)
   list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS mongo::mongoc_shared
                                               mongo::bson_shared)
@@ -538,6 +583,9 @@ endif()
 if(TARGET orm_postgresql_driver)
   orm_enable_strict_warnings(orm_postgresql_driver)
 endif()
+if(TARGET orm_tidesdb_driver)
+  orm_enable_strict_warnings(orm_tidesdb_driver)
+endif()
 
 orm_enable_strict_warnings(turbo_orm)
 if(ORM_WITH_PGSQL)
@@ -577,8 +625,6 @@ if(ORM_BUILD_TESTS)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_REDIS)
     target_link_libraries(orm_c_test_static PRIVATE TurboDB::Redis)
   endif()
-  target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_TIDESDB)
-  target_link_libraries(orm_c_test_static PRIVATE TidesDB::tidesdb)
   if(ORM_WITH_MONGODB)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_MONGO)
     target_link_libraries(orm_c_test_static PRIVATE mongo::mongoc_shared)
@@ -1154,7 +1200,9 @@ if(MSVC)
 endif()
 add_test(NAME orm_tidesdb_row COMMAND orm_tidesdb_row_test)
 
-add_executable(orm_tidesdb_flow_test tests/flow/orm_tidesdb_flow_test.c)
+add_executable(orm_tidesdb_flow_test
+               tests/flow/orm_tidesdb_flow_test.c
+               src/dbs/tidesdb/orm_tidesdb_cursor.c)
 target_compile_features(orm_tidesdb_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_tidesdb_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
@@ -1171,22 +1219,27 @@ if(MSVC)
 endif()
 add_test(NAME orm_tidesdb_flow COMMAND orm_tidesdb_flow_test)
 
-add_executable(orm_tidesdb_public_flow_test
-               tests/integration/tidesdb_public_flow_test.c)
-target_compile_features(orm_tidesdb_public_flow_test PRIVATE c_std_11)
-target_compile_definitions(orm_tidesdb_public_flow_test PRIVATE ORM_C_STATIC)
-target_include_directories(orm_tidesdb_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
-target_link_libraries(
-  orm_tidesdb_public_flow_test PRIVATE turbo_orm
-                                       Salts::CFlow Salts::TinyTest)
-set_target_properties(orm_tidesdb_public_flow_test
-                      PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
-orm_enable_strict_warnings(orm_tidesdb_public_flow_test)
-if(MSVC)
-  target_compile_options(orm_tidesdb_public_flow_test
-                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+if(ORM_BUILD_TIDESDB_DRIVER)
+  add_executable(orm_tidesdb_public_flow_test
+                 tests/integration/tidesdb_public_flow_test.c)
+  target_compile_features(orm_tidesdb_public_flow_test PRIVATE c_std_11)
+  target_compile_definitions(orm_tidesdb_public_flow_test PRIVATE ORM_C_STATIC)
+  target_include_directories(orm_tidesdb_public_flow_test PRIVATE ${ORM_INCLUDE_DIR})
+  target_link_libraries(
+    orm_tidesdb_public_flow_test PRIVATE turbo_orm
+                                         Salts::CFlow Salts::TinyTest)
+  add_dependencies(orm_tidesdb_public_flow_test orm_tidesdb_driver)
+  set_target_properties(orm_tidesdb_public_flow_test
+                        PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_tidesdb_public_flow_test)
+  if(MSVC)
+    target_compile_options(orm_tidesdb_public_flow_test
+                           PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
+  endif()
+  add_test(NAME orm_tidesdb_public_flow COMMAND orm_tidesdb_public_flow_test)
+  set_tests_properties(orm_tidesdb_public_flow PROPERTIES
+    ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
 endif()
-add_test(NAME orm_tidesdb_public_flow COMMAND orm_tidesdb_public_flow_test)
 
 if(ORM_WITH_SQLITE)
 add_executable(orm_sqlite_flow_test tests/flow/orm_sqlite_flow_test.c)
@@ -1388,21 +1441,23 @@ if(WIN32)
     )
     list(APPEND ORM_RUNTIME_TESTS orm_redis_query orm_redis_backend_contract)
   endif()
-  string(APPEND ORM_TEST_RUNTIME_PATH
-         ";PATH=path_list_prepend:$<TARGET_FILE_DIR:TidesDB::tidesdb>")
-  if(TARGET zstd::libzstd_shared)
+  if(ORM_BUILD_TIDESDB_DRIVER)
     string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:zstd::libzstd_shared>")
+           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:TidesDB::tidesdb>")
+    if(TARGET zstd::libzstd_shared)
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:$<TARGET_FILE_DIR:zstd::libzstd_shared>")
+    endif()
+    if(TARGET Snappy::snappy)
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:$<TARGET_FILE_DIR:Snappy::snappy>")
+    endif()
+    if(TARGET LZ4::lz4_shared)
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:$<TARGET_FILE_DIR:LZ4::lz4_shared>")
+    endif()
+    list(APPEND ORM_RUNTIME_TESTS orm_tidesdb_public_flow)
   endif()
-  if(TARGET Snappy::snappy)
-    string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:Snappy::snappy>")
-  endif()
-  if(TARGET LZ4::lz4_shared)
-    string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:LZ4::lz4_shared>")
-  endif()
-  list(APPEND ORM_RUNTIME_TESTS orm_tidesdb_public_flow)
   if(ORM_WITH_MONGODB)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::mongoc_shared>;PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::bson_shared>")
