@@ -107,12 +107,15 @@ static inline int orm_driver_storage_capabilities_valid(
     return 0;
   }
 
-  if ((caps & ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE) != 0u) {
-    if (storage->max_restore_chunk_bytes == 0u)
-      return 0;
-  } else if (storage->max_restore_chunk_bytes != 0u) {
+  /*
+   * STAGED_RESTORE may either ingest bounded restore chunks or publish a
+   * pre-materialized immutable generation. A zero restore-chunk limit is valid
+   * for the latter: the Driver accepts no restore payload bytes itself.
+   * Non-zero restore limits are only meaningful when STAGED_RESTORE is set.
+   */
+  if ((caps & ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE) == 0u &&
+      storage->max_restore_chunk_bytes != 0u)
     return 0;
-  }
 
   return 1;
 }
