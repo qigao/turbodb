@@ -49,6 +49,7 @@ static orm_runtime_t *orm_redis_test_runtime(orm_error_t *error) {
   orm_runtime_t *runtime = NULL;
   orm_driver_load_config_t load;
   orm_driver_info_t info;
+  orm_driver_storage_capabilities_v1 storage;
   const uint64_t required =
       ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_INSERT |
       ORM_DRIVER_CAP_UPDATE | ORM_DRIVER_CAP_DELETE |
@@ -91,6 +92,32 @@ static orm_runtime_t *orm_redis_test_runtime(orm_error_t *error) {
       info.execution_models !=
           (ORM_DRIVER_EXEC_CALLER_BLOCKING | ORM_DRIVER_EXEC_NATIVE_WAIT)) {
     fprintf(stderr, "Redis Driver capability contract mismatch: %s\n",
+            error->message);
+    (void)orm_runtime_close(runtime, error);
+    orm_runtime_release(runtime);
+    return NULL;
+  }
+
+  memset(&storage, 0, sizeof(storage));
+  if (orm_runtime_driver_storage_info(runtime, view("redis"), &storage, error) !=
+          ORM_STATUS_OK ||
+      !orm_driver_storage_capabilities_valid(&storage) ||
+      (storage.capabilities &
+       (ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA |
+        ORM_DRIVER_STORAGE_CAP_ORDERED_REPLAY_CLASSIFICATION |
+        ORM_DRIVER_STORAGE_CAP_AMBIGUOUS_COMMIT |
+        ORM_DRIVER_STORAGE_CAP_BOUNDED_BATCH |
+        ORM_DRIVER_STORAGE_CAP_RECONCILE)) !=
+       (ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA |
+        ORM_DRIVER_STORAGE_CAP_ORDERED_REPLAY_CLASSIFICATION |
+        ORM_DRIVER_STORAGE_CAP_AMBIGUOUS_COMMIT |
+        ORM_DRIVER_STORAGE_CAP_BOUNDED_BATCH |
+        ORM_DRIVER_STORAGE_CAP_RECONCILE) ||
+      storage.max_batch_operations == 0u ||
+      storage.max_batch_bytes != ORM_DRIVER_STORAGE_LIMIT_CONFIGURED ||
+      storage.max_progress_metadata_bytes !=
+          ORM_DRIVER_STORAGE_LIMIT_CONFIGURED) {
+    fprintf(stderr, "Redis storage capability contract mismatch: %s\n",
             error->message);
     (void)orm_runtime_close(runtime, error);
     orm_runtime_release(runtime);
