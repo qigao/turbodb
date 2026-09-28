@@ -114,7 +114,20 @@ endif()
 add_subdirectory(dbtools)
 include(FindTools)
 if(TURBODB_BUILD_REDIS)
+  # Redis remains a standalone shared client library and is also the native
+  # dependency of the runtime-loaded Redis TurboDb.Driver module. The Linux
+  # hardening preset marks generic SHARED objects -z nodlopen, which is
+  # incompatible with a DSO reached through dlopen(). Remove only that loader
+  # prohibition in the Redis directory scope; keep RELRO/NOW/noexecstack and
+  # restore the parent flags immediately afterwards.
+  set(TURBODB_REDIS_SAVED_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    string(REPLACE ",-z,nodlopen" ""
+           CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
+  endif()
   add_subdirectory(redis)
+  set(CMAKE_SHARED_LINKER_FLAGS "${TURBODB_REDIS_SAVED_SHARED_LINKER_FLAGS}")
+  unset(TURBODB_REDIS_SAVED_SHARED_LINKER_FLAGS)
 endif()
 
 # TidesDB is a private native dependency of the runtime-loaded
