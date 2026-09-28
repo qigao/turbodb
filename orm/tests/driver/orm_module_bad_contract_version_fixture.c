@@ -19,6 +19,14 @@ static orm_status_t ORM_DRIVER_CALL bad_contract_create(
   return ORM_STATUS_UNSUPPORTED;
 }
 
+static const orm_driver_storage_capabilities_v1 bad_contract_storage =
+    ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
+
+static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
+bad_contract_storage_capabilities(void *self) {
+  return self != NULL ? &bad_contract_storage : NULL;
+}
+
 static uint64_t ORM_DRIVER_CALL
 bad_contract_execution_models(void *self) {
   return self != NULL ? ORM_DRIVER_EXEC_CALLER_BLOCKING : UINT64_C(0);
@@ -28,7 +36,8 @@ static const TurboDb_Driver_vtable bad_contract_vtable = {
     .implementation = "bad-contract-version",
     .capabilities = 0u,
     .create = bad_contract_create,
-    .execution_models = bad_contract_execution_models};
+    .execution_models = bad_contract_execution_models,
+    .storage_capabilities = bad_contract_storage_capabilities};
 
 static unsigned bad_contract_state;
 static TurboDb_Driver bad_contract_driver = {

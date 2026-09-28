@@ -8,6 +8,8 @@ using driver_create_type = orm_status_t (ORM_DRIVER_CALL *)(
     orm_driver_connection_v1 *, orm_error_t *);
 using driver_execution_models_type =
     uint64_t (ORM_DRIVER_CALL *)(void *);
+using driver_storage_capabilities_type =
+    const orm_driver_storage_capabilities_v1 *(ORM_DRIVER_CALL *)(void *);
 
 static_assert(std::is_standard_layout<TurboDb_Driver>::value,
               "Driver interface must keep C layout");
@@ -22,7 +24,12 @@ static_assert(
         decltype(static_cast<TurboDb_Driver_vtable *>(nullptr)->execution_models),
         driver_execution_models_type>::value,
     "reflected execution-model dispatch must preserve the Driver C ABI");
-static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 2u,
+static_assert(
+    std::is_same<
+        decltype(static_cast<TurboDb_Driver_vtable *>(nullptr)->storage_capabilities),
+        driver_storage_capabilities_type>::value,
+    "reflected storage-capability dispatch must preserve the Driver C ABI");
+static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 3u,
               "Driver contract version drift");
 static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
               "TurboDB supports exactly Plugin ABI 2");
@@ -30,12 +37,14 @@ static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
 int main() {
   const cmeta_interface_desc *desc = TurboDb_Driver_interface();
   if (desc == nullptr || !cmeta_interface_desc_valid(desc) ||
-      desc->method_count != 2u)
+      desc->method_count != 3u)
     return 1;
   if (desc->methods[0].function == nullptr ||
       desc->methods[0].abi == nullptr ||
       desc->methods[1].function == nullptr ||
-      desc->methods[1].abi == nullptr)
+      desc->methods[1].abi == nullptr ||
+      desc->methods[2].function == nullptr ||
+      desc->methods[2].abi == nullptr)
     return 2;
   return 0;
 }

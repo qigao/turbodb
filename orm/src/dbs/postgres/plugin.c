@@ -13,6 +13,14 @@
 
 static int postgresql_driver_identity;
 
+static const orm_driver_storage_capabilities_v1 postgresql_storage_capabilities =
+    ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
+
+static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
+postgresql_driver_storage_capabilities(void *self) {
+  return self == &postgresql_driver_identity ? &postgresql_storage_capabilities : NULL;
+}
+
 static uint64_t ORM_DRIVER_CALL postgresql_driver_execution_models(
     void *self) {
   return self == &postgresql_driver_identity
@@ -35,7 +43,8 @@ static const TurboDb_Driver_vtable postgresql_driver_vtable = {
     .implementation = "postgresql",
     .capabilities = ORM_POSTGRESQL_DRIVER_CAPABILITIES,
     .create = postgresql_driver_create,
-    .execution_models = postgresql_driver_execution_models};
+    .execution_models = postgresql_driver_execution_models,
+    .storage_capabilities = postgresql_driver_storage_capabilities};
 
 static TurboDb_Driver postgresql_driver = {
     &postgresql_driver_identity, &postgresql_driver_vtable};

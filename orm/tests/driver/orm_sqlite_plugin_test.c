@@ -56,6 +56,7 @@ static orm_runtime_t *sqlite_plugin_runtime(orm_error_t *error) {
   orm_runtime_t *runtime = NULL;
   orm_driver_load_config_t load;
   orm_driver_info_t info;
+  orm_driver_storage_capabilities_v1 storage;
 
   orm_runtime_config_init(&config);
   check_equal(orm_runtime_create(&config, &runtime, error), ORM_STATUS_OK);
@@ -81,6 +82,18 @@ static orm_runtime_t *sqlite_plugin_runtime(orm_error_t *error) {
   check_true((info.capabilities & ORM_DRIVER_CAP_TRANSACTION) != 0u);
   check_true((info.capabilities & ORM_DRIVER_CAP_SAVEPOINT) != 0u);
   check_true((info.capabilities & ORM_DRIVER_CAP_INCREMENTAL_ROWS) != 0u);
+
+  memset(&storage, 0, sizeof(storage));
+  check_equal(orm_runtime_driver_storage_info(
+                  runtime, orm_view("sqlite"), &storage, error),
+              ORM_STATUS_OK);
+  check_true(orm_driver_storage_capabilities_valid(&storage));
+  check_equal(storage.capabilities,
+              (uint64_t)ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA);
+  check_equal(storage.max_progress_metadata_bytes,
+              (uint64_t)ORM_DRIVER_STORAGE_LIMIT_CONFIGURED);
+  check_equal(storage.max_checkpoint_chunk_bytes, (uint64_t)0u);
+  check_equal(storage.max_restore_chunk_bytes, (uint64_t)0u);
   return runtime;
 }
 

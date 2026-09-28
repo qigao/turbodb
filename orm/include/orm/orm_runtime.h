@@ -2,6 +2,7 @@
 #define ORM_RUNTIME_H
 
 #include <orm_driver_ops.h>
+#include <orm_driver_storage.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,6 +90,13 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
 ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
                         orm_driver_info_t *out_info, orm_error_t *error);
+
+/* Copies the provider-neutral local durability descriptor cached when the
+ * Driver Plugin was admitted. No backend fallback or connection is performed. */
+ORM_C_API orm_status_t ORM_C_CALL
+orm_runtime_driver_storage_info(
+    orm_runtime_t *runtime, orm_string_view_t id,
+    orm_driver_storage_capabilities_v1 *out_storage, orm_error_t *error);
 
 /* Creates one ORM connection from an already registered driver ID/alias.
  * This never loads modules implicitly. Success holds a runtime/module lease
