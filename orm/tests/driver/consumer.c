@@ -4,6 +4,9 @@
 
 #define REQUIRE(condition) do { if (!(condition)) return __LINE__; } while (0)
 
+_Static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
+               "TurboDB Driver SDK requires canonical Plugin ABI 2");
+
 static orm_status_t ORM_DRIVER_CALL consumer_create(
     void *self, const orm_config_t *config,
     const orm_driver_limits_v1 *limits,
@@ -36,7 +39,6 @@ int main(void) {
       .exports = &entry,
       .export_count = 1u};
 
-  REQUIRE(SALTS_PLUGIN_ABI_VERSION == 2u);
   REQUIRE(TurboDb_Driver_valid(&driver));
   REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_OK);
   REQUIRE(salts_plugin_export_require_interface(
