@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
 typedef struct mysql_session_cursor_limits_t {
+  uint64_t max_result_rows;
   size_t max_columns;
   size_t max_metadata_bytes;
   size_t max_row_bytes;
