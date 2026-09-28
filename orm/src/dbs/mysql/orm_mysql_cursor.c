@@ -1,6 +1,7 @@
 #include "orm_mysql_cursor.h"
 #include "orm_text_token.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -201,9 +202,12 @@ static orm_row_cursor_step orm_mysql_cursor_next(
   size_t row_bytes = 0u;
   size_t column;
 
-  if (state == NULL || out_row == NULL)
-    return orm_mysql_cursor_error(
-        state, ORM_STATUS_INVALID_ARGUMENT, "invalid MySQL cursor next");
+  if (state == NULL || out_row == NULL) {
+    step.kind = ORM_ROW_CURSOR_ERROR;
+    step.status = ORM_STATUS_INVALID_ARGUMENT;
+    step.message = "invalid MySQL cursor next";
+    return step;
+  }
   if (state->terminal) {
     step.kind = ORM_ROW_CURSOR_DONE;
     return step;
@@ -357,9 +361,11 @@ orm_status_t orm_mysql_cursor_from_statement(
   if (state->column_count != 0u) {
     state->metadata = mysql_stmt_result_metadata(state->statement);
     if (state->metadata == NULL) {
+      char diagnostic[ORM_C_ERROR_MESSAGE_CAPACITY];
+      (void)snprintf(diagnostic, sizeof(diagnostic), "%s",
+                     mysql_stmt_error(state->statement));
       orm_mysql_cursor_destroy(state);
-      orm_mysql_set_error(error, ORM_STATUS_DATASTORE_ERROR,
-                          mysql_stmt_error(*statement));
+      orm_mysql_set_error(error, ORM_STATUS_DATASTORE_ERROR, diagnostic);
       return ORM_STATUS_DATASTORE_ERROR;
     }
     state->fields = mysql_fetch_fields(state->metadata);
@@ -413,9 +419,11 @@ orm_status_t orm_mysql_cursor_from_statement(
       state->binds[column].error = &state->errors[column];
     }
     if (mysql_stmt_bind_result(state->statement, state->binds)) {
+      char diagnostic[ORM_C_ERROR_MESSAGE_CAPACITY];
+      (void)snprintf(diagnostic, sizeof(diagnostic), "%s",
+                     mysql_stmt_error(state->statement));
       orm_mysql_cursor_destroy(state);
-      orm_mysql_set_error(error, ORM_STATUS_DATASTORE_ERROR,
-                          mysql_stmt_error(*statement));
+      orm_mysql_set_error(error, ORM_STATUS_DATASTORE_ERROR, diagnostic);
       return ORM_STATUS_DATASTORE_ERROR;
     }
   }
