@@ -24,7 +24,7 @@ static void mysql_cursor_set_error(
                  status == ORM_STATUS_OK
                      ? ""
                      : (message != NULL ? message
-                                        : orm_status_message(status)));
+                                        : "MySQL cursor error"));
 }
 
 static int mysql_cursor_source_valid(const mysql_cursor_source_t *source) {
