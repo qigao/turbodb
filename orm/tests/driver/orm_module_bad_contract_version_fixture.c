@@ -12,9 +12,9 @@ static orm_status_t ORM_DRIVER_CALL bad_contract_create(
   if (out_connection != NULL)
     memset(out_connection, 0, sizeof(*out_connection));
   if (error != NULL) {
-    orm_error_init(error);
-    orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                  "bad contract fixture must never be invoked");
+    memset(error, 0, sizeof(*error));
+    error->struct_size = (uint32_t)sizeof(*error);
+    error->status = ORM_STATUS_UNSUPPORTED;
   }
   return ORM_STATUS_UNSUPPORTED;
 }
