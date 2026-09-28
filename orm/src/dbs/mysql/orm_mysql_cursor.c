@@ -83,8 +83,6 @@ static cserde_status orm_mysql_emit_value(
                  : orm_text_token_sint(data, size, out);
     case MYSQL_TYPE_FLOAT:
     case MYSQL_TYPE_DOUBLE:
-    case MYSQL_TYPE_DECIMAL:
-    case MYSQL_TYPE_NEWDECIMAL:
       return orm_text_token_float(data, size, 0, out);
     default:
       if (orm_mysql_binary_type(field->type)) {
