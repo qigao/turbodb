@@ -8,7 +8,7 @@ using driver_create_type = orm_status_t (ORM_DRIVER_CALL *)(
 
 static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
               "TurboDB Driver SDK requires canonical Plugin ABI 2");
-static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 1u,
+static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 2u,
               "TurboDb.Driver contract version drift");
 static_assert(std::is_standard_layout<TurboDb_Driver>::value,
               "Driver interface must keep C layout");
@@ -22,7 +22,7 @@ static_assert(
 int main() {
   const cmeta_interface_desc *desc = TurboDb_Driver_interface();
   return desc != nullptr && cmeta_interface_desc_valid(desc) &&
-                 desc->method_count == 1u
+                 desc->method_count == 2u
              ? 0
              : 1;
 }
