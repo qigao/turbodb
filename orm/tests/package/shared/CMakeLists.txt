@@ -3,24 +3,22 @@ project(OrmSharedPackageConsumer LANGUAGES C CXX)
 
 find_package(Orm CONFIG REQUIRED)
 
-foreach(required_variable IN ITEMS ORM_PACKAGE_EXPECT_SQLITE
-                                   ORM_PACKAGE_EXPECT_POSTGRESQL)
-  if(NOT DEFINED ${required_variable})
-    message(FATAL_ERROR "${required_variable} is required")
-  endif()
-endforeach()
+if(NOT DEFINED ORM_PACKAGE_EXPECT_LEGACY_POSTGRESQL)
+  message(FATAL_ERROR "ORM_PACKAGE_EXPECT_LEGACY_POSTGRESQL is required")
+endif()
 
-if(NOT DEFINED Orm_WITH_SQLITE OR NOT DEFINED Orm_WITH_POSTGRESQL)
-  message(FATAL_ERROR "Orm package does not export backend capabilities")
+if(NOT TARGET Orm::C OR NOT TARGET Orm::Cpp)
+  message(FATAL_ERROR "Orm package must export generic Orm::C and Orm::Cpp")
 endif()
-if(NOT "${Orm_WITH_SQLITE}" STREQUAL "${ORM_PACKAGE_EXPECT_SQLITE}")
+if(DEFINED Orm_WITH_SQLITE OR DEFINED Orm_WITH_POSTGRESQL)
   message(FATAL_ERROR
-          "Orm SQLite capability is ${Orm_WITH_SQLITE}; expected ${ORM_PACKAGE_EXPECT_SQLITE}")
+          "generic Orm package must not export build-time backend capability flags")
 endif()
-if(NOT "${Orm_WITH_POSTGRESQL}" STREQUAL
-   "${ORM_PACKAGE_EXPECT_POSTGRESQL}")
-  message(FATAL_ERROR
-          "Orm PostgreSQL capability is ${Orm_WITH_POSTGRESQL}; expected ${ORM_PACKAGE_EXPECT_POSTGRESQL}")
+if(ORM_PACKAGE_EXPECT_LEGACY_POSTGRESQL AND NOT TARGET Orm::PostgreSQL)
+  message(FATAL_ERROR "expected legacy Orm::PostgreSQL compatibility target")
+endif()
+if(NOT ORM_PACKAGE_EXPECT_LEGACY_POSTGRESQL AND TARGET Orm::PostgreSQL)
+  message(FATAL_ERROR "unexpected legacy Orm::PostgreSQL compatibility target")
 endif()
 
 add_executable(orm_shared_package_consumer main.c)

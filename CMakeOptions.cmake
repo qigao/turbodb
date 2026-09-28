@@ -34,15 +34,24 @@ option(TURBODB_BUILD_REDIS "Build the Redis client library" ON)
 set(TIDESDB_WITH_SNAPPY OFF CACHE BOOL "build with Snappy compression support")
 set(TIDESDB_WITH_LZ4 OFF CACHE BOOL "build with LZ4 compression support")
 
-# ORM core stays database-independent. SQLite/PostgreSQL and the runtime-loaded
-# Redis Driver are opt-in build products; native dependencies remain private to
-# their components/modules.
-set(ORM_WITH_SQLITE_DEFAULT ON)
-set(ORM_WITH_PGSQL_DEFAULT ON)
+# ORM core stays database-independent. Database Drivers are build products;
+# native dependencies remain private to their modules. The direct PostgreSQL
+# connector is a separately named 2.x compatibility component.
+set(ORM_BUILD_SQLITE_DRIVER_DEFAULT ON)
+set(ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT ON)
+set(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT ON)
 set(ORM_BUILD_REDIS_DRIVER_DEFAULT OFF)
 set(ORM_BUILD_MONGODB_DRIVER_DEFAULT OFF)
 
-option(ORM_WITH_PGSQL "Enable PostgreSQL backend for ORM" ${ORM_WITH_PGSQL_DEFAULT})
+option(ORM_BUILD_SQLITE_DRIVER
+       "Build the independent SQLite TurboDb.Driver module"
+       ${ORM_BUILD_SQLITE_DRIVER_DEFAULT})
+option(ORM_BUILD_POSTGRESQL_DRIVER
+       "Build the independent PostgreSQL TurboDb.Driver module"
+       ${ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT})
+option(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT
+       "Build the legacy Orm::PostgreSQL direct connector compatibility component"
+       ${ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT})
 option(ORM_BUILD_REDIS_DRIVER
        "Build the independent Redis TurboDb.Driver module"
        ${ORM_BUILD_REDIS_DRIVER_DEFAULT})

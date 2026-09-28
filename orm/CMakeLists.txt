@@ -21,14 +21,16 @@ option(ORM_WARNINGS_AS_ERRORS "Treat ORM compiler warnings as errors"
        ${ORM_BUILD_TESTS_DEFAULT})
 
 # Keep the installed Orm::C contract identical whether ORM is built on its own
-# or as a TurboDB subdirectory. The public target is always shared so backend
-# development packages never enter the consumer's CMake package boundary.
-if(NOT DEFINED ORM_WITH_SQLITE_DEFAULT)
-  set(ORM_WITH_SQLITE_DEFAULT ON)
+# or as a TurboDB subdirectory. Database Drivers are deployment/build products;
+# they are not capabilities of the generic core package.
+if(NOT DEFINED ORM_BUILD_SQLITE_DRIVER_DEFAULT)
+  set(ORM_BUILD_SQLITE_DRIVER_DEFAULT ON)
 endif()
-
-if(NOT DEFINED ORM_WITH_PGSQL_DEFAULT)
-  set(ORM_WITH_PGSQL_DEFAULT ON)
+if(NOT DEFINED ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT)
+  set(ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT ON)
+endif()
+if(NOT DEFINED ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT)
+  set(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT ON)
 endif()
 if(NOT DEFINED ORM_BUILD_REDIS_DRIVER_DEFAULT)
   set(ORM_BUILD_REDIS_DRIVER_DEFAULT OFF)
@@ -36,8 +38,15 @@ endif()
 if(NOT DEFINED ORM_BUILD_MONGODB_DRIVER_DEFAULT)
   set(ORM_BUILD_MONGODB_DRIVER_DEFAULT OFF)
 endif()
-option(ORM_WITH_SQLITE "Enable SQLite backend" ${ORM_WITH_SQLITE_DEFAULT})
-option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
+option(ORM_BUILD_SQLITE_DRIVER
+       "Build the independent SQLite TurboDb.Driver module"
+       ${ORM_BUILD_SQLITE_DRIVER_DEFAULT})
+option(ORM_BUILD_POSTGRESQL_DRIVER
+       "Build the independent PostgreSQL TurboDb.Driver module"
+       ${ORM_BUILD_POSTGRESQL_DRIVER_DEFAULT})
+option(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT
+       "Build the legacy Orm::PostgreSQL direct connector compatibility component"
+       ${ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT_DEFAULT})
 option(ORM_BUILD_REDIS_DRIVER
        "Build the independent Redis TurboDb.Driver module"
        ${ORM_BUILD_REDIS_DRIVER_DEFAULT})
@@ -72,8 +81,9 @@ if(ORM_POSTGRES_LIVE_TESTS)
   if(NOT ORM_BUILD_TESTS)
     message(FATAL_ERROR "ORM_POSTGRES_LIVE_TESTS requires ORM_BUILD_TESTS=ON")
   endif()
-  if(NOT ORM_WITH_PGSQL)
-    message(FATAL_ERROR "ORM_POSTGRES_LIVE_TESTS requires ORM_WITH_PGSQL=ON")
+  if(NOT ORM_BUILD_POSTGRESQL_DRIVER)
+    message(FATAL_ERROR
+            "ORM_POSTGRES_LIVE_TESTS requires ORM_BUILD_POSTGRESQL_DRIVER=ON")
   endif()
   if(NOT DEFINED ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO} OR
      "$ENV{TURBODB_ORM_PGSQL_TEST_CONNINFO}" STREQUAL "")
@@ -82,7 +92,8 @@ if(ORM_POSTGRES_LIVE_TESTS)
   endif()
 endif()
 
-if((ORM_BUILD_TESTS OR ORM_WITH_PGSQL) AND
+if((ORM_BUILD_TESTS OR ORM_BUILD_POSTGRESQL_DRIVER OR
+    ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT) AND
    NOT CMAKE_CXX_COMPILER_LOADED)
   enable_language(CXX)
 endif()
@@ -117,12 +128,12 @@ if(NOT TARGET Salts::DataBind)
           "The selected SaltsUtils 4.1.0 installation must export Salts::DataBind")
 endif()
 
-# Find backend-specific dependencies based on enabled options
-if(ORM_WITH_SQLITE)
+# Driver/component-native dependencies remain outside the generic core.
+if(ORM_BUILD_SQLITE_DRIVER)
   find_package(SQLite3 REQUIRED)
 endif()
 
-if(ORM_WITH_PGSQL)
+if(ORM_BUILD_POSTGRESQL_DRIVER OR ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   find_package(PostgreSQL REQUIRED)
 endif()
 
@@ -211,7 +222,7 @@ foreach(ORM_FORBIDDEN_CORE_LINK IN ITEMS SQLite::SQLite3
   endif()
 endforeach()
 
-if(ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
   add_library(orm_sqlite_driver MODULE
     src/dbs/sqlite/plugin.c
     src/driver/orm_driver_backend_bridge.c
@@ -219,7 +230,7 @@ if(ORM_WITH_SQLITE)
     src/dbs/sqlite/orm_sqlite_cursor.c
     src/dbs/sql/orm_sql_render.c)
   target_compile_features(orm_sqlite_driver PRIVATE c_std_11)
-  target_compile_definitions(orm_sqlite_driver PRIVATE ORM_C_STATIC ORM_WITH_SQLITE)
+  target_compile_definitions(orm_sqlite_driver PRIVATE ORM_C_STATIC)
   target_include_directories(
     orm_sqlite_driver PRIVATE
       ${ORM_INCLUDE_DIR}
@@ -429,24 +440,25 @@ cmake_config_target(
   "orm"
   NO_VERSION)
 
-if(ORM_WITH_PGSQL)
-  set(ORM_POSTGRESQL_SOURCES
-      src/dbs/postgres/component.c
-      src/dbs/postgres/backend.c
-      src/dbs/postgres/orm_postgres_libpq.c
-      src/dbs/postgres/orm_postgres_cursor.c
-      src/flow/orm_text_token.c)
-  foreach(ORM_POSTGRESQL_SOURCE IN LISTS ORM_POSTGRESQL_SOURCES)
-    if(NOT ORM_POSTGRESQL_SOURCE MATCHES "\\.c$")
-      message(FATAL_ERROR
-              "orm_postgresql accepts only C implementation sources: ${ORM_POSTGRESQL_SOURCE}")
-    endif()
-  endforeach()
-  add_library(orm_postgresql SHARED ${ORM_POSTGRESQL_SOURCES})
+set(ORM_POSTGRESQL_BACKEND_SOURCES
+    src/dbs/postgres/backend.c
+    src/dbs/postgres/orm_postgres_libpq.c
+    src/dbs/postgres/orm_postgres_cursor.c
+    src/flow/orm_text_token.c)
+foreach(ORM_POSTGRESQL_SOURCE IN LISTS ORM_POSTGRESQL_BACKEND_SOURCES)
+  if(NOT ORM_POSTGRESQL_SOURCE MATCHES "\\.c$")
+    message(FATAL_ERROR
+            "PostgreSQL Driver/component accepts only C implementation sources: ${ORM_POSTGRESQL_SOURCE}")
+  endif()
+endforeach()
+
+if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
+  add_library(orm_postgresql SHARED
+    src/dbs/postgres/component.c
+    ${ORM_POSTGRESQL_BACKEND_SOURCES})
   target_compile_features(orm_postgresql PRIVATE c_std_11)
-  target_compile_definitions(orm_postgresql PRIVATE ORM_WITH_PGSQL
-                                                     ORM_POSTGRESQL_BUILD
-                                                     ORM_NATIVE_OWNER_CANDIDATE)
+  target_compile_definitions(orm_postgresql PRIVATE
+    ORM_POSTGRESQL_BUILD ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_postgresql
     PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -458,9 +470,6 @@ if(ORM_WITH_PGSQL)
     PUBLIC turbo_orm
     PRIVATE PostgreSQL::PostgreSQL Salts::CSerde
             Salts::CFlow Salts::CSTL)
-  # Some libpq packages close static BoringSSL archives through the C++
-  # runtime. This changes only final linkage; every implementation source in
-  # the component remains C11.
   set_target_properties(
     orm_postgresql
     PROPERTIES C_STANDARD_REQUIRED ON
@@ -475,23 +484,21 @@ if(ORM_WITH_PGSQL)
     EXPORT_SET
     OrmTargets
     FOLDER
-    "orm"
+    "orm/legacy"
     RUNTIME_DEPENDENCY_SET
     OrmPostgreSQLRuntimeDependencies
     NO_VERSION)
+endif()
 
+if(ORM_BUILD_POSTGRESQL_DRIVER)
   add_library(orm_postgresql_driver MODULE
     src/dbs/postgres/plugin.c
     src/driver/orm_driver_backend_bridge.c
-    src/dbs/postgres/backend.c
-    src/dbs/postgres/orm_postgres_libpq.c
-    src/dbs/postgres/orm_postgres_cursor.c
-    src/dbs/sql/orm_sql_render.c
-    src/flow/orm_text_token.c)
+    ${ORM_POSTGRESQL_BACKEND_SOURCES}
+    src/dbs/sql/orm_sql_render.c)
   target_compile_features(orm_postgresql_driver PRIVATE c_std_11)
   target_compile_definitions(
-    orm_postgresql_driver PRIVATE ORM_C_STATIC ORM_WITH_PGSQL
-                                  ORM_NATIVE_OWNER_CANDIDATE)
+    orm_postgresql_driver PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_postgresql_driver PRIVATE
       ${ORM_INCLUDE_DIR}
@@ -519,9 +526,8 @@ if(ORM_WITH_PGSQL)
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # libpq/BoringSSL may arrive as static archives. Do not publish their
-    # symbols as part of the TurboDB Driver MODULE surface.
-    target_link_options(orm_postgresql_driver PRIVATE "LINKER:--exclude-libs,ALL")
+    target_link_options(orm_postgresql_driver PRIVATE
+      "LINKER:--exclude-libs,ALL")
   endif()
   get_target_property(ORM_POSTGRESQL_DRIVER_LINK_CONTRACT
                       orm_postgresql_driver LINK_LIBRARIES)
@@ -621,7 +627,7 @@ else()
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
-if(ORM_WITH_PGSQL)
+if(TARGET orm_postgresql)
   set(ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES)
   orm_collect_runtime_search_directories(
     PostgreSQL::PostgreSQL ORM_POSTGRESQL_RUNTIME_SEARCH_DIRECTORIES)
@@ -691,14 +697,14 @@ if(TARGET orm_mongodb_driver)
 endif()
 
 orm_enable_strict_warnings(turbo_orm)
-if(ORM_WITH_PGSQL)
+if(TARGET orm_postgresql)
   orm_enable_strict_warnings(orm_postgresql)
 endif()
 
 set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
 if(ORM_BUILD_TESTS)
   set(ORM_TEST_STATIC_SOURCES ${ORM_C_SOURCES} ${ORM_FLOW_SOURCES})
-  if(ORM_WITH_SQLITE)
+  if(ORM_BUILD_SQLITE_DRIVER)
     list(APPEND ORM_TEST_STATIC_SOURCES
          src/dbs/sqlite/backend.c
          src/dbs/sqlite/orm_sqlite_cursor.c)
@@ -720,8 +726,8 @@ if(ORM_BUILD_TESTS)
     orm_c_test_static PUBLIC Salts::Core
     PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin Salts::CFlow
             Salts::CSTL Salts::Platform ${CMAKE_DL_LIBS})
-  if(ORM_WITH_SQLITE)
-    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
+  if(ORM_BUILD_SQLITE_DRIVER)
+    target_compile_definitions(orm_c_test_static PRIVATE ORM_LEGACY_SQLITE_FACTORY)
     target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
   endif()
   set_target_properties(orm_c_test_static PROPERTIES C_STANDARD_REQUIRED ON)
@@ -747,8 +753,7 @@ add_test(
     "-DORM_PACKAGE_TEST_SALTS_ROOT=$ENV{SALTS_ROOT}"
     "-DORM_PACKAGE_TEST_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
     "-DORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR=${ORM_PACKAGE_TEST_EXPECTED_RUNTIME_DIR}"
-    "-DORM_PACKAGE_TEST_EXPECT_SQLITE=${ORM_WITH_SQLITE}"
-    "-DORM_PACKAGE_TEST_EXPECT_POSTGRESQL=${ORM_WITH_PGSQL}"
+    "-DORM_PACKAGE_TEST_EXPECT_LEGACY_POSTGRESQL=${ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT}"
     "-DORM_PACKAGE_TEST_CONFIG=$<CONFIG>"
     "-DORM_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}"
     "-DORM_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
@@ -762,14 +767,14 @@ function(orm_link_internal_test TARGET_NAME)
   set_property(TARGET ${TARGET_NAME} PROPERTY LINKER_LANGUAGE CXX)
 endfunction()
 
-if(ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
   list(APPEND ORM_TEST_PRIVATE_LIBS SQLite::SQLite3 Salts::CSerde
                                     Salts::CFlow)
 endif()
 list(APPEND ORM_TEST_PRIVATE_LIBS TidesDB::tidesdb)
 set(ORM_TEST_DEFINITIONS ORM_C_STATIC)
-if(ORM_WITH_SQLITE)
-  list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
+  list(APPEND ORM_TEST_DEFINITIONS ORM_LEGACY_SQLITE_FACTORY)
 endif()
 list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_TIDESDB)
 
@@ -826,7 +831,7 @@ if(ORM_MONGODB_LIVE_TESTS)
 endif()
 endif()
 
-if(ORM_WITH_PGSQL)
+if(ORM_BUILD_POSTGRESQL_DRIVER OR ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
 add_executable(
   orm_postgres_libpq_test tests/flow/orm_postgres_libpq_test.c
                            tests/abi/c_api_fake_libpq.cpp
@@ -850,7 +855,9 @@ if(MSVC)
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
 add_test(NAME orm_postgres_libpq COMMAND orm_postgres_libpq_test)
+endif()
 
+if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
 add_executable(orm_postgresql_component_test
                tests/flow/orm_postgresql_component_test.c)
 target_compile_features(orm_postgresql_component_test PRIVATE c_std_11)
@@ -864,7 +871,9 @@ if(MSVC)
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
 add_test(NAME orm_postgresql_component COMMAND orm_postgresql_component_test)
+endif()
 
+if(ORM_BUILD_POSTGRESQL_DRIVER)
 add_executable(orm_postgresql_plugin_test
   tests/driver/orm_postgresql_plugin_test.c)
 target_compile_features(orm_postgresql_plugin_test PRIVATE c_std_11)
@@ -884,8 +893,9 @@ endif()
 add_test(NAME orm_postgresql_plugin COMMAND orm_postgresql_plugin_test)
 set_tests_properties(orm_postgresql_plugin PROPERTIES
   ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
+endif()
 
-if(ORM_WITH_SQLITE AND ORM_WITH_PGSQL)
+if(ORM_BUILD_SQLITE_DRIVER AND ORM_BUILD_POSTGRESQL_DRIVER)
   add_executable(orm_sql_plugin_matrix_test
     tests/driver/orm_sql_plugin_matrix.c)
   target_compile_features(orm_sql_plugin_matrix_test PRIVATE c_std_11)
@@ -942,8 +952,6 @@ if(ORM_POSTGRES_LIVE_TESTS)
     ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
 endif()
 
-endif()
-
 add_executable(orm_row_publisher_test tests/flow/orm_row_publisher_test.c)
 target_compile_features(orm_row_publisher_test PRIVATE c_std_11)
 target_compile_definitions(orm_row_publisher_test PRIVATE ORM_C_STATIC)
@@ -980,7 +988,7 @@ add_executable(orm_backend_profile_test tests/abi/backend_profile_test.c)
 target_compile_features(orm_backend_profile_test PRIVATE c_std_11)
 target_compile_definitions(
   orm_backend_profile_test
-  PRIVATE ORM_C_STATIC ORM_EXPECT_SQLITE=$<BOOL:${ORM_WITH_SQLITE}>)
+  PRIVATE ORM_C_STATIC ORM_EXPECT_SQLITE=$<BOOL:${ORM_BUILD_SQLITE_DRIVER}>)
 orm_link_internal_test(orm_backend_profile_test Salts::TinyTest)
 set_target_properties(orm_backend_profile_test
                       PROPERTIES FOLDER "orm/tests")
@@ -1360,7 +1368,7 @@ if(ORM_BUILD_TIDESDB_DRIVER)
     ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
 endif()
 
-if(ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
 add_executable(orm_sqlite_flow_test tests/flow/orm_sqlite_flow_test.c)
 target_compile_features(orm_sqlite_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_sqlite_flow_test PRIVATE ORM_C_STATIC)
@@ -1544,7 +1552,7 @@ if(WIN32)
                         orm_row_publisher orm_pure_c_build orm_sql_render
                         orm_driver_plan_view orm_driver_owner_bridge
                         orm_postgres_flow orm_backend_profile)
-  if(ORM_WITH_SQLITE)
+  if(ORM_BUILD_SQLITE_DRIVER)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
     if(SQLite3_LIBRARY)
@@ -1562,11 +1570,11 @@ if(WIN32)
                                   orm_sqlite_provider_atomicity orm_cpp_flow
                                   orm_public_ownership orm_public_ownership_cpp)
   endif()
-  if(ORM_WITH_PGSQL)
+  if(ORM_BUILD_POSTGRESQL_DRIVER OR ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:PostgreSQL::PostgreSQL>")
     list(APPEND ORM_RUNTIME_TESTS orm_postgres_libpq)
-    if(ORM_WITH_SQLITE)
+    if(ORM_BUILD_SQLITE_DRIVER)
       list(APPEND ORM_RUNTIME_TESTS
            orm_sql_plugin_matrix_sqlite
            orm_sql_plugin_matrix_postgresql
@@ -1676,7 +1684,7 @@ endif()
 cmake_install_headers(
   FILES include/orm/orm.h include/orm/orm.hpp
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
-if(ORM_WITH_PGSQL)
+if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   cmake_install_headers(
     FILES include/orm/orm_postgresql.h include/orm/orm_postgresql.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)

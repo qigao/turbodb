@@ -657,7 +657,7 @@ static orm_status_t orm_backend_create(const orm_config_t *config,
   (void)config;
   (void)limits;
   memset(backend, 0, sizeof(*backend));
-#if defined(ORM_WITH_SQLITE)
+#if defined(ORM_LEGACY_SQLITE_FACTORY)
   if (orm_view_equal_cstr(config->driver, "sqlite"))
     status = orm_sqlite_backend_create(config, limits, backend, error);
   else

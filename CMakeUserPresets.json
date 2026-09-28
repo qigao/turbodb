@@ -75,8 +75,9 @@
             "name": "win-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "ORM_WITH_SQLITE": "ON",
-                "ORM_WITH_PGSQL": "ON",
+                "ORM_BUILD_SQLITE_DRIVER": "ON",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
@@ -91,8 +92,9 @@
         {
             "name": "win-release-user",
             "cacheVariables": {
-                "ORM_WITH_SQLITE": "ON",
-                "ORM_WITH_PGSQL": "ON",
+                "ORM_BUILD_SQLITE_DRIVER": "ON",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
@@ -110,8 +112,9 @@
             "inherits": "win-release-user",
             "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG",
             "cacheVariables": {
-                "ORM_WITH_SQLITE": "OFF",
-                "ORM_WITH_PGSQL": "ON",
+                "ORM_BUILD_SQLITE_DRIVER": "OFF",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "OFF",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "OFF",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
@@ -129,7 +132,8 @@
             "inherits": "win-release-dbtools-pg-user",
             "binaryDir": "${sourceDir}/build/Msvc-Release-PG",
             "cacheVariables": {
-                "ORM_WITH_PGSQL": "ON",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
                 "ORM_POSTGRES_LIVE_TESTS": "ON",
                 "TURBODB_DBTOOLS_PG_LIVE_TESTS": "ON"
             },
@@ -141,8 +145,9 @@
             "name": "linux-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "ORM_WITH_SQLITE": "ON",
-                "ORM_WITH_PGSQL": "ON",
+                "ORM_BUILD_SQLITE_DRIVER": "ON",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
@@ -157,8 +162,9 @@
         {
             "name": "linux-release-user",
             "cacheVariables": {
-                "ORM_WITH_SQLITE": "ON",
-                "ORM_WITH_PGSQL": "ON",
+                "ORM_BUILD_SQLITE_DRIVER": "ON",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
@@ -176,8 +182,9 @@
             "inherits": "linux-release-user",
             "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
             "cacheVariables": {
-                "ORM_WITH_SQLITE": "OFF",
-                "ORM_WITH_PGSQL": "ON",
+                "ORM_BUILD_SQLITE_DRIVER": "OFF",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
                 "ORM_POSTGRES_LIVE_TESTS": "ON",
                 "TURBODB_DBTOOLS_WITH_SQLITE": "OFF",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
@@ -198,7 +205,8 @@
             },
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/debug",
-                "ORM_WITH_PGSQL": "OFF",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "OFF",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
                 "TURBODB_BUILD_DBTOOLS": "OFF",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "OFF"
             }
@@ -211,7 +219,8 @@
             },
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release",
-                "ORM_WITH_PGSQL": "OFF",
+                "ORM_BUILD_POSTGRESQL_DRIVER": "OFF",
+                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
                 "TURBODB_BUILD_DBTOOLS": "OFF",
                 "TURBODB_DBTOOLS_WITH_PGSQL": "OFF"
             }
