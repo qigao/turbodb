@@ -45,6 +45,7 @@ typedef enum mysql_session_action_t {
   MYSQL_SESSION_ACTION_PREPARED_PROBE,
   MYSQL_SESSION_ACTION_PREPARED_CURSOR,
   MYSQL_SESSION_ACTION_PREPARED_COMMAND,
+  MYSQL_SESSION_ACTION_TEXT_QUERY,
   MYSQL_SESSION_ACTION_TRANSACTION,
   MYSQL_SESSION_ACTION_TRANSACTION_CURSOR
 } mysql_session_action_t;
@@ -59,6 +60,7 @@ typedef enum mysql_session_phase_t {
   MYSQL_PHASE_WAIT_AUTH_SEND,
   MYSQL_PHASE_WAIT_PING_SEND,
   MYSQL_PHASE_WAIT_PING_REPLY,
+  MYSQL_PHASE_WAIT_QUERY_SEND,
   MYSQL_PHASE_WAIT_CONTROL_SEND,
   MYSQL_PHASE_WAIT_CONTROL_REPLY,
   MYSQL_PHASE_TRANSACTION_READY,
@@ -84,6 +86,7 @@ typedef enum mysql_session_send_kind_t {
   MYSQL_SEND_HANDSHAKE_RESPONSE,
   MYSQL_SEND_AUTH_RESPONSE,
   MYSQL_SEND_PING,
+  MYSQL_SEND_QUERY,
   MYSQL_SEND_CONTROL,
   MYSQL_SEND_PREPARE,
   MYSQL_SEND_EXECUTE,
@@ -107,6 +110,7 @@ typedef struct mysql_session_t {
   mysql_session_error_t *error;
   mysql_session_action_t action;
   mysql_session_prepared_probe_t *probe;
+  mysql_session_text_probe_t *text_probe;
   mysql_session_command_result_t *command_result;
   const uint8_t *prepared_sql;
   size_t prepared_sql_size;
@@ -478,6 +482,38 @@ static void mysql_session_send_ping(mysql_session_t *session) {
       session, UINT8_C(0), &command, 1u, MYSQL_SEND_PING);
 }
 
+static void mysql_session_send_text_query(mysql_session_t *session) {
+  uint8_t payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  size_t payload_size = 0u;
+  mysql_wire_status_t status;
+
+  if (session == NULL || session->control_sql == NULL ||
+      session->control_sql_size == 0u) {
+    mysql_session_set_error(
+        session, MYSQL_SESSION_INVALID,
+        "text-query", "invalid COM_QUERY text probe");
+    return;
+  }
+
+  status = mysql_wire_build_query(
+      session->control_sql, session->control_sql_size,
+      payload, sizeof(payload), &payload_size);
+  if (status != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(
+        session,
+        status == MYSQL_WIRE_STATUS_LIMIT
+            ? MYSQL_SESSION_INVALID
+            : MYSQL_SESSION_PROTOCOL,
+        "text-query", "failed to encode COM_QUERY");
+    return;
+  }
+
+  mysql_wire_packet_stream_reset(&session->stream, UINT8_C(1));
+  session->phase = MYSQL_PHASE_WAIT_QUERY_SEND;
+  (void)mysql_session_send_packet(
+      session, UINT8_C(0), payload, payload_size, MYSQL_SEND_QUERY);
+}
+
 static mysql_session_status_t mysql_session_isolation_sql(
     orm_isolation_t isolation,
     const uint8_t **out_sql, size_t *out_size) {
@@ -689,6 +725,10 @@ static void mysql_session_begin_action(mysql_session_t *session) {
       session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR ||
       session->action == MYSQL_SESSION_ACTION_PREPARED_COMMAND) {
     mysql_session_send_prepare(session);
+    return;
+  }
+  if (session->action == MYSQL_SESSION_ACTION_TEXT_QUERY) {
+    mysql_session_send_text_query(session);
     return;
   }
   if (session->action == MYSQL_SESSION_ACTION_TRANSACTION) {
@@ -1018,6 +1058,15 @@ static void mysql_session_handle_result_column_count(
                               "prepared cursor result column count mismatch");
       return;
     }
+  } else if (session->action == MYSQL_SESSION_ACTION_TEXT_QUERY) {
+    if (session->text_probe == NULL || count == 0u ||
+        count > MYSQL_SESSION_TEXT_PROBE_MAX_COLUMNS) {
+      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                              "text-result-columns",
+                              "COM_QUERY text result exceeds probe column bound");
+      return;
+    }
+    session->text_probe->column_count = (uint32_t)count;
   } else if (count != MYSQL_SESSION_PROBE_COLUMN_COUNT) {
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                             "result-columns",
@@ -1115,6 +1164,79 @@ static void mysql_session_handle_result_column_def(
 static void mysql_session_handle_result_row(
     mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
   mysql_binary_value_t values[MYSQL_SESSION_PROBE_COLUMN_COUNT];
+
+  if (session->action == MYSQL_SESSION_ACTION_TEXT_QUERY) {
+    mysql_wire_ok_packet_t ok;
+    mysql_wire_eof_packet_t eof;
+    mysql_wire_bytes_t fields[MYSQL_SESSION_TEXT_PROBE_MAX_COLUMNS];
+    mysql_wire_status_t status;
+    size_t i;
+
+    if (payload_size != 0u && payload[0] == UINT8_C(0xfe)) {
+      if ((session->client_capabilities &
+           MYSQL_WIRE_CLIENT_DEPRECATE_EOF) != 0u) {
+        status = mysql_wire_decode_ok_packet(
+            payload, payload_size, session->client_capabilities, &ok);
+      } else {
+        status = mysql_wire_decode_eof_packet(
+            payload, payload_size, session->client_capabilities, &eof);
+      }
+      if (status == MYSQL_WIRE_STATUS_OK) {
+        if (session->text_probe == NULL ||
+            session->text_probe->row_count != 1u) {
+          mysql_session_set_error(
+              session, MYSQL_SESSION_PROTOCOL,
+              "text-result-end",
+              "COM_QUERY text probe expected exactly one row");
+          return;
+        }
+        session->phase = MYSQL_PHASE_DONE;
+        return;
+      }
+    }
+
+    if (session->text_probe == NULL ||
+        session->text_probe->column_count == 0u ||
+        session->text_probe->row_count != 0u) {
+      mysql_session_set_error(
+          session, MYSQL_SESSION_PROTOCOL,
+          "text-result-row",
+          "unexpected COM_QUERY text row state");
+      return;
+    }
+
+    status = mysql_wire_decode_text_row(
+        payload, payload_size,
+        session->text_probe->column_count,
+        fields, MYSQL_SESSION_TEXT_PROBE_MAX_COLUMNS);
+    if (status != MYSQL_WIRE_STATUS_OK) {
+      mysql_session_set_error(
+          session, MYSQL_SESSION_PROTOCOL,
+          "text-result-row",
+          "invalid COM_QUERY text row");
+      return;
+    }
+
+    for (i = 0u; i < session->text_probe->column_count; ++i) {
+      mysql_session_text_probe_field_t *field =
+          &session->text_probe->columns[i];
+      field->is_null = fields[i].is_null ? 1u : 0u;
+      field->size = fields[i].length;
+      if (field->size > sizeof(field->data)) {
+        mysql_session_set_error(
+            session, MYSQL_SESSION_PROTOCOL,
+            "text-result-row",
+            "COM_QUERY text field exceeds fixed probe bound");
+        return;
+      }
+      if (!fields[i].is_null && field->size != 0u)
+        memcpy(field->data, fields[i].data, field->size);
+    }
+    session->text_probe->row_count = 1u;
+    session->result_row_count = 1u;
+    session->phase = MYSQL_PHASE_WAIT_RESULT_ROW;
+    return;
+  }
 
   if (payload_size != 0u && payload[0] == UINT8_C(0xfe) &&
       payload_size >= 7u) {
@@ -1360,6 +1482,10 @@ static void mysql_session_on_send(
       break;
     case MYSQL_SEND_PING:
       session->phase = MYSQL_PHASE_WAIT_PING_REPLY;
+      (void)mysql_session_request_receive(session);
+      break;
+    case MYSQL_SEND_QUERY:
+      session->phase = MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT;
       (void)mysql_session_request_receive(session);
       break;
     case MYSQL_SEND_CONTROL:
@@ -2006,6 +2132,49 @@ mysql_session_status_t mysql_session_connect_and_ping(
     const mysql_session_config_t *config, mysql_session_error_t *error) {
   return mysql_session_run(
       config, MYSQL_SESSION_ACTION_PING, NULL, error);
+}
+
+mysql_session_status_t mysql_session_text_query_probe(
+    const mysql_session_config_t *config,
+    const uint8_t *sql, size_t sql_size,
+    mysql_session_text_probe_t *out,
+    mysql_session_error_t *error) {
+  mysql_session_t session;
+  mysql_session_status_t status;
+
+  if (out != NULL)
+    memset(out, 0, sizeof(*out));
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  if (!mysql_session_config_valid(config) ||
+      sql == NULL || sql_size == 0u ||
+      sql_size + 1u > MYSQL_SESSION_CONTROL_CAPACITY ||
+      out == NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "text-query-config");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "invalid COM_QUERY text probe request");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  status = mysql_session_start(
+      &session, config, MYSQL_SESSION_ACTION_TEXT_QUERY,
+      NULL, error, MYSQL_SESSION_CONTROL_CAPACITY,
+      MYSQL_SESSION_CONTROL_CAPACITY);
+  if (status != MYSQL_SESSION_OK)
+    return status;
+
+  session.text_probe = out;
+  session.control_sql = sql;
+  session.control_sql_size = sql_size;
+  status = mysql_session_progress_until(
+      &session, MYSQL_PHASE_DONE);
+  mysql_session_shutdown(
+      &session, session.phase == MYSQL_PHASE_DONE);
+  return status;
 }
 
 mysql_session_status_t mysql_session_prepared_probe(
