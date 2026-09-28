@@ -35,6 +35,9 @@ mysql_wire_status_t mysql_parameter_lower(
     uint32_t *bind_order, size_t bind_order_capacity,
     mysql_parameter_lower_result_t *result);
 
+bool mysql_sql_reject_managed_transaction(
+    const uint8_t *sql, size_t sql_size);
+
 #ifdef __cplusplus
 }
 #endif
