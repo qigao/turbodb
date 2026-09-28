@@ -222,6 +222,12 @@ if(ORM_WITH_SQLITE)
       C_VISIBILITY_PRESET hidden
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Keep statically linked SQLite/Salts archive symbols private to the
+    # Driver MODULE. salts_plugin_query is defined by the MODULE object itself
+    # and remains the only intentional generic loader entry.
+    target_link_options(orm_sqlite_driver PRIVATE "LINKER:--exclude-libs,ALL")
+  endif()
 endif()
 
 if(ORM_WITH_REDIS)
@@ -362,6 +368,11 @@ if(ORM_WITH_PGSQL)
       C_VISIBILITY_PRESET hidden
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # libpq/BoringSSL may arrive as static archives. Do not publish their
+    # symbols as part of the TurboDB Driver MODULE surface.
+    target_link_options(orm_postgresql_driver PRIVATE "LINKER:--exclude-libs,ALL")
+  endif()
   get_target_property(ORM_POSTGRESQL_DRIVER_LINK_CONTRACT
                       orm_postgresql_driver LINK_LIBRARIES)
   list(FIND ORM_POSTGRESQL_DRIVER_LINK_CONTRACT "PostgreSQL::PostgreSQL"
