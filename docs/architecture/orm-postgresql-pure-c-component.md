@@ -1,5 +1,19 @@
 # Pure-C PostgreSQL Component and Composite-Key Contract
 
+## 2026-09-28 runtime-Driver cutover
+
+This document records the original pure-C direct PostgreSQL component. The
+canonical architecture is now the runtime-loaded
+`turbodb_driver_postgresql` module published as the reflected
+`TurboDb.Driver` Interface through Salts 1.8.0 Plugin ABI 2.
+
+`Orm::PostgreSQL` / `orm_postgresql_connect()` remain only as a 2.1.x source
+compatibility component controlled by
+`ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT`. New code uses
+`ORM_BUILD_POSTGRESQL_DRIVER` plus `orm_runtime_load_driver()` /
+`orm_runtime_connect()`. The direct connector is scheduled for removal at
+the 3.0 connection-API cutover.
+
 ## 背景
 
 当前 ORM 核心已经迁移为 C11，并通过 CFlow Publisher 暴露有界 reactive row stream。历史分支 `feat/orm-pg-control` 仍然修改 `orm_c.cpp`、`backend.cpp` 和已经删除的 C++ schema generator；将它整体合入当前主线会重新引入生产 C++ 实现，并产生多处 modify/delete 冲突。
@@ -61,8 +75,8 @@ C++ 只提供 header wrapper。`orm::connection` 增加接收 C connector functi
 
 ## 构建与依赖
 
-- `ORM_WITH_PGSQL=OFF`：不调用 `find_package(PostgreSQL)`，不构建 `Orm::PostgreSQL`。
-- `ORM_WITH_PGSQL=ON`：构建纯 C `orm_postgresql` target 和 `Orm::PostgreSQL` alias；`Orm::C` 本身不链接 libpq。
+- `ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF`：不调用 `find_package(PostgreSQL)`，不构建 `Orm::PostgreSQL`。
+- `ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=ON`：构建纯 C `orm_postgresql` target 和 `Orm::PostgreSQL` alias；`Orm::C` 本身不链接 libpq。
 - shared core 的生产 target 和文件名统一为 `turbo_orm`。安装消费者始终使用稳定 target `Orm::C`，不依赖仓库内部 target 名或物理文件名。
 - `Orm` 是唯一的消费端 CMake package；启用 PostgreSQL 时，同一个
   `OrmTargets.cmake` 额外导出 `Orm::PostgreSQL`，不生成独立 driver package。
@@ -86,7 +100,7 @@ C++ 只提供 header wrapper。`orm::connection` 增加接收 C connector functi
 新增 `ORM_POSTGRES_LIVE_TESTS`，默认 `OFF`。启用时必须同时满足：
 
 - `ORM_BUILD_TESTS=ON`；
-- `ORM_WITH_PGSQL=ON`；
+- `ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=ON`；
 - configure 进程存在非空 `TURBODB_ORM_PGSQL_TEST_CONNINFO`。
 
 任一条件缺失都在 configure 阶段失败，不注册一个运行时 skip 的假测试。CTest 继承同名环境变量；测试不得打印 conninfo 或密码。
