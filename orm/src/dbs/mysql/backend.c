@@ -1,6 +1,6 @@
 #include "backend.h"
 #include "orm_mysql_cursor.h"
-#include "orm_sql_render.h"
+#include "orm_mysql_sql.h"
 
 #include <mysql.h>
 
@@ -234,7 +234,7 @@ static orm_status_t orm_mysql_prepare(
     return ORM_STATUS_INVALID_ARGUMENT;
   }
 
-  status = orm_sql_render(plan, limits, ORM_SQL_MYSQL, &rendered, error);
+  status = orm_mysql_sql_render(plan, limits, &rendered, error);
   if (status != ORM_STATUS_OK)
     return status;
   if (tstr_len(rendered.text) > (size_t)ULONG_MAX) {
