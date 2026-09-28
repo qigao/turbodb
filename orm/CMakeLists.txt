@@ -369,7 +369,7 @@ if(ORM_BUILD_MYSQL_DRIVER)
     src/driver/orm_driver_backend_bridge.c
     src/dbs/mysql/backend.c
     src/dbs/mysql/orm_mysql_cursor.c
-    src/dbs/sql/orm_sql_render.c
+    src/dbs/mysql/orm_mysql_sql.c
     src/flow/orm_text_token.c)
   target_compile_features(orm_mysql_driver PRIVATE c_std_11)
   target_compile_definitions(
