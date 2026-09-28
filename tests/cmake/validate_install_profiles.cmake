@@ -37,16 +37,18 @@ endfunction()
 
 foreach(full_preset IN ITEMS win-dev-user win-release-user linux-dev-user
                             linux-release-user)
-  require_preset_cache("${full_preset}" ORM_WITH_SQLITE ON)
-  require_preset_cache("${full_preset}" ORM_WITH_PGSQL ON)
+  require_preset_cache("${full_preset}" ORM_BUILD_SQLITE_DRIVER ON)
+  require_preset_cache("${full_preset}" ORM_BUILD_POSTGRESQL_DRIVER ON)
+  require_preset_cache("${full_preset}" ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT ON)
 endforeach()
 
 foreach(postgresql_preset IN ITEMS win-release-dbtools-pg-user
                                   linux-release-pg-live-user)
-  require_preset_cache("${postgresql_preset}" ORM_WITH_SQLITE OFF)
+  require_preset_cache("${postgresql_preset}" ORM_BUILD_SQLITE_DRIVER OFF)
   require_preset_cache("${postgresql_preset}"
                        TURBODB_DBTOOLS_WITH_SQLITE OFF)
-  require_preset_cache("${postgresql_preset}" ORM_WITH_PGSQL ON)
+  require_preset_cache("${postgresql_preset}" ORM_BUILD_POSTGRESQL_DRIVER ON)
+  require_preset_cache("${postgresql_preset}" ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT ON)
   require_preset_cache("${postgresql_preset}" TURBODB_DBTOOLS_WITH_PGSQL ON)
 endforeach()
 
