@@ -440,24 +440,25 @@ cmake_config_target(
   "orm"
   NO_VERSION)
 
-if(ORM_WITH_PGSQL)
-  set(ORM_POSTGRESQL_SOURCES
-      src/dbs/postgres/component.c
-      src/dbs/postgres/backend.c
-      src/dbs/postgres/orm_postgres_libpq.c
-      src/dbs/postgres/orm_postgres_cursor.c
-      src/flow/orm_text_token.c)
-  foreach(ORM_POSTGRESQL_SOURCE IN LISTS ORM_POSTGRESQL_SOURCES)
-    if(NOT ORM_POSTGRESQL_SOURCE MATCHES "\\.c$")
-      message(FATAL_ERROR
-              "orm_postgresql accepts only C implementation sources: ${ORM_POSTGRESQL_SOURCE}")
-    endif()
-  endforeach()
-  add_library(orm_postgresql SHARED ${ORM_POSTGRESQL_SOURCES})
+set(ORM_POSTGRESQL_BACKEND_SOURCES
+    src/dbs/postgres/backend.c
+    src/dbs/postgres/orm_postgres_libpq.c
+    src/dbs/postgres/orm_postgres_cursor.c
+    src/flow/orm_text_token.c)
+foreach(ORM_POSTGRESQL_SOURCE IN LISTS ORM_POSTGRESQL_BACKEND_SOURCES)
+  if(NOT ORM_POSTGRESQL_SOURCE MATCHES "\\.c$")
+    message(FATAL_ERROR
+            "PostgreSQL Driver/component accepts only C implementation sources: ${ORM_POSTGRESQL_SOURCE}")
+  endif()
+endforeach()
+
+if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
+  add_library(orm_postgresql SHARED
+    src/dbs/postgres/component.c
+    ${ORM_POSTGRESQL_BACKEND_SOURCES})
   target_compile_features(orm_postgresql PRIVATE c_std_11)
-  target_compile_definitions(orm_postgresql PRIVATE ORM_WITH_PGSQL
-                                                     ORM_POSTGRESQL_BUILD
-                                                     ORM_NATIVE_OWNER_CANDIDATE)
+  target_compile_definitions(orm_postgresql PRIVATE
+    ORM_POSTGRESQL_BUILD ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_postgresql
     PUBLIC $<BUILD_INTERFACE:${ORM_INCLUDE_DIR}>
@@ -469,9 +470,6 @@ if(ORM_WITH_PGSQL)
     PUBLIC turbo_orm
     PRIVATE PostgreSQL::PostgreSQL Salts::CSerde
             Salts::CFlow Salts::CSTL)
-  # Some libpq packages close static BoringSSL archives through the C++
-  # runtime. This changes only final linkage; every implementation source in
-  # the component remains C11.
   set_target_properties(
     orm_postgresql
     PROPERTIES C_STANDARD_REQUIRED ON
@@ -486,23 +484,21 @@ if(ORM_WITH_PGSQL)
     EXPORT_SET
     OrmTargets
     FOLDER
-    "orm"
+    "orm/legacy"
     RUNTIME_DEPENDENCY_SET
     OrmPostgreSQLRuntimeDependencies
     NO_VERSION)
+endif()
 
+if(ORM_BUILD_POSTGRESQL_DRIVER)
   add_library(orm_postgresql_driver MODULE
     src/dbs/postgres/plugin.c
     src/driver/orm_driver_backend_bridge.c
-    src/dbs/postgres/backend.c
-    src/dbs/postgres/orm_postgres_libpq.c
-    src/dbs/postgres/orm_postgres_cursor.c
-    src/dbs/sql/orm_sql_render.c
-    src/flow/orm_text_token.c)
+    ${ORM_POSTGRESQL_BACKEND_SOURCES}
+    src/dbs/sql/orm_sql_render.c)
   target_compile_features(orm_postgresql_driver PRIVATE c_std_11)
   target_compile_definitions(
-    orm_postgresql_driver PRIVATE ORM_C_STATIC ORM_WITH_PGSQL
-                                  ORM_NATIVE_OWNER_CANDIDATE)
+    orm_postgresql_driver PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
   target_include_directories(
     orm_postgresql_driver PRIVATE
       ${ORM_INCLUDE_DIR}
@@ -530,9 +526,8 @@ if(ORM_WITH_PGSQL)
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # libpq/BoringSSL may arrive as static archives. Do not publish their
-    # symbols as part of the TurboDB Driver MODULE surface.
-    target_link_options(orm_postgresql_driver PRIVATE "LINKER:--exclude-libs,ALL")
+    target_link_options(orm_postgresql_driver PRIVATE
+      "LINKER:--exclude-libs,ALL")
   endif()
   get_target_property(ORM_POSTGRESQL_DRIVER_LINK_CONTRACT
                       orm_postgresql_driver LINK_LIBRARIES)
