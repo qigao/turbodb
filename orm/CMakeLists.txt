@@ -54,8 +54,14 @@ endif()
 option(ORM_BUILD_TIDESDB_DRIVER
        "Build the independent TidesDB TurboDb.Driver module"
        ${ORM_BUILD_TIDESDB_DRIVER_DEFAULT})
+option(ORM_MONGODB_LIVE_TESTS
+       "Run the MongoDB Driver CRUD test against ORM_MONGODB_URI" OFF)
 option(ORM_POSTGRES_LIVE_TESTS
        "Run tests against TURBODB_ORM_PGSQL_TEST_CONNINFO" OFF)
+
+if(ORM_MONGODB_LIVE_TESTS AND NOT ORM_BUILD_MONGODB_DRIVER)
+  message(FATAL_ERROR "ORM_MONGODB_LIVE_TESTS requires ORM_BUILD_MONGODB_DRIVER=ON")
+endif()
 
 if(ORM_POSTGRES_LIVE_TESTS)
   if(NOT ORM_BUILD_TESTS)
@@ -762,6 +768,37 @@ if(MSVC)
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
 add_test(NAME orm_mongo_query COMMAND orm_mongo_query_test)
+
+add_executable(orm_mongodb_plugin_test
+               tests/driver/orm_mongodb_plugin_test.c)
+target_compile_features(orm_mongodb_plugin_test PRIVATE c_std_11)
+target_compile_definitions(orm_mongodb_plugin_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mongodb_plugin_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mongodb_plugin_test PRIVATE turbo_orm)
+add_dependencies(orm_mongodb_plugin_test orm_mongodb_driver)
+set_target_properties(orm_mongodb_plugin_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mongodb_plugin_test)
+add_test(NAME orm_mongodb_plugin COMMAND orm_mongodb_plugin_test)
+set_tests_properties(orm_mongodb_plugin PROPERTIES
+  ENVIRONMENT "ORM_MONGODB_PLUGIN=$<TARGET_FILE:orm_mongodb_driver>")
+
+add_executable(orm_mongodb_live_driver_test
+               tests/integration/mongodb_live_driver_test.c)
+target_compile_features(orm_mongodb_live_driver_test PRIVATE c_std_11)
+target_compile_definitions(orm_mongodb_live_driver_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mongodb_live_driver_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mongodb_live_driver_test PRIVATE
+                      turbo_orm Salts::CFlow)
+add_dependencies(orm_mongodb_live_driver_test orm_mongodb_driver)
+set_target_properties(orm_mongodb_live_driver_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mongodb_live_driver_test)
+if(ORM_MONGODB_LIVE_TESTS)
+  add_test(NAME orm_mongodb_live_driver COMMAND orm_mongodb_live_driver_test)
+  set_tests_properties(orm_mongodb_live_driver PROPERTIES
+    ENVIRONMENT "ORM_MONGODB_PLUGIN=$<TARGET_FILE:orm_mongodb_driver>;ORM_MONGODB_URI=$ENV{ORM_MONGODB_URI}")
+endif()
 endif()
 
 if(ORM_WITH_PGSQL)
@@ -1525,7 +1562,7 @@ if(WIN32)
   if(ORM_BUILD_MONGODB_DRIVER)
     string(APPEND ORM_TEST_RUNTIME_PATH
            ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::mongoc_shared>;PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::bson_shared>")
-    list(APPEND ORM_RUNTIME_TESTS orm_mongo_query)
+    list(APPEND ORM_RUNTIME_TESTS orm_mongo_query orm_mongodb_plugin)
   endif()
 
   if(EXISTS "${CMAKE_C_COMPILER}")
