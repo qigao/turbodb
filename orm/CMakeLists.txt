@@ -2237,7 +2237,16 @@ if(TARGET orm_mysql_driver)
 endif()
 
 cmake_install_headers(
-  FILES include/orm/orm.h include/orm/orm.hpp include/orm/orm_sqlite.h
+  FILES
+    include/orm/orm.h
+    include/orm/orm.hpp
+    include/orm/orm_driver_base.h
+    include/orm/orm_driver_plan.h
+    include/orm/orm_driver_ops.h
+    include/orm/orm_driver_storage.h
+    include/orm/orm_driver_interface.h
+    include/orm/orm_runtime.h
+    include/orm/orm_sqlite.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   cmake_install_headers(
