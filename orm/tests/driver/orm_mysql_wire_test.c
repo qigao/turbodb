@@ -340,6 +340,49 @@ spec("mysql wire result packets") {
                 MYSQL_WIRE_STATUS_OK);
   }
 
+  it("decodes COM_QUERY text rows with NULL and embedded NUL") {
+    const uint8_t payload[] = {
+        0x01, 'a',
+        0xfb,
+        0x03, 'x', 0x00, 'y'};
+    mysql_wire_bytes_t columns[3];
+
+    check_equal(mysql_wire_decode_text_row(
+                    payload, sizeof(payload), 3u,
+                    columns, 3u),
+                MYSQL_WIRE_STATUS_OK);
+    check_equal(columns[0].is_null, false);
+    check_equal(columns[0].length, (size_t)1u);
+    check_equal(memcmp(columns[0].data, "a", 1u), 0);
+    check_equal(columns[1].is_null, true);
+    check_null(columns[1].data);
+    check_equal(columns[1].length, (size_t)0u);
+    check_equal(columns[2].is_null, false);
+    check_equal(columns[2].length, (size_t)3u);
+    check_equal(columns[2].data[0], (uint8_t)'x');
+    check_equal(columns[2].data[1], UINT8_C(0));
+    check_equal(columns[2].data[2], (uint8_t)'y');
+  }
+
+  it("rejects truncated, trailing, and undersized text-row outputs") {
+    const uint8_t truncated[] = {0x03, 'a'};
+    const uint8_t trailing[] = {0x01, 'a', 0x00};
+    mysql_wire_bytes_t columns[2];
+
+    check_equal(mysql_wire_decode_text_row(
+                    truncated, sizeof(truncated), 1u,
+                    columns, 2u),
+                MYSQL_WIRE_STATUS_INVALID);
+    check_equal(mysql_wire_decode_text_row(
+                    trailing, sizeof(trailing), 1u,
+                    columns, 2u),
+                MYSQL_WIRE_STATUS_INVALID);
+    check_equal(mysql_wire_decode_text_row(
+                    trailing, sizeof(trailing), 2u,
+                    columns, 1u),
+                MYSQL_WIRE_STATUS_LIMIT);
+  }
+
   it("rejects truncated complete result packets") {
     const uint8_t bad_ok[] = {0x00, 0xfc, 0x01};
     const uint8_t bad_err[] = {0xff, 0x15, 0x04, '#', 'H'};
