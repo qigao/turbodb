@@ -1,0 +1,50 @@
+name: Bootstrap TurboDB native release
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/bootstrap-native-release.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-and-dispatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create version tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '/^[[:space:]]*VERSION[[:space:]]+[0-9]/{print $2; exit}' CMakeLists.txt)"
+          test -n "$version"
+          tag="v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "$tag^{commit}" >/dev/null 2>&1; then
+            target="$(git rev-parse "$tag^{commit}")"
+            if [[ "$target" != "$GITHUB_SHA" ]]; then
+              echo "$tag already exists at $target, expected $GITHUB_SHA" >&2
+              exit 1
+            fi
+          else
+            git tag -a "$tag" "$GITHUB_SHA" -m "TurboDB $version"
+            git push origin "$tag"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch tag-bound native release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run native-nuget-release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
