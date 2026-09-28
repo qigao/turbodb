@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   package:
-    name: Salts 1.7.10 + SaltsUtils 4.0.2 (${{ matrix.os }}, ${{ matrix.config }})
+    name: Salts 1.8.0 + SaltsUtils 4.1.0 (${{ matrix.os }}, ${{ matrix.config }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -94,8 +94,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path evidence/deps | Out-Null
           @(
-            'Salts.Native=1.7.10',
-            'SaltsUtils.Native=4.0.2',
+            'Salts.Native=1.8.0',
+            'SaltsUtils.Native=4.1.0',
             'PluginABI=2',
             'Qigao.Re2c.Binary=4.6.3',
             "SALTS_ROOT=$env:SALTS_ROOT",
