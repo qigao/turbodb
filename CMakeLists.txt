@@ -168,7 +168,7 @@ add_subdirectory(orm)
 if(NOT MSVC AND SANITIZER_LINK_FLAGS)
   target_link_options(turbo_orm INTERFACE ${SANITIZER_LINK_FLAGS})
 endif()
-if(ORM_BUILD_TESTS AND ORM_WITH_SQLITE)
+if(ORM_BUILD_TESTS AND ORM_BUILD_SQLITE_DRIVER)
   add_subdirectory(orm/tests/ownership)
 endif()
 
