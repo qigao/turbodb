@@ -6,7 +6,7 @@
 #include <salts/plugin.h>
 
 #if SALTS_PLUGIN_ABI_VERSION != 2u
-#error "TurboDB Driver plugins require SaltsUtils Plugin ABI 2"
+#error "TurboDB Driver plugins require Salts Plugin ABI 2"
 #endif
 
 #define ORM_DRIVER_PLUGIN_EXPORT_ID "driver"
