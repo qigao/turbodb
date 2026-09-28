@@ -51,6 +51,7 @@ spec("runtime driver registry") {
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
     orm_driver_info_t info;
+    orm_driver_storage_capabilities_v1 storage;
     orm_driver_load_config_t load = load_config("fixture");
 
     orm_runtime_config_init(&config);
@@ -71,9 +72,20 @@ spec("runtime driver registry") {
     check_equal(memcmp(info.canonical_id, "fixture", 7u), 0);
     check_equal(info.execution_models, ORM_DRIVER_EXEC_CALLER_BLOCKING);
 
+    memset(&storage, 0xa5, sizeof(storage));
+    check_equal(orm_runtime_driver_storage_info(
+                    runtime, orm_view("fixture"), &storage, &error),
+                ORM_STATUS_OK);
+    check_true(orm_driver_storage_capabilities_valid(&storage));
+    check_equal(storage.capabilities, UINT64_C(0));
+
     memset(&info, 0, sizeof(info));
     check_equal(orm_runtime_driver_info(runtime, orm_view("fixture-alias"),
                                         &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+    memset(&storage, 0, sizeof(storage));
+    check_equal(orm_runtime_driver_storage_info(
+                    runtime, orm_view("fixture-alias"), &storage, &error),
                 ORM_STATUS_DRIVER_NOT_REGISTERED);
 
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
