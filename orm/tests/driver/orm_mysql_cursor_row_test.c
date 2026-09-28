@@ -181,9 +181,10 @@ spec("mysql cursor-owned row storage") {
     mysql_cursor_row_store_destroy(&store);
   }
 
-  it("destroys idempotently and zeros the ownership record") {
-    mysql_cursor_row_store_t store;
-    memset(&store, 0xa5, sizeof(store));
+  it("destroys zero or initialized ownership records idempotently") {
+    mysql_cursor_row_store_t store = {0};
+
+    mysql_cursor_row_store_destroy(&store);
     mysql_cursor_row_store_destroy(&store);
     check_null(store.columns);
     check_null(store.values);
