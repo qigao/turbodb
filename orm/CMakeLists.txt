@@ -338,6 +338,7 @@ if(ORM_BUILD_TIDESDB_DRIVER)
     src/driver/orm_driver_backend_bridge.c
     src/dbs/tidesdb/backend.c
     src/dbs/tidesdb/bridge.c
+    src/dbs/tidesdb/maintenance.c
     src/dbs/tidesdb/row.c
     src/dbs/tidesdb/orm_tidesdb_cursor.c)
   target_compile_features(orm_tidesdb_driver PRIVATE c_std_11)
@@ -1858,6 +1859,26 @@ if(ORM_BUILD_TIDESDB_DRIVER)
   add_test(NAME orm_tidesdb_public_flow COMMAND orm_tidesdb_public_flow_test)
   set_tests_properties(orm_tidesdb_public_flow PROPERTIES
     ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
+
+  add_executable(orm_tidesdb_maintenance_test
+                 tests/integration/tidesdb_maintenance_test.c)
+  target_compile_features(orm_tidesdb_maintenance_test PRIVATE c_std_11)
+  target_compile_definitions(orm_tidesdb_maintenance_test PRIVATE ORM_C_STATIC)
+  target_include_directories(orm_tidesdb_maintenance_test PRIVATE ${ORM_INCLUDE_DIR})
+  target_link_libraries(orm_tidesdb_maintenance_test
+                        PRIVATE turbo_orm Salts::CFlow Salts::TinyTest Salts::Core)
+  add_dependencies(orm_tidesdb_maintenance_test orm_tidesdb_driver)
+  set_target_properties(orm_tidesdb_maintenance_test
+                        PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_tidesdb_maintenance_test)
+  if(MSVC)
+    target_compile_options(orm_tidesdb_maintenance_test PRIVATE /WX /std:c11)
+  else()
+    target_compile_options(orm_tidesdb_maintenance_test PRIVATE -Werror)
+  endif()
+  add_test(NAME orm_tidesdb_maintenance COMMAND orm_tidesdb_maintenance_test)
+  set_tests_properties(orm_tidesdb_maintenance PROPERTIES
+    ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
 endif()
 
 if(ORM_BUILD_SQLITE_DRIVER)
@@ -2247,6 +2268,7 @@ cmake_install_headers(
     include/orm/orm_driver_interface.h
     include/orm/orm_runtime.h
     include/orm/orm_sqlite.h
+    include/orm/orm_tidesdb.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   cmake_install_headers(
