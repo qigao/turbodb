@@ -487,6 +487,7 @@ static int qualify_cancel_lease(
   }
 
   cflow_publisher_destroy(&publisher);
+  memset(&publisher, 0, sizeof(publisher));
 
   if (orm_query_close(query, error) != ORM_STATUS_OK) {
     fprintf(stderr,
@@ -534,7 +535,8 @@ static int qualify_cancel_lease(
   connection = NULL;
 
 cleanup:
-  cflow_publisher_destroy(&publisher);
+  if (cflow_publisher_valid(&publisher))
+    cflow_publisher_destroy(&publisher);
   orm_result_destroy(probe_result);
   orm_query_destroy(probe);
   if (query != NULL) {
