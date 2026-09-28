@@ -129,14 +129,16 @@ This matrix records the currently claimed semantics. “Primitive” means usefu
 
 | Backend | Local transaction | Atomic state + caller metadata | Replay/conflict classes | Commit ambiguity | Checkpoint export | Staged restore | Qualification |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SQLite ORM | yes | primitive only | no | no explicit class | missing provider-grade path | missing | #47 |
-| TidesDB | yes | primitive/candidate | no generic classification | no explicit class | `tidesdb_checkpoint` exists | not yet provider-grade | #48 |
+| SQLite ORM | yes | qualified; machine-readable | no | no explicit class | missing current-master provider-grade path | missing | #47 |
+| TidesDB | yes | qualified; machine-readable | APPLIED / REPLAYED / GAP / CONFLICT | no explicit ambiguous class | qualified file-backed checkpoint | not yet provider-grade | #48 |
 | Redis ordered apply | specialized atomic Lua path | yes for current ordered-apply metadata/state operation | APPLIED / REPLAYED / GAP / CONFLICT / PENDING | COMMIT_UNKNOWN | no generic snapshot capability claimed | no generic restore capability claimed | machine-readable via Driver v3; #49 |
 | PostgreSQL ORM | yes | primitive only | no | no explicit class | no provider-grade path in current scope | no | informational / future |
 
 ### SQLite
 
-Current ORM code exposes explicit transactions including serializable mode. This is sufficient to build an atomic state+metadata primitive, but the repository does not yet expose a dedicated caller-owned durable-progress operation or database-scale provider snapshot/restore contract.
+Current ORM code exposes explicit transactions including serializable mode. The retained provider atomicity test proves application state and caller-owned progress rows commit or roll back together across reopen. The SQLite Driver therefore publishes `ATOMIC_STATE_METADATA`; its metadata budget is connection/operation configured.
+
+SQLite does not yet publish `FILE_BACKED_CHECKPOINT` or `STAGED_RESTORE` on current master. The closed historical #68 implementation remains reference material only.
 
 #47 owns:
 
@@ -149,7 +151,14 @@ Current ORM code exposes explicit transactions including serializable mode. This
 
 TidesDB already exposes transactions and `tidesdb_checkpoint()`. Commit hooks run after WAL write, memtable apply, and commit marking, and hook failure does not roll back the durable commit. Therefore a commit hook MUST NOT be used to implement atomic progress metadata.
 
-#48 must qualify metadata as part of the transaction itself and establish checkpoint ownership/restore semantics. Existing checkpoint support is a strong primitive, not automatic proof of `STREAMING_CHECKPOINT` or `STAGED_RESTORE`.
+Current retained tests qualify:
+- same-column-family application state + caller metadata in one durable transaction;
+- APPLIED / REPLAYED / GAP / CONFLICT classification that survives reopen and does not mutate rejected paths;
+- a filesystem checkpoint that reopens at the completed checkpoint boundary and refuses to overwrite a non-empty destination.
+
+The TidesDB Driver therefore publishes `ATOMIC_STATE_METADATA`, `ORDERED_REPLAY_CLASSIFICATION`, and `FILE_BACKED_CHECKPOINT`. It does not claim `BOUNDED_BATCH`, `AMBIGUOUS_COMMIT`, `RECONCILE`, `STREAMING_CHECKPOINT`, or `STAGED_RESTORE`.
+
+#48 still owns generation-directory staged restore and durable ACTIVE publication before `STAGED_RESTORE` can be advertised.
 
 ### Redis
 
@@ -207,7 +216,9 @@ Rules:
 - generic code contains no backend-name switch;
 - SQL/CRUD Driver capability bits and storage durability capability bits remain separate namespaces;
 - unsupported storage semantics are represented by absent bits, never by fallback or emulation;
-- currently SQLite, PostgreSQL, MySQL, MongoDB, and TidesDB publish a valid empty storage descriptor until their provider-grade semantics are separately qualified;
+- SQLite publishes only its already-qualified atomic state+metadata fact;
+- TidesDB publishes only its already-qualified atomic metadata, ordered replay classification, and file-backed checkpoint facts;
+- PostgreSQL, MySQL, and MongoDB publish a valid empty storage descriptor until provider-grade semantics are separately qualified;
 - Redis publishes only the already-qualified ordered-apply/reconciliation semantics.
 
 TurboFabric may select a provider profile by checking required capability bits and limits at startup. That selection policy remains outside TurboDB.
