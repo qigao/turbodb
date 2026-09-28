@@ -440,7 +440,15 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
       generation_path, generations, result->generation,
       "active generation", error);
   if (status != ORM_STATUS_OK) return status;
-  status = tidesdb_validate_generation(generation_path, error);
+  /*
+   * Resolution must not reopen the active database: a normal runtime may
+   * already own it, and reconciliation must not turn into a second-open lock
+   * race. Full native open/close validation happens before publication.
+   */
+  status = tidesdb_require_directory(
+      generation_path, "inspect active TidesDB generation", error);
+  if (status != ORM_STATUS_OK) return status;
+  status = tidesdb_require_nonempty_directory(generation_path, error);
   if (status != ORM_STATUS_OK) return status;
 
   orm_error_set(error, ORM_STATUS_OK, NULL);
