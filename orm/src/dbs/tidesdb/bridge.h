@@ -76,6 +76,10 @@ int orm_tidesdb_iter_value(orm_tidesdb_iterator_t *, uint8_t **, size_t *);
 void orm_tidesdb_iter_free(orm_tidesdb_iterator_t *);
 void orm_tidesdb_free(void *);
 
+/* Called only from the Driver Plugin destroy callback after all leases are
+ * gone and before the module is unloaded. */
+void orm_tidesdb_module_cleanup(void);
+
 #ifdef __cplusplus
 }
 
