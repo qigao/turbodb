@@ -1,0 +1,206 @@
+name: MySQL Driver live contract
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "orm/src/dbs/mysql/**"
+      - "orm/tests/driver/orm_mysql_*"
+      - "orm/tests/integration/mysql_live_test.c"
+      - "orm/CMakeLists.txt"
+      - "vcpkg.json"
+      - ".github/workflows/mysql-driver-live.yml"
+  push:
+    branches: [master]
+    paths:
+      - "orm/src/dbs/mysql/**"
+      - "orm/tests/driver/orm_mysql_*"
+      - "orm/tests/integration/mysql_live_test.c"
+      - "orm/CMakeLists.txt"
+      - "vcpkg.json"
+      - ".github/workflows/mysql-driver-live.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: mysql-driver-live-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mysql-cnet-live:
+    name: MySQL 8.0.40 CNet TLS/auth/ping
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      mysql:
+        image: mysql:8.0.40
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+          MYSQL_DATABASE: turbodb
+          MYSQL_USER: turbodb
+          MYSQL_PASSWORD: turbodbpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -prootpw"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure canonical vcpkg tool and shared cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Restore canonical re2c host tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        with:
+          version: "4.6.3"
+
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+
+      - name: Restore cached BoringSSL MySQL feature
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$RUNNER_TEMP/turbodb-mysql-vcpkg"
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$GITHUB_WORKSPACE" \
+            --x-install-root="$install_root" \
+            --triplet=x64-linux \
+            --x-feature=mysql
+          status="$install_root/vcpkg/status"
+          test -f "$status"
+          grep -F "Package: boringssl" "$status"
+          if grep -Fq "Package: openssl" "$status"; then
+            cat "$status"
+            echo "MySQL qualification must use BoringSSL, not OpenSSL" >&2
+            exit 1
+          fi
+          echo "TURBODB_MYSQL_VCPKG_ROOT=$install_root" >> "$GITHUB_ENV"
+
+      - name: Prepare MySQL auth users and verified TLS identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mysql-tls" "$GITHUB_WORKSPACE/evidence/mysql"
+          cid="$(docker ps --filter ancestor=mysql:8.0.40 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+
+          docker exec "$cid" mysql -uroot -prootpw -e \
+            "CREATE USER IF NOT EXISTS 'nativeuser'@'%' IDENTIFIED WITH mysql_native_password BY 'nativepass'; GRANT ALL ON turbodb.* TO 'nativeuser'@'%'; FLUSH PRIVILEGES;"
+          docker exec "$cid" mysql -uroot -prootpw -Nse \
+            "SELECT VERSION(); SELECT user,host,plugin FROM mysql.user WHERE user IN ('turbodb','nativeuser') ORDER BY user,host;" \
+            | tee "$GITHUB_WORKSPACE/evidence/mysql/server.txt"
+
+          docker cp "$cid:/var/lib/mysql/ca.pem" "$RUNNER_TEMP/mysql-tls/ca.pem"
+          docker cp "$cid:/var/lib/mysql/server-cert.pem" "$RUNNER_TEMP/mysql-tls/server-cert.pem"
+          openssl verify -CAfile "$RUNNER_TEMP/mysql-tls/ca.pem" \
+            "$RUNNER_TEMP/mysql-tls/server-cert.pem"
+          subject="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
+            -noout -subject -nameopt RFC2253)"
+          server_name="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
+            -noout -subject -nameopt sep_multiline \
+            | sed -n 's/^[[:space:]]*CN[[:space:]]*=[[:space:]]*//p' \
+            | head -n 1)"
+          if [[ -z "$server_name" ]]; then
+            printf 'unable to extract certificate CN from subject: %s\n' "$subject" >&2
+            exit 1
+          fi
+          printf 'certificate_subject=%s\nserver_name=%s\n' "$subject" "$server_name" \
+            | tee "$GITHUB_WORKSPACE/evidence/mysql/tls.txt"
+
+          {
+            echo "ORM_MYSQL_HOST=127.0.0.1"
+            echo "ORM_MYSQL_PORT=3306"
+            echo "ORM_MYSQL_USER=turbodb"
+            echo "ORM_MYSQL_PASSWORD=turbodbpass"
+            echo "ORM_MYSQL_DATABASE=turbodb"
+            echo "ORM_MYSQL_CA_FILE=$RUNNER_TEMP/mysql-tls/ca.pem"
+            echo "ORM_MYSQL_SERVER_NAME=$server_name"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure MySQL M2 qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          build="$GITHUB_WORKSPACE/build/mysql-m2"
+          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_MANIFEST_INSTALL=OFF \
+            -DVCPKG_INSTALLED_DIR="$TURBODB_MYSQL_VCPKG_ROOT" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux \
+            -DORM_BUILD_TESTS=ON \
+            -DORM_MYSQL_LIVE_TESTS=ON \
+            -DORM_BUILD_SQLITE_DRIVER=OFF \
+            -DORM_BUILD_POSTGRESQL_DRIVER=OFF \
+            -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF \
+            -DORM_BUILD_REDIS_DRIVER=OFF \
+            -DORM_BUILD_MONGODB_DRIVER=OFF \
+            -DORM_BUILD_TIDESDB_DRIVER=OFF \
+            -DTURBODB_BUILD_REDIS=OFF \
+            -DTURBODB_BUILD_DBTOOLS=OFF \
+            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
+            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
+          echo "TURBODB_MYSQL_BUILD=$build" >> "$GITHUB_ENV"
+
+      - name: Build and run MySQL handshake plus caching_sha2 full auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$TURBODB_MYSQL_BUILD" --target \
+            orm_mysql_handshake_test orm_mysql_live_test --parallel 4
+          ctest --test-dir "$TURBODB_MYSQL_BUILD" \
+            -R "^orm_mysql_(handshake|live)$" --output-on-failure
+
+      - name: Qualify caching_sha2 fast auth and native compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="$(find "$TURBODB_MYSQL_BUILD" -type f -name orm_mysql_live_test -perm -111 -print -quit)"
+          test -n "$exe"
+          "$exe"
+          ORM_MYSQL_USER=nativeuser ORM_MYSQL_PASSWORD=nativepass "$exe"
+
+      - name: Record MySQL exact-head evidence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "os=ubuntu-24.04"
+            echo "arch=x64"
+            echo "configuration=Release"
+            echo "mysql=8.0.40"
+            echo "salts=1.8.0"
+            echo "saltsutils=4.1.0"
+            echo "transport=Salts::CNet"
+            echo "tls=required"
+            echo "auth=caching_sha2_password,mysql_native_password"
+            echo "crypto=boringssl"
+          } > "$GITHUB_WORKSPACE/evidence/mysql/qualification.txt"
+
+      - name: Keep MySQL qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-cnet-live-${{ github.sha }}
+          path: evidence/mysql/
+          if-no-files-found: warn
+
+

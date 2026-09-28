@@ -69,12 +69,29 @@ option(ORM_REDIS_LIVE_TESTS
        "Run the Redis Driver CRUD test against ORM_REDIS_PORT" OFF)
 option(ORM_POSTGRES_LIVE_TESTS
        "Run tests against TURBODB_ORM_PGSQL_TEST_CONNINFO" OFF)
+option(ORM_MYSQL_LIVE_TESTS
+       "Qualify MySQL HandshakeV10/CNet/TLS/auth/ping against a real service" OFF)
 
 if(ORM_MONGODB_LIVE_TESTS AND NOT ORM_BUILD_MONGODB_DRIVER)
   message(FATAL_ERROR "ORM_MONGODB_LIVE_TESTS requires ORM_BUILD_MONGODB_DRIVER=ON")
 endif()
 if(ORM_REDIS_LIVE_TESTS AND NOT ORM_BUILD_REDIS_DRIVER)
   message(FATAL_ERROR "ORM_REDIS_LIVE_TESTS requires ORM_BUILD_REDIS_DRIVER=ON")
+endif()
+
+if(ORM_MYSQL_LIVE_TESTS)
+  if(NOT ORM_BUILD_TESTS)
+    message(FATAL_ERROR "ORM_MYSQL_LIVE_TESTS requires ORM_BUILD_TESTS=ON")
+  endif()
+  foreach(ORM_MYSQL_REQUIRED_ENV IN ITEMS
+          ORM_MYSQL_HOST ORM_MYSQL_PORT ORM_MYSQL_USER ORM_MYSQL_PASSWORD
+          ORM_MYSQL_CA_FILE ORM_MYSQL_SERVER_NAME)
+    if(NOT DEFINED ENV{${ORM_MYSQL_REQUIRED_ENV}} OR
+       "$ENV{${ORM_MYSQL_REQUIRED_ENV}}" STREQUAL "")
+      message(FATAL_ERROR
+              "ORM_MYSQL_LIVE_TESTS requires ${ORM_MYSQL_REQUIRED_ENV}")
+    endif()
+  endforeach()
 endif()
 
 if(ORM_POSTGRES_LIVE_TESTS)
@@ -126,6 +143,14 @@ endif()
 if(NOT TARGET Salts::DataBind)
   message(FATAL_ERROR
           "The selected SaltsUtils 4.1.0 installation must export Salts::DataBind")
+endif()
+
+if(ORM_MYSQL_LIVE_TESTS)
+  if(NOT TARGET Salts::CNet)
+    message(FATAL_ERROR
+            "The selected Salts 1.8.0 installation must export Salts::CNet for MySQL M2")
+  endif()
+  find_package(OpenSSL REQUIRED)
 endif()
 
 # Driver/component-native dependencies remain outside the generic core.
@@ -1057,6 +1082,58 @@ else()
   target_compile_options(orm_mysql_wire_test PRIVATE -Werror)
 endif()
 add_test(NAME orm_mysql_wire COMMAND orm_mysql_wire_test)
+
+if(ORM_MYSQL_LIVE_TESTS)
+  set(ORM_MYSQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql)
+  set(ORM_MYSQL_AUTH_SOURCE_DIR ${ORM_MYSQL_SOURCE_DIR}/auth)
+
+  add_executable(orm_mysql_handshake_test
+    tests/driver/orm_mysql_handshake_test.c
+    src/dbs/mysql/wire/codec.c
+    src/dbs/mysql/wire/handshake.c
+    src/dbs/mysql/auth/auth.c)
+  target_compile_features(orm_mysql_handshake_test PRIVATE c_std_11)
+  target_include_directories(orm_mysql_handshake_test PRIVATE
+    ${ORM_MYSQL_WIRE_SOURCE_DIR} ${ORM_MYSQL_AUTH_SOURCE_DIR})
+  target_link_libraries(orm_mysql_handshake_test PRIVATE
+    Salts::TinyTest OpenSSL::Crypto)
+  set_target_properties(orm_mysql_handshake_test PROPERTIES
+    C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_mysql_handshake_test)
+  if(MSVC)
+    target_compile_options(orm_mysql_handshake_test PRIVATE /WX)
+  else()
+    target_compile_options(orm_mysql_handshake_test PRIVATE -Werror)
+  endif()
+  add_test(NAME orm_mysql_handshake COMMAND orm_mysql_handshake_test)
+
+  add_executable(orm_mysql_live_test
+    tests/integration/mysql_live_test.c
+    src/dbs/mysql/session.c
+    src/dbs/mysql/wire/codec.c
+    src/dbs/mysql/wire/packet.c
+    src/dbs/mysql/wire/result.c
+    src/dbs/mysql/wire/handshake.c
+    src/dbs/mysql/auth/auth.c)
+  target_compile_features(orm_mysql_live_test PRIVATE c_std_11)
+  target_include_directories(orm_mysql_live_test PRIVATE
+    ${ORM_MYSQL_SOURCE_DIR}
+    ${ORM_MYSQL_WIRE_SOURCE_DIR}
+    ${ORM_MYSQL_AUTH_SOURCE_DIR})
+  target_link_libraries(orm_mysql_live_test PRIVATE
+    Salts::CNet OpenSSL::Crypto)
+  set_target_properties(orm_mysql_live_test PROPERTIES
+    C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_mysql_live_test)
+  if(MSVC)
+    target_compile_options(orm_mysql_live_test PRIVATE /WX)
+  else()
+    target_compile_options(orm_mysql_live_test PRIVATE -Werror)
+  endif()
+  add_test(NAME orm_mysql_live COMMAND orm_mysql_live_test)
+  set_tests_properties(orm_mysql_live PROPERTIES ENVIRONMENT
+    "ORM_MYSQL_HOST=$ENV{ORM_MYSQL_HOST};ORM_MYSQL_PORT=$ENV{ORM_MYSQL_PORT};ORM_MYSQL_USER=$ENV{ORM_MYSQL_USER};ORM_MYSQL_PASSWORD=$ENV{ORM_MYSQL_PASSWORD};ORM_MYSQL_DATABASE=$ENV{ORM_MYSQL_DATABASE};ORM_MYSQL_CA_FILE=$ENV{ORM_MYSQL_CA_FILE};ORM_MYSQL_SERVER_NAME=$ENV{ORM_MYSQL_SERVER_NAME}")
+endif()
 
 add_executable(orm_driver_interface_test
   tests/driver/orm_driver_interface_test.c

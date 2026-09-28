@@ -32,6 +32,12 @@
           ]
         }
       ]
+    },
+    "mysql": {
+      "description": "Build/qualify the CNet MySQL wire Driver with cached BoringSSL and without libmysql/OpenSSL",
+      "dependencies": [
+        "boringssl"
+      ]
     }
   },
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01",
