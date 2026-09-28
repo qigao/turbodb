@@ -1070,6 +1070,20 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     goto fail_admission;
   }
 
+  const uint64_t execution_models =
+      TurboDb_Driver_execution_models(binding);
+  if ((execution_models & ~ORM_DRIVER_EXEC_KNOWN_MASK) != 0u) {
+    status = runtime_result(error, ORM_STATUS_UNSUPPORTED,
+                            "TurboDb.Driver declares unknown execution models");
+    goto fail_admission;
+  }
+  if ((execution_models & ORM_DRIVER_EXEC_CALLER_BLOCKING) == 0u) {
+    status = runtime_result(
+        error, ORM_STATUS_UNSUPPORTED,
+        "TurboDb.Driver does not support the caller-blocking control plane");
+    goto fail_admission;
+  }
+
   if (runtime_id_conflicts(
           runtime,
           (orm_driver_bytes_v1){manifest->plugin_id,
@@ -1116,7 +1130,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
       &driver->canonical,
       (orm_driver_bytes_v1){manifest->plugin_id, (uint64_t)plugin_id_size});
   driver->capabilities = entry->capabilities;
-  driver->execution_models = ORM_DRIVER_EXEC_CALLER_BLOCKING;
+  driver->execution_models = execution_models;
   memcpy(driver->bundle_id, runtime_bundle, sizeof(driver->bundle_id));
   ++runtime->driver_count;
   --runtime->pending_operations;
