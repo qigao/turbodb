@@ -1,4 +1,5 @@
 #include "session.h"
+#include "session_cursor.h"
 
 #include "auth/auth.h"
 #include "wire/handshake.h"
@@ -11,6 +12,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MYSQL_SESSION_CONTROL_CAPACITY 4096u
@@ -25,7 +27,8 @@ static const uint8_t MYSQL_SESSION_PROBE_SQL[] =
 
 typedef enum mysql_session_action_t {
   MYSQL_SESSION_ACTION_PING = 0,
-  MYSQL_SESSION_ACTION_PREPARED_PROBE
+  MYSQL_SESSION_ACTION_PREPARED_PROBE,
+  MYSQL_SESSION_ACTION_PREPARED_CURSOR
 } mysql_session_action_t;
 
 typedef enum mysql_session_phase_t {
@@ -46,6 +49,8 @@ typedef enum mysql_session_phase_t {
   MYSQL_PHASE_WAIT_RESULT_COLUMN_COUNT,
   MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF,
   MYSQL_PHASE_WAIT_RESULT_ROW,
+  MYSQL_PHASE_CURSOR_READY,
+  MYSQL_PHASE_CURSOR_ROW_READY,
   MYSQL_PHASE_WAIT_CLOSE_SEND,
   MYSQL_PHASE_DONE,
   MYSQL_PHASE_FAILED
@@ -67,6 +72,11 @@ typedef struct mysql_session_t {
   mysql_session_error_t *error;
   mysql_session_action_t action;
   mysql_session_prepared_probe_t *probe;
+  const uint8_t *prepared_sql;
+  size_t prepared_sql_size;
+  const mysql_stmt_value_t *prepared_values;
+  size_t prepared_value_count;
+  mysql_session_cursor_limits_t cursor_limits;
   cnet_client client;
   cnet_connection connection;
   mysql_wire_packet_stream_t stream;
@@ -87,6 +97,18 @@ typedef struct mysql_session_t {
   uint64_t result_column_count;
   mysql_column_definition_t result_columns[MYSQL_SESSION_PROBE_COLUMN_COUNT];
   uint32_t result_row_count;
+  mysql_column_definition_t *cursor_columns;
+  unsigned char *cursor_metadata;
+  size_t cursor_metadata_used;
+  uint8_t *cursor_message;
+  size_t cursor_message_capacity;
+  size_t command_capacity;
+  uint8_t deferred[MYSQL_SESSION_PACKET_CAPACITY];
+  size_t deferred_size;
+  size_t cursor_row_size;
+  uint32_t timeout_ms;
+  bool cancel_requested;
+  mysql_session_error_t owned_error;
 } mysql_session_t;
 
 static void mysql_session_set_error(
@@ -134,16 +156,32 @@ static int mysql_session_send_packet(
     mysql_session_t *session, uint8_t sequence_id,
     const uint8_t *payload, size_t payload_size,
     mysql_session_send_kind_t kind) {
-  uint8_t packet[MYSQL_SESSION_PACKET_CAPACITY];
+  uint8_t stack_packet[MYSQL_SESSION_PACKET_CAPACITY];
+  uint8_t *packet = stack_packet;
+  const size_t command_capacity =
+      session->command_capacity != 0u
+          ? session->command_capacity
+          : MYSQL_SESSION_CONTROL_CAPACITY;
   size_t total;
   int status;
 
-  if (payload_size > MYSQL_SESSION_CONTROL_CAPACITY ||
+  if (payload_size > command_capacity ||
       payload_size > MYSQL_WIRE_PACKET_MAX_PAYLOAD ||
+      payload_size > SIZE_MAX - 4u ||
       (payload == NULL && payload_size != 0u)) {
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
-                            "send", "control packet exceeds M2 bound");
+                            "send", "MySQL command exceeds configured bound");
     return SALTS_EMSGSIZE;
+  }
+
+  total = payload_size + 4u;
+  if (total > sizeof(stack_packet)) {
+    packet = (uint8_t *)malloc(total);
+    if (packet == NULL) {
+      mysql_session_set_error(session, MYSQL_SESSION_IO,
+                              "send", "allocate bounded MySQL command packet");
+      return SALTS_ENOMEM;
+    }
   }
 
   packet[0] = (uint8_t)(payload_size & 0xffu);
@@ -152,9 +190,10 @@ static int mysql_session_send_packet(
   packet[3] = sequence_id;
   if (payload_size != 0u)
     memcpy(packet + 4u, payload, payload_size);
-  total = payload_size + 4u;
 
   status = cnet_send(&session->client, session->connection, packet, total);
+  if (packet != stack_packet)
+    free(packet);
   if (status != SALTS_OK) {
     if (session->error != NULL)
       session->error->cnet_status = status;
@@ -347,19 +386,46 @@ static void mysql_session_send_ping(mysql_session_t *session) {
 }
 
 static void mysql_session_send_prepare(mysql_session_t *session) {
-  uint8_t payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  uint8_t stack_payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  uint8_t *payload = stack_payload;
+  const uint8_t *sql = MYSQL_SESSION_PROBE_SQL;
+  size_t sql_size = sizeof(MYSQL_SESSION_PROBE_SQL) - 1u;
+  const size_t capacity =
+      session->command_capacity != 0u
+          ? session->command_capacity
+          : MYSQL_SESSION_CONTROL_CAPACITY;
   size_t payload_size = 0u;
+  mysql_wire_status_t wire_status;
 
   if ((session->client_capabilities & MYSQL_WIRE_CLIENT_DEPRECATE_EOF) == 0u) {
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                             "prepare-capability",
-                            "prepared probe requires CLIENT_DEPRECATE_EOF");
+                            "prepared statements require CLIENT_DEPRECATE_EOF");
     return;
   }
-  if (mysql_wire_build_stmt_prepare(
-          MYSQL_SESSION_PROBE_SQL,
-          sizeof(MYSQL_SESSION_PROBE_SQL) - 1u,
-          payload, sizeof(payload), &payload_size) != MYSQL_WIRE_STATUS_OK) {
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+    sql = session->prepared_sql;
+    sql_size = session->prepared_sql_size;
+  }
+  if (sql == NULL || sql_size == 0u || sql_size + 1u > capacity) {
+    mysql_session_set_error(session, MYSQL_SESSION_INVALID,
+                            "prepare", "invalid or oversized prepared SQL");
+    return;
+  }
+  if (capacity > sizeof(stack_payload)) {
+    payload = (uint8_t *)malloc(capacity);
+    if (payload == NULL) {
+      mysql_session_set_error(session, MYSQL_SESSION_IO,
+                              "prepare", "allocate prepared command buffer");
+      return;
+    }
+  }
+
+  wire_status = mysql_wire_build_stmt_prepare(
+      sql, sql_size, payload, capacity, &payload_size);
+  if (wire_status != MYSQL_WIRE_STATUS_OK) {
+    if (payload != stack_payload)
+      free(payload);
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                             "prepare", "failed to encode COM_STMT_PREPARE");
     return;
@@ -369,18 +435,44 @@ static void mysql_session_send_prepare(mysql_session_t *session) {
   session->phase = MYSQL_PHASE_WAIT_PREPARE_SEND;
   (void)mysql_session_send_packet(
       session, UINT8_C(0), payload, payload_size, MYSQL_SEND_PREPARE);
+  if (payload != stack_payload)
+    free(payload);
 }
 
 static void mysql_session_send_execute(mysql_session_t *session) {
-  const mysql_stmt_value_t value = {
+  const mysql_stmt_value_t probe_value = {
       .kind = MYSQL_STMT_VALUE_SINT64,
       .data.sint64_value = INT64_C(-42)};
-  uint8_t payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  const mysql_stmt_value_t *values = &probe_value;
+  size_t value_count = 1u;
+  uint8_t stack_payload[MYSQL_SESSION_CONTROL_CAPACITY];
+  uint8_t *payload = stack_payload;
+  const size_t capacity =
+      session->command_capacity != 0u
+          ? session->command_capacity
+          : MYSQL_SESSION_CONTROL_CAPACITY;
   size_t payload_size = 0u;
+  mysql_wire_status_t wire_status;
 
-  if (mysql_wire_build_stmt_execute(
-          session->prepare_ok.statement_id, &value, 1u,
-          payload, sizeof(payload), &payload_size) != MYSQL_WIRE_STATUS_OK) {
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+    values = session->prepared_values;
+    value_count = session->prepared_value_count;
+  }
+  if (capacity > sizeof(stack_payload)) {
+    payload = (uint8_t *)malloc(capacity);
+    if (payload == NULL) {
+      mysql_session_set_error(session, MYSQL_SESSION_IO,
+                              "execute", "allocate execute command buffer");
+      return;
+    }
+  }
+
+  wire_status = mysql_wire_build_stmt_execute(
+      session->prepare_ok.statement_id, values, value_count,
+      payload, capacity, &payload_size);
+  if (wire_status != MYSQL_WIRE_STATUS_OK) {
+    if (payload != stack_payload)
+      free(payload);
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                             "execute", "failed to encode COM_STMT_EXECUTE");
     return;
@@ -390,6 +482,8 @@ static void mysql_session_send_execute(mysql_session_t *session) {
   session->phase = MYSQL_PHASE_WAIT_EXECUTE_SEND;
   (void)mysql_session_send_packet(
       session, UINT8_C(0), payload, payload_size, MYSQL_SEND_EXECUTE);
+  if (payload != stack_payload)
+    free(payload);
 }
 
 static void mysql_session_send_close(mysql_session_t *session) {
@@ -414,7 +508,8 @@ static void mysql_session_begin_action(mysql_session_t *session) {
     mysql_session_send_ping(session);
     return;
   }
-  if (session->action == MYSQL_SESSION_ACTION_PREPARED_PROBE) {
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_PROBE ||
+      session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
     mysql_session_send_prepare(session);
     return;
   }
@@ -568,15 +663,29 @@ static void mysql_session_handle_prepare_ok(
                             "prepare-ok", "invalid COM_STMT_PREPARE_OK");
     return;
   }
-  if (session->prepare_ok.parameter_count != 1u ||
-      session->prepare_ok.column_count != MYSQL_SESSION_PROBE_COLUMN_COUNT) {
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+    if ((size_t)session->prepare_ok.parameter_count !=
+            session->prepared_value_count ||
+        session->prepare_ok.column_count == 0u ||
+        (size_t)session->prepare_ok.column_count >
+            session->cursor_limits.max_columns) {
+      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                              "prepare-shape",
+                              "prepared cursor metadata exceeds expected shape");
+      return;
+    }
+  } else if (session->prepare_ok.parameter_count != 1u ||
+             session->prepare_ok.column_count !=
+                 MYSQL_SESSION_PROBE_COLUMN_COUNT) {
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                             "prepare-shape",
                             "unexpected prepared metadata shape");
     return;
   }
   session->metadata_index = 0u;
-  session->phase = MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF;
+  session->phase = session->prepare_ok.parameter_count == 0u
+                       ? MYSQL_PHASE_WAIT_PREPARE_COLUMN_DEF
+                       : MYSQL_PHASE_WAIT_PREPARE_PARAM_DEF;
 }
 
 static void mysql_session_handle_prepare_param_def(
@@ -622,10 +731,24 @@ static void mysql_session_handle_result_column_count(
     return;
   if (mysql_wire_read_lenenc_uint(
           payload, payload_size, &offset, &count, &is_null) != MYSQL_WIRE_STATUS_OK ||
-      is_null || offset != payload_size ||
-      count != MYSQL_SESSION_PROBE_COLUMN_COUNT) {
+      is_null || offset != payload_size) {
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
-                            "result-columns", "unexpected binary result column count");
+                            "result-columns", "invalid binary result column count");
+    return;
+  }
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+    if (count == 0u ||
+        count > (uint64_t)session->cursor_limits.max_columns ||
+        count != (uint64_t)session->prepare_ok.column_count) {
+      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                              "result-columns",
+                              "prepared cursor result column count mismatch");
+      return;
+    }
+  } else if (count != MYSQL_SESSION_PROBE_COLUMN_COUNT) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            "result-columns",
+                            "unexpected binary result column count");
     return;
   }
   session->result_column_count = count;
@@ -633,20 +756,87 @@ static void mysql_session_handle_result_column_count(
   session->phase = MYSQL_PHASE_WAIT_RESULT_COLUMN_DEF;
 }
 
+static mysql_wire_status_t mysql_session_copy_cursor_column(
+    mysql_session_t *session, size_t index,
+    const mysql_column_definition_t *input) {
+  mysql_column_definition_t copied;
+  size_t name_size;
+
+  if (session == NULL || input == NULL ||
+      session->cursor_columns == NULL ||
+      session->cursor_metadata == NULL ||
+      index >= session->cursor_limits.max_columns)
+    return MYSQL_WIRE_STATUS_INVALID;
+
+  name_size = input->name.length;
+  if (input->name.is_null ||
+      (input->name.data == NULL && name_size != 0u))
+    return MYSQL_WIRE_STATUS_INVALID;
+  if (session->cursor_metadata_used >
+          session->cursor_limits.max_metadata_bytes ||
+      name_size > session->cursor_limits.max_metadata_bytes -
+                      session->cursor_metadata_used)
+    return MYSQL_WIRE_STATUS_LIMIT;
+
+  copied = *input;
+  copied.catalog = (mysql_wire_bytes_t){0};
+  copied.schema = (mysql_wire_bytes_t){0};
+  copied.table = (mysql_wire_bytes_t){0};
+  copied.org_table = (mysql_wire_bytes_t){0};
+  copied.org_name = (mysql_wire_bytes_t){0};
+
+  if (name_size != 0u)
+    memcpy(session->cursor_metadata + session->cursor_metadata_used,
+           input->name.data, name_size);
+  copied.name.data =
+      name_size != 0u
+          ? session->cursor_metadata + session->cursor_metadata_used
+          : NULL;
+  copied.name.length = name_size;
+  copied.name.is_null = false;
+  session->cursor_metadata_used += name_size;
+  session->cursor_columns[index] = copied;
+  return MYSQL_WIRE_STATUS_OK;
+}
+
 static void mysql_session_handle_result_column_def(
     mysql_session_t *session, const uint8_t *payload, size_t payload_size) {
-  if (session->metadata_index >= MYSQL_SESSION_PROBE_COLUMN_COUNT ||
+  mysql_column_definition_t definition;
+  mysql_wire_status_t status;
+
+  if (session->metadata_index >= (size_t)session->result_column_count ||
       mysql_wire_decode_column_definition41(
-          payload, payload_size,
-          &session->result_columns[session->metadata_index]) !=
-          MYSQL_WIRE_STATUS_OK) {
+          payload, payload_size, &definition) != MYSQL_WIRE_STATUS_OK) {
     mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                             "result-column", "invalid binary result metadata");
     return;
   }
+
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+    status = mysql_session_copy_cursor_column(
+        session, session->metadata_index, &definition);
+    if (status != MYSQL_WIRE_STATUS_OK) {
+      mysql_session_set_error(
+          session,
+          status == MYSQL_WIRE_STATUS_LIMIT
+              ? MYSQL_SESSION_PROTOCOL
+              : MYSQL_SESSION_PROTOCOL,
+          "result-column",
+          status == MYSQL_WIRE_STATUS_LIMIT
+              ? "prepared cursor metadata exceeds configured bound"
+              : "invalid prepared cursor metadata");
+      return;
+    }
+  } else {
+    session->result_columns[session->metadata_index] = definition;
+  }
+
   ++session->metadata_index;
   if (session->metadata_index == session->result_column_count)
-    session->phase = MYSQL_PHASE_WAIT_RESULT_ROW;
+    session->phase =
+        session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR
+            ? MYSQL_PHASE_CURSOR_READY
+            : MYSQL_PHASE_WAIT_RESULT_ROW;
 }
 
 static void mysql_session_handle_result_row(
@@ -659,7 +849,8 @@ static void mysql_session_handle_result_row(
     if (mysql_wire_decode_ok_packet(
             payload, payload_size, session->client_capabilities,
             &ok) != MYSQL_WIRE_STATUS_OK ||
-        session->result_row_count != 1u) {
+        (session->action != MYSQL_SESSION_ACTION_PREPARED_CURSOR &&
+         session->result_row_count != 1u)) {
       mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
                               "result-end", "invalid prepared result terminator");
       return;
@@ -670,6 +861,18 @@ static void mysql_session_handle_result_row(
   if (mysql_session_decode_server_error(
           session, payload, payload_size, "result-server"))
     return;
+  if (session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR) {
+    if (payload_size == 0u || payload_size > session->cursor_message_capacity) {
+      mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                              "result-row",
+                              "prepared cursor row exceeds configured message bound");
+      return;
+    }
+    session->cursor_row_size = payload_size;
+    ++session->result_row_count;
+    session->phase = MYSQL_PHASE_CURSOR_ROW_READY;
+    return;
+  }
   if (session->result_row_count != 0u ||
       mysql_wire_decode_binary_row(
           payload, payload_size, session->result_columns,
@@ -745,6 +948,27 @@ static void mysql_session_handle_message(
   }
 }
 
+static uint8_t *mysql_session_message_buffer(
+    mysql_session_t *session) {
+  return session != NULL &&
+                 session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR
+             ? session->cursor_message
+             : (session != NULL ? session->control : NULL);
+}
+
+static size_t mysql_session_message_capacity(
+    const mysql_session_t *session) {
+  return session != NULL &&
+                 session->action == MYSQL_SESSION_ACTION_PREPARED_CURSOR
+             ? session->cursor_message_capacity
+             : MYSQL_SESSION_CONTROL_CAPACITY;
+}
+
+static bool mysql_session_pause_receive(mysql_session_phase_t phase) {
+  return phase == MYSQL_PHASE_CURSOR_READY ||
+         phase == MYSQL_PHASE_CURSOR_ROW_READY;
+}
+
 static void mysql_session_on_receive(
     void *user, cnet_connection connection, const cnet_receive_view *view) {
   mysql_session_t *session = (mysql_session_t *)user;
@@ -778,13 +1002,17 @@ static void mysql_session_on_receive(
     }
 
     if (event.length != 0u) {
-      if (session->control_used >
-              sizeof(session->control) - event.length) {
+      uint8_t *message = mysql_session_message_buffer(session);
+      const size_t capacity = mysql_session_message_capacity(session);
+      if (message == NULL ||
+          session->control_used > capacity ||
+          event.length > capacity - session->control_used) {
         mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
-                                "packet", "control message exceeds M2 bound");
+                                "packet",
+                                "MySQL message exceeds configured bound");
         return;
       }
-      memcpy(session->control + session->control_used,
+      memcpy(message + session->control_used,
              event.data, event.length);
       session->control_used += event.length;
       session->message_last_sequence = event.sequence_id;
@@ -794,12 +1022,27 @@ static void mysql_session_on_receive(
 
     if (event.message_end) {
       uint8_t last_sequence = session->message_last_sequence;
+      uint8_t *message = mysql_session_message_buffer(session);
       mysql_session_handle_message(
-          session, session->control, session->control_used, last_sequence);
+          session, message, session->control_used, last_sequence);
       session->control_used = 0u;
       if (session->phase == MYSQL_PHASE_FAILED ||
           session->phase == MYSQL_PHASE_DONE)
         break;
+      if (mysql_session_pause_receive(session->phase)) {
+        const size_t remaining = view->size - offset;
+        if (remaining > sizeof(session->deferred)) {
+          mysql_session_set_error(
+              session, MYSQL_SESSION_PROTOCOL,
+              "receive-deferred",
+              "CNet callback remainder exceeds deferred transport bound");
+          return;
+        }
+        if (remaining != 0u)
+          memcpy(session->deferred, input + offset, remaining);
+        session->deferred_size = remaining;
+        break;
+      }
     }
 
     if (status == MYSQL_WIRE_STATUS_NEED_MORE && consumed == 0u)
@@ -911,12 +1154,23 @@ static void mysql_session_on_state(
 
   if (state == CNET_CONNECTION_CLOSED &&
       session->phase != MYSQL_PHASE_DONE &&
-      session->phase != MYSQL_PHASE_FAILED)
+      session->phase != MYSQL_PHASE_FAILED) {
+    if (session->cancel_requested) {
+      session->phase = MYSQL_PHASE_DONE;
+      return;
+    }
     mysql_session_set_error(session, MYSQL_SESSION_IO,
-                            "closed", "connection closed before MySQL operation completed");
+                            "closed",
+                            "connection closed before MySQL operation completed");
+  }
 }
 
-static cnet_client_config mysql_session_cnet_config(uint32_t timeout_ms) {
+static cnet_client_config mysql_session_cnet_config(
+    uint32_t timeout_ms, size_t command_capacity) {
+  const size_t max_send_bytes =
+      command_capacity <= SIZE_MAX - 4u
+          ? command_capacity + 4u
+          : SIZE_MAX;
   cnet_client_config config = {
 #if defined(_WIN32)
       .backend = NATIVE_IO_BACKEND_IOCP,
@@ -930,76 +1184,93 @@ static cnet_client_config mysql_session_cnet_config(uint32_t timeout_ms) {
       .request_capacity = 16u,
       .completion_batch_capacity = 16u,
       .event_capacity = 32u,
-      .max_send_bytes = MYSQL_SESSION_PACKET_CAPACITY,
+      .max_send_bytes = max_send_bytes,
       .receive_buffer_bytes = MYSQL_SESSION_PACKET_CAPACITY,
       .connect_timeout_ms = timeout_ms,
       .read_timeout_ms = timeout_ms,
       .write_timeout_ms = timeout_ms,
       .tls_io_buffer_bytes = CNET_TLS_MIN_IO_BUFFER_BYTES,
       .tls_handshake_timeout_ms = timeout_ms,
-      .command_buffer_bytes = 0u,
+      .command_buffer_bytes = max_send_bytes,
       .event_buffer_bytes = 0u};
   return config;
 }
 
-static mysql_session_status_t mysql_session_run(
-    const mysql_session_config_t *config, mysql_session_action_t action,
-    mysql_session_prepared_probe_t *probe, mysql_session_error_t *error) {
-  mysql_session_t session;
+static bool mysql_session_config_valid(
+    const mysql_session_config_t *config) {
+  return config != NULL &&
+         config->host != NULL && config->host[0] != '\0' &&
+         config->port != 0u &&
+         config->username != NULL &&
+         config->password != NULL &&
+         config->ca_file != NULL && config->ca_file[0] != '\0' &&
+         config->server_name != NULL && config->server_name[0] != '\0';
+}
+
+static mysql_session_status_t mysql_session_start(
+    mysql_session_t *session,
+    const mysql_session_config_t *config,
+    mysql_session_action_t action,
+    mysql_session_prepared_probe_t *probe,
+    mysql_session_error_t *error,
+    size_t message_capacity,
+    size_t command_capacity) {
   cnet_client_config client_config;
   cnet_connect_options options;
   char uri[512];
-  uint32_t timeout_ms;
-  uint32_t elapsed = 0u;
   int status;
-  mysql_session_status_t result;
 
   if (error != NULL)
     memset(error, 0, sizeof(*error));
-  if (config == NULL || config->host == NULL || config->host[0] == '\0' ||
-      config->port == 0u || config->username == NULL ||
-      config->password == NULL || config->ca_file == NULL ||
-      config->ca_file[0] == '\0' || config->server_name == NULL ||
-      config->server_name[0] == '\0') {
+  if (session == NULL || !mysql_session_config_valid(config) ||
+      message_capacity == 0u || command_capacity == 0u ||
+      command_capacity > MYSQL_WIRE_PACKET_MAX_PAYLOAD) {
     if (error != NULL) {
       error->status = MYSQL_SESSION_INVALID;
       (void)snprintf(error->stage, sizeof(error->stage), "%s", "config");
       (void)snprintf(error->message, sizeof(error->message), "%s",
-                     "host/port/user/password/CA/server_name are required");
+                     "invalid MySQL session configuration or bounds");
     }
     return MYSQL_SESSION_INVALID;
   }
 
-  memset(&session, 0, sizeof(session));
-  session.config = config;
-  session.error = error;
-  session.action = action;
-  session.probe = probe;
-  session.phase = MYSQL_PHASE_WAIT_TCP;
-  timeout_ms = config->timeout_ms != 0u
-                   ? config->timeout_ms
-                   : MYSQL_SESSION_DEFAULT_TIMEOUT_MS;
+  memset(session, 0, sizeof(*session));
+  session->config = config;
+  session->error = error;
+  session->action = action;
+  session->probe = probe;
+  session->phase = MYSQL_PHASE_WAIT_TCP;
+  session->command_capacity = command_capacity;
+  session->timeout_ms = config->timeout_ms != 0u
+                            ? config->timeout_ms
+                            : MYSQL_SESSION_DEFAULT_TIMEOUT_MS;
 
   {
-    int uri_size = snprintf(uri, sizeof(uri), "tcp://%s:%u",
-                            config->host, (unsigned int)config->port);
+    const int uri_size = snprintf(
+        uri, sizeof(uri), "tcp://%s:%u",
+        config->host, (unsigned int)config->port);
     if (uri_size <= 0 || (size_t)uri_size >= sizeof(uri)) {
-      if (error != NULL)
+      if (error != NULL) {
         error->status = MYSQL_SESSION_INVALID;
+        (void)snprintf(error->stage, sizeof(error->stage), "%s", "uri");
+      }
       return MYSQL_SESSION_INVALID;
     }
   }
 
   if (mysql_wire_packet_stream_init(
-          &session.stream, UINT8_C(0),
-          MYSQL_SESSION_CONTROL_CAPACITY) != MYSQL_WIRE_STATUS_OK) {
-    if (error != NULL)
+          &session->stream, UINT8_C(0),
+          message_capacity) != MYSQL_WIRE_STATUS_OK) {
+    if (error != NULL) {
       error->status = MYSQL_SESSION_PROTOCOL;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s", "packet-stream");
+    }
     return MYSQL_SESSION_PROTOCOL;
   }
 
-  client_config = mysql_session_cnet_config(timeout_ms);
-  status = cnet_client_init(&session.client, &client_config);
+  client_config = mysql_session_cnet_config(
+      session->timeout_ms, command_capacity);
+  status = cnet_client_init(&session->client, &client_config);
   if (status != SALTS_OK) {
     if (error != NULL) {
       error->status = MYSQL_SESSION_IO;
@@ -1013,62 +1284,394 @@ static mysql_session_status_t mysql_session_run(
       .uri = uri,
       .observer = {.on_state = mysql_session_on_state,
                    .on_receive = mysql_session_on_receive,
-                   .user = &session,
+                   .user = session,
                    .on_send = mysql_session_on_send}};
-  status = cnet_connect(&session.client, &options, &session.connection);
+  status = cnet_connect(&session->client, &options, &session->connection);
   if (status != SALTS_OK) {
     if (error != NULL) {
       error->status = MYSQL_SESSION_IO;
       error->cnet_status = status;
       (void)snprintf(error->stage, sizeof(error->stage), "%s", "connect");
     }
-    (void)cnet_client_stop(&session.client, timeout_ms);
-    (void)cnet_client_destroy(&session.client);
+    (void)cnet_client_stop(&session->client, session->timeout_ms);
+    (void)cnet_client_destroy(&session->client);
+    memset(&session->client, 0, sizeof(session->client));
     return MYSQL_SESSION_IO;
   }
 
-  while (session.phase != MYSQL_PHASE_DONE &&
-         session.phase != MYSQL_PHASE_FAILED &&
-         elapsed < timeout_ms) {
+  return MYSQL_SESSION_OK;
+}
+
+static mysql_session_status_t mysql_session_progress_until(
+    mysql_session_t *session, mysql_session_phase_t target) {
+  uint32_t elapsed = 0u;
+  int status;
+
+  if (session == NULL)
+    return MYSQL_SESSION_INVALID;
+
+  while (session->phase != target &&
+         session->phase != MYSQL_PHASE_DONE &&
+         session->phase != MYSQL_PHASE_FAILED &&
+         elapsed < session->timeout_ms) {
     size_t events = 0u;
-    uint32_t slice = timeout_ms - elapsed > 10u
-                         ? 10u
-                         : timeout_ms - elapsed;
-    status = cnet_client_poll(&session.client, slice, &events);
+    const uint32_t remaining = session->timeout_ms - elapsed;
+    const uint32_t slice = remaining > 10u ? 10u : remaining;
+    status = cnet_client_poll(&session->client, slice, &events);
     if (status != SALTS_OK) {
-      if (error != NULL)
-        error->cnet_status = status;
-      mysql_session_set_error(&session, MYSQL_SESSION_IO,
+      if (session->error != NULL)
+        session->error->cnet_status = status;
+      mysql_session_set_error(session, MYSQL_SESSION_IO,
                               "poll", "CNet progress failed");
       break;
     }
     elapsed += slice;
   }
 
-  if (session.phase != MYSQL_PHASE_DONE &&
-      session.phase != MYSQL_PHASE_FAILED)
-    mysql_session_set_error(&session, MYSQL_SESSION_TIMEOUT,
-                            "timeout", "MySQL connect/ping deadline expired");
+  if (session->phase != target &&
+      session->phase != MYSQL_PHASE_DONE &&
+      session->phase != MYSQL_PHASE_FAILED)
+    mysql_session_set_error(session, MYSQL_SESSION_TIMEOUT,
+                            "timeout", "MySQL session deadline expired");
 
-  result = session.phase == MYSQL_PHASE_DONE
-               ? MYSQL_SESSION_OK
-               : (error != NULL && error->status != MYSQL_SESSION_OK
-                      ? error->status
-                      : MYSQL_SESSION_PROTOCOL);
+  if (session->phase == target ||
+      (target == MYSQL_PHASE_DONE &&
+       session->phase == MYSQL_PHASE_DONE))
+    return MYSQL_SESSION_OK;
 
-  if (session.phase == MYSQL_PHASE_DONE)
-    (void)cnet_close(&session.client, session.connection);
-  status = cnet_client_stop(&session.client, timeout_ms);
-  if (status != SALTS_OK && result == MYSQL_SESSION_OK) {
-    result = MYSQL_SESSION_IO;
-    if (error != NULL) {
-      error->status = result;
-      error->cnet_status = status;
-      (void)snprintf(error->stage, sizeof(error->stage), "%s", "client-stop");
-    }
-  }
-  (void)cnet_client_destroy(&session.client);
+  return session->error != NULL &&
+                 session->error->status != MYSQL_SESSION_OK
+             ? session->error->status
+             : MYSQL_SESSION_PROTOCOL;
+}
+
+static void mysql_session_release_cursor_storage(
+    mysql_session_t *session) {
+  if (session == NULL)
+    return;
+  free(session->cursor_message);
+  free(session->cursor_metadata);
+  free(session->cursor_columns);
+  session->cursor_message = NULL;
+  session->cursor_metadata = NULL;
+  session->cursor_columns = NULL;
+  session->cursor_message_capacity = 0u;
+  session->cursor_metadata_used = 0u;
+}
+
+static void mysql_session_shutdown(
+    mysql_session_t *session, bool request_close) {
+  if (session == NULL)
+    return;
+  if (request_close &&
+      session->phase != MYSQL_PHASE_FAILED)
+    (void)cnet_close(&session->client, session->connection);
+  (void)cnet_client_stop(&session->client, session->timeout_ms);
+  (void)cnet_client_destroy(&session->client);
+}
+
+static mysql_session_status_t mysql_session_run(
+    const mysql_session_config_t *config, mysql_session_action_t action,
+    mysql_session_prepared_probe_t *probe, mysql_session_error_t *error) {
+  mysql_session_t session;
+  mysql_session_status_t result;
+
+  result = mysql_session_start(
+      &session, config, action, probe, error,
+      MYSQL_SESSION_CONTROL_CAPACITY,
+      MYSQL_SESSION_CONTROL_CAPACITY);
+  if (result != MYSQL_SESSION_OK)
+    return result;
+
+  result = mysql_session_progress_until(
+      &session, MYSQL_PHASE_DONE);
+  mysql_session_shutdown(&session, session.phase == MYSQL_PHASE_DONE);
   return result;
+}
+
+static orm_status_t mysql_session_source_status(
+    mysql_session_status_t status) {
+  switch (status) {
+    case MYSQL_SESSION_INVALID:
+      return ORM_STATUS_INVALID_ARGUMENT;
+    case MYSQL_SESSION_IO:
+    case MYSQL_SESSION_AUTH:
+    case MYSQL_SESSION_TIMEOUT:
+      return ORM_STATUS_CONNECTION_ERROR;
+    case MYSQL_SESSION_PROTOCOL:
+      return ORM_STATUS_DATASTORE_ERROR;
+    case MYSQL_SESSION_OK:
+      return ORM_STATUS_OK;
+    default:
+      return ORM_STATUS_INTERNAL_ERROR;
+  }
+}
+
+static void mysql_session_feed_deferred(mysql_session_t *session) {
+  uint8_t deferred[MYSQL_SESSION_PACKET_CAPACITY];
+  cnet_receive_view view;
+
+  if (session == NULL || session->deferred_size == 0u)
+    return;
+  memcpy(deferred, session->deferred, session->deferred_size);
+  view = (cnet_receive_view){
+      .data = deferred,
+      .size = session->deferred_size,
+      .kind = CNET_MESSAGE_BYTES};
+  session->deferred_size = 0u;
+  mysql_session_on_receive(session, session->connection, &view);
+}
+
+static mysql_cursor_source_step_t mysql_session_cursor_source_next(
+    void *context) {
+  mysql_session_t *session = (mysql_session_t *)context;
+  mysql_cursor_source_step_t step = MYSQL_CURSOR_SOURCE_STEP_INIT;
+  mysql_session_status_t progress_status;
+
+  if (session == NULL) {
+    step.kind = MYSQL_CURSOR_SOURCE_ERROR;
+    step.status = ORM_STATUS_INVALID_ARGUMENT;
+    step.message = "invalid MySQL cursor source";
+    return step;
+  }
+
+  if (session->phase == MYSQL_PHASE_DONE)
+    return step;
+  if (session->phase == MYSQL_PHASE_FAILED) {
+    step.kind = MYSQL_CURSOR_SOURCE_ERROR;
+    step.status = mysql_session_source_status(
+        session->error != NULL ? session->error->status
+                               : MYSQL_SESSION_PROTOCOL);
+    step.message = session->error != NULL &&
+                           session->error->message[0] != '\0'
+                       ? session->error->message
+                       : "MySQL cursor source failed";
+    return step;
+  }
+  if (session->cancel_requested) {
+    progress_status = mysql_session_progress_until(
+        session, MYSQL_PHASE_DONE);
+    if (progress_status == MYSQL_SESSION_OK ||
+        session->phase == MYSQL_PHASE_DONE)
+      return step;
+    step.kind = MYSQL_CURSOR_SOURCE_ERROR;
+    step.status = mysql_session_source_status(progress_status);
+    step.message = session->error != NULL &&
+                           session->error->message[0] != '\0'
+                       ? session->error->message
+                       : "cancel MySQL cursor source";
+    return step;
+  }
+
+  if (session->phase != MYSQL_PHASE_CURSOR_READY) {
+    step.kind = MYSQL_CURSOR_SOURCE_ERROR;
+    step.status = ORM_STATUS_INVALID_STATE;
+    step.message = "MySQL cursor source is not ready for demand";
+    return step;
+  }
+
+  session->phase = MYSQL_PHASE_WAIT_RESULT_ROW;
+  if (session->deferred_size != 0u) {
+    mysql_session_feed_deferred(session);
+  } else if (mysql_session_request_receive(session) != SALTS_OK) {
+    /* request_receive records the session error */
+  }
+
+  if (session->phase == MYSQL_PHASE_WAIT_RESULT_ROW)
+    progress_status = mysql_session_progress_until(
+        session, MYSQL_PHASE_CURSOR_ROW_READY);
+  else
+    progress_status = session->phase == MYSQL_PHASE_CURSOR_ROW_READY
+                          ? MYSQL_SESSION_OK
+                          : (session->phase == MYSQL_PHASE_DONE
+                                 ? MYSQL_SESSION_OK
+                                 : (session->error != NULL
+                                        ? session->error->status
+                                        : MYSQL_SESSION_PROTOCOL));
+
+  if (session->phase == MYSQL_PHASE_CURSOR_ROW_READY) {
+    step.kind = MYSQL_CURSOR_SOURCE_ROW;
+    step.row = session->cursor_message;
+    step.row_size = session->cursor_row_size;
+    session->phase = MYSQL_PHASE_CURSOR_READY;
+    return step;
+  }
+
+  if (session->phase == MYSQL_PHASE_DONE)
+    return step;
+
+  step.kind = MYSQL_CURSOR_SOURCE_ERROR;
+  step.status = mysql_session_source_status(progress_status);
+  step.message = session->error != NULL &&
+                         session->error->message[0] != '\0'
+                     ? session->error->message
+                     : "advance MySQL cursor source";
+  return step;
+}
+
+static void mysql_session_cursor_source_cancel(void *context) {
+  mysql_session_t *session = (mysql_session_t *)context;
+  if (session == NULL || session->cancel_requested ||
+      session->phase == MYSQL_PHASE_DONE ||
+      session->phase == MYSQL_PHASE_FAILED)
+    return;
+  session->cancel_requested = true;
+  (void)cnet_close(&session->client, session->connection);
+}
+
+static void mysql_session_cursor_source_destroy(void *context) {
+  mysql_session_t *session = (mysql_session_t *)context;
+  if (session == NULL)
+    return;
+  if (session->phase != MYSQL_PHASE_DONE &&
+      session->phase != MYSQL_PHASE_FAILED &&
+      !session->cancel_requested) {
+    session->cancel_requested = true;
+    (void)cnet_close(&session->client, session->connection);
+  }
+  (void)cnet_client_stop(&session->client, session->timeout_ms);
+  (void)cnet_client_destroy(&session->client);
+  mysql_session_release_cursor_storage(session);
+  free(session);
+}
+
+static const mysql_cursor_source_ops_t mysql_session_cursor_source_ops = {
+    sizeof(mysql_cursor_source_ops_t),
+    MYSQL_CURSOR_SOURCE_OPS_ABI_VERSION,
+    mysql_session_cursor_source_next,
+    mysql_session_cursor_source_cancel,
+    mysql_session_cursor_source_destroy};
+
+mysql_session_status_t mysql_session_open_prepared_source(
+    const mysql_session_config_t *config,
+    const uint8_t *sql, size_t sql_size,
+    const mysql_stmt_value_t *parameters, size_t parameter_count,
+    const mysql_session_cursor_limits_t *limits,
+    mysql_cursor_source_t *out_source,
+    const mysql_column_definition_t **out_columns,
+    size_t *out_column_count,
+    mysql_session_error_t *error) {
+  mysql_session_t *session = NULL;
+  mysql_session_status_t status;
+  size_t message_capacity;
+
+  if (out_source != NULL)
+    memset(out_source, 0, sizeof(*out_source));
+  if (out_columns != NULL)
+    *out_columns = NULL;
+  if (out_column_count != NULL)
+    *out_column_count = 0u;
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+
+  if (!mysql_session_config_valid(config) ||
+      sql == NULL || sql_size == 0u ||
+      (parameters == NULL && parameter_count != 0u) ||
+      parameter_count > (size_t)UINT16_MAX ||
+      limits == NULL ||
+      limits->max_columns == 0u ||
+      limits->max_metadata_bytes == 0u ||
+      limits->max_row_bytes == 0u ||
+      limits->max_command_bytes == 0u ||
+      limits->max_command_bytes > MYSQL_WIRE_PACKET_MAX_PAYLOAD ||
+      sql_size + 1u > limits->max_command_bytes ||
+      out_source == NULL ||
+      out_columns == NULL ||
+      out_column_count == NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "cursor-config");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "invalid prepared cursor request or bounds");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  message_capacity = MYSQL_SESSION_CONTROL_CAPACITY;
+  if (limits->max_row_bytes > message_capacity)
+    message_capacity = limits->max_row_bytes;
+  if (limits->max_metadata_bytes > message_capacity)
+    message_capacity = limits->max_metadata_bytes;
+
+  session = (mysql_session_t *)calloc(1u, sizeof(*session));
+  if (session == NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_IO;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "cursor-allocate");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "allocate MySQL cursor session");
+    }
+    return MYSQL_SESSION_IO;
+  }
+
+  status = mysql_session_start(
+      session, config, MYSQL_SESSION_ACTION_PREPARED_CURSOR,
+      NULL, &session->owned_error,
+      message_capacity, limits->max_command_bytes);
+  if (status != MYSQL_SESSION_OK)
+    goto fail;
+
+  session->prepared_sql = sql;
+  session->prepared_sql_size = sql_size;
+  session->prepared_values = parameters;
+  session->prepared_value_count = parameter_count;
+  session->cursor_limits = *limits;
+  session->cursor_message_capacity = message_capacity;
+
+  if (limits->max_columns > SIZE_MAX / sizeof(*session->cursor_columns)) {
+    status = MYSQL_SESSION_INVALID;
+    mysql_session_set_error(session, status,
+                            "cursor-columns",
+                            "cursor column allocation exceeds platform range");
+    goto fail;
+  }
+
+  session->cursor_columns = (mysql_column_definition_t *)calloc(
+      limits->max_columns, sizeof(*session->cursor_columns));
+  session->cursor_metadata = (unsigned char *)malloc(
+      limits->max_metadata_bytes);
+  session->cursor_message = (uint8_t *)malloc(message_capacity);
+  if (session->cursor_columns == NULL ||
+      session->cursor_metadata == NULL ||
+      session->cursor_message == NULL) {
+    mysql_session_set_error(session, MYSQL_SESSION_IO,
+                            "cursor-storage",
+                            "allocate bounded MySQL cursor storage");
+    status = MYSQL_SESSION_IO;
+    goto fail;
+  }
+
+  status = mysql_session_progress_until(
+      session, MYSQL_PHASE_CURSOR_READY);
+  if (status != MYSQL_SESSION_OK ||
+      session->phase != MYSQL_PHASE_CURSOR_READY)
+    goto fail;
+
+  session->prepared_sql = NULL;
+  session->prepared_sql_size = 0u;
+  session->prepared_values = NULL;
+  session->prepared_value_count = 0u;
+  session->config = NULL;
+
+  out_source->ops = &mysql_session_cursor_source_ops;
+  out_source->context = session;
+  *out_columns = session->cursor_columns;
+  *out_column_count = (size_t)session->result_column_count;
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  return MYSQL_SESSION_OK;
+
+fail:
+  if (error != NULL)
+    *error = session->owned_error;
+  mysql_session_shutdown(session, true);
+  mysql_session_release_cursor_storage(session);
+  free(session);
+  return status != MYSQL_SESSION_OK
+             ? status
+             : MYSQL_SESSION_PROTOCOL;
 }
 
 mysql_session_status_t mysql_session_connect_and_ping(
