@@ -412,6 +412,239 @@ static int structured_read(
 }
 
 
+static int view_equals(
+    orm_string_view_t value, const char *expected) {
+  const size_t size = strlen(expected);
+  return value.len == size &&
+         (size == 0u || memcmp(value.data, expected, size) == 0);
+}
+
+static int qualify_live_values(
+    orm_connection_t *connection, orm_error_t *error) {
+  static const unsigned char expected_blob[] = {
+      0x00u, 0x7fu, 0xffu};
+  orm_query_t *query = NULL;
+  orm_result_t *result = NULL;
+  orm_string_view_t text = {0};
+  orm_blob_t blob = {0};
+  uint64_t u = 0u;
+  uint64_t rows = 0u;
+  uint64_t columns = 0u;
+  uint8_t is_null = 0u;
+  int failed = 0;
+
+  if (orm_raw(
+          connection,
+          orm_view(
+              "SELECT n_null,u,b,decv,d,t,dt "
+              "FROM m5_values WHERE id=?1"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_bind(
+          query, orm_i64(1), error) != ORM_STATUS_OK ||
+      orm_query_execute(
+          query, &result, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "MySQL live value SELECT failed: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  if (orm_result_row_count(
+          result, &rows, error) != ORM_STATUS_OK ||
+      orm_result_column_count(
+          result, &columns, error) != ORM_STATUS_OK ||
+      rows != UINT64_C(1) || columns != UINT64_C(7)) {
+    fprintf(stderr,
+            "MySQL live value shape mismatch rows=%llu columns=%llu message=%s\n",
+            (unsigned long long)rows,
+            (unsigned long long)columns,
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  if (orm_result_is_null(
+          result, 0u, 0u, &is_null, error) != ORM_STATUS_OK ||
+      is_null != 1u) {
+    fprintf(stderr, "MySQL live NULL mapping failed: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+  if (!failed &&
+      (orm_result_get_uint64(
+           result, 0u, 1u, &u, error) != ORM_STATUS_OK ||
+       u != UINT64_MAX)) {
+    fprintf(stderr,
+            "MySQL live uint64 mapping failed got=%llu message=%s\n",
+            (unsigned long long)u,
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+  if (!failed &&
+      (orm_result_get_blob(
+           result, 0u, 2u, &blob, error) != ORM_STATUS_OK ||
+       blob.size != sizeof(expected_blob) ||
+       memcmp(blob.data, expected_blob, sizeof(expected_blob)) != 0)) {
+    fprintf(stderr,
+            "MySQL live BLOB mapping failed size=%zu message=%s\n",
+            blob.size, error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+  if (!failed &&
+      (orm_result_get_text(
+           result, 0u, 3u, &text, error) != ORM_STATUS_OK ||
+       !view_equals(text, "1234567890123.456789"))) {
+    fprintf(stderr,
+            "MySQL live DECIMAL mapping failed value=%.*s message=%s\n",
+            (int)text.len, text.data != NULL ? text.data : "",
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+  if (!failed &&
+      (orm_result_get_text(
+           result, 0u, 4u, &text, error) != ORM_STATUS_OK ||
+       !view_equals(text, "2026-09-28"))) {
+    fprintf(stderr,
+            "MySQL live DATE mapping failed value=%.*s message=%s\n",
+            (int)text.len, text.data != NULL ? text.data : "",
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+  if (!failed &&
+      (orm_result_get_text(
+           result, 0u, 5u, &text, error) != ORM_STATUS_OK ||
+       !view_equals(text, "12:34:56.123456"))) {
+    fprintf(stderr,
+            "MySQL live TIME mapping failed value=%.*s message=%s\n",
+            (int)text.len, text.data != NULL ? text.data : "",
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+  if (!failed &&
+      (orm_result_get_text(
+           result, 0u, 6u, &text, error) != ORM_STATUS_OK ||
+       !view_equals(text, "2026-09-28 12:34:56.654321"))) {
+    fprintf(stderr,
+            "MySQL live DATETIME mapping failed value=%.*s message=%s\n",
+            (int)text.len, text.data != NULL ? text.data : "",
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+cleanup:
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+  return failed;
+}
+
+static int qualify_constraint(
+    orm_connection_t *connection, orm_error_t *error) {
+  orm_query_t *query = NULL;
+  orm_result_t *result = NULL;
+  orm_status_t status;
+  int failed = 0;
+
+  if (orm_insert(
+          connection, orm_view("m5_constraint"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("id"), orm_i64(1), error) !=
+          ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("note"), orm_text("duplicate"), error) !=
+          ORM_STATUS_OK) {
+    fprintf(stderr,
+            "prepare MySQL duplicate constraint query failed: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  status = orm_query_execute(query, &result, error);
+  if (status != ORM_STATUS_CONSTRAINT || result != NULL) {
+    fprintf(stderr,
+            "MySQL duplicate constraint expected=%d got=%d result=%p message=%s\n",
+            (int)ORM_STATUS_CONSTRAINT, (int)status,
+            (void *)result,
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+cleanup:
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+  return failed;
+}
+
+static int qualify_row_limit(
+    orm_runtime_t *runtime,
+    const char *host, const char *port,
+    const char *user, const char *password,
+    const char *database, const char *ca_file,
+    const char *server_name, orm_error_t *error) {
+  orm_config_t config;
+  orm_option_t options[8];
+  orm_connection_t *connection = NULL;
+  orm_query_t *query = NULL;
+  orm_result_t *result = NULL;
+  orm_status_t status;
+  int failed = 0;
+
+  orm_config(&config);
+  options[0] = (orm_option_t){orm_view("host"), orm_view(host)};
+  options[1] = (orm_option_t){orm_view("port"), orm_view(port)};
+  options[2] = (orm_option_t){orm_view("username"), orm_view(user)};
+  options[3] = (orm_option_t){orm_view("password"), orm_view(password)};
+  options[4] = (orm_option_t){orm_view("database"), orm_view(database)};
+  options[5] = (orm_option_t){orm_view("ca_file"), orm_view(ca_file)};
+  options[6] = (orm_option_t){orm_view("server_name"), orm_view(server_name)};
+  options[7] = (orm_option_t){orm_view("timeout_ms"), orm_view("5000")};
+  config.driver = orm_view("mysql");
+  config.options = options;
+  config.option_count = 8u;
+  config.max_result_rows = 1u;
+
+  if (orm_runtime_connect(
+          runtime, &config, &connection, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "connect bounded MySQL datasource failed: %s\n",
+            error != NULL ? error->message : "");
+    return 1;
+  }
+
+  if (orm_raw(
+          connection,
+          orm_view("SELECT 1 AS s UNION ALL SELECT 2 AS s"),
+          &query, error) != ORM_STATUS_OK) {
+    failed = 1;
+    goto cleanup;
+  }
+
+  status = orm_query_execute(query, &result, error);
+  if (status != ORM_STATUS_LIMIT_EXCEEDED || result != NULL) {
+    fprintf(stderr,
+            "MySQL row limit expected=%d got=%d result=%p message=%s\n",
+            (int)ORM_STATUS_LIMIT_EXCEEDED, (int)status,
+            (void *)result,
+            error != NULL ? error->message : "");
+    failed = 1;
+  }
+
+cleanup:
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+  orm_disconnect(connection);
+  return failed;
+}
+
+
 static int qualify_cancel_lease(
     orm_runtime_t *runtime,
     const char *host, const char *port,
@@ -628,6 +861,16 @@ int main(void) {
   }
 
   if (read_probe(connection_a, &error) != 0)
+    failed = 1;
+
+  if (!failed && qualify_live_values(connection_a, &error) != 0)
+    failed = 1;
+  if (!failed && qualify_constraint(connection_a, &error) != 0)
+    failed = 1;
+  if (!failed &&
+      qualify_row_limit(
+          runtime, host, port, user, password,
+          database_a, ca_file, server_name, &error) != 0)
     failed = 1;
 
   if (!failed && update_driver_value(connection_a, INT64_C(1), &error) != 0)
