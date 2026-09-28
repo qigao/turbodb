@@ -566,6 +566,7 @@ typedef struct bridge_connection {
 
 typedef struct bridge_cursor {
   orm_row_cursor cursor;
+  orm_query_plan plan;
 } bridge_cursor;
 
 typedef struct bridge_transaction {
@@ -706,6 +707,7 @@ static void ORM_DRIVER_CALL bridge_cursor_destroy(void *context) {
   bridge_cursor *wrapper = (bridge_cursor *)context;
   if (wrapper == NULL) return;
   bridge_row_cursor_dispose(&wrapper->cursor);
+  orm_driver_backend_plan_destroy(&wrapper->plan);
   free(wrapper);
 }
 
@@ -748,10 +750,11 @@ static const orm_driver_cursor_ops_v1 bridge_cursor_ops = {
     bridge_cursor_column_count};
 
 static orm_status_t bridge_wrap_cursor(
-    orm_row_cursor *cursor, orm_driver_cursor_v1 *out,
-    orm_error_t *error) {
+    orm_row_cursor *cursor, orm_query_plan *plan,
+    orm_driver_cursor_v1 *out, orm_error_t *error) {
   if (out != NULL) memset(out, 0, sizeof(*out));
-  if (cursor == NULL || out == NULL || !bridge_row_cursor_valid(cursor))
+  if (cursor == NULL || plan == NULL || out == NULL ||
+      !bridge_row_cursor_valid(cursor))
     return bridge_result(error, ORM_STATUS_ABI_MISMATCH,
                          "backend returned an invalid cursor");
 
@@ -761,8 +764,13 @@ static orm_status_t bridge_wrap_cursor(
     return bridge_result(error, ORM_STATUS_OUT_OF_MEMORY,
                          "allocate Driver cursor wrapper");
 
+  /* A backend cursor may borrow the materialized query plan until destroy.
+   * Transfer both objects together so no cursor can retain stack-backed
+   * plan storage after open_cursor returns. */
   wrapper->cursor = *cursor;
+  wrapper->plan = *plan;
   memset(cursor, 0, sizeof(*cursor));
+  memset(plan, 0, sizeof(*plan));
   out->header =
       (orm_driver_header_v1)BRIDGE_HEADER(orm_driver_cursor_v1);
   out->context = wrapper;
@@ -798,15 +806,17 @@ static orm_status_t bridge_backend_open_cursor(
   if (status == ORM_STATUS_OK)
     status = backend->ops->open_cursor(
         backend->context, &plan, &limits, &cursor, error);
-  orm_driver_backend_plan_destroy(&plan);
   if (status != ORM_STATUS_OK) {
     bridge_row_cursor_dispose(&cursor);
+    orm_driver_backend_plan_destroy(&plan);
     return status;
   }
 
-  status = bridge_wrap_cursor(&cursor, out, error);
-  if (status != ORM_STATUS_OK)
+  status = bridge_wrap_cursor(&cursor, &plan, out, error);
+  if (status != ORM_STATUS_OK) {
     bridge_row_cursor_dispose(&cursor);
+    orm_driver_backend_plan_destroy(&plan);
+  }
   return status;
 }
 
@@ -868,15 +878,17 @@ static orm_status_t bridge_transaction_open_cursor_impl(
   if (status == ORM_STATUS_OK)
     status = wrapper->transaction.ops->open_cursor(
         wrapper->transaction.context, &plan, &limits, &cursor, error);
-  orm_driver_backend_plan_destroy(&plan);
   if (status != ORM_STATUS_OK) {
     bridge_row_cursor_dispose(&cursor);
+    orm_driver_backend_plan_destroy(&plan);
     return status;
   }
 
-  status = bridge_wrap_cursor(&cursor, out, error);
-  if (status != ORM_STATUS_OK)
+  status = bridge_wrap_cursor(&cursor, &plan, out, error);
+  if (status != ORM_STATUS_OK) {
     bridge_row_cursor_dispose(&cursor);
+    orm_driver_backend_plan_destroy(&plan);
+  }
   return status;
 }
 
