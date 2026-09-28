@@ -85,6 +85,46 @@ int main(void) {
   }
 
   {
+    static const uint8_t sql[] =
+        "SELECT 'hello', NULL, CONCAT('x', CHAR(0), 'y')";
+    mysql_session_text_probe_t probe;
+
+    status = mysql_session_text_query_probe(
+        &config, sql, sizeof(sql) - 1u, &probe, &error);
+    if (status != MYSQL_SESSION_OK) {
+      fprintf(stderr,
+              "mysql COM_QUERY text probe failed status=%d stage=%s cnet=%d "
+              "native=%d server=%u sqlstate=%s message=%s\n",
+              (int)status, error.stage, error.cnet_status,
+              error.cnet_native_status, (unsigned int)error.server_error,
+              error.sql_state, error.message);
+      return 1;
+    }
+
+    if (probe.row_count != 1u || probe.column_count != 3u ||
+        probe.columns[0].is_null ||
+        probe.columns[0].size != 5u ||
+        memcmp(probe.columns[0].data, "hello", 5u) != 0 ||
+        !probe.columns[1].is_null ||
+        probe.columns[1].size != 0u ||
+        probe.columns[2].is_null ||
+        probe.columns[2].size != 3u ||
+        probe.columns[2].data[0] != (uint8_t)'x' ||
+        probe.columns[2].data[1] != UINT8_C(0) ||
+        probe.columns[2].data[2] != (uint8_t)'y') {
+      fprintf(stderr,
+              "unexpected COM_QUERY text row rows=%u columns=%u "
+              "first_size=%zu null=%u third_size=%zu\n",
+              (unsigned int)probe.row_count,
+              (unsigned int)probe.column_count,
+              probe.columns[0].size,
+              (unsigned int)probe.columns[1].is_null,
+              probe.columns[2].size);
+      return 1;
+    }
+  }
+
+  {
     mysql_session_prepared_probe_t probe;
     status = mysql_session_prepared_probe(&config, &probe, &error);
     if (status != MYSQL_SESSION_OK) {
