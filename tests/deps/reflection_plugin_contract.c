@@ -13,7 +13,7 @@ CMETA_INTERFACE(turbodb_dependency_wrong_interface,
                 TURBODB_DEPENDENCY_WRONG_METHODS);
 
 _Static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
-               "TurboDB requires SaltsUtils Plugin ABI 2");
+               "TurboDB requires Salts Plugin ABI 2");
 
 static int dependency_value(void *self) {
   return self != NULL ? *(const int *)self : 0;
