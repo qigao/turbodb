@@ -981,7 +981,11 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   plugin_status =
       salts_plugin_registry_load(&runtime->plugins, path, &plugin);
   if (plugin_status != SALTS_PLUGIN_OK) {
-    status = runtime_plugin_status(plugin_status, error, "load driver Plugin");
+    status = plugin_status == SALTS_PLUGIN_UNSUPPORTED_ABI
+                 ? runtime_result(error, ORM_STATUS_ABI_MISMATCH,
+                                  "driver Plugin ABI mismatch")
+                 : runtime_plugin_status(
+                       plugin_status, error, "load driver Plugin");
     goto fail_reserved;
   }
 
@@ -1023,6 +1027,27 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   if (plugin_status != SALTS_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "find TurboDb.Driver export");
+    goto fail_admission;
+  }
+
+  if (entry->kind == SALTS_PLUGIN_EXPORT_INTERFACE &&
+      entry->contract_id != NULL &&
+      strcmp(entry->contract_id, ORM_DRIVER_INTERFACE_CONTRACT_ID) == 0 &&
+      entry->contract_version != ORM_DRIVER_INTERFACE_CONTRACT_VERSION) {
+    status = runtime_result(error, ORM_STATUS_ABI_MISMATCH,
+                            "TurboDb.Driver contract version mismatch");
+    goto fail_admission;
+  }
+  if (entry->kind == SALTS_PLUGIN_EXPORT_INTERFACE &&
+      entry->contract_id != NULL &&
+      strcmp(entry->contract_id, ORM_DRIVER_INTERFACE_CONTRACT_ID) == 0 &&
+      entry->contract_version == ORM_DRIVER_INTERFACE_CONTRACT_VERSION &&
+      (entry->value.interface.desc == NULL ||
+       !cmeta_interface_desc_valid(entry->value.interface.desc) ||
+       !cmeta_interface_desc_equal(entry->value.interface.desc,
+                                   TurboDb_Driver_interface()))) {
+    status = runtime_result(error, ORM_STATUS_ABI_MISMATCH,
+                            "TurboDb.Driver CMeta Interface shape mismatch");
     goto fail_admission;
   }
 
