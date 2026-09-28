@@ -1036,6 +1036,28 @@ else()
 endif()
 add_test(NAME orm_driver_plan_view COMMAND orm_driver_plan_view_test)
 
+# MySQL issue #33 M1 is protocol-only. It intentionally does not build or
+# publish a TurboDb.Driver module and therefore advertises no CRUD capability.
+set(ORM_MYSQL_WIRE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql/wire)
+add_executable(orm_mysql_wire_test
+  tests/driver/orm_mysql_wire_test.c
+  src/dbs/mysql/wire/codec.c
+  src/dbs/mysql/wire/packet.c
+  src/dbs/mysql/wire/result.c)
+target_compile_features(orm_mysql_wire_test PRIVATE c_std_11)
+target_include_directories(orm_mysql_wire_test PRIVATE
+  ${ORM_MYSQL_WIRE_SOURCE_DIR})
+target_link_libraries(orm_mysql_wire_test PRIVATE Salts::TinyTest)
+set_target_properties(orm_mysql_wire_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_wire_test)
+if(MSVC)
+  target_compile_options(orm_mysql_wire_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_wire_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_wire COMMAND orm_mysql_wire_test)
+
 add_executable(orm_driver_interface_test
   tests/driver/orm_driver_interface_test.c
   tests/driver/orm_driver_interface_peer_a.c
