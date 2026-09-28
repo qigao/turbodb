@@ -222,7 +222,7 @@ foreach(ORM_FORBIDDEN_CORE_LINK IN ITEMS SQLite::SQLite3
   endif()
 endforeach()
 
-if(ORM_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER)
   add_library(orm_sqlite_driver MODULE
     src/dbs/sqlite/plugin.c
     src/driver/orm_driver_backend_bridge.c
@@ -230,7 +230,7 @@ if(ORM_WITH_SQLITE)
     src/dbs/sqlite/orm_sqlite_cursor.c
     src/dbs/sql/orm_sql_render.c)
   target_compile_features(orm_sqlite_driver PRIVATE c_std_11)
-  target_compile_definitions(orm_sqlite_driver PRIVATE ORM_C_STATIC ORM_WITH_SQLITE)
+  target_compile_definitions(orm_sqlite_driver PRIVATE ORM_C_STATIC)
   target_include_directories(
     orm_sqlite_driver PRIVATE
       ${ORM_INCLUDE_DIR}
