@@ -14,7 +14,7 @@
  * equality, never descriptor pointer identity, admits the interface shape.
  */
 #define ORM_DRIVER_INTERFACE_CONTRACT_ID "TurboDb.Driver"
-#define ORM_DRIVER_INTERFACE_CONTRACT_VERSION UINT32_C(1)
+#define ORM_DRIVER_INTERFACE_CONTRACT_VERSION UINT32_C(2)
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,7 +107,9 @@ CMETA_LOCAL const cmeta_type_desc orm_driver_error_ptr_cmeta_type = {
      &orm_driver_connection_ptr_cmeta_type, CMETA_ABI_OBJECT_POINTER),          \
     (orm_error_t *, error,                                                      \
      CMETA_PARAM_OUT | CMETA_PARAM_BORROWED | CMETA_PARAM_NULLABLE,             \
-     &orm_driver_error_ptr_cmeta_type, CMETA_ABI_OBJECT_POINTER))
+     &orm_driver_error_ptr_cmeta_type, CMETA_ABI_OBJECT_POINTER))                \
+  X(I, F0, uint64_t, execution_models, value,                                   \
+    &cmeta_type_uint64, CMETA_ABI_SCALAR)
 
 CMETA_INTERFACE(TurboDb_Driver, ORM_DRIVER_INTERFACE_METHODS);
 
