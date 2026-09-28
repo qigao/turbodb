@@ -212,6 +212,16 @@ jobs:
           test -x "$app"
 
           driver_dir="$(dirname "$installed_module")"
+
+          # The build-tree live test above intentionally mutates these fixtures.
+          # Reset only its mutable public-runtime state so the installed-module
+          # smoke is an independent qualification, not a second pass over
+          # already-updated rows.
+          cid="$(docker ps --filter ancestor=mysql:8.0.40 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+          docker exec "$cid" mysql -uroot -prootpw -e \
+            "UPDATE turbodb.m4_driver SET n=0 WHERE s=-13; UPDATE turbodb_b.m4_driver SET n=100 WHERE s=-13; TRUNCATE TABLE turbodb.structured_items; TRUNCATE TABLE turbodb_b.structured_items;"
+
           export LD_LIBRARY_PATH="$TURBODB_MYSQL_BUILD/bin:$driver_dir:$stage/lib:${LD_LIBRARY_PATH:-}"
           ORM_MYSQL_PLUGIN="$installed_module" "$app"
 
