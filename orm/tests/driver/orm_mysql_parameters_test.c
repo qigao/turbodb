@@ -179,4 +179,40 @@ spec("mysql raw SQL parameter lowering") {
     lower_ok("SELECT 42", &options, "SELECT 42", NULL, 0u,
              MYSQL_PARAMETER_STYLE_NONE);
   }
+
+  it("rejects implicit-commit and transaction-control raw SQL in managed transactions") {
+    static const char *const rejected[] = {
+        "CREATE TABLE t(id INT)",
+        "  /* comment */ ALTER TABLE t ADD c INT",
+        "-- leading comment\nDROP TABLE t",
+        "# comment\nTRUNCATE TABLE t",
+        "RENAME TABLE a TO b",
+        "GRANT SELECT ON *.* TO u",
+        "LOCK TABLES t READ",
+        "START TRANSACTION",
+        "COMMIT",
+        "ROLLBACK",
+        "SAVEPOINT s",
+        "SET autocommit=1",
+        "CACHE INDEX t IN cache",
+        "CHECK TABLE t",
+        "LOAD DATA INFILE 'x' INTO TABLE t",
+        "CHANGE REPLICATION SOURCE TO SOURCE_HOST='x'",
+        "STOP REPLICA",
+        "/*!80000 CREATE TABLE t(id INT) */"};
+    static const char *const allowed[] = {
+        "SELECT * FROM t",
+        "INSERT INTO t VALUES (1)",
+        "UPDATE t SET a=1",
+        "DELETE FROM t",
+        "WITH cte AS (SELECT 1) SELECT * FROM cte"};
+    size_t i;
+
+    for (i = 0u; i < sizeof(rejected) / sizeof(rejected[0]); ++i)
+      check_true(mysql_sql_reject_managed_transaction(
+          (const uint8_t *)rejected[i], strlen(rejected[i])));
+    for (i = 0u; i < sizeof(allowed) / sizeof(allowed[0]); ++i)
+      check_false(mysql_sql_reject_managed_transaction(
+          (const uint8_t *)allowed[i], strlen(allowed[i])));
+  }
 }

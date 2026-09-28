@@ -670,6 +670,27 @@ fail:
   return status;
 }
 
+static orm_status_t orm_mysql_guard_managed_transaction_plan(
+    const orm_query_plan *plan, orm_error_t *error) {
+  if (plan == NULL)
+    return orm_mysql_fail(
+        error, ORM_STATUS_INVALID_ARGUMENT,
+        "MySQL query plan is required");
+  if (plan->kind != ORM_QUERY_RAW)
+    return ORM_STATUS_OK;
+  if (plan->raw_sql == NULL)
+    return orm_mysql_fail(
+        error, ORM_STATUS_INVALID_ARGUMENT,
+        "MySQL RAW SQL is required");
+  if (!mysql_sql_reject_managed_transaction(
+          (const uint8_t *)plan->raw_sql,
+          tstr_len(plan->raw_sql)))
+    return ORM_STATUS_OK;
+  return orm_mysql_fail(
+      error, ORM_STATUS_UNSUPPORTED,
+      "MySQL managed transactions reject implicit-commit or transaction-control RAW SQL");
+}
+
 static orm_status_t orm_mysql_prepare_plan(
     const orm_query_plan *plan, const orm_limits *limits,
     orm_mysql_prepared *out, orm_error_t *error) {
@@ -879,6 +900,11 @@ static orm_status_t orm_mysql_transaction_open(
         error, ORM_STATUS_INVALID_STATE,
         "MySQL transaction is no longer active");
 
+  status = orm_mysql_guard_managed_transaction_plan(
+      plan, error);
+  if (status != ORM_STATUS_OK)
+    return status;
+
   status = orm_mysql_prepare_plan(
       plan, limits, &prepared, error);
   if (status != ORM_STATUS_OK)
@@ -938,11 +964,18 @@ static orm_status_t orm_mysql_transaction_execute(
     orm_error_t *error) {
   orm_mysql_transaction_state *transaction =
       (orm_mysql_transaction_state *)context;
+  orm_status_t status;
   if (transaction == NULL || !transaction->active ||
       transaction->session == NULL)
     return orm_mysql_fail(
         error, ORM_STATUS_INVALID_STATE,
         "MySQL transaction is no longer active");
+
+  status = orm_mysql_guard_managed_transaction_plan(
+      plan, error);
+  if (status != ORM_STATUS_OK)
+    return status;
+
   return orm_mysql_execute_with_session(
       &transaction->owner->settings,
       plan, limits, transaction->session,

@@ -986,6 +986,114 @@ cleanup:
   return failed;
 }
 
+
+static int qualify_implicit_commit_guard(
+    orm_connection_t *connection, orm_error_t *error) {
+  orm_transaction_t *transaction = NULL;
+  orm_query_t *query = NULL;
+  orm_result_t *result = NULL;
+  orm_flow_config_t flow;
+  cflow_publisher publisher = {0};
+  mysql_driver_live_row row = {0};
+  cflow_step step;
+  orm_status_t status;
+  int failed = 0;
+
+  if (orm_transaction_begin(
+          connection, ORM_ISOLATION_READ_COMMITTED,
+          &transaction, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "begin MySQL implicit-commit guard transaction failed: %s\n",
+            error != NULL ? error->message : "");
+    return 1;
+  }
+
+  if (orm_raw(
+          connection,
+          orm_view("CREATE TABLE m5_ddl_guard(id INT PRIMARY KEY)"),
+          &query, error) != ORM_STATUS_OK) {
+    failed = 1;
+    goto cleanup;
+  }
+
+  status = orm_query_execute_in_transaction(
+      query, transaction, &result, error);
+  if (status != ORM_STATUS_UNSUPPORTED || result != NULL) {
+    fprintf(stderr,
+            "MySQL managed DDL guard expected=%d got=%d result=%p message=%s\n",
+            (int)ORM_STATUS_UNSUPPORTED, (int)status,
+            (void *)result,
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  orm_query_destroy(query);
+  query = NULL;
+
+  if (orm_transaction_rollback(transaction, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "rollback after rejected MySQL DDL failed: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+  orm_transaction_destroy(transaction);
+  transaction = NULL;
+
+  if (orm_raw(
+          connection,
+          orm_view(
+              "SELECT IF(EXISTS("
+              "SELECT 1 FROM information_schema.tables "
+              "WHERE table_schema=DATABASE() "
+              "AND table_name='m5_ddl_guard'"
+              "),1,0) AS s"),
+          &query, error) != ORM_STATUS_OK) {
+    failed = 1;
+    goto cleanup;
+  }
+
+  orm_flow_config(&flow, &mysql_driver_live_row_data);
+  if (orm_query_open_flow(
+          query, &flow, &publisher, error) != ORM_STATUS_OK) {
+    failed = 1;
+    goto cleanup;
+  }
+
+  step = cflow_publisher_resume(&publisher, NULL, &row);
+  if ((step.kind != CFLOW_STEP_VALUE &&
+       step.kind != CFLOW_STEP_VALUE_AND_DONE) ||
+      row.s != 0L) {
+    fprintf(stderr,
+            "MySQL rejected DDL still reached server step=%d exists=%ld\n",
+            (int)step.kind, row.s);
+    failed = 1;
+    goto cleanup;
+  }
+
+  if (step.kind == CFLOW_STEP_VALUE) {
+    step = cflow_publisher_resume(&publisher, NULL, &row);
+    if (step.kind != CFLOW_STEP_DONE) {
+      fprintf(stderr,
+              "MySQL DDL guard existence probe expected DONE got=%d\n",
+              (int)step.kind);
+      failed = 1;
+    }
+  }
+
+cleanup:
+  if (cflow_publisher_valid(&publisher))
+    cflow_publisher_destroy(&publisher);
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+  if (transaction != NULL) {
+    (void)orm_transaction_rollback(transaction, error);
+    orm_transaction_destroy(transaction);
+  }
+  return failed;
+}
+
 int main(void) {
   const char *module = getenv("ORM_MYSQL_PLUGIN");
   const char *host = getenv("ORM_MYSQL_HOST");
@@ -1069,6 +1177,9 @@ int main(void) {
   if (!failed && qualify_live_values(connection_a, &error) != 0)
     failed = 1;
   if (!failed && qualify_constraint(connection_a, &error) != 0)
+    failed = 1;
+  if (!failed &&
+      qualify_implicit_commit_guard(connection_a, &error) != 0)
     failed = 1;
   if (!failed &&
       qualify_row_limit(
