@@ -127,6 +127,13 @@ endif()
 if(ORM_BUILD_MONGODB_DRIVER)
   find_package(mongoc CONFIG REQUIRED)
   find_package(bson CONFIG REQUIRED)
+  if(TARGET mongoc::shared)
+    set(ORM_MONGODB_MONGOC_TARGET mongoc::shared)
+  elseif(TARGET mongoc::static)
+    set(ORM_MONGODB_MONGOC_TARGET mongoc::static)
+  else()
+    message(FATAL_ERROR "MongoDB Driver requires a canonical mongoc target")
+  endif()
   if(TARGET bson::shared)
     set(ORM_MONGODB_BSON_TARGET bson::shared)
   elseif(TARGET bson::static)
@@ -184,7 +191,7 @@ foreach(ORM_FORBIDDEN_CORE_LINK IN ITEMS SQLite::SQLite3
                                          PostgreSQL::PostgreSQL
                                          TidesDB::tidesdb
                                          TurboDB::Redis
-                                         mongoc::mongoc
+                                         ${ORM_MONGODB_MONGOC_TARGET}
                                          ${ORM_MONGODB_BSON_TARGET})
   list(FIND ORM_CORE_LINK_CONTRACT "${ORM_FORBIDDEN_CORE_LINK}"
        ORM_FORBIDDEN_CORE_LINK_INDEX)
@@ -354,7 +361,7 @@ if(ORM_BUILD_MONGODB_DRIVER)
   target_link_libraries(
     orm_mongodb_driver PRIVATE
       turbo_orm
-      mongoc::mongoc
+      ${ORM_MONGODB_MONGOC_TARGET}
       ${ORM_MONGODB_BSON_TARGET}
       Salts::PluginABI
       Salts::Core
@@ -1568,8 +1575,14 @@ if(WIN32)
     list(APPEND ORM_RUNTIME_TESTS orm_tidesdb_public_flow)
   endif()
   if(ORM_BUILD_MONGODB_DRIVER)
-    string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongoc::mongoc>;PATH=path_list_prepend:$<TARGET_FILE_DIR:${ORM_MONGODB_BSON_TARGET}>")
+    if(TARGET mongoc::shared)
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongoc::shared>")
+    endif()
+    if(TARGET bson::shared)
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:$<TARGET_FILE_DIR:bson::shared>")
+    endif()
     list(APPEND ORM_RUNTIME_TESTS orm_mongo_query orm_mongodb_plugin)
   endif()
 
