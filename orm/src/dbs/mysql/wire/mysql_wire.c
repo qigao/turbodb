@@ -349,6 +349,13 @@ int mysql_wire_decode_ok(const void *payload, size_t size,
     return status;
   if (marker != UINT8_C(0x00) && marker != UINT8_C(0xfe))
     return MYSQL_WIRE_PROTOCOL_ERROR;
+  /*
+   * 0xfe is also the legacy EOF marker. MySQL disambiguates it by payload
+   * length: EOF is strictly shorter than nine bytes. Only the non-EOF form
+   * may be interpreted as an OK packet when CLIENT_DEPRECATE_EOF is active.
+   */
+  if (marker == UINT8_C(0xfe) && mysql_wire_is_eof_packet(payload, size))
+    return MYSQL_WIRE_PROTOCOL_ERROR;
 
   status = mysql_wire_read_lenenc(&reader, &affected);
   if (status != MYSQL_WIRE_OK)
