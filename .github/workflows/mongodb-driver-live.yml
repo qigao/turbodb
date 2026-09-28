@@ -25,6 +25,7 @@ jobs:
         image: mongo:8.0
         ports:
           - 27017:27017
+
     steps:
       - name: Checkout exact TurboDB head
         uses: actions/checkout@v4
@@ -52,8 +53,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
 
       - name: Install Linux build prerequisites
         shell: bash
@@ -69,24 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           build="$RUNNER_TEMP/mongodb-driver-live"
-          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
-            -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed_mongodb" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DORM_WITH_SQLITE=OFF \
-            -DORM_WITH_PGSQL=OFF \
-            -DORM_BUILD_REDIS_DRIVER=OFF \
-            -DORM_BUILD_TIDESDB_DRIVER=OFF \
-            -DORM_BUILD_MONGODB_DRIVER=ON \
-            -DORM_MONGODB_LIVE_TESTS=ON \
-            -DORM_BUILD_TESTS=ON \
-            -DTURBODB_BUILD_REDIS=OFF \
-            -DTURBODB_BUILD_DBTOOLS=OFF \
-            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
-            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF \
-            -DBUILD_TESTS=OFF \
-            -DENABLE_TESTS=OFF
+          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed_mongodb" -DVCPKG_TARGET_TRIPLET=x64-linux -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=ON -DORM_MONGODB_LIVE_TESTS=ON -DORM_BUILD_TESTS=ON -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF
           cmake --build "$build" --target orm_mongodb_live_driver_test --parallel 4
 
           mkdir -p evidence/mongodb-live
@@ -98,8 +81,7 @@ jobs:
             echo "PluginABI=2"
           } > evidence/mongodb-live/qualification.txt
 
-          ctest --test-dir "$build" -R '^orm_mongodb_live_driver$' \
-            --output-on-failure 2>&1 | tee evidence/mongodb-live/ctest.log
+          ctest --test-dir "$build" -R '^orm_mongodb_live_driver$' --output-on-failure 2>&1 | tee evidence/mongodb-live/ctest.log
 
           core="$build/bin/libturbo_orm.so"
           driver="$build/bin/turbodb_driver_mongodb.so"
@@ -107,48 +89,29 @@ jobs:
           readelf -d "$driver" > evidence/mongodb-live/driver-dependencies.txt
           nm --defined-only "$driver" > evidence/mongodb-live/driver-symbols.txt
           nm -D --defined-only "$driver" > evidence/mongodb-live/driver-exports.txt
+
           if grep -Eiq 'mongoc|bson' evidence/mongodb-live/core-dependencies.txt; then
             cat evidence/mongodb-live/core-dependencies.txt
             echo 'generic core imports MongoDB native libraries' >&2
             exit 1
           fi
-          if ! grep -Eiq 'mongoc' evidence/mongodb-live/driver-dependencies.txt &&
-             ! grep -Eq '[[:space:]][Tt][[:space:]]mongoc_client_new
-      - name: Keep MongoDB live qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mongodb-driver-live-${{ github.sha }}
-          path: evidence/mongodb-live/
-          if-no-files-found: warn
- evidence/mongodb-live/driver-symbols.txt; then
-            cat evidence/mongodb-live/driver-dependencies.txt
-            grep -E 'mongoc_client_new|mongoc_' evidence/mongodb-live/driver-symbols.txt || true
-            echo 'MongoDB Driver contains neither shared nor static mongoc implementation' >&2
-            exit 1
+
+          if ! grep -Eiq 'mongoc' evidence/mongodb-live/driver-dependencies.txt; then
+            if ! grep -Eq '[[:space:]][Tt][[:space:]]mongoc_client_new$' evidence/mongodb-live/driver-symbols.txt; then
+              cat evidence/mongodb-live/driver-dependencies.txt
+              grep -E 'mongoc_client_new|mongoc_' evidence/mongodb-live/driver-symbols.txt || true
+              echo 'MongoDB Driver contains neither shared nor static mongoc implementation' >&2
+              exit 1
+            fi
           fi
-          grep -Eq '[[:space:]]salts_plugin_query
-      - name: Keep MongoDB live qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mongodb-driver-live-${{ github.sha }}
-          path: evidence/mongodb-live/
-          if-no-files-found: warn
- evidence/mongodb-live/driver-exports.txt
-          if grep -Eiq '[[:space:]]mongoc_[A-Za-z0-9_]*$|[[:space:]]bson_[A-Za-z0-9_]*
-      - name: Keep MongoDB live qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mongodb-driver-live-${{ github.sha }}
-          path: evidence/mongodb-live/
-          if-no-files-found: warn
-               evidence/mongodb-live/driver-exports.txt; then
+
+          grep -Eq '[[:space:]]salts_plugin_query$' evidence/mongodb-live/driver-exports.txt
+          if grep -Eiq '[[:space:]]mongoc_[A-Za-z0-9_]*$|[[:space:]]bson_[A-Za-z0-9_]*$' evidence/mongodb-live/driver-exports.txt; then
             cat evidence/mongodb-live/driver-exports.txt
             echo 'MongoDB native symbols leaked from Driver MODULE' >&2
             exit 1
           fi
+
           sha256sum "$core" "$driver" > evidence/mongodb-live/binaries.sha256
 
       - name: Keep MongoDB live qualification evidence
