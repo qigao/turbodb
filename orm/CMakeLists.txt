@@ -338,6 +338,7 @@ if(ORM_BUILD_TIDESDB_DRIVER)
     src/driver/orm_driver_backend_bridge.c
     src/dbs/tidesdb/backend.c
     src/dbs/tidesdb/bridge.c
+    src/dbs/tidesdb/maintenance.c
     src/dbs/tidesdb/row.c
     src/dbs/tidesdb/orm_tidesdb_cursor.c)
   target_compile_features(orm_tidesdb_driver PRIVATE c_std_11)
@@ -2247,6 +2248,7 @@ cmake_install_headers(
     include/orm/orm_driver_interface.h
     include/orm/orm_runtime.h
     include/orm/orm_sqlite.h
+    include/orm/orm_tidesdb.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 if(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT)
   cmake_install_headers(
