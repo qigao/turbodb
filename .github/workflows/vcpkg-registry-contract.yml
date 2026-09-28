@@ -213,9 +213,12 @@ jobs:
             cmp "$evidence/baseline.sha256" "$evidence/$scenario.sha256"
           done
 
+          # Qualification uses the production install graph unchanged (#36).
+          # Build the full configured graph before staging the existing install.
+          cmake --build "$build" --parallel 4
           stage="$RUNNER_TEMP/turbodb-driver-install"
           rm -rf "$stage"
-          cmake --install "$build" --prefix "$stage" --component TurboDbDrivers
+          cmake --install "$build" --prefix "$stage"
           installed_sqlite="$stage/lib/turbodb/drivers/turbodb_driver_sqlite.so"
           installed_postgresql="$stage/lib/turbodb/drivers/turbodb_driver_postgresql.so"
           test -f "$installed_sqlite"
@@ -316,9 +319,12 @@ jobs:
             }
           }
 
+          # Qualification uses the production install graph unchanged (#36).
+          & cmake --build $build --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "full install graph build failed" }
           $stage = Join-Path $env:RUNNER_TEMP "turbodb-driver-install"
           Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-          & cmake --install $build --prefix $stage --component TurboDbDrivers --config Release
+          & cmake --install $build --prefix $stage --config Release
           if ($LASTEXITCODE -ne 0) { throw "installed Driver module staging failed" }
           $installedDir = Join-Path $stage "bin/turbodb/drivers"
           $installedSqlite = Join-Path $installedDir "turbodb_driver_sqlite.dll"
