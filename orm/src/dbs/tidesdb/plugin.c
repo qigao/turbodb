@@ -1,6 +1,7 @@
 #include <orm_driver_plugin.h>
 
 #include "backend.h"
+#include "bridge.h"
 #include "orm_driver_backend_bridge.h"
 
 #define ORM_TIDESDB_DRIVER_CAPABILITIES                                     \
@@ -13,6 +14,51 @@
    ORM_DRIVER_CAP_SERIALIZABLE)
 
 static int tidesdb_driver_identity;
+
+typedef struct tidesdb_plugin_lifecycle {
+  int started;
+  int stopping;
+} tidesdb_plugin_lifecycle;
+
+static tidesdb_plugin_lifecycle tidesdb_lifecycle;
+
+static salts_plugin_status SALTS_PLUGIN_CALL tidesdb_plugin_start(void *self) {
+  tidesdb_plugin_lifecycle *state = (tidesdb_plugin_lifecycle *)self;
+  if (state != &tidesdb_lifecycle)
+    return SALTS_PLUGIN_INVALID_ARGUMENT;
+  state->started = 1;
+  state->stopping = 0;
+  return SALTS_PLUGIN_OK;
+}
+
+static salts_plugin_status SALTS_PLUGIN_CALL
+tidesdb_plugin_request_stop(void *self) {
+  tidesdb_plugin_lifecycle *state = (tidesdb_plugin_lifecycle *)self;
+  if (state != &tidesdb_lifecycle)
+    return SALTS_PLUGIN_INVALID_ARGUMENT;
+  state->stopping = 1;
+  return SALTS_PLUGIN_OK;
+}
+
+static bool SALTS_PLUGIN_CALL tidesdb_plugin_is_quiescent(const void *self) {
+  const tidesdb_plugin_lifecycle *state =
+      (const tidesdb_plugin_lifecycle *)self;
+  return state == &tidesdb_lifecycle && state->stopping != 0;
+}
+
+static void SALTS_PLUGIN_CALL tidesdb_plugin_destroy(void *self) {
+  tidesdb_plugin_lifecycle *state = (tidesdb_plugin_lifecycle *)self;
+  if (state != &tidesdb_lifecycle)
+    return;
+  /*
+   * Salts calls destroy() after leases/callbacks quiesce and before closing
+   * the DSO. This is the last safe point to remove Win32 FLS callbacks that
+   * are implemented by code statically linked into this Driver module.
+   */
+  orm_tidesdb_module_cleanup();
+  state->started = 0;
+  state->stopping = 0;
+}
 
 static orm_status_t ORM_DRIVER_CALL tidesdb_driver_create(
     void *self, const orm_config_t *config,
@@ -48,7 +94,12 @@ static const salts_plugin_manifest tidesdb_manifest = {
     .plugin_id = "tidesdb",
     .version = {1u, 0u, 0u},
     .exports = tidesdb_exports,
-    .export_count = 1u};
+    .export_count = 1u,
+    .self = &tidesdb_lifecycle,
+    .start = tidesdb_plugin_start,
+    .request_stop = tidesdb_plugin_request_stop,
+    .is_quiescent = tidesdb_plugin_is_quiescent,
+    .destroy = tidesdb_plugin_destroy};
 
 SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
 salts_plugin_query(uint32_t host_abi) {
