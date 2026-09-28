@@ -1321,6 +1321,8 @@ if(ORM_MYSQL_LIVE_TESTS)
     src/dbs/mysql/wire/row.c
     src/dbs/mysql/auth/auth.c)
   target_compile_features(orm_mysql_live_test PRIVATE c_std_11)
+  target_compile_definitions(orm_mysql_live_test PRIVATE
+    ORM_MYSQL_ENABLE_FAULT_INJECTION=1)
   target_include_directories(orm_mysql_live_test PRIVATE
     ${ORM_INCLUDE_DIR}
     ${ORM_FLOW_SOURCE_DIR}

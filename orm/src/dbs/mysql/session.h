@@ -16,7 +16,8 @@ typedef enum mysql_session_status_t {
   MYSQL_SESSION_IO = 2,
   MYSQL_SESSION_PROTOCOL = 3,
   MYSQL_SESSION_AUTH = 4,
-  MYSQL_SESSION_TIMEOUT = 5
+  MYSQL_SESSION_TIMEOUT = 5,
+  MYSQL_SESSION_COMMIT_UNKNOWN = 6
 } mysql_session_status_t;
 
 typedef struct mysql_session_config_t {

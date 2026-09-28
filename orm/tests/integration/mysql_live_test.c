@@ -537,5 +537,62 @@ int main(void) {
     cursor.ops->destroy(cursor.context);
   }
 
+  {
+    static const uint8_t update_sql[] =
+        "UPDATE m4_commit_unknown SET n=n+1 WHERE s=?";
+    const mysql_stmt_value_t parameter = {
+      .kind = MYSQL_STMT_VALUE_SINT64,
+      .data.sint64_value = INT64_C(-11)};
+    mysql_transaction_session_t *transaction = NULL;
+    mysql_session_command_result_t command_result;
+
+    status = mysql_transaction_session_begin(
+        &config, ORM_ISOLATION_READ_COMMITTED, 4096u,
+        &transaction, &error);
+    if (status != MYSQL_SESSION_OK) {
+      fprintf(stderr,
+              "mysql commit-unknown transaction begin failed status=%d "
+              "stage=%s message=%s\n",
+              (int)status, error.stage, error.message);
+      return 1;
+    }
+
+    status = mysql_transaction_session_execute_prepared(
+        transaction, update_sql, sizeof(update_sql) - 1u,
+        &parameter, 1u, &command_result, &error);
+    if (status != MYSQL_SESSION_OK ||
+        command_result.affected_rows != UINT64_C(1)) {
+      fprintf(stderr,
+              "mysql commit-unknown update failed status=%d affected=%llu "
+              "stage=%s message=%s\n",
+              (int)status,
+              (unsigned long long)command_result.affected_rows,
+              error.stage, error.message);
+      mysql_transaction_session_destroy(transaction);
+      return 1;
+    }
+
+#if defined(ORM_MYSQL_ENABLE_FAULT_INJECTION)
+    mysql_transaction_session_test_drop_commit_ack(transaction, 1);
+    status = mysql_transaction_session_commit(transaction, &error);
+    if (status != MYSQL_SESSION_COMMIT_UNKNOWN ||
+        error.status != MYSQL_SESSION_COMMIT_UNKNOWN ||
+        mysql_transaction_session_test_commit_send_count(transaction) != 1u) {
+      fprintf(stderr,
+              "mysql lost COMMIT ack classification failed status=%d "
+              "error_status=%d sends=%u stage=%s message=%s\n",
+              (int)status, (int)error.status,
+              mysql_transaction_session_test_commit_send_count(transaction),
+              error.stage, error.message);
+      mysql_transaction_session_destroy(transaction);
+      return 1;
+    }
+#else
+#error ORM_MYSQL_ENABLE_FAULT_INJECTION must be enabled for live qualification
+#endif
+
+    mysql_transaction_session_destroy(transaction);
+  }
+
   return 0;
 }
