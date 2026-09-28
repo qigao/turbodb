@@ -1,4 +1,5 @@
 #include <orm_driver_plugin.h>
+#include <orm_sqlite.h>
 
 #include "orm_driver_backend_bridge.h"
 #include "orm_internal.h"
@@ -12,6 +13,8 @@
    ORM_DRIVER_CAP_SAVEPOINT | ORM_DRIVER_CAP_INCREMENTAL_ROWS)
 
 static int sqlite_driver_identity;
+
+TurboDb_SqliteMaintenance *orm_sqlite_maintenance_binding(void);
 
 static const orm_driver_storage_capabilities_v1 sqlite_storage_capabilities = {
     .header = {(uint32_t)sizeof(orm_driver_storage_capabilities_v1),
@@ -56,14 +59,25 @@ static const TurboDb_Driver_vtable sqlite_driver_vtable = {
 static TurboDb_Driver sqlite_driver = {
     &sqlite_driver_identity, &sqlite_driver_vtable};
 
-static const salts_plugin_export sqlite_exports[] = {{
-    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
-    .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
-    .capabilities = ORM_SQLITE_DRIVER_CAPABILITIES,
-    .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
-    .contract_id = ORM_DRIVER_INTERFACE_CONTRACT_ID,
-    .value.interface = {&TurboDb_Driver_interface_meta, &sqlite_driver}}};
+static salts_plugin_export sqlite_exports[] = {
+    {
+        .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
+        .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+        .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
+        .capabilities = ORM_SQLITE_DRIVER_CAPABILITIES,
+        .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
+        .contract_id = ORM_DRIVER_INTERFACE_CONTRACT_ID,
+        .value.interface = {&TurboDb_Driver_interface_meta, &sqlite_driver},
+    },
+    {
+        .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
+        .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+        .contract_version = ORM_SQLITE_MAINTENANCE_CONTRACT_VERSION,
+        .capabilities = 0u,
+        .export_id = ORM_SQLITE_MAINTENANCE_EXPORT_ID,
+        .contract_id = ORM_SQLITE_MAINTENANCE_CONTRACT_ID,
+        .value.interface = {&TurboDb_SqliteMaintenance_interface_meta, NULL},
+    }};
 
 static const salts_plugin_manifest sqlite_manifest = {
     .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
@@ -71,9 +85,11 @@ static const salts_plugin_manifest sqlite_manifest = {
     .plugin_id = "sqlite",
     .version = {1u, 0u, 0u},
     .exports = sqlite_exports,
-    .export_count = 1u};
+    .export_count = 2u};
 
 SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
 salts_plugin_query(uint32_t host_abi) {
-  return host_abi == SALTS_PLUGIN_ABI_VERSION ? &sqlite_manifest : NULL;
+  if (host_abi != SALTS_PLUGIN_ABI_VERSION) return NULL;
+  sqlite_exports[1].value.interface.value = orm_sqlite_maintenance_binding();
+  return &sqlite_manifest;
 }
