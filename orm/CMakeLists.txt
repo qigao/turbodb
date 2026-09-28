@@ -62,6 +62,8 @@ option(ORM_BUILD_TIDESDB_DRIVER
        ${ORM_BUILD_TIDESDB_DRIVER_DEFAULT})
 option(ORM_MONGODB_LIVE_TESTS
        "Run the MongoDB Driver CRUD test against ORM_MONGODB_URI" OFF)
+option(ORM_MYSQL_LIVE_TESTS
+       "Run the MySQL Driver CRUD test against ORM_MYSQL_* options" OFF)
 option(ORM_REDIS_LIVE_TESTS
        "Run the Redis Driver CRUD test against ORM_REDIS_PORT" OFF)
 option(ORM_POSTGRES_LIVE_TESTS
@@ -69,6 +71,9 @@ option(ORM_POSTGRES_LIVE_TESTS
 
 if(ORM_MONGODB_LIVE_TESTS AND NOT ORM_BUILD_MONGODB_DRIVER)
   message(FATAL_ERROR "ORM_MONGODB_LIVE_TESTS requires ORM_BUILD_MONGODB_DRIVER=ON")
+endif()
+if(ORM_MYSQL_LIVE_TESTS AND NOT ORM_BUILD_MYSQL_DRIVER)
+  message(FATAL_ERROR "ORM_MYSQL_LIVE_TESTS requires ORM_BUILD_MYSQL_DRIVER=ON")
 endif()
 if(ORM_REDIS_LIVE_TESTS AND NOT ORM_BUILD_REDIS_DRIVER)
   message(FATAL_ERROR "ORM_REDIS_LIVE_TESTS requires ORM_BUILD_REDIS_DRIVER=ON")
@@ -871,6 +876,28 @@ else()
   target_compile_options(orm_mysql_sql_test PRIVATE -Werror)
 endif()
 add_test(NAME orm_mysql_sql COMMAND orm_mysql_sql_test)
+
+add_executable(orm_mysql_live_driver_test
+               tests/integration/mysql_live_driver_test.c)
+target_compile_features(orm_mysql_live_driver_test PRIVATE c_std_11)
+target_compile_definitions(orm_mysql_live_driver_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mysql_live_driver_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mysql_live_driver_test PRIVATE
+                      turbo_orm Salts::TinyTest)
+add_dependencies(orm_mysql_live_driver_test orm_mysql_driver)
+set_target_properties(orm_mysql_live_driver_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_live_driver_test)
+if(MSVC)
+  target_compile_options(orm_mysql_live_driver_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_live_driver_test PRIVATE -Werror)
+endif()
+if(ORM_MYSQL_LIVE_TESTS)
+  add_test(NAME orm_mysql_live_driver COMMAND orm_mysql_live_driver_test)
+  set_tests_properties(orm_mysql_live_driver PROPERTIES
+    ENVIRONMENT "ORM_MYSQL_PLUGIN=$<TARGET_FILE:orm_mysql_driver>;ORM_MYSQL_HOST=$ENV{ORM_MYSQL_HOST};ORM_MYSQL_USER=$ENV{ORM_MYSQL_USER};ORM_MYSQL_PASSWORD=$ENV{ORM_MYSQL_PASSWORD};ORM_MYSQL_DATABASE=$ENV{ORM_MYSQL_DATABASE};ORM_MYSQL_PORT=$ENV{ORM_MYSQL_PORT}")
+endif()
 endif()
 
 if(ORM_BUILD_MONGODB_DRIVER)
