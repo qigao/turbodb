@@ -14,7 +14,8 @@
 enum {
   ORM_MYSQL_DEFAULT_PORT = 3306u,
   ORM_MYSQL_DEFAULT_TIMEOUT_MS = 5000u,
-  ORM_MYSQL_OPTION_VALUE_MAX = 4096u
+  ORM_MYSQL_OPTION_VALUE_MAX = 4096u,
+  ORM_MYSQL_CONTROL_COMMAND_BYTES = 4096u
 };
 
 typedef struct orm_mysql_settings {
@@ -530,6 +531,8 @@ static orm_status_t orm_mysql_prepare_raw(
       out->sql_size + 1u > execute_bytes
           ? out->sql_size + 1u
           : execute_bytes;
+  if (out->command_bytes < ORM_MYSQL_CONTROL_COMMAND_BYTES)
+    out->command_bytes = ORM_MYSQL_CONTROL_COMMAND_BYTES;
   if (out->command_bytes > (size_t)MYSQL_WIRE_PACKET_MAX_PAYLOAD) {
     status = orm_mysql_fail(
         error, ORM_STATUS_LIMIT_EXCEEDED,
@@ -859,6 +862,8 @@ static size_t orm_mysql_command_limit(const orm_limits *limits) {
     return 0u;
 
   value = (uint64_t)limits->max_query_bytes;
+  if (value < ORM_MYSQL_CONTROL_COMMAND_BYTES)
+    value = ORM_MYSQL_CONTROL_COMMAND_BYTES;
   if (value >= MYSQL_WIRE_PACKET_MAX_PAYLOAD)
     return (size_t)MYSQL_WIRE_PACKET_MAX_PAYLOAD;
 
