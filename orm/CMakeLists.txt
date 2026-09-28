@@ -2171,7 +2171,9 @@ if(TARGET orm_mysql_driver)
     TARGETS orm_mysql_driver
     RUNTIME_DEPENDENCY_SET OrmMysqlDriverRuntimeDependencies
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+            COMPONENT OrmMysqlDriver
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers
+            COMPONENT OrmMysqlDriver)
   if(WIN32)
     install(
       RUNTIME_DEPENDENCY_SET OrmMysqlDriverRuntimeDependencies
@@ -2180,14 +2182,16 @@ if(TARGET orm_mysql_driver)
                           "clang_rt.asan_dynamic-.*"
                           "turbo_orm\\.dll" "salts_.*\\.dll"
       POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
-      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers)
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
+              COMPONENT OrmMysqlDriver)
   else()
     install(
       RUNTIME_DEPENDENCY_SET OrmMysqlDriverRuntimeDependencies
       DIRECTORIES ${ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES}
       PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libsalts_.*"
       POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
-      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers
+              COMPONENT OrmMysqlDriver)
   endif()
 endif()
 

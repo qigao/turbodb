@@ -195,6 +195,53 @@ jobs:
             fi
           fi
 
+      - name: Qualify installed MySQL Driver module
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/mysql-installed"
+          rm -rf "$stage"
+          cmake --install "$TURBODB_MYSQL_BUILD" \
+            --prefix "$stage" --component OrmMysqlDriver
+
+          installed_module="$(find "$stage" -type f \
+            \( -name 'turbodb_driver_mysql.so' -o -name 'turbodb_driver_mysql.dll' -o -name 'turbodb_driver_mysql.dylib' \) \
+            -print -quit)"
+          app="$(find "$TURBODB_MYSQL_BUILD" -type f -name orm_mysql_driver_live_test -perm -111 -print -quit)"
+          test -n "$installed_module"
+          test -x "$app"
+
+          driver_dir="$(dirname "$installed_module")"
+
+          # The build-tree live test above intentionally mutates these fixtures.
+          # Reset only its mutable public-runtime state so the installed-module
+          # smoke is an independent qualification, not a second pass over
+          # already-updated rows.
+          cid="$(docker ps --filter ancestor=mysql:8.0.40 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+          docker exec "$cid" mysql -uroot -prootpw -e \
+            "UPDATE turbodb.m4_driver SET n=0 WHERE s=-13; UPDATE turbodb_b.m4_driver SET n=100 WHERE s=-13; TRUNCATE TABLE turbodb.structured_items; TRUNCATE TABLE turbodb_b.structured_items;"
+
+          export LD_LIBRARY_PATH="$TURBODB_MYSQL_BUILD/bin:$driver_dir:$stage/lib:${LD_LIBRARY_PATH:-}"
+          ORM_MYSQL_PLUGIN="$installed_module" "$app"
+
+          find "$stage" -type f -print | sort \
+            > "$GITHUB_WORKSPACE/evidence/mysql/installed-files.txt"
+          realpath "$installed_module" \
+            > "$GITHUB_WORKSPACE/evidence/mysql/installed-module-path.txt"
+          sha256sum "$installed_module" \
+            > "$GITHUB_WORKSPACE/evidence/mysql/installed-module.sha256"
+
+          if command -v ldd >/dev/null 2>&1; then
+            ldd "$installed_module" \
+              | tee "$GITHUB_WORKSPACE/evidence/mysql/installed-driver-ldd.txt"
+            if grep -Eiq 'libmysql|mariadb|boost|libtirpc' \
+                 "$GITHUB_WORKSPACE/evidence/mysql/installed-driver-ldd.txt"; then
+              echo "Installed MySQL Driver contains a forbidden dependency" >&2
+              exit 1
+            fi
+          fi
+
       - name: Qualify caching_sha2 fast auth and native compatibility
         shell: bash
         run: |
@@ -225,6 +272,7 @@ jobs:
             echo "live_boundaries=null,uint64,blob,decimal,date,time,datetime,constraint,row_limit"
             echo "wire_text_rows=lenenc,null,embedded-nul,truncation,trailing"
             echo "com_query_text_session=real-mysql-8.0.40"
+            echo "installed_module_smoke=runtime-load-connect-crud"
             echo "graceful_quit=COM_QUIT"
             echo "managed_transaction_ddl=reject-before-dispatch"
             echo "server_disconnect=wait_timeout,no-replay"
