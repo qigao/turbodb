@@ -234,6 +234,8 @@ mysql_wire_status_t mysql_wire_build_stmt_execute(
       (values == NULL && value_count != 0u))
     return MYSQL_WIRE_STATUS_INVALID;
   *out_size = 0u;
+  if (value_count > (size_t)UINT16_MAX)
+    return MYSQL_WIRE_STATUS_LIMIT;
 
   null_bitmap_size = (value_count + 7u) / 8u;
 
