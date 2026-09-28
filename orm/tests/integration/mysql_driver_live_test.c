@@ -79,6 +79,35 @@ static int run_command(
   return 0;
 }
 
+static int run_command_in_transaction(
+    orm_query_t *query, orm_transaction_t *transaction,
+    orm_error_t *error, uint64_t *affected) {
+  orm_result_t *result = NULL;
+  uint64_t count = 0u;
+  orm_status_t status;
+
+  if (affected != NULL)
+    *affected = 0u;
+  status = orm_query_execute_in_transaction(
+      query, transaction, &result, error);
+  if (status != ORM_STATUS_OK) {
+    orm_result_destroy(result);
+    return fail_status(
+        "execute MySQL transaction command",
+        status, ORM_STATUS_OK, error);
+  }
+  status = orm_result_affected_rows(
+      result, &count, error);
+  orm_result_destroy(result);
+  if (status != ORM_STATUS_OK)
+    return fail_status(
+        "read MySQL transaction affected_rows",
+        status, ORM_STATUS_OK, error);
+  if (affected != NULL)
+    *affected = count;
+  return 0;
+}
+
 static int read_probe(
     orm_connection_t *connection, orm_error_t *error) {
   orm_query_t *query = NULL;
@@ -509,6 +538,55 @@ int main(void) {
       (structured_read(connection_a, INT64_C(1), 41L, 1, &error) != 0 ||
        structured_read(connection_b, INT64_C(1), 141L, 1, &error) != 0))
     failed = 1;
+
+  if (!failed &&
+      orm_transaction_begin(
+          connection_a, ORM_ISOLATION_READ_COMMITTED,
+          &transaction_a, &error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "begin structured MySQL transaction failed: %s\n",
+            error.message);
+    failed = 1;
+  }
+  if (!failed) {
+    orm_query_t *tx_query = NULL;
+    uint64_t tx_affected = 0u;
+    if (orm_update(
+            connection_a, orm_view("structured_items"),
+            &tx_query, &error) != ORM_STATUS_OK ||
+        orm_query_set(
+            tx_query, orm_view("s"), orm_i64(99), &error) !=
+            ORM_STATUS_OK ||
+        orm_query_where(
+            tx_query, orm_view("id"), ORM_COMPARE_EQUAL,
+            orm_i64(1), &error) != ORM_STATUS_OK ||
+        run_command_in_transaction(
+            tx_query, transaction_a, &error,
+            &tx_affected) != 0 ||
+        tx_affected != UINT64_C(1)) {
+      fprintf(stderr,
+              "structured transaction UPDATE failed affected=%llu message=%s\n",
+              (unsigned long long)tx_affected, error.message);
+      failed = 1;
+    }
+    orm_query_destroy(tx_query);
+  }
+  if (transaction_a != NULL) {
+    if (orm_transaction_rollback(
+            transaction_a, &error) != ORM_STATUS_OK) {
+      fprintf(stderr,
+              "rollback structured MySQL transaction failed: %s\n",
+              error.message);
+      failed = 1;
+    }
+    orm_transaction_destroy(transaction_a);
+    transaction_a = NULL;
+  }
+  if (!failed &&
+      structured_read(
+          connection_a, INT64_C(1), 41L, 1, &error) != 0)
+    failed = 1;
+
   if (!failed &&
       structured_update(
           connection_a, INT64_C(1), INT64_C(42), &error) != 0)
