@@ -1442,7 +1442,7 @@ target_include_directories(orm_mysql_cursor_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql
   ${ORM_MYSQL_WIRE_SOURCE_DIR})
 target_link_libraries(orm_mysql_cursor_test PRIVATE
-  Salts::TinyTest Salts::CSerde)
+  Salts::Core Salts::CFlow Salts::CSerde Salts::TinyTest)
 set_target_properties(orm_mysql_cursor_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_mysql_cursor_test)
