@@ -935,11 +935,13 @@ release_query:
   return status;
 }
 
-static orm_status_t orm_open_rows(orm_query_t *query, orm_backend *database,
-                                  orm_transaction_t *transaction,
-                                  const orm_flow_config_t *config,
-                                  cflow_publisher *out_publisher,
-                                  orm_error_t *error) {
+static orm_status_t orm_open_rows(
+    orm_query_t *query, orm_backend *database,
+    orm_transaction_t *transaction,
+    const orm_flow_config_t *config,
+    const struct DataBindMessagePlan *message_plan,
+    cflow_publisher *out_publisher,
+    orm_error_t *error) {
   orm_row_cursor cursor = {0};
   orm_row_publisher_config publisher_config;
   orm_row_publisher_prepared *prepared = NULL;
