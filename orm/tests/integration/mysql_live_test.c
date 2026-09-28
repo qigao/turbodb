@@ -122,6 +122,7 @@ int main(void) {
         .kind = MYSQL_STMT_VALUE_SINT64,
         .data.sint64_value = INT64_C(-42)};
     const mysql_session_cursor_limits_t source_limits = {
+        .max_result_rows = 4u,
         .max_columns = 8u,
         .max_metadata_bytes = 1024u,
         .max_row_bytes = 4096u,
@@ -276,6 +277,7 @@ int main(void) {
     mysql_transaction_session_t *transaction = NULL;
     mysql_session_command_result_t command_result;
     const mysql_session_cursor_limits_t source_limits = {
+      .max_result_rows = 2u,
       .max_columns = 4u,
       .max_metadata_bytes = 512u,
       .max_row_bytes = 1024u,
@@ -403,6 +405,7 @@ int main(void) {
     mysql_transaction_session_t *transaction = NULL;
     mysql_session_command_result_t command_result;
     const mysql_session_cursor_limits_t source_limits = {
+      .max_result_rows = 2u,
       .max_columns = 4u,
       .max_metadata_bytes = 512u,
       .max_row_bytes = 1024u,
