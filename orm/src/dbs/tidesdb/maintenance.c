@@ -371,6 +371,7 @@ static orm_status_t tidesdb_maintenance_read_active_id(
   int code;
   int second;
 
+  generation_id[0] = '\0';
   code = salts_fs_lstat(active_path, &stat);
   if (code == -ENOENT) {
     result->found = 0u;
@@ -425,6 +426,7 @@ static orm_status_t tidesdb_maintenance_read_active_id(
         error, ORM_STATUS_INVALID_STATE,
         "TidesDB ACTIVE contains an invalid generation ID");
   generation_id[code] = '\0';
+  result->found = 1u;
   return ORM_STATUS_OK;
 }
 
@@ -472,12 +474,8 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_maintenance_resolve_active(
   if (status != ORM_STATUS_OK) return status;
   status = tidesdb_maintenance_read_active_id(
       active_path, generation_id, result, error);
-  if (status != ORM_STATUS_OK || result->found == 0u) {
-    if (status == ORM_STATUS_OK &&
-        generation_id[0] != '\0')
-      result->found = 1u;
-    if (result->found == 0u) return status;
-  }
+  if (status != ORM_STATUS_OK || result->found == 0u)
+    return status;
 
   status = tidesdb_maintenance_join(
       provider_root, ORM_TIDESDB_GENERATIONS_DIR_NAME,
