@@ -783,6 +783,209 @@ cleanup:
   return failed;
 }
 
+
+static int qualify_transaction_rows(
+    orm_connection_t *connection, orm_error_t *error) {
+  orm_transaction_t *transaction = NULL;
+  orm_query_t *query = NULL;
+  orm_result_t *command_result = NULL;
+  orm_flow_config_t flow;
+  cflow_publisher publisher = {0};
+  mysql_driver_live_row row = {0};
+  cflow_step step;
+  uint64_t affected = 0u;
+  int failed = 0;
+
+  if (orm_transaction_begin(
+          connection, ORM_ISOLATION_READ_COMMITTED,
+          &transaction, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "begin MySQL transaction-row qualification failed: %s\n",
+            error != NULL ? error->message : "");
+    return 1;
+  }
+
+  if (orm_update(
+          connection, orm_view("structured_items"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("s"), orm_i64(99), error) !=
+          ORM_STATUS_OK ||
+      orm_query_where(
+          query, orm_view("id"), ORM_COMPARE_EQUAL,
+          orm_i64(1), error) != ORM_STATUS_OK ||
+      orm_query_execute_in_transaction(
+          query, transaction, &command_result, error) !=
+          ORM_STATUS_OK ||
+      orm_result_affected_rows(
+          command_result, &affected, error) != ORM_STATUS_OK ||
+      affected != UINT64_C(1)) {
+    fprintf(stderr,
+            "prepare MySQL transaction-row fixture failed affected=%llu message=%s\n",
+            (unsigned long long)affected,
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+  orm_result_destroy(command_result);
+  command_result = NULL;
+  orm_query_destroy(query);
+  query = NULL;
+
+  if (orm_query_create(
+          connection, orm_view("structured_items"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_add_column(
+          query, orm_view("s"), error) != ORM_STATUS_OK ||
+      orm_query_where(
+          query, orm_view("id"), ORM_COMPARE_EQUAL,
+          orm_i64(1), error) != ORM_STATUS_OK) {
+    failed = 1;
+    goto cleanup;
+  }
+
+  orm_flow_config(&flow, &mysql_driver_live_row_data);
+  if (orm_query_open_flow_in_transaction(
+          query, transaction, &flow, &publisher, error) !=
+      ORM_STATUS_OK) {
+    fprintf(stderr,
+            "open MySQL transaction row Publisher failed: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  step = cflow_publisher_resume(&publisher, NULL, &row);
+  if (step.kind != CFLOW_STEP_VALUE || row.s != 99L) {
+    fprintf(stderr,
+            "MySQL transaction row mismatch step=%d s=%ld\n",
+            (int)step.kind, row.s);
+    failed = 1;
+    goto cleanup;
+  }
+
+  if (orm_transaction_rollback(transaction, error) !=
+      ORM_STATUS_BUSY) {
+    fprintf(stderr,
+            "transaction row Publisher did not retain transaction lease: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  step = cflow_publisher_resume(&publisher, NULL, &row);
+  if (step.kind != CFLOW_STEP_DONE) {
+    fprintf(stderr,
+            "MySQL transaction row expected DONE got=%d\n",
+            (int)step.kind);
+    failed = 1;
+    goto cleanup;
+  }
+
+  cflow_publisher_destroy(&publisher);
+  memset(&publisher, 0, sizeof(publisher));
+  orm_query_destroy(query);
+  query = NULL;
+
+  /*
+   * Early cancel inside a transaction drains only inside the configured result
+   * budget, preserves the same physical transaction session, and still keeps
+   * the public transaction owner BUSY until Publisher destroy.
+   */
+  if (orm_raw(
+          connection,
+          orm_view(
+              "SELECT 1 AS s UNION ALL SELECT 2 AS s "
+              "UNION ALL SELECT 3 AS s"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_open_flow_in_transaction(
+          query, transaction, &flow, &publisher, error) !=
+          ORM_STATUS_OK) {
+    fprintf(stderr,
+            "open cancellable MySQL transaction Publisher failed: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  step = cflow_publisher_resume(&publisher, NULL, &row);
+  if (step.kind != CFLOW_STEP_VALUE || row.s != 1L) {
+    fprintf(stderr,
+            "cancellable MySQL transaction row mismatch step=%d s=%ld\n",
+            (int)step.kind, row.s);
+    failed = 1;
+    goto cleanup;
+  }
+
+  cflow_publisher_cancel(&publisher);
+  if (orm_transaction_rollback(transaction, error) !=
+      ORM_STATUS_BUSY) {
+    fprintf(stderr,
+            "transaction cancel released owner before Publisher destroy: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  cflow_publisher_destroy(&publisher);
+  memset(&publisher, 0, sizeof(publisher));
+  orm_query_destroy(query);
+  query = NULL;
+
+  /* Same persistent session remains usable after bounded cancel-drain. */
+  if (orm_update(
+          connection, orm_view("structured_items"),
+          &query, error) != ORM_STATUS_OK ||
+      orm_query_set(
+          query, orm_view("s"), orm_i64(98), error) !=
+          ORM_STATUS_OK ||
+      orm_query_where(
+          query, orm_view("id"), ORM_COMPARE_EQUAL,
+          orm_i64(1), error) != ORM_STATUS_OK ||
+      orm_query_execute_in_transaction(
+          query, transaction, &command_result, error) !=
+          ORM_STATUS_OK ||
+      orm_result_affected_rows(
+          command_result, &affected, error) != ORM_STATUS_OK ||
+      affected != UINT64_C(1)) {
+    fprintf(stderr,
+            "MySQL transaction session was not reusable after row cancel: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  orm_result_destroy(command_result);
+  command_result = NULL;
+  orm_query_destroy(query);
+  query = NULL;
+
+  if (orm_transaction_rollback(transaction, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "rollback MySQL transaction-row qualification failed: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+  orm_transaction_destroy(transaction);
+  transaction = NULL;
+
+  if (structured_read(
+          connection, INT64_C(1), 41L, 1, error) != 0)
+    failed = 1;
+
+cleanup:
+  if (cflow_publisher_valid(&publisher))
+    cflow_publisher_destroy(&publisher);
+  orm_result_destroy(command_result);
+  orm_query_destroy(query);
+  if (transaction != NULL) {
+    (void)orm_transaction_rollback(transaction, error);
+    orm_transaction_destroy(transaction);
+  }
+  return failed;
+}
+
 int main(void) {
   const char *module = getenv("ORM_MYSQL_PLUGIN");
   const char *host = getenv("ORM_MYSQL_HOST");
@@ -974,6 +1177,10 @@ int main(void) {
   if (!failed &&
       structured_read(
           connection_a, INT64_C(1), 41L, 1, &error) != 0)
+    failed = 1;
+
+  if (!failed &&
+      qualify_transaction_rows(connection_a, &error) != 0)
     failed = 1;
 
   if (!failed &&

@@ -1,7 +1,7 @@
 #ifndef TURBODB_ORM_MYSQL_SESSION_TRANSACTION_H
 #define TURBODB_ORM_MYSQL_SESSION_TRANSACTION_H
 
-#include "session.h"
+#include "session_cursor.h"
 
 #include <orm.h>
 
@@ -26,6 +26,16 @@ mysql_session_status_t mysql_transaction_session_execute_prepared(
     const uint8_t *sql, size_t sql_size,
     const mysql_stmt_value_t *parameters, size_t parameter_count,
     mysql_session_command_result_t *out,
+    mysql_session_error_t *error);
+
+mysql_session_status_t mysql_transaction_session_open_prepared_source(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *sql, size_t sql_size,
+    const mysql_stmt_value_t *parameters, size_t parameter_count,
+    const mysql_session_cursor_limits_t *limits,
+    mysql_cursor_source_t *out_source,
+    const mysql_column_definition_t **out_columns,
+    size_t *out_column_count,
     mysql_session_error_t *error);
 
 mysql_session_status_t mysql_transaction_session_commit(
