@@ -1859,6 +1859,31 @@ if(ORM_BUILD_TIDESDB_DRIVER)
   add_test(NAME orm_tidesdb_public_flow COMMAND orm_tidesdb_public_flow_test)
   set_tests_properties(orm_tidesdb_public_flow PROPERTIES
     ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
+
+  add_executable(orm_tidesdb_generation_maintenance_test
+                 tests/integration/tidesdb_generation_maintenance_test.c)
+  target_compile_features(orm_tidesdb_generation_maintenance_test PRIVATE c_std_11)
+  target_compile_definitions(orm_tidesdb_generation_maintenance_test PRIVATE ORM_C_STATIC)
+  target_include_directories(orm_tidesdb_generation_maintenance_test PRIVATE
+                             ${ORM_INCLUDE_DIR})
+  target_link_libraries(orm_tidesdb_generation_maintenance_test
+                        PRIVATE turbo_orm Salts::TinyTest Salts::Core)
+  add_dependencies(orm_tidesdb_generation_maintenance_test orm_tidesdb_driver)
+  set_target_properties(
+    orm_tidesdb_generation_maintenance_test
+    PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_tidesdb_generation_maintenance_test)
+  if(MSVC)
+    target_compile_options(orm_tidesdb_generation_maintenance_test
+                           PRIVATE /WX /std:c11)
+  else()
+    target_compile_options(orm_tidesdb_generation_maintenance_test
+                           PRIVATE -Werror)
+  endif()
+  add_test(NAME orm_tidesdb_generation_maintenance
+           COMMAND orm_tidesdb_generation_maintenance_test)
+  set_tests_properties(orm_tidesdb_generation_maintenance PROPERTIES
+    ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
 endif()
 
 if(ORM_BUILD_SQLITE_DRIVER)
@@ -2129,7 +2154,8 @@ if(WIN32)
       string(APPEND ORM_TEST_RUNTIME_PATH
              ";PATH=path_list_prepend:$<TARGET_FILE_DIR:LZ4::lz4_shared>")
     endif()
-    list(APPEND ORM_RUNTIME_TESTS orm_tidesdb_public_flow)
+    list(APPEND ORM_RUNTIME_TESTS orm_tidesdb_public_flow
+                                  orm_tidesdb_generation_maintenance)
   endif()
   if(ORM_BUILD_MONGODB_DRIVER)
     if(TARGET mongoc::shared)
