@@ -96,7 +96,8 @@ spec("mysql incremental Driver cursor") {
     orm_row_cursor_step step;
     uint64_t columns = 0u;
 
-    orm_error_init(&error);
+    memset(&error, 0, sizeof(error));
+    error.struct_size = (uint32_t)sizeof(error);
     check_equal(mysql_cursor_start(
                     &cursor, &source, &column, 1u, &config, &error),
                 ORM_STATUS_OK);
@@ -139,7 +140,8 @@ spec("mysql incremental Driver cursor") {
     orm_row_cursor cursor = {0};
     orm_error_t error;
 
-    orm_error_init(&error);
+    memset(&error, 0, sizeof(error));
+    error.struct_size = (uint32_t)sizeof(error);
     check_equal(mysql_cursor_start(
                     &cursor, &source, &column, 1u, &config, &error),
                 ORM_STATUS_OK);
@@ -166,7 +168,8 @@ spec("mysql incremental Driver cursor") {
     cserde_reader reader = {0};
     orm_row_cursor_step step;
 
-    orm_error_init(&error);
+    memset(&error, 0, sizeof(error));
+    error.struct_size = (uint32_t)sizeof(error);
     check_equal(mysql_cursor_start(
                     &cursor, &source, &column, 1u, &config, &error),
                 ORM_STATUS_OK);
@@ -200,7 +203,8 @@ spec("mysql incremental Driver cursor") {
     cserde_reader reader = {0};
     orm_row_cursor_step step;
 
-    orm_error_init(&error);
+    memset(&error, 0, sizeof(error));
+    error.struct_size = (uint32_t)sizeof(error);
     check_equal(mysql_cursor_start(
                     &cursor, &source, &column, 1u, &config, &error),
                 ORM_STATUS_OK);
@@ -230,7 +234,8 @@ spec("mysql incremental Driver cursor") {
     cserde_reader reader = {0};
     orm_row_cursor_step step;
 
-    orm_error_init(&error);
+    memset(&error, 0, sizeof(error));
+    error.struct_size = (uint32_t)sizeof(error);
     check_equal(mysql_cursor_start(
                     &cursor, &source, &column, 1u, &config, &error),
                 ORM_STATUS_OK);
@@ -253,7 +258,8 @@ spec("mysql incremental Driver cursor") {
     orm_row_cursor cursor = {0};
     orm_error_t error;
 
-    orm_error_init(&error);
+    memset(&error, 0, sizeof(error));
+    error.struct_size = (uint32_t)sizeof(error);
     config.max_result_rows = 0u;
     check_equal(mysql_cursor_start(
                     &cursor, &source, &column, 1u, &config, &error),
