@@ -290,7 +290,7 @@ jobs:
           if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
           cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
           if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-build.log & exit /b 1)
-          for /r "%BUILD%" %%F in (turbodb_driver_tidesdb.dll) do (
+          for /f "delims=" %%F in ('dir /s /b "%BUILD%\turbodb_driver_tidesdb.dll" 2^>nul') do (
             dumpbin /DEPENDENTS "%%F" > evidence\deps\tidesdb-driver-dependencies.txt 2>&1
             dumpbin /EXPORTS "%%F" > evidence\deps\tidesdb-driver-exports.txt 2>&1
           )
