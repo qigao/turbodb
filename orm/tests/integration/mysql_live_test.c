@@ -119,7 +119,7 @@ int main(void) {
         "SELECT s,u,txt,decv FROM m3_probe WHERE s=?";
     const mysql_stmt_value_t parameter = {
         .kind = MYSQL_STMT_VALUE_SINT64,
-        .data.sint64_value = INT64_C(-42)};
+        .data.sint64_value = INT64_C(-7)};
     const mysql_session_cursor_limits_t source_limits = {
         .max_columns = 8u,
         .max_metadata_bytes = 1024u,
@@ -220,7 +220,7 @@ int main(void) {
 
   {
     static const uint8_t sql[] =
-        "UPDATE m3_probe SET txt=? WHERE s=?";
+        "UPDATE m4_command SET txt=CONCAT(txt, ?) WHERE s=?";
     static const uint8_t changed[] = {'c','h','a','n','g','e','d'};
     const mysql_stmt_value_t parameters[2] = {
       {.kind = MYSQL_STMT_VALUE_TEXT,
