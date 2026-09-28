@@ -43,9 +43,9 @@ jobs:
             echo 'TurboDB-private generic DSO loader primitive remains in ORM production source' >&2
             exit 1
           fi
-          if git grep -n 'ORM_WITH_REDIS' -- \
+          if git grep -n -E 'ORM_WITH_(REDIS|MONGO(DB)?)' -- \
               CMakeOptions.cmake orm/CMakeLists.txt orm/src; then
-            echo 'legacy built-in Redis ORM selection remains in active source' >&2
+            echo 'legacy built-in Redis/MongoDB ORM selection remains in active source' >&2
             exit 1
           fi
 
@@ -195,7 +195,7 @@ jobs:
             -DORM_WITH_SQLITE=OFF \
             -DORM_WITH_PGSQL=OFF \
             -DORM_BUILD_REDIS_DRIVER=OFF \
-            -DORM_WITH_MONGODB=OFF \
+            -DORM_BUILD_MONGODB_DRIVER=OFF \
             -DORM_BUILD_TIDESDB_DRIVER=OFF \
             -DORM_BUILD_TESTS=OFF \
             -DBUILD_TESTS=OFF \
@@ -208,12 +208,13 @@ jobs:
             -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE \
+            -DCMAKE_DISABLE_FIND_PACKAGE_mongoc-1.0=TRUE \
             2>&1 | tee evidence/deps/core-only-configure.log
           cmake --build "$build" --target turbo_orm --parallel 4 \
             2>&1 | tee evidence/deps/core-only-build.log
           readelf -d "$build/bin/libturbo_orm.so" \
             > evidence/deps/core-only-dependencies.txt
-          if grep -Eiq 'sqlite|libpq|postgres|tidesdb|redis|tedis' evidence/deps/core-only-dependencies.txt; then
+          if grep -Eiq 'sqlite|libpq|postgres|tidesdb|redis|tedis|mongoc|bson' evidence/deps/core-only-dependencies.txt; then
             cat evidence/deps/core-only-dependencies.txt
             echo 'generic turbo_orm has a database-native dependency' >&2
             exit 1
@@ -228,12 +229,12 @@ jobs:
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
           set "BUILD=%GITHUB_WORKSPACE%\build\core-only-windows"
-          cmake -S "%GITHUB_WORKSPACE%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_WITH_MONGODB=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_TESTS=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE > evidence\deps\core-only-configure.log 2>&1
+          cmake -S "%GITHUB_WORKSPACE%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_TESTS=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_mongoc-1.0=TRUE > evidence\deps\core-only-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\core-only-configure.log & exit /b 1)
           cmake --build "%BUILD%" --target turbo_orm --parallel 4 > evidence\deps\core-only-build.log 2>&1
           if errorlevel 1 (type evidence\deps\core-only-build.log & exit /b 1)
           dumpbin /DEPENDENTS "%BUILD%\bin\turbo_orm.dll" > evidence\deps\core-only-dependencies.txt
-          findstr /i /c:"sqlite" /c:"libpq" /c:"postgres" /c:"tidesdb" /c:"redis" /c:"tedis" evidence\deps\core-only-dependencies.txt >nul
+          findstr /i /c:"sqlite" /c:"libpq" /c:"postgres" /c:"tidesdb" /c:"redis" /c:"tedis" /c:"mongoc" /c:"bson" evidence\deps\core-only-dependencies.txt >nul
           if not errorlevel 1 (type evidence\deps\core-only-dependencies.txt & echo generic turbo_orm has a database-native dependency & exit /b 1)
           certutil -hashfile "%BUILD%\bin\turbo_orm.dll" SHA256 > evidence\deps\core-only.sha256
 
@@ -266,7 +267,7 @@ jobs:
           set -euo pipefail
           profile=linux-release-user
           if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
-          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
 
           redis_module="$(find build -type f -name 'turbodb_driver_redis.so' -print -quit)"
@@ -315,7 +316,7 @@ jobs:
           set "BUILD=build\Msvc-Release"
           if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
           if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
           findstr /c:"z-applocal" "%BUILD%\build.ninja" >nul
           if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
