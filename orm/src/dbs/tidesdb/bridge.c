@@ -73,6 +73,12 @@ int orm_tidesdb_close(orm_tidesdb_database_t *database)
     return tidesdb_close((tidesdb_t *)database);
 }
 
+int orm_tidesdb_checkpoint(orm_tidesdb_database_t *database,
+                           const char *checkpoint_dir)
+{
+    return tidesdb_checkpoint((tidesdb_t *)database, checkpoint_dir);
+}
+
 int orm_tidesdb_create_column_family(
     orm_tidesdb_database_t *database,
     const char *name,
