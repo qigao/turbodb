@@ -1,10 +1,9 @@
-#include "orm_internal.h"
+#include "backend.h"
 #include "orm_mongo_cursor.h"
 #include "orm_mongo_lib.h"
 #include "query.h"
 
 #include <mongoc/mongoc.h>
-#include <salts/thread.h>
 
 #include <limits.h>
 #include <stdio.h>
@@ -34,14 +33,6 @@ typedef struct orm_mongo_transaction_state {
   mongoc_client_session_t *session;
   int active;
 } orm_mongo_transaction_state;
-
-static salts_once_t orm_mongo_once = SALTS_ONCE_INIT;
-static int orm_mongo_cleanup_registered;
-
-static void orm_mongo_process_init(void) {
-  mongoc_init();
-  orm_mongo_cleanup_registered = atexit(mongoc_cleanup) == 0;
-}
 
 static orm_status_t orm_mongo_error_status(const bson_error_t *error,
                                            orm_status_t fallback) {
@@ -733,12 +724,6 @@ orm_status_t orm_mongo_backend_create(const orm_config_t *config,
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   memset(out_backend, 0, sizeof(*out_backend));
-  salts_once(&orm_mongo_once, orm_mongo_process_init);
-  if (!orm_mongo_cleanup_registered) {
-    orm_error_set(error, ORM_STATUS_INTERNAL_ERROR,
-                  "register MongoDB process cleanup failed");
-    return ORM_STATUS_INTERNAL_ERROR;
-  }
   state = (orm_mongo_backend_state *)calloc(1u, sizeof(*state));
   if (state == NULL) {
     orm_error_set(error, ORM_STATUS_OUT_OF_MEMORY,
