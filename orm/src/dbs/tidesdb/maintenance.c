@@ -380,10 +380,13 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
   char generations[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
   char generation_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
   char active_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
+  char lock_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
   salts_fs_stat_t active_stat;
   salts_fs_buf_t active_bytes = {0};
+  salts_file_t lock_file = SALTS_INVALID_FILE;
   orm_status_t status;
   int rc;
+  int locked = 0;
 
   if (self != &tidesdb_maintenance_identity)
     return ORM_STATUS_INVALID_ARGUMENT;
@@ -415,23 +418,55 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
   if (status != ORM_STATUS_OK) return status;
   status = tidesdb_join_path(active_path, root, "ACTIVE", "ACTIVE", error);
   if (status != ORM_STATUS_OK) return status;
+  status = tidesdb_join_path(
+      lock_path, root, "ACTIVE.lock", "ACTIVE lock", error);
+  if (status != ORM_STATUS_OK) return status;
+
+  /*
+   * Coordinate with Windows MoveFileEx publication as well as POSIX rename.
+   * Atomic replacement gives readers old-or-new contents, while this shared
+   * lock also prevents a reader's open ACTIVE handle from racing the writer's
+   * exclusive replacement on platforms with stricter file sharing rules.
+   */
+  lock_file = salts_fs_open(
+      lock_path, SALTS_FS_O_RDWR | SALTS_FS_O_CREAT,
+      SALTS_FS_DEFAULT_MODE);
+  if (lock_file == SALTS_INVALID_FILE) {
+    orm_error_set(error, ORM_STATUS_DATASTORE_ERROR,
+                  "open TidesDB ACTIVE lock failed");
+    return ORM_STATUS_DATASTORE_ERROR;
+  }
+  rc = salts_fs_lock(
+      lock_file, SALTS_FS_LOCK_SHARED | SALTS_FS_LOCK_NONBLOCK, 0, 0);
+  if (rc != 0) {
+    (void)salts_fs_close(lock_file);
+    orm_error_set(error, ORM_STATUS_BUSY,
+                  "TidesDB ACTIVE resolution is busy");
+    return ORM_STATUS_BUSY;
+  }
+  locked = 1;
 
   rc = salts_fs_lstat(active_path, &active_stat);
-  if (rc != 0)
-    return tidesdb_maintenance_fail_fs(
+  if (rc != 0) {
+    status = tidesdb_maintenance_fail_fs(
         rc, "inspect TidesDB ACTIVE pointer", error);
+    goto cleanup;
+  }
   if (!active_stat.is_file || active_stat.is_symlink ||
       active_stat.size == 0u ||
       active_stat.size > ORM_TIDESDB_GENERATION_ID_MAX_BYTES) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
                   "TidesDB ACTIVE pointer is invalid");
-    return ORM_STATUS_INVALID_STATE;
+    status = ORM_STATUS_INVALID_STATE;
+    goto cleanup;
   }
 
   rc = salts_fs_read_file(active_path, &active_bytes);
-  if (rc != 0)
-    return tidesdb_maintenance_fail_fs(
+  if (rc != 0) {
+    status = tidesdb_maintenance_fail_fs(
         rc, "read TidesDB ACTIVE pointer", error);
+    goto cleanup;
+  }
   {
     const orm_string_view_t generation = {
         active_bytes.base, active_bytes.len};
@@ -439,12 +474,12 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
         generation, result->generation, &result->generation_size, error);
   }
   salts_fs_buf_free(&active_bytes);
-  if (status != ORM_STATUS_OK) return status;
+  if (status != ORM_STATUS_OK) goto cleanup;
 
   status = tidesdb_join_path(
       generation_path, generations, result->generation,
       "active generation", error);
-  if (status != ORM_STATUS_OK) return status;
+  if (status != ORM_STATUS_OK) goto cleanup;
   /*
    * Resolution must not reopen the active database: a normal runtime may
    * already own it, and reconciliation must not turn into a second-open lock
@@ -452,12 +487,33 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
    */
   status = tidesdb_require_directory(
       generation_path, "inspect active TidesDB generation", error);
-  if (status != ORM_STATUS_OK) return status;
+  if (status != ORM_STATUS_OK) goto cleanup;
   status = tidesdb_require_nonempty_directory(generation_path, error);
-  if (status != ORM_STATUS_OK) return status;
+  if (status != ORM_STATUS_OK) goto cleanup;
 
   orm_error_set(error, ORM_STATUS_OK, NULL);
-  return ORM_STATUS_OK;
+  status = ORM_STATUS_OK;
+
+cleanup:
+  if (active_bytes.base != NULL)
+    salts_fs_buf_free(&active_bytes);
+  if (locked) {
+    const int unlock_status = salts_fs_unlock(lock_file, 0, 0);
+    if (status == ORM_STATUS_OK && unlock_status != 0) {
+      orm_error_set(error, ORM_STATUS_CLEANUP_FAILED,
+                    "unlock TidesDB ACTIVE resolution failed");
+      status = ORM_STATUS_CLEANUP_FAILED;
+    }
+  }
+  if (lock_file != SALTS_INVALID_FILE) {
+    const int close_status = salts_fs_close(lock_file);
+    if (status == ORM_STATUS_OK && close_status != 0) {
+      orm_error_set(error, ORM_STATUS_CLEANUP_FAILED,
+                    "close TidesDB ACTIVE resolution lock failed");
+      status = ORM_STATUS_CLEANUP_FAILED;
+    }
+  }
+  return status;
 }
 
 static const TurboDb_TidesMaintenance_vtable tidesdb_maintenance_vtable = {
