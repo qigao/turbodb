@@ -53,6 +53,7 @@ struct orm_runtime {
   uint32_t close_remaining;
   uint32_t dependents;
   uint32_t pending_operations;
+  uint32_t extension_count;
   uint32_t load_active;
 };
 
@@ -297,6 +298,27 @@ static void runtime_release_last(orm_runtime_t *runtime);
 
 static void runtime_drop_dependent(orm_runtime_t *runtime) {
   if (runtime_release_dependent_ref(runtime))
+    runtime_release_last(runtime);
+}
+
+static int runtime_release_extension_ref(orm_runtime_t *runtime) {
+  int last = 0;
+  salts_mutex_lock(&runtime->mutex);
+  if (runtime->extension_count == 0u ||
+      runtime->dependents == 0u || runtime->refs == 0u) {
+    salts_mutex_unlock(&runtime->mutex);
+    abort();
+  }
+  --runtime->extension_count;
+  --runtime->dependents;
+  --runtime->refs;
+  last = runtime->refs == 0u;
+  salts_mutex_unlock(&runtime->mutex);
+  return last;
+}
+
+static void runtime_drop_extension(orm_runtime_t *runtime) {
+  if (runtime_release_extension_ref(runtime))
     runtime_release_last(runtime);
 }
 
@@ -1239,12 +1261,13 @@ orm_runtime_driver_acquire_extension(
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
   }
-  if (runtime->dependents == runtime->config.max_connections ||
+  if (runtime->extension_count >= runtime->config.max_pending_operations ||
       runtime->refs == UINT32_MAX) {
     salts_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
-                          "runtime dependent budget is full");
+                          "runtime extension budget is full");
   }
+  ++runtime->extension_count;
   ++runtime->dependents;
   ++runtime->refs;
   plugin = driver->plugin;
@@ -1255,7 +1278,7 @@ orm_runtime_driver_acquire_extension(
   if (plugin_status != SALTS_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "acquire Driver extension Plugin lease");
-    runtime_drop_dependent(runtime);
+    runtime_drop_extension(runtime);
     return status;
   }
 
@@ -1300,7 +1323,7 @@ fail:
       status = runtime_plugin_status(
           release_status, error, "release failed Driver extension lease");
   }
-  runtime_drop_dependent(runtime);
+  runtime_drop_extension(runtime);
   return status;
 }
 
@@ -1321,7 +1344,7 @@ orm_runtime_driver_release_extension(
 
   extension->runtime = NULL;
   free(extension);
-  runtime_drop_dependent(runtime);
+  runtime_drop_extension(runtime);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
