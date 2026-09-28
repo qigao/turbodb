@@ -4,11 +4,13 @@ project(OrmPostgreSQLPackageConsumer LANGUAGES C CXX)
 
 find_package(Orm CONFIG REQUIRED)
 
-if(NOT DEFINED Orm_WITH_SQLITE OR NOT DEFINED Orm_WITH_POSTGRESQL)
-  message(FATAL_ERROR "Orm package does not export backend capabilities")
+if(NOT TARGET Orm::PostgreSQL)
+  message(FATAL_ERROR
+          "legacy PostgreSQL consumer requires the Orm::PostgreSQL compatibility target")
 endif()
-if(NOT Orm_WITH_POSTGRESQL)
-  message(FATAL_ERROR "PostgreSQL package does not export PostgreSQL support")
+if(DEFINED Orm_WITH_SQLITE OR DEFINED Orm_WITH_POSTGRESQL)
+  message(FATAL_ERROR
+          "Orm package must not expose legacy backend capability flags")
 endif()
 
 add_executable(orm_postgresql_c_consumer main.c)
