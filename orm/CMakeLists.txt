@@ -1623,6 +1623,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_plugin_bad_contract_fixture PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
+add_library(orm_plugin_bad_storage_fixture MODULE
+  tests/driver/orm_module_bad_storage_fixture.c)
+target_compile_features(orm_plugin_bad_storage_fixture PRIVATE c_std_11)
+target_include_directories(orm_plugin_bad_storage_fixture PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_plugin_bad_storage_fixture PRIVATE
+  Salts::PluginABI Salts::Core Salts::CSerde Salts::CFlow)
+set_target_properties(orm_plugin_bad_storage_fixture PROPERTIES
+  PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+  WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_plugin_bad_storage_fixture)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_options(orm_plugin_bad_storage_fixture PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 add_library(orm_plugin_bad_shape_fixture MODULE
   tests/driver/orm_module_bad_interface_fixture.c)
 target_compile_features(orm_plugin_bad_shape_fixture PRIVATE c_std_11)
@@ -1659,7 +1673,7 @@ target_link_libraries(orm_runtime_registry_test PRIVATE turbo_orm Salts::TinyTes
 add_dependencies(orm_runtime_registry_test
   orm_runtime_plugin_fixture orm_plugin_no_query_fixture
   orm_plugin_bad_abi_fixture orm_plugin_bad_contract_fixture
-  orm_plugin_bad_shape_fixture)
+  orm_plugin_bad_shape_fixture orm_plugin_bad_storage_fixture)
 set_target_properties(orm_runtime_registry_test PROPERTIES
   C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_runtime_registry_test)
@@ -1671,7 +1685,7 @@ endif()
 add_test(NAME orm_runtime_registry COMMAND orm_runtime_registry_test)
 set_tests_properties(orm_runtime_registry PROPERTIES
   ENVIRONMENT
-    "ORM_PLUGIN_FIXTURE=$<TARGET_FILE:orm_runtime_plugin_fixture>;ORM_PLUGIN_NO_QUERY_FIXTURE=$<TARGET_FILE:orm_plugin_no_query_fixture>;ORM_PLUGIN_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_plugin_bad_abi_fixture>;ORM_PLUGIN_BAD_CONTRACT_FIXTURE=$<TARGET_FILE:orm_plugin_bad_contract_fixture>;ORM_PLUGIN_BAD_SHAPE_FIXTURE=$<TARGET_FILE:orm_plugin_bad_shape_fixture>")
+    "ORM_PLUGIN_FIXTURE=$<TARGET_FILE:orm_runtime_plugin_fixture>;ORM_PLUGIN_NO_QUERY_FIXTURE=$<TARGET_FILE:orm_plugin_no_query_fixture>;ORM_PLUGIN_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_plugin_bad_abi_fixture>;ORM_PLUGIN_BAD_CONTRACT_FIXTURE=$<TARGET_FILE:orm_plugin_bad_contract_fixture>;ORM_PLUGIN_BAD_SHAPE_FIXTURE=$<TARGET_FILE:orm_plugin_bad_shape_fixture>;ORM_PLUGIN_BAD_STORAGE_FIXTURE=$<TARGET_FILE:orm_plugin_bad_storage_fixture>")
 
 # Dedicated race fixture intentionally exports test-only gate symbols in
 # addition to canonical salts_plugin_query. It is not the export-surface fixture.
