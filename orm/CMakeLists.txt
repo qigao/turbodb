@@ -1008,6 +1008,23 @@ if(MSVC)
 endif()
 add_test(NAME orm_sql_render COMMAND orm_sql_render_test)
 
+add_executable(orm_mysql_wire_test
+  tests/driver/orm_mysql_wire_test.c
+  src/dbs/mysql/wire/mysql_wire.c)
+target_compile_features(orm_mysql_wire_test PRIVATE c_std_11)
+target_include_directories(orm_mysql_wire_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql/wire)
+target_link_libraries(orm_mysql_wire_test PRIVATE Salts::TinyTest)
+set_target_properties(orm_mysql_wire_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_wire_test)
+if(MSVC)
+  target_compile_options(orm_mysql_wire_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_wire_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_wire COMMAND orm_mysql_wire_test)
+
 # Candidate plan adapter is exercised against the real core, not the SDK fixture.
 add_executable(orm_driver_plan_view_test
   tests/driver/orm_driver_plan_view_test.c)
