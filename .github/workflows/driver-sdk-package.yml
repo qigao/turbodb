@@ -11,6 +11,9 @@ on:
       - "orm/src/dbs/sql/**"
       - "orm/driver-sdk/**"
       - "orm/cmake/**"
+      - "orm/CMakeLists.txt"
+      - "orm/tests/driver/orm_driver_deployment_matrix.c"
+      - "vcpkg.json"
       - "tests/deps/**"
       - "CMakeLists.txt"
       - "CMakeOptions.cmake"
@@ -291,7 +294,7 @@ jobs:
           set -euo pipefail
           profile=linux-release-user
           if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
-          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_BUILD_SQLITE_DRIVER=ON -DORM_BUILD_POSTGRESQL_DRIVER=OFF -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_BUILD_SQLITE_DRIVER=ON -DORM_BUILD_POSTGRESQL_DRIVER=ON -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DORM_BUILD_TIDESDB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
 
           core_module="$(find build -type f -name 'libturbo_orm.so' -print -quit)"
@@ -363,7 +366,7 @@ jobs:
           set "BUILD=build\Msvc-Release"
           if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
           if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_BUILD_SQLITE_DRIVER=ON -DORM_BUILD_POSTGRESQL_DRIVER=OFF -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_BUILD_SQLITE_DRIVER=ON -DORM_BUILD_POSTGRESQL_DRIVER=ON -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DORM_BUILD_TIDESDB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
           findstr /c:"z-applocal" "%BUILD%\build.ninja" >nul
           if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
@@ -402,6 +405,83 @@ jobs:
 
           ctest --preset "%PROFILE%" --output-on-failure > evidence\deps\root-ctest.log 2>&1
           if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-ctest.log & exit /b 1)
+
+      - name: Prove same app/core across all current Drivers on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ '${{ matrix.config }}' == debug ]]; then
+            build='build/Gcc'
+          else
+            build='build/Gcc-Release'
+          fi
+          evidence="evidence/deps/all-driver-matrix"
+          mkdir -p "$evidence"
+          app="$build/bin/orm_driver_deployment_matrix_test"
+          core="$build/bin/libturbo_orm.so"
+          sqlite="$build/bin/turbodb_driver_sqlite.so"
+          postgresql="$build/bin/turbodb_driver_postgresql.so"
+          redis="$build/bin/turbodb_driver_redis.so"
+          mongodb="$build/bin/turbodb_driver_mongodb.so"
+          tidesdb="$build/bin/turbodb_driver_tidesdb.so"
+          for file in "$app" "$core" "$sqlite" "$postgresql" "$redis" "$mongodb" "$tidesdb"; do
+            test -f "$file"
+          done
+          export LD_LIBRARY_PATH="$build/bin:$GITHUB_WORKSPACE/vcpkg_installed/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          sha256sum "$core" "$app" > "$evidence/baseline.sha256"
+          run_case() {
+            name="$1"; shift
+            "$app" "$@"
+            sha256sum "$core" "$app" > "$evidence/$name.sha256"
+            cmp "$evidence/baseline.sha256" "$evidence/$name.sha256"
+          }
+          run_case sqlite sqlite "$sqlite"
+          run_case postgresql postgresql "$postgresql"
+          run_case redis redis "$redis"
+          run_case mongodb mongodb "$mongodb"
+          run_case tidesdb tidesdb "$tidesdb"
+          run_case all sqlite "$sqlite" postgresql "$postgresql" redis "$redis" mongodb "$mongodb" tidesdb "$tidesdb"
+          printf '%s\n' "$sqlite" "$postgresql" "$redis" "$mongodb" "$tidesdb" > "$evidence/modules.txt"
+
+      - name: Prove same app/core across all current Drivers on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = if ('${{ matrix.config }}' -eq 'debug') { 'build\Msvc' } else { 'build\Msvc-Release' }
+          $evidence = 'evidence\deps\all-driver-matrix'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $bin = Join-Path $build 'bin'
+          $app = Join-Path $bin 'orm_driver_deployment_matrix_test.exe'
+          $core = Join-Path $bin 'turbo_orm.dll'
+          $sqlite = Join-Path $bin 'turbodb_driver_sqlite.dll'
+          $postgresql = Join-Path $bin 'turbodb_driver_postgresql.dll'
+          $redis = Join-Path $bin 'turbodb_driver_redis.dll'
+          $mongodb = Join-Path $bin 'turbodb_driver_mongodb.dll'
+          $tidesdb = Join-Path $bin 'turbodb_driver_tidesdb.dll'
+          foreach ($file in @($app,$core,$sqlite,$postgresql,$redis,$mongodb,$tidesdb)) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "missing matrix artifact: $file" }
+          }
+          $env:PATH = "$bin;$env:GITHUB_WORKSPACE\vcpkg_installed\x64-windows\bin;$env:PATH"
+          $baselineCore = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+          $baselineApp = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+          ("core=" + $baselineCore + [Environment]::NewLine + "app=" + $baselineApp) | Set-Content -LiteralPath (Join-Path $evidence 'baseline.sha256') -Encoding ascii
+          function Invoke-MatrixCase([string]$Name, [string[]]$Args) {
+            & $app @Args
+            if ($LASTEXITCODE -ne 0) { throw "Driver deployment scenario failed: $Name" }
+            $coreHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $core).Hash
+            $appHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $app).Hash
+            ("core=" + $coreHash + [Environment]::NewLine + "app=" + $appHash) | Set-Content -LiteralPath (Join-Path $evidence "$Name.sha256") -Encoding ascii
+            if ($coreHash -ne $baselineCore -or $appHash -ne $baselineApp) { throw "core/application hash changed: $Name" }
+          }
+          Invoke-MatrixCase 'sqlite' @('sqlite',$sqlite)
+          Invoke-MatrixCase 'postgresql' @('postgresql',$postgresql)
+          Invoke-MatrixCase 'redis' @('redis',$redis)
+          Invoke-MatrixCase 'mongodb' @('mongodb',$mongodb)
+          Invoke-MatrixCase 'tidesdb' @('tidesdb',$tidesdb)
+          Invoke-MatrixCase 'all' @('sqlite',$sqlite,'postgresql',$postgresql,'redis',$redis,'mongodb',$mongodb,'tidesdb',$tidesdb)
+          @($sqlite,$postgresql,$redis,$mongodb,$tidesdb) | Set-Content -LiteralPath (Join-Path $evidence 'modules.txt') -Encoding ascii
 
       - name: Keep dependency qualification evidence
         if: always()
