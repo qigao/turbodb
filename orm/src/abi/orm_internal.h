@@ -243,17 +243,13 @@ orm_status_t orm_plan_set_order(orm_query_plan *plan, vstr column,
                                 orm_order_t order, const orm_limits *limits,
                                 orm_error_t *error);
 
-#if defined(ORM_WITH_SQLITE)
 orm_status_t orm_sqlite_backend_create(const orm_config_t *config,
                                        const orm_limits *limits,
                                        orm_backend *out_backend,
                                        orm_error_t *error);
-#endif
-#if defined(ORM_WITH_PGSQL)
 orm_status_t orm_postgres_backend_create(const orm_config_t *config,
                                          const orm_limits *limits,
                                          orm_backend *out_backend,
                                          orm_error_t *error);
-#endif
 
 #endif
