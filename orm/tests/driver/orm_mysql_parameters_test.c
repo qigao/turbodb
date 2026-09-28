@@ -193,6 +193,12 @@ spec("mysql raw SQL parameter lowering") {
         "COMMIT",
         "ROLLBACK",
         "SAVEPOINT s",
+        "SET autocommit=1",
+        "CACHE INDEX t IN cache",
+        "CHECK TABLE t",
+        "LOAD DATA INFILE 'x' INTO TABLE t",
+        "CHANGE REPLICATION SOURCE TO SOURCE_HOST='x'",
+        "STOP REPLICA",
         "/*!80000 CREATE TABLE t(id INT) */"};
     static const char *const allowed[] = {
         "SELECT * FROM t",
