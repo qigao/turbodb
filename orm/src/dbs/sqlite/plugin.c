@@ -26,7 +26,7 @@ static const orm_driver_storage_capabilities_v1 sqlite_storage_capabilities = {
     .max_batch_bytes = 0u,
     .max_progress_metadata_bytes = ORM_DRIVER_STORAGE_LIMIT_CONFIGURED,
     .max_checkpoint_chunk_bytes = 0u,
-    .max_restore_chunk_bytes = ORM_DRIVER_STORAGE_LIMIT_CONFIGURED};
+    .max_restore_chunk_bytes = ORM_SQLITE_MAX_RESTORE_CHUNK_BYTES};
 
 static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
 sqlite_driver_storage_capabilities(void *self) {
