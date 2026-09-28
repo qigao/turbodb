@@ -1,0 +1,123 @@
+name: MongoDB Driver live contract
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: mongodb-driver-live-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mongodb-live:
+    name: MongoDB 8 live Driver CRUD
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27017:27017
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact tracked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Configure shared vcpkg binary cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Restore canonical re2c host tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+        with:
+          version: "4.6.3"
+
+      - name: Restore published native SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+
+      - name: Install Linux build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nasm ninja-build
+
+      - name: Build MongoDB Driver live test
+        shell: bash
+        env:
+          ORM_MONGODB_URI: mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=5000
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/mongodb-driver-live"
+          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed_mongodb" -DVCPKG_TARGET_TRIPLET=x64-linux -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=ON -DORM_MONGODB_LIVE_TESTS=ON -DORM_BUILD_TESTS=ON -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF
+          cmake --build "$build" --target orm_mongodb_live_driver_test --parallel 4
+
+          mkdir -p evidence/mongodb-live
+          {
+            echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "MongoDB=8.0"
+            echo "Salts.Native=1.7.10"
+            echo "SaltsUtils.Native=4.0.2"
+            echo "PluginABI=2"
+          } > evidence/mongodb-live/qualification.txt
+
+          ctest --test-dir "$build" -R '^orm_mongodb_live_driver$' --output-on-failure 2>&1 | tee evidence/mongodb-live/ctest.log
+
+          core="$build/bin/libturbo_orm.so"
+          driver="$build/bin/turbodb_driver_mongodb.so"
+          readelf -d "$core" > evidence/mongodb-live/core-dependencies.txt
+          readelf -d "$driver" > evidence/mongodb-live/driver-dependencies.txt
+          nm --defined-only "$driver" > evidence/mongodb-live/driver-symbols.txt
+          nm -D --defined-only "$driver" > evidence/mongodb-live/driver-exports.txt
+
+          if grep -Eiq 'mongoc|bson' evidence/mongodb-live/core-dependencies.txt; then
+            cat evidence/mongodb-live/core-dependencies.txt
+            echo 'generic core imports MongoDB native libraries' >&2
+            exit 1
+          fi
+
+          if ! grep -Eiq 'mongoc' evidence/mongodb-live/driver-dependencies.txt; then
+            if ! grep -Eq '[[:space:]][Tt][[:space:]]mongoc_client_new$' evidence/mongodb-live/driver-symbols.txt; then
+              cat evidence/mongodb-live/driver-dependencies.txt
+              grep -E 'mongoc_client_new|mongoc_' evidence/mongodb-live/driver-symbols.txt || true
+              echo 'MongoDB Driver contains neither shared nor static mongoc implementation' >&2
+              exit 1
+            fi
+          fi
+
+          grep -Eq '[[:space:]]salts_plugin_query$' evidence/mongodb-live/driver-exports.txt
+          if grep -Eiq '[[:space:]]mongoc_[A-Za-z0-9_]*$|[[:space:]]bson_[A-Za-z0-9_]*$' evidence/mongodb-live/driver-exports.txt; then
+            cat evidence/mongodb-live/driver-exports.txt
+            echo 'MongoDB native symbols leaked from Driver MODULE' >&2
+            exit 1
+          fi
+
+          sha256sum "$core" "$driver" > evidence/mongodb-live/binaries.sha256
+
+      - name: Keep MongoDB live qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mongodb-driver-live-${{ github.sha }}
+          path: evidence/mongodb-live/
+          if-no-files-found: warn

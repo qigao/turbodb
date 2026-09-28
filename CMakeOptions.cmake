@@ -40,12 +40,14 @@ set(TIDESDB_WITH_LZ4 OFF CACHE BOOL "build with LZ4 compression support")
 set(ORM_WITH_SQLITE_DEFAULT ON)
 set(ORM_WITH_PGSQL_DEFAULT ON)
 set(ORM_BUILD_REDIS_DRIVER_DEFAULT OFF)
-set(ORM_WITH_MONGODB_DEFAULT OFF)
+set(ORM_BUILD_MONGODB_DRIVER_DEFAULT OFF)
 
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend for ORM" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_BUILD_REDIS_DRIVER
        "Build the independent Redis TurboDb.Driver module"
        ${ORM_BUILD_REDIS_DRIVER_DEFAULT})
-option(ORM_WITH_MONGODB "Enable MongoDB backend for ORM" ${ORM_WITH_MONGODB_DEFAULT})
+option(ORM_BUILD_MONGODB_DRIVER
+       "Build the independent MongoDB TurboDb.Driver module"
+       ${ORM_BUILD_MONGODB_DRIVER_DEFAULT})
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)

@@ -72,7 +72,7 @@ if (orm_connect(&config, &connection, &error) != ORM_STATUS_OK) {
 
 ### Runtime-loaded Drivers
 
-Redis and TidesDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
+Redis, TidesDB, and MongoDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
 The application loads an exact module path into an `orm_runtime_t`, then
 connects by the canonical Plugin manifest ID. Runtime loading does not scan
 directories, infer aliases, retry older ABIs, or fall back to a built-in
@@ -106,6 +106,10 @@ orm_runtime_release(runtime);
 ```
 
 The Driver keeps its Plugin lease while connection-owned native work is live.
+MongoDB's native process runtime is owned by the managed MongoDB Plugin:
+`mongoc_init()` runs from Plugin start and `mongoc_cleanup()` runs only after
+all Driver leases quiesce and before module unload. No process-global
+`atexit` callback is registered by the ORM adapter.
 Unsupported Redis transaction/raw-SQL operations remain explicit backend
 errors; they are not emulated by another database.
 
@@ -300,9 +304,10 @@ unchanged.
 
 Backend/component build options include `ORM_WITH_SQLITE`,
 `ORM_WITH_PGSQL`, `ORM_BUILD_REDIS_DRIVER`,
-`ORM_BUILD_TIDESDB_DRIVER`, and `ORM_WITH_MONGODB`. Redis and TidesDB ORM
-adapters are independent runtime-loaded Driver modules; enabling them does not
-put their native client/storage implementation back into generic `Orm::C`.
+`ORM_BUILD_TIDESDB_DRIVER`, and `ORM_BUILD_MONGODB_DRIVER`. Redis, TidesDB,
+and MongoDB ORM adapters are independent runtime-loaded Driver modules;
+enabling them does not put native client/storage implementations back into
+generic `Orm::C`.
 
 ```sh
 cmake --preset win-dev-user

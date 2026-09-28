@@ -33,15 +33,17 @@ endif()
 if(NOT DEFINED ORM_BUILD_REDIS_DRIVER_DEFAULT)
   set(ORM_BUILD_REDIS_DRIVER_DEFAULT OFF)
 endif()
-if(NOT DEFINED ORM_WITH_MONGODB_DEFAULT)
-  set(ORM_WITH_MONGODB_DEFAULT OFF)
+if(NOT DEFINED ORM_BUILD_MONGODB_DRIVER_DEFAULT)
+  set(ORM_BUILD_MONGODB_DRIVER_DEFAULT OFF)
 endif()
 option(ORM_WITH_SQLITE "Enable SQLite backend" ${ORM_WITH_SQLITE_DEFAULT})
 option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ${ORM_WITH_PGSQL_DEFAULT})
 option(ORM_BUILD_REDIS_DRIVER
        "Build the independent Redis TurboDb.Driver module"
        ${ORM_BUILD_REDIS_DRIVER_DEFAULT})
-option(ORM_WITH_MONGODB "Enable MongoDB backend" ${ORM_WITH_MONGODB_DEFAULT})
+option(ORM_BUILD_MONGODB_DRIVER
+       "Build the independent MongoDB TurboDb.Driver module"
+       ${ORM_BUILD_MONGODB_DRIVER_DEFAULT})
 if(NOT DEFINED ORM_BUILD_TIDESDB_DRIVER_DEFAULT)
   if(TARGET TidesDB::tidesdb)
     set(ORM_BUILD_TIDESDB_DRIVER_DEFAULT ON)
@@ -52,8 +54,14 @@ endif()
 option(ORM_BUILD_TIDESDB_DRIVER
        "Build the independent TidesDB TurboDb.Driver module"
        ${ORM_BUILD_TIDESDB_DRIVER_DEFAULT})
+option(ORM_MONGODB_LIVE_TESTS
+       "Run the MongoDB Driver CRUD test against ORM_MONGODB_URI" OFF)
 option(ORM_POSTGRES_LIVE_TESTS
        "Run tests against TURBODB_ORM_PGSQL_TEST_CONNINFO" OFF)
+
+if(ORM_MONGODB_LIVE_TESTS AND NOT ORM_BUILD_MONGODB_DRIVER)
+  message(FATAL_ERROR "ORM_MONGODB_LIVE_TESTS requires ORM_BUILD_MONGODB_DRIVER=ON")
+endif()
 
 if(ORM_POSTGRES_LIVE_TESTS)
   if(NOT ORM_BUILD_TESTS)
@@ -116,8 +124,23 @@ if(ORM_BUILD_TIDESDB_DRIVER AND NOT TARGET TidesDB::tidesdb)
   find_package(TidesDB CONFIG REQUIRED)
 endif()
 
-if(ORM_WITH_MONGODB)
-  find_package(mongoc-1.0 CONFIG REQUIRED)
+if(ORM_BUILD_MONGODB_DRIVER)
+  find_package(mongoc CONFIG REQUIRED)
+  find_package(bson CONFIG REQUIRED)
+  if(TARGET mongoc::shared)
+    set(ORM_MONGODB_MONGOC_TARGET mongoc::shared)
+  elseif(TARGET mongoc::static)
+    set(ORM_MONGODB_MONGOC_TARGET mongoc::static)
+  else()
+    message(FATAL_ERROR "MongoDB Driver requires a canonical mongoc target")
+  endif()
+  if(TARGET bson::shared)
+    set(ORM_MONGODB_BSON_TARGET bson::shared)
+  elseif(TARGET bson::static)
+    set(ORM_MONGODB_BSON_TARGET bson::static)
+  else()
+    message(FATAL_ERROR "MongoDB Driver requires a canonical bson target")
+  endif()
 endif()
 
 set(ORM_VERSION 2.1.0)
@@ -138,13 +161,7 @@ set(ORM_C_SOURCES src/abi/orm_core.c src/abi/orm_owner.c src/abi/orm_plan.c
                   src/dbs/sql/orm_sql_render.c)
 set(ORM_FLOW_SOURCES src/flow/orm_row_publisher.c
                      src/flow/orm_command_publisher.c
-                     src/flow/orm_text_token.c
-                     src/dbs/mongo/orm_mongo_cursor.c)
-if(ORM_WITH_MONGODB)
-  list(APPEND ORM_C_SOURCES src/dbs/mongo/backend.c
-                             src/dbs/mongo/query.c
-                             src/dbs/mongo/orm_mongo_lib.c)
-endif()
+                     src/flow/orm_text_token.c)
 
 foreach(ORM_C_SOURCE IN LISTS ORM_C_SOURCES ORM_FLOW_SOURCES)
   if(NOT ORM_C_SOURCE MATCHES "\\.c$")
@@ -173,7 +190,9 @@ get_target_property(ORM_CORE_LINK_CONTRACT turbo_orm LINK_LIBRARIES)
 foreach(ORM_FORBIDDEN_CORE_LINK IN ITEMS SQLite::SQLite3
                                          PostgreSQL::PostgreSQL
                                          TidesDB::tidesdb
-                                         TurboDB::Redis)
+                                         TurboDB::Redis
+                                         ${ORM_MONGODB_MONGOC_TARGET}
+                                         ${ORM_MONGODB_BSON_TARGET})
   list(FIND ORM_CORE_LINK_CONTRACT "${ORM_FORBIDDEN_CORE_LINK}"
        ORM_FORBIDDEN_CORE_LINK_INDEX)
   if(NOT ORM_FORBIDDEN_CORE_LINK_INDEX EQUAL -1)
@@ -320,9 +339,48 @@ if(ORM_BUILD_REDIS_DRIVER)
   endif()
 endif()
 
-if(ORM_WITH_MONGODB)
-  target_compile_definitions(turbo_orm PRIVATE ORM_WITH_MONGO)
-  target_link_libraries(turbo_orm PRIVATE mongo::mongoc_shared)
+if(ORM_BUILD_MONGODB_DRIVER)
+  add_library(orm_mongodb_driver MODULE
+    src/dbs/mongo/plugin.c
+    src/driver/orm_driver_backend_bridge.c
+    src/dbs/mongo/backend.c
+    src/dbs/mongo/query.c
+    src/dbs/mongo/orm_mongo_lib.c
+    src/dbs/mongo/orm_mongo_cursor.c
+    src/flow/orm_text_token.c)
+  target_compile_features(orm_mongodb_driver PRIVATE c_std_11)
+  target_compile_definitions(
+    orm_mongodb_driver PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
+  target_include_directories(
+    orm_mongodb_driver PRIVATE
+      ${ORM_INCLUDE_DIR}
+      ${ORM_ABI_SOURCE_DIR}
+      ${ORM_FLOW_SOURCE_DIR}
+      ${ORM_DRIVER_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
+  target_link_libraries(
+    orm_mongodb_driver PRIVATE
+      turbo_orm
+      ${ORM_MONGODB_MONGOC_TARGET}
+      ${ORM_MONGODB_BSON_TARGET}
+      Salts::PluginABI
+      Salts::Core
+      Salts::CSerde
+      Salts::CFlow
+      Salts::DataBind
+      Salts::CSTL)
+  set_target_properties(
+    orm_mongodb_driver PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "turbodb_driver_mongodb"
+      C_STANDARD_REQUIRED ON
+      C_VISIBILITY_PRESET hidden
+      WINDOWS_EXPORT_ALL_SYMBOLS OFF
+      FOLDER "orm/drivers")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(orm_mongodb_driver PRIVATE
+      "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
+  endif()
 endif()
 
 set_target_properties(
@@ -466,10 +524,6 @@ if(ORM_WITH_PGSQL)
 endif()
 
 set(ORM_RUNTIME_DEPENDENCY_TARGETS Salts::DataBind)
-if(ORM_WITH_MONGODB)
-  list(APPEND ORM_RUNTIME_DEPENDENCY_TARGETS mongo::mongoc_shared
-                                              mongo::bson_shared)
-endif()
 
 # Runtime dependency scanning is independent from the consumer CMake contract.
 # Include enabled backend and codec target directories so standalone installs
@@ -622,6 +676,9 @@ endif()
 if(TARGET orm_redis_driver)
   orm_enable_strict_warnings(orm_redis_driver)
 endif()
+if(TARGET orm_mongodb_driver)
+  orm_enable_strict_warnings(orm_mongodb_driver)
+endif()
 
 orm_enable_strict_warnings(turbo_orm)
 if(ORM_WITH_PGSQL)
@@ -656,10 +713,6 @@ if(ORM_BUILD_TESTS)
   if(ORM_WITH_SQLITE)
     target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_SQLITE)
     target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
-  endif()
-  if(ORM_WITH_MONGODB)
-    target_compile_definitions(orm_c_test_static PRIVATE ORM_WITH_MONGO)
-    target_link_libraries(orm_c_test_static PRIVATE mongo::mongoc_shared)
   endif()
   set_target_properties(orm_c_test_static PROPERTIES C_STANDARD_REQUIRED ON)
   orm_enable_strict_warnings(orm_c_test_static)
@@ -704,29 +757,24 @@ if(ORM_WITH_SQLITE)
                                     Salts::CFlow)
 endif()
 list(APPEND ORM_TEST_PRIVATE_LIBS TidesDB::tidesdb)
-if(ORM_WITH_MONGODB)
-  list(APPEND ORM_TEST_PRIVATE_LIBS mongo::mongoc_shared)
-endif()
 set(ORM_TEST_DEFINITIONS ORM_C_STATIC)
 if(ORM_WITH_SQLITE)
   list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_SQLITE)
 endif()
 list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_TIDESDB)
-if(ORM_WITH_MONGODB)
-  list(APPEND ORM_TEST_DEFINITIONS ORM_WITH_MONGO)
-endif()
 
-if(ORM_WITH_MONGODB)
-add_executable(orm_mongo_query_test tests/flow/orm_mongo_query_test.c)
+if(ORM_BUILD_MONGODB_DRIVER)
+add_executable(orm_mongo_query_test
+               tests/flow/orm_mongo_query_test.c
+               src/dbs/mongo/query.c)
 target_compile_features(orm_mongo_query_test PRIVATE c_std_11)
-target_compile_definitions(orm_mongo_query_test PRIVATE ORM_C_STATIC
-                                                        ORM_WITH_MONGO)
+target_compile_definitions(orm_mongo_query_test PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_mongo_query_test PRIVATE ${ORM_INCLUDE_DIR} ${ORM_ABI_SOURCE_DIR}
                                ${ORM_FLOW_SOURCE_DIR}
                                ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mongo)
 orm_link_internal_test(orm_mongo_query_test Salts::TinyTest
-                       mongo::bson_shared)
+                       ${ORM_MONGODB_BSON_TARGET})
 set_target_properties(orm_mongo_query_test
                       PROPERTIES C_STANDARD_REQUIRED ON FOLDER "orm/tests")
 orm_enable_strict_warnings(orm_mongo_query_test)
@@ -735,6 +783,37 @@ if(MSVC)
                          PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
 endif()
 add_test(NAME orm_mongo_query COMMAND orm_mongo_query_test)
+
+add_executable(orm_mongodb_plugin_test
+               tests/driver/orm_mongodb_plugin_test.c)
+target_compile_features(orm_mongodb_plugin_test PRIVATE c_std_11)
+target_compile_definitions(orm_mongodb_plugin_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mongodb_plugin_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mongodb_plugin_test PRIVATE turbo_orm)
+add_dependencies(orm_mongodb_plugin_test orm_mongodb_driver)
+set_target_properties(orm_mongodb_plugin_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mongodb_plugin_test)
+add_test(NAME orm_mongodb_plugin COMMAND orm_mongodb_plugin_test)
+set_tests_properties(orm_mongodb_plugin PROPERTIES
+  ENVIRONMENT "ORM_MONGODB_PLUGIN=$<TARGET_FILE:orm_mongodb_driver>")
+
+add_executable(orm_mongodb_live_driver_test
+               tests/integration/mongodb_live_driver_test.c)
+target_compile_features(orm_mongodb_live_driver_test PRIVATE c_std_11)
+target_compile_definitions(orm_mongodb_live_driver_test PRIVATE ORM_C_STATIC)
+target_include_directories(orm_mongodb_live_driver_test PRIVATE ${ORM_INCLUDE_DIR})
+target_link_libraries(orm_mongodb_live_driver_test PRIVATE
+                      turbo_orm Salts::CFlow)
+add_dependencies(orm_mongodb_live_driver_test orm_mongodb_driver)
+set_target_properties(orm_mongodb_live_driver_test PROPERTIES
+                      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mongodb_live_driver_test)
+if(ORM_MONGODB_LIVE_TESTS)
+  add_test(NAME orm_mongodb_live_driver COMMAND orm_mongodb_live_driver_test)
+  set_tests_properties(orm_mongodb_live_driver PROPERTIES
+    ENVIRONMENT "ORM_MONGODB_PLUGIN=$<TARGET_FILE:orm_mongodb_driver>;ORM_MONGODB_URI=$ENV{ORM_MONGODB_URI}")
+endif()
 endif()
 
 if(ORM_WITH_PGSQL)
@@ -1193,7 +1272,9 @@ if(MSVC)
 endif()
 add_test(NAME orm_redis_flow COMMAND orm_redis_flow_test)
 
-add_executable(orm_mongo_flow_test tests/flow/orm_mongo_flow_test.c)
+add_executable(orm_mongo_flow_test
+               tests/flow/orm_mongo_flow_test.c
+               src/dbs/mongo/orm_mongo_cursor.c)
 target_compile_features(orm_mongo_flow_test PRIVATE c_std_11)
 target_compile_definitions(orm_mongo_flow_test PRIVATE ORM_C_STATIC)
 target_include_directories(
@@ -1493,10 +1574,16 @@ if(WIN32)
     endif()
     list(APPEND ORM_RUNTIME_TESTS orm_tidesdb_public_flow)
   endif()
-  if(ORM_WITH_MONGODB)
-    string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::mongoc_shared>;PATH=path_list_prepend:$<TARGET_FILE_DIR:mongo::bson_shared>")
-    list(APPEND ORM_RUNTIME_TESTS orm_mongo_query)
+  if(ORM_BUILD_MONGODB_DRIVER)
+    if(TARGET mongoc::shared)
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:$<TARGET_FILE_DIR:mongoc::shared>")
+    endif()
+    if(TARGET bson::shared)
+      string(APPEND ORM_TEST_RUNTIME_PATH
+             ";PATH=path_list_prepend:$<TARGET_FILE_DIR:bson::shared>")
+    endif()
+    list(APPEND ORM_RUNTIME_TESTS orm_mongo_query orm_mongodb_plugin)
   endif()
 
   if(EXISTS "${CMAKE_C_COMPILER}")

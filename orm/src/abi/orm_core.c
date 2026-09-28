@@ -662,12 +662,6 @@ static orm_status_t orm_backend_create(const orm_config_t *config,
     status = orm_sqlite_backend_create(config, limits, backend, error);
   else
 #endif
-#if defined(ORM_WITH_MONGO)
-  if (orm_view_equal_cstr(config->driver, "mongo") ||
-      orm_view_equal_cstr(config->driver, "mongodb"))
-    status = orm_mongo_backend_create(config, limits, backend, error);
-  else
-#endif
   {
     orm_error_set(error, ORM_STATUS_UNSUPPORTED,
                   "requested ORM driver is not enabled");

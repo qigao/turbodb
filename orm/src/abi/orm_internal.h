@@ -255,11 +255,5 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
                                          orm_backend *out_backend,
                                          orm_error_t *error);
 #endif
-#if defined(ORM_WITH_MONGO)
-orm_status_t orm_mongo_backend_create(const orm_config_t *config,
-                                      const orm_limits *limits,
-                                      orm_backend *out_backend,
-                                      orm_error_t *error);
-#endif
 
 #endif

@@ -43,9 +43,14 @@ jobs:
             echo 'TurboDB-private generic DSO loader primitive remains in ORM production source' >&2
             exit 1
           fi
-          if git grep -n 'ORM_WITH_REDIS' -- \
+          if git grep -n -E 'ORM_WITH_(REDIS|MONGO(DB)?)' -- \
               CMakeOptions.cmake orm/CMakeLists.txt orm/src; then
-            echo 'legacy built-in Redis ORM selection remains in active source' >&2
+            echo 'legacy built-in Redis/MongoDB ORM selection remains in active source' >&2
+            exit 1
+          fi
+          if git grep -n -E 'atexit[[:space:]]*\([[:space:]]*mongoc_cleanup' -- \
+              orm/src; then
+            echo 'MongoDB Driver must not register process-exit native cleanup' >&2
             exit 1
           fi
 
@@ -195,7 +200,7 @@ jobs:
             -DORM_WITH_SQLITE=OFF \
             -DORM_WITH_PGSQL=OFF \
             -DORM_BUILD_REDIS_DRIVER=OFF \
-            -DORM_WITH_MONGODB=OFF \
+            -DORM_BUILD_MONGODB_DRIVER=OFF \
             -DORM_BUILD_TIDESDB_DRIVER=OFF \
             -DORM_BUILD_TESTS=OFF \
             -DBUILD_TESTS=OFF \
@@ -208,12 +213,13 @@ jobs:
             -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE \
+            -DCMAKE_DISABLE_FIND_PACKAGE_mongoc=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_bson=TRUE \
             2>&1 | tee evidence/deps/core-only-configure.log
           cmake --build "$build" --target turbo_orm --parallel 4 \
             2>&1 | tee evidence/deps/core-only-build.log
           readelf -d "$build/bin/libturbo_orm.so" \
             > evidence/deps/core-only-dependencies.txt
-          if grep -Eiq 'sqlite|libpq|postgres|tidesdb|redis|tedis' evidence/deps/core-only-dependencies.txt; then
+          if grep -Eiq 'sqlite|libpq|postgres|tidesdb|redis|tedis|mongoc|bson' evidence/deps/core-only-dependencies.txt; then
             cat evidence/deps/core-only-dependencies.txt
             echo 'generic turbo_orm has a database-native dependency' >&2
             exit 1
@@ -228,12 +234,12 @@ jobs:
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
           set "BUILD=%GITHUB_WORKSPACE%\build\core-only-windows"
-          cmake -S "%GITHUB_WORKSPACE%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_WITH_MONGODB=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_TESTS=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE > evidence\deps\core-only-configure.log 2>&1
+          cmake -S "%GITHUB_WORKSPACE%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DORM_WITH_SQLITE=OFF -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_TESTS=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_mongoc=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_bson=TRUE > evidence\deps\core-only-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\core-only-configure.log & exit /b 1)
           cmake --build "%BUILD%" --target turbo_orm --parallel 4 > evidence\deps\core-only-build.log 2>&1
           if errorlevel 1 (type evidence\deps\core-only-build.log & exit /b 1)
           dumpbin /DEPENDENTS "%BUILD%\bin\turbo_orm.dll" > evidence\deps\core-only-dependencies.txt
-          findstr /i /c:"sqlite" /c:"libpq" /c:"postgres" /c:"tidesdb" /c:"redis" /c:"tedis" evidence\deps\core-only-dependencies.txt >nul
+          findstr /i /c:"sqlite" /c:"libpq" /c:"postgres" /c:"tidesdb" /c:"redis" /c:"tedis" /c:"mongoc" /c:"bson" evidence\deps\core-only-dependencies.txt >nul
           if not errorlevel 1 (type evidence\deps\core-only-dependencies.txt & echo generic turbo_orm has a database-native dependency & exit /b 1)
           certutil -hashfile "%BUILD%\bin\turbo_orm.dll" SHA256 > evidence\deps\core-only.sha256
 
@@ -266,31 +272,54 @@ jobs:
           set -euo pipefail
           profile=linux-release-user
           if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
-          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
+          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
           cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
 
+          core_module="$(find build -type f -name 'libturbo_orm.so' -print -quit)"
           redis_module="$(find build -type f -name 'turbodb_driver_redis.so' -print -quit)"
           redis_native="$(find build -type f -name 'libtedis.so.1*' ! -type l -print -quit)"
-          core_module="$(find build -type f -name 'libturbo_orm.so' -print -quit)"
+          mongodb_module="$(find build -type f -name 'turbodb_driver_mongodb.so' -print -quit)"
+          test -n "$core_module"
           test -n "$redis_module"
           test -n "$redis_native"
-          test -n "$core_module"
+          test -n "$mongodb_module"
+
+          readelf -d "$core_module" > evidence/deps/root-core-dependencies.txt
           readelf -d "$redis_module" > evidence/deps/redis-driver-dependencies.txt
           readelf -d "$redis_native" > evidence/deps/redis-native-dependencies.txt
-          readelf -d "$core_module" > evidence/deps/root-core-dependencies.txt
+          readelf -d "$mongodb_module" > evidence/deps/mongodb-driver-dependencies.txt
+          nm -D --defined-only "$redis_module" > evidence/deps/redis-driver-exports.txt
+          nm --defined-only "$mongodb_module" > evidence/deps/mongodb-driver-symbols.txt
+          nm -D --defined-only "$mongodb_module" > evidence/deps/mongodb-driver-exports.txt
+
+          grep -Eiq 'tedis' evidence/deps/redis-driver-dependencies.txt
           if grep -q 'NOOPEN' evidence/deps/redis-native-dependencies.txt; then
             cat evidence/deps/redis-native-dependencies.txt
             echo 'Redis native client is marked unavailable to dlopen' >&2
             exit 1
           fi
-          nm -D --defined-only "$redis_module" > evidence/deps/redis-driver-exports.txt
-          grep -Eiq 'tedis' evidence/deps/redis-driver-dependencies.txt
-          if grep -Eiq 'tedis|redis' evidence/deps/root-core-dependencies.txt; then
-            cat evidence/deps/root-core-dependencies.txt
-            echo 'generic turbo_orm imports the Redis client' >&2
+          grep -Eq '[[:space:]]salts_plugin_query$' evidence/deps/redis-driver-exports.txt
+
+          if ! grep -Eiq 'mongoc' evidence/deps/mongodb-driver-dependencies.txt; then
+            if ! grep -Eq '[[:space:]][Tt][[:space:]]mongoc_client_new$' evidence/deps/mongodb-driver-symbols.txt; then
+              cat evidence/deps/mongodb-driver-dependencies.txt
+              grep -E 'mongoc_client_new|mongoc_' evidence/deps/mongodb-driver-symbols.txt || true
+              echo 'MongoDB Driver contains neither shared nor static mongoc implementation' >&2
+              exit 1
+            fi
+          fi
+          grep -Eq '[[:space:]]salts_plugin_query$' evidence/deps/mongodb-driver-exports.txt
+          if grep -Eiq '[[:space:]]mongoc_[A-Za-z0-9_]*$|[[:space:]]bson_[A-Za-z0-9_]*$' evidence/deps/mongodb-driver-exports.txt; then
+            cat evidence/deps/mongodb-driver-exports.txt
+            echo 'MongoDB native symbols leaked from Driver MODULE' >&2
             exit 1
           fi
-          grep -Eq '[[:space:]]salts_plugin_query$' evidence/deps/redis-driver-exports.txt
+
+          if grep -Eiq 'tedis|redis|mongoc|bson' evidence/deps/root-core-dependencies.txt; then
+            cat evidence/deps/root-core-dependencies.txt
+            echo 'generic turbo_orm imports a Redis/MongoDB native library' >&2
+            exit 1
+          fi
 
           tides_module="$(find build -type f -name 'turbodb_driver_tidesdb.so' -print -quit)"
           if [[ -n "$tides_module" ]]; then
@@ -300,9 +329,9 @@ jobs:
               readelf -d "$tides_native" > evidence/deps/tidesdb-native-dynamic.txt
             fi
             ldd -r "$tides_module" > evidence/deps/tidesdb-driver-ldd.txt 2>&1 || true
-            python3 -c 'import ctypes,sys; ctypes.CDLL(sys.argv[1])' "$tides_module" \
-              > evidence/deps/tidesdb-driver-dlopen.txt 2>&1 || true
+            python3 -c 'import ctypes,sys; ctypes.CDLL(sys.argv[1])' "$tides_module" > evidence/deps/tidesdb-driver-dlopen.txt 2>&1 || true
           fi
+
           ctest --preset "$profile" --output-on-failure 2>&1 | tee evidence/deps/root-ctest.log
 
       - name: Build and test TurboDB on Windows
@@ -315,30 +344,43 @@ jobs:
           set "BUILD=build\Msvc-Release"
           if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
           if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
+          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_WITH_SQLITE=ON -DORM_WITH_PGSQL=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
           if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
           findstr /c:"z-applocal" "%BUILD%\build.ninja" >nul
           if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
           cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
           if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-build.log & exit /b 1)
 
+          dumpbin /DEPENDENTS "%BUILD%\bin\turbo_orm.dll" > evidence\deps\root-core-dependencies.txt 2>&1
+
           set "REDIS_DRIVER="
           for /f "delims=" %%F in ('dir /s /b "%BUILD%\turbodb_driver_redis.dll" 2^>nul') do set "REDIS_DRIVER=%%F"
           if not defined REDIS_DRIVER (echo missing Redis Driver module & exit /b 1)
           dumpbin /DEPENDENTS "%REDIS_DRIVER%" > evidence\deps\redis-driver-dependencies.txt 2>&1
           dumpbin /EXPORTS "%REDIS_DRIVER%" > evidence\deps\redis-driver-exports.txt 2>&1
-          dumpbin /DEPENDENTS "%BUILD%\bin\turbo_orm.dll" > evidence\deps\root-core-dependencies.txt 2>&1
           findstr /i /c:"tedis.dll" evidence\deps\redis-driver-dependencies.txt >nul
           if errorlevel 1 (type evidence\deps\redis-driver-dependencies.txt & echo Redis Driver does not import tedis.dll & exit /b 1)
-          findstr /i /c:"tedis.dll" /c:"redis.dll" evidence\deps\root-core-dependencies.txt >nul
-          if not errorlevel 1 (type evidence\deps\root-core-dependencies.txt & echo generic turbo_orm imports the Redis client & exit /b 1)
           findstr /c:"salts_plugin_query" evidence\deps\redis-driver-exports.txt >nul
           if errorlevel 1 (type evidence\deps\redis-driver-exports.txt & echo Redis Driver does not export salts_plugin_query & exit /b 1)
+
+          set "MONGODB_DRIVER="
+          for /f "delims=" %%F in ('dir /s /b "%BUILD%\turbodb_driver_mongodb.dll" 2^>nul') do set "MONGODB_DRIVER=%%F"
+          if not defined MONGODB_DRIVER (echo missing MongoDB Driver module & exit /b 1)
+          dumpbin /DEPENDENTS "%MONGODB_DRIVER%" > evidence\deps\mongodb-driver-dependencies.txt 2>&1
+          dumpbin /EXPORTS "%MONGODB_DRIVER%" > evidence\deps\mongodb-driver-exports.txt 2>&1
+          findstr /i /c:"mongoc" evidence\deps\mongodb-driver-dependencies.txt >nul
+          if errorlevel 1 (type evidence\deps\mongodb-driver-dependencies.txt & echo MongoDB Driver does not import mongoc & exit /b 1)
+          findstr /c:"salts_plugin_query" evidence\deps\mongodb-driver-exports.txt >nul
+          if errorlevel 1 (type evidence\deps\mongodb-driver-exports.txt & echo MongoDB Driver does not export salts_plugin_query & exit /b 1)
+
+          findstr /i /c:"tedis.dll" /c:"redis.dll" /c:"mongoc" /c:"bson" evidence\deps\root-core-dependencies.txt >nul
+          if not errorlevel 1 (type evidence\deps\root-core-dependencies.txt & echo generic turbo_orm imports Redis/MongoDB native libraries & exit /b 1)
 
           for /f "delims=" %%F in ('dir /s /b "%BUILD%\turbodb_driver_tidesdb.dll" 2^>nul') do (
             dumpbin /DEPENDENTS "%%F" > evidence\deps\tidesdb-driver-dependencies.txt 2>&1
             dumpbin /EXPORTS "%%F" > evidence\deps\tidesdb-driver-exports.txt 2>&1
           )
+
           ctest --preset "%PROFILE%" --output-on-failure > evidence\deps\root-ctest.log 2>&1
           if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-ctest.log & exit /b 1)
 

@@ -198,7 +198,7 @@ jobs:
             -DORM_WITH_PGSQL=ON \
             -DORM_BUILD_REDIS_DRIVER=OFF \
             -DTURBODB_BUILD_REDIS=OFF \
-            -DORM_WITH_MONGODB=OFF \
+            -DORM_BUILD_MONGODB_DRIVER=OFF \
             -DORM_BUILD_TESTS=ON \
             -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
             -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
@@ -325,7 +325,7 @@ jobs:
             "-DORM_WITH_PGSQL=ON",
             "-DORM_BUILD_REDIS_DRIVER=OFF",
             "-DTURBODB_BUILD_REDIS=OFF",
-            "-DORM_WITH_MONGODB=OFF",
+            "-DORM_BUILD_MONGODB_DRIVER=OFF",
             "-DORM_BUILD_TESTS=ON",
             "-DTURBODB_DBTOOLS_WITH_SQLITE=OFF",
             "-DTURBODB_DBTOOLS_WITH_PGSQL=OFF"
