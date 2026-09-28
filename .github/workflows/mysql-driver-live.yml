@@ -172,13 +172,14 @@ jobs:
           set -euo pipefail
           cmake --build "$TURBODB_MYSQL_BUILD" --target \
             orm_mysql_driver orm_mysql_plugin_test orm_mysql_driver_live_test \
-            orm_mysql_parameters_test orm_mysql_dialect_test orm_mysql_statement_test \
+            orm_mysql_wire_test orm_mysql_parameters_test \
+            orm_mysql_dialect_test orm_mysql_statement_test \
             orm_mysql_query_test orm_mysql_savepoint_test \
             orm_mysql_binary_row_test orm_mysql_row_reader_test \
             orm_mysql_cursor_row_test orm_mysql_cursor_test \
             orm_mysql_handshake_test orm_mysql_live_test --parallel 4
           ctest --test-dir "$TURBODB_MYSQL_BUILD" \
-            -R "^orm_mysql_(plugin|driver_live|parameters|dialect|statement|query|savepoint|binary_row|row_reader|cursor_row|cursor|handshake|live)$" --output-on-failure
+            -R "^orm_mysql_(plugin|driver_live|wire|parameters|dialect|statement|query|savepoint|binary_row|row_reader|cursor_row|cursor|handshake|live)$" --output-on-failure
 
           module="$(find "$TURBODB_MYSQL_BUILD" -type f \
             \( -name 'turbodb_driver_mysql.so' -o -name 'turbodb_driver_mysql.dll' -o -name 'turbodb_driver_mysql.dylib' \) \
@@ -222,6 +223,7 @@ jobs:
             echo "datasources=turbodb,turbodb_b"
             echo "structured_crud=select,insert,update,delete"
             echo "live_boundaries=null,uint64,blob,decimal,date,time,datetime,constraint,row_limit"
+            echo "wire_text_rows=lenenc,null,embedded-nul,truncation,trailing"
           } > "$GITHUB_WORKSPACE/evidence/mysql/qualification.txt"
 
       - name: Keep MySQL qualification evidence
