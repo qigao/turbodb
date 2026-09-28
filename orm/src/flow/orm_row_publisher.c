@@ -461,17 +461,27 @@ orm_status_t orm_row_publisher_prepare(
     return orm_row_status_to_orm(status);
   }
   if (required.container_depth > config->max_depth ||
-      required.field_tracking_bytes > config->scratch_bytes) {
+      required.field_tracking_bytes > config->scratch_bytes ||
+      message_bitmap_bytes >
+          config->scratch_bytes - required.field_tracking_bytes) {
     orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED,
                       "row container depth or field bitmap exceeds caller budget");
     return ORM_STATUS_LIMIT_EXCEEDED;
   }
-  if (required.workspace_alignment == 0u ||
-      required.decode_bytes > SIZE_MAX - (required.workspace_alignment - 1u)) {
-    orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED, "row workspace size overflow");
+  if (required.decode_bytes > SIZE_MAX - message_bitmap_bytes) {
+    orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED,
+                      "row workspace size overflow");
     return ORM_STATUS_LIMIT_EXCEEDED;
   }
-  allocation_bytes = required.decode_bytes + required.workspace_alignment - 1u;
+  workspace_bytes = required.decode_bytes + message_bitmap_bytes;
+  if (required.workspace_alignment == 0u ||
+      workspace_bytes > SIZE_MAX - (required.workspace_alignment - 1u)) {
+    orm_row_set_error(error, ORM_STATUS_LIMIT_EXCEEDED,
+                      "row workspace size overflow");
+    return ORM_STATUS_LIMIT_EXCEEDED;
+  }
+  allocation_bytes =
+      workspace_bytes + required.workspace_alignment - 1u;
   state = (orm_row_publisher_state *)calloc(1u, sizeof(*state));
   if (state == NULL) {
     orm_row_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
