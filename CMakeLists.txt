@@ -12,17 +12,23 @@ if(ORM_BUILD_MONGODB_DRIVER)
   list(APPEND VCPKG_MANIFEST_FEATURES mongodb)
 endif()
 
-option(ORM_WITH_SQLITE "Enable SQLite backend" ON)
+option(ORM_BUILD_SQLITE_DRIVER
+       "Build the independent SQLite TurboDb.Driver module" ON)
 option(TURBODB_DBTOOLS_WITH_SQLITE
        "Enable SQLite standalone database tools" ON)
-if(ORM_WITH_SQLITE OR TURBODB_DBTOOLS_WITH_SQLITE)
+if(ORM_BUILD_SQLITE_DRIVER OR TURBODB_DBTOOLS_WITH_SQLITE)
   list(APPEND VCPKG_MANIFEST_FEATURES sqlite)
 endif()
 
-option(ORM_WITH_PGSQL "Enable PostgreSQL backend" ON)
+option(ORM_BUILD_POSTGRESQL_DRIVER
+       "Build the independent PostgreSQL TurboDb.Driver module" ON)
+option(ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT
+       "Build the legacy Orm::PostgreSQL direct connector compatibility component" ON)
 option(TURBODB_DBTOOLS_WITH_PGSQL
        "Enable PostgreSQL standalone database tools" ON)
-if(ORM_WITH_PGSQL OR TURBODB_DBTOOLS_WITH_PGSQL)
+if(ORM_BUILD_POSTGRESQL_DRIVER OR
+   ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT OR
+   TURBODB_DBTOOLS_WITH_PGSQL)
   list(APPEND VCPKG_MANIFEST_FEATURES postgresql)
 endif()
 
