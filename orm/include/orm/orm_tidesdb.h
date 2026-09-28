@@ -187,6 +187,10 @@ static inline orm_status_t orm_runtime_tidesdb_restore_publish(
       TurboDb_TidesMaintenance_interface(), &extension, &binding, error);
   if (status != ORM_STATUS_OK) return status;
   TurboDb_TidesMaintenance *maintenance = (TurboDb_TidesMaintenance *)binding;
+  if (!TurboDb_TidesMaintenance_valid(maintenance)) {
+    (void)orm_runtime_driver_release_extension(extension, NULL);
+    return ORM_STATUS_ABI_MISMATCH;
+  }
   status = TurboDb_TidesMaintenance_restore_publish(
       maintenance, config, result, error);
   orm_error_t release_error;
@@ -213,6 +217,10 @@ static inline orm_status_t orm_runtime_tidesdb_resolve_active(
       TurboDb_TidesMaintenance_interface(), &extension, &binding, error);
   if (status != ORM_STATUS_OK) return status;
   TurboDb_TidesMaintenance *maintenance = (TurboDb_TidesMaintenance *)binding;
+  if (!TurboDb_TidesMaintenance_valid(maintenance)) {
+    (void)orm_runtime_driver_release_extension(extension, NULL);
+    return ORM_STATUS_ABI_MISMATCH;
+  }
   status = TurboDb_TidesMaintenance_resolve_active(
       maintenance, config, result, error);
   orm_error_t release_error;
