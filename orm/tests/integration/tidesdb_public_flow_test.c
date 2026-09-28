@@ -1,5 +1,6 @@
 #include "orm.h"
 #include <orm_runtime.h>
+#include <orm_tidesdb.h>
 
 #include <cmeta/struct.h>
 #include <tinytest.h>
@@ -98,7 +99,8 @@ static orm_runtime_t *orm_tides_plugin_runtime(orm_error_t *error) {
       storage.capabilities,
       (uint64_t)(ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA |
                  ORM_DRIVER_STORAGE_CAP_ORDERED_REPLAY_CLASSIFICATION |
-                 ORM_DRIVER_STORAGE_CAP_FILE_BACKED_CHECKPOINT));
+                 ORM_DRIVER_STORAGE_CAP_FILE_BACKED_CHECKPOINT |
+                 ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE));
   check_equal(storage.max_progress_metadata_bytes,
               (uint64_t)ORM_DRIVER_STORAGE_LIMIT_CONFIGURED);
   check_equal(storage.max_batch_operations, (uint64_t)0u);
