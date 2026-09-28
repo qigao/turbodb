@@ -1,4 +1,5 @@
 #include <orm_driver_plugin.h>
+#include <orm_tidesdb.h>
 
 #include "backend.h"
 #include "bridge.h"
@@ -15,10 +16,13 @@
 
 static int tidesdb_driver_identity;
 
+extern TurboDb_TidesMaintenance orm_tidesdb_maintenance;
+
 #define ORM_TIDESDB_STORAGE_CAPABILITIES                                  \
   (ORM_DRIVER_STORAGE_CAP_ATOMIC_STATE_METADATA |                          \
    ORM_DRIVER_STORAGE_CAP_ORDERED_REPLAY_CLASSIFICATION |                  \
-   ORM_DRIVER_STORAGE_CAP_FILE_BACKED_CHECKPOINT)
+   ORM_DRIVER_STORAGE_CAP_FILE_BACKED_CHECKPOINT |                          \
+   ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE)
 
 static const orm_driver_storage_capabilities_v1 tidesdb_storage_capabilities = {
     .header = {(uint32_t)sizeof(orm_driver_storage_capabilities_v1),
@@ -28,7 +32,7 @@ static const orm_driver_storage_capabilities_v1 tidesdb_storage_capabilities = {
     .max_batch_bytes = 0u,
     .max_progress_metadata_bytes = ORM_DRIVER_STORAGE_LIMIT_CONFIGURED,
     .max_checkpoint_chunk_bytes = 0u,
-    .max_restore_chunk_bytes = 0u};
+    .max_restore_chunk_bytes = ORM_DRIVER_STORAGE_LIMIT_CONFIGURED};
 
 static const orm_driver_storage_capabilities_v1 *ORM_DRIVER_CALL
 tidesdb_driver_storage_capabilities(void *self) {
@@ -108,14 +112,26 @@ static const TurboDb_Driver_vtable tidesdb_driver_vtable = {
 static TurboDb_Driver tidesdb_driver = {
     &tidesdb_driver_identity, &tidesdb_driver_vtable};
 
-static const salts_plugin_export tidesdb_exports[] = {{
-    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
-    .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
-    .capabilities = ORM_TIDESDB_DRIVER_CAPABILITIES,
-    .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
-    .contract_id = ORM_DRIVER_INTERFACE_CONTRACT_ID,
-    .value.interface = {&TurboDb_Driver_interface_meta, &tidesdb_driver}}};
+static const salts_plugin_export tidesdb_exports[] = {
+    {
+        .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
+        .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+        .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
+        .capabilities = ORM_TIDESDB_DRIVER_CAPABILITIES,
+        .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
+        .contract_id = ORM_DRIVER_INTERFACE_CONTRACT_ID,
+        .value.interface = {&TurboDb_Driver_interface_meta, &tidesdb_driver},
+    },
+    {
+        .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
+        .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+        .contract_version = ORM_TIDESDB_MAINTENANCE_CONTRACT_VERSION,
+        .capabilities = 0u,
+        .export_id = ORM_TIDESDB_MAINTENANCE_EXPORT_ID,
+        .contract_id = ORM_TIDESDB_MAINTENANCE_CONTRACT_ID,
+        .value.interface = {&TurboDb_TidesMaintenance_interface_meta,
+                            &orm_tidesdb_maintenance},
+    }};
 
 static const salts_plugin_manifest tidesdb_manifest = {
     .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
@@ -123,7 +139,7 @@ static const salts_plugin_manifest tidesdb_manifest = {
     .plugin_id = "tidesdb",
     .version = {1u, 0u, 0u},
     .exports = tidesdb_exports,
-    .export_count = 1u,
+    .export_count = 2u,
     .self = &tidesdb_lifecycle,
     .start = tidesdb_plugin_start,
     .request_stop = tidesdb_plugin_request_stop,
