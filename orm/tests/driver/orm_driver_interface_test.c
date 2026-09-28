@@ -16,6 +16,11 @@ CMETA_INTERFACE(TurboDb_Driver_Wrong, ORM_DRIVER_WRONG_METHODS);
 
 static unsigned create_calls;
 
+static uint64_t ORM_DRIVER_CALL fixture_execution_models(void *self) {
+  return self == &create_calls ? ORM_DRIVER_EXEC_CALLER_BLOCKING
+                               : UINT64_C(0);
+}
+
 static orm_status_t ORM_DRIVER_CALL fixture_create(
     void *self, const orm_config_t *config,
     const orm_driver_limits_v1 *limits,
@@ -44,7 +49,7 @@ int main(void) {
   REQUIRE(cmeta_interface_desc_equal(local, peer_a));
   REQUIRE(cmeta_interface_desc_equal(peer_a, peer_b));
   REQUIRE(strcmp(local->name, "TurboDb_Driver") == 0);
-  REQUIRE(local->method_count == 1u);
+  REQUIRE(local->method_count == 2u);
 
   method = &local->methods[0];
   REQUIRE(cmeta_interface_method_reflection_valid(method));
@@ -72,10 +77,23 @@ int main(void) {
   REQUIRE(abi->param_carriers[2] == CMETA_ABI_OBJECT_POINTER);
   REQUIRE(abi->param_carriers[3] == CMETA_ABI_OBJECT_POINTER);
 
+  method = &local->methods[1];
+  REQUIRE(cmeta_interface_method_reflection_valid(method));
+  REQUIRE(strcmp(method->name, "execution_models") == 0);
+  REQUIRE(method->dispatch_arity == 0u);
+  function = method->function;
+  abi = method->abi;
+  REQUIRE(function != NULL && abi != NULL);
+  REQUIRE(strcmp(function->name, "TurboDb_Driver.execution_models") == 0);
+  REQUIRE(function->param_count == 0u);
+  REQUIRE(abi->return_carrier == CMETA_ABI_SCALAR);
+  REQUIRE(abi->param_count == 0u);
+
   static const TurboDb_Driver_vtable vtable = {
       .implementation = "fixture",
       .capabilities = ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_TRANSACTION,
-      .create = fixture_create};
+      .create = fixture_create,
+      .execution_models = fixture_execution_models};
   TurboDb_Driver driver = TurboDb_Driver_bind(&create_calls, &vtable);
   orm_config_t config = {0};
   orm_driver_limits_v1 limits = {0};
@@ -87,6 +105,8 @@ int main(void) {
              &driver, &config, &limits, &connection, &error) == ORM_STATUS_OK);
   REQUIRE(create_calls == 1u);
   REQUIRE(connection.context == &create_calls);
+  REQUIRE(TurboDb_Driver_execution_models(&driver) ==
+          ORM_DRIVER_EXEC_CALLER_BLOCKING);
 
   salts_plugin_export entry = orm_driver_plugin_export(
       &driver, ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_TRANSACTION);

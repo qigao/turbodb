@@ -13,6 +13,13 @@
 
 static int postgresql_driver_identity;
 
+static uint64_t ORM_DRIVER_CALL postgresql_driver_execution_models(
+    void *self) {
+  return self == &postgresql_driver_identity
+             ? (uint64_t)(ORM_DRIVER_EXEC_CALLER_BLOCKING)
+             : UINT64_C(0);
+}
+
 static orm_status_t ORM_DRIVER_CALL postgresql_driver_create(
     void *self, const orm_config_t *config,
     const orm_driver_limits_v1 *limits,
@@ -27,7 +34,8 @@ static orm_status_t ORM_DRIVER_CALL postgresql_driver_create(
 static const TurboDb_Driver_vtable postgresql_driver_vtable = {
     .implementation = "postgresql",
     .capabilities = ORM_POSTGRESQL_DRIVER_CAPABILITIES,
-    .create = postgresql_driver_create};
+    .create = postgresql_driver_create,
+    .execution_models = postgresql_driver_execution_models};
 
 static TurboDb_Driver postgresql_driver = {
     &postgresql_driver_identity, &postgresql_driver_vtable};

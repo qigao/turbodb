@@ -60,6 +60,13 @@ static void SALTS_PLUGIN_CALL tidesdb_plugin_destroy(void *self) {
   state->stopping = 0;
 }
 
+static uint64_t ORM_DRIVER_CALL tidesdb_driver_execution_models(
+    void *self) {
+  return self == &tidesdb_driver_identity
+             ? (uint64_t)(ORM_DRIVER_EXEC_CALLER_BLOCKING)
+             : UINT64_C(0);
+}
+
 static orm_status_t ORM_DRIVER_CALL tidesdb_driver_create(
     void *self, const orm_config_t *config,
     const orm_driver_limits_v1 *limits,
@@ -74,7 +81,8 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_driver_create(
 static const TurboDb_Driver_vtable tidesdb_driver_vtable = {
     .implementation = "tidesdb",
     .capabilities = ORM_TIDESDB_DRIVER_CAPABILITIES,
-    .create = tidesdb_driver_create};
+    .create = tidesdb_driver_create,
+    .execution_models = tidesdb_driver_execution_models};
 
 static TurboDb_Driver tidesdb_driver = {
     &tidesdb_driver_identity, &tidesdb_driver_vtable};

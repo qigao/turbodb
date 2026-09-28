@@ -7,6 +7,10 @@
 _Static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
                "TurboDB Driver SDK requires canonical Plugin ABI 2");
 
+static uint64_t ORM_DRIVER_CALL consumer_execution_models(void *self) {
+  return self != NULL ? ORM_DRIVER_EXEC_CALLER_BLOCKING : UINT64_C(0);
+}
+
 static orm_status_t ORM_DRIVER_CALL consumer_create(
     void *self, const orm_config_t *config,
     const orm_driver_limits_v1 *limits,
@@ -27,7 +31,8 @@ int main(void) {
   static const TurboDb_Driver_vtable vtable = {
       .implementation = "sdk-consumer",
       .capabilities = ORM_DRIVER_CAP_SELECT,
-      .create = consumer_create};
+      .create = consumer_create,
+      .execution_models = consumer_execution_models};
   TurboDb_Driver driver = TurboDb_Driver_bind(&consumer_state, &vtable);
   salts_plugin_export entry =
       orm_driver_plugin_export(&driver, ORM_DRIVER_CAP_SELECT);

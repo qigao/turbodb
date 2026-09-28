@@ -10,6 +10,13 @@
 
 static int redis_driver_identity;
 
+static uint64_t ORM_DRIVER_CALL redis_driver_execution_models(
+    void *self) {
+  return self == &redis_driver_identity
+             ? (uint64_t)(ORM_DRIVER_EXEC_CALLER_BLOCKING | ORM_DRIVER_EXEC_NATIVE_WAIT)
+             : UINT64_C(0);
+}
+
 static orm_status_t ORM_DRIVER_CALL redis_driver_create(
     void *self, const orm_config_t *config,
     const orm_driver_limits_v1 *limits,
@@ -24,7 +31,8 @@ static orm_status_t ORM_DRIVER_CALL redis_driver_create(
 static const TurboDb_Driver_vtable redis_driver_vtable = {
     .implementation = "redis",
     .capabilities = ORM_REDIS_DRIVER_CAPABILITIES,
-    .create = redis_driver_create};
+    .create = redis_driver_create,
+    .execution_models = redis_driver_execution_models};
 
 static TurboDb_Driver redis_driver = {
     &redis_driver_identity, &redis_driver_vtable};
