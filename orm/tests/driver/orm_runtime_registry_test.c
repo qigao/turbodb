@@ -237,6 +237,73 @@ spec("runtime driver registry") {
     orm_runtime_release(runtime);
   }
 
+  it("keeps the module leased through a standalone query handle") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_create(connection, orm_view("rows"),
+                                 &query, &error),
+                ORM_STATUS_OK);
+
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    orm_query_destroy(query);
+    query = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps the module leased through a standalone transaction handle") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_transaction_t *transaction = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_transaction_begin(connection, ORM_ISOLATION_SERIALIZABLE,
+                                      &transaction, &error),
+                ORM_STATUS_OK);
+
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_OK);
+    orm_transaction_destroy(transaction);
+    transaction = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
   it("does not publish a module lease when connect fails") {
     orm_runtime_config_t runtime_config;
     orm_runtime_t *runtime = NULL;
@@ -260,7 +327,7 @@ spec("runtime driver registry") {
     orm_runtime_release(runtime);
   }
 
-  it("keeps runtime and query leases through a driver row Publisher") {
+  it("keeps the module leased through row Publisher cursor cleanup") {
     orm_runtime_config_t runtime_config;
     orm_runtime_t *runtime = NULL;
     orm_connection_t *connection = NULL;
