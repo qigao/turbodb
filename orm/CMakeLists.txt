@@ -1199,6 +1199,28 @@ else()
 endif()
 add_test(NAME orm_mysql_row_reader COMMAND orm_mysql_row_reader_test)
 
+add_executable(orm_mysql_cursor_row_test
+  tests/driver/orm_mysql_cursor_row_test.c
+  src/dbs/mysql/cursor_row.c
+  src/dbs/mysql/row_reader.c
+  src/dbs/mysql/wire/codec.c
+  src/dbs/mysql/wire/row.c)
+target_compile_features(orm_mysql_cursor_row_test PRIVATE c_std_11)
+target_include_directories(orm_mysql_cursor_row_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql
+  ${ORM_MYSQL_WIRE_SOURCE_DIR})
+target_link_libraries(orm_mysql_cursor_row_test PRIVATE
+  Salts::TinyTest Salts::CSerde)
+set_target_properties(orm_mysql_cursor_row_test PROPERTIES
+  C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+orm_enable_strict_warnings(orm_mysql_cursor_row_test)
+if(MSVC)
+  target_compile_options(orm_mysql_cursor_row_test PRIVATE /WX)
+else()
+  target_compile_options(orm_mysql_cursor_row_test PRIVATE -Werror)
+endif()
+add_test(NAME orm_mysql_cursor_row COMMAND orm_mysql_cursor_row_test)
+
 if(ORM_MYSQL_LIVE_TESTS)
   set(ORM_MYSQL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dbs/mysql)
   set(ORM_MYSQL_AUTH_SOURCE_DIR ${ORM_MYSQL_SOURCE_DIR}/auth)
