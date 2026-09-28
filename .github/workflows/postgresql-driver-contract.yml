@@ -19,7 +19,6 @@ on:
       - "orm/include/orm/orm.h"
       - "orm/src/abi/orm_core.c"
       - "orm/src/flow/**"
-      - "orm/CMakeLists.txt"
       - ".github/workflows/postgresql-driver-contract.yml"
   push:
     branches: [master]
@@ -39,7 +38,6 @@ on:
       - "orm/include/orm/orm.h"
       - "orm/src/abi/orm_core.c"
       - "orm/src/flow/**"
-      - "orm/CMakeLists.txt"
       - ".github/workflows/postgresql-driver-contract.yml"
   workflow_dispatch:
 
