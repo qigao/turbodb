@@ -168,10 +168,10 @@ jobs:
           set -euo pipefail
           cmake --build "$TURBODB_MYSQL_BUILD" --target \
             orm_mysql_parameters_test orm_mysql_statement_test \
-            orm_mysql_binary_row_test orm_mysql_handshake_test \
-            orm_mysql_live_test --parallel 4
+            orm_mysql_binary_row_test orm_mysql_row_reader_test \
+            orm_mysql_handshake_test orm_mysql_live_test --parallel 4
           ctest --test-dir "$TURBODB_MYSQL_BUILD" \
-            -R "^orm_mysql_(parameters|statement|binary_row|handshake|live)$" --output-on-failure
+            -R "^orm_mysql_(parameters|statement|binary_row|row_reader|handshake|live)$" --output-on-failure
 
       - name: Qualify caching_sha2 fast auth and native compatibility
         shell: bash
