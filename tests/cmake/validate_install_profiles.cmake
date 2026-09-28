@@ -42,15 +42,32 @@ foreach(full_preset IN ITEMS win-dev-user win-release-user linux-dev-user
   require_preset_cache("${full_preset}" ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT ON)
 endforeach()
 
-foreach(postgresql_preset IN ITEMS win-release-dbtools-pg-user
-                                  linux-release-pg-live-user)
-  require_preset_cache("${postgresql_preset}" ORM_BUILD_SQLITE_DRIVER OFF)
-  require_preset_cache("${postgresql_preset}"
-                       TURBODB_DBTOOLS_WITH_SQLITE OFF)
-  require_preset_cache("${postgresql_preset}" ORM_BUILD_POSTGRESQL_DRIVER ON)
-  require_preset_cache("${postgresql_preset}" ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT ON)
-  require_preset_cache("${postgresql_preset}" TURBODB_DBTOOLS_WITH_PGSQL ON)
-endforeach()
+require_preset_cache(win-release-dbtools-pg-user
+                     ORM_BUILD_SQLITE_DRIVER OFF)
+require_preset_cache(win-release-dbtools-pg-user
+                     ORM_BUILD_POSTGRESQL_DRIVER OFF)
+require_preset_cache(win-release-dbtools-pg-user
+                     ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT OFF)
+require_preset_cache(win-release-dbtools-pg-user
+                     TURBODB_DBTOOLS_WITH_SQLITE OFF)
+require_preset_cache(win-release-dbtools-pg-user
+                     TURBODB_DBTOOLS_WITH_PGSQL ON)
+
+require_preset_cache(win-release-pg-live-user
+                     ORM_BUILD_POSTGRESQL_DRIVER ON)
+require_preset_cache(win-release-pg-live-user
+                     ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT OFF)
+
+require_preset_cache(linux-release-pg-live-user
+                     ORM_BUILD_SQLITE_DRIVER OFF)
+require_preset_cache(linux-release-pg-live-user
+                     ORM_BUILD_POSTGRESQL_DRIVER ON)
+require_preset_cache(linux-release-pg-live-user
+                     ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT OFF)
+require_preset_cache(linux-release-pg-live-user
+                     TURBODB_DBTOOLS_WITH_SQLITE OFF)
+require_preset_cache(linux-release-pg-live-user
+                     TURBODB_DBTOOLS_WITH_PGSQL ON)
 
 string(CONCAT full_install_prefix "$" "env{PKG_ROOT}/turbodb/release")
 string(CONCAT postgresql_install_prefix "$"
