@@ -184,8 +184,8 @@ jobs:
             echo "os=ubuntu-24.04"
             echo "arch=x64"
             echo "configuration=Release"
-            echo "Salts.Native=1.7.10"
-            echo "SaltsUtils.Native=4.0.2"
+            echo "Salts.Native=1.8.0"
+            echo "SaltsUtils.Native=4.1.0"
             echo "PluginABI=2"
           } > "$evidence/qualification.txt"
           cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
@@ -307,8 +307,8 @@ jobs:
             "os=windows-2022",
             "arch=x64",
             "configuration=Release",
-            "Salts.Native=1.7.10",
-            "SaltsUtils.Native=4.0.2",
+            "Salts.Native=1.8.0",
+            "SaltsUtils.Native=4.1.0",
             "PluginABI=2"
           ) | Set-Content -LiteralPath (Join-Path $evidence "qualification.txt") -Encoding ascii
           $args = @(
