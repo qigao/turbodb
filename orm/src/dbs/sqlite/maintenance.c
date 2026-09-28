@@ -111,7 +111,7 @@ static orm_status_t sqlite_maintenance_validate_request(
   if (config->reserved != 0u || config->busy_timeout_ms == 0u ||
       config->busy_timeout_ms > (uint32_t)INT_MAX ||
       config->pages_per_step == 0u ||
-      config->pages_per_step > (uint32_t)INT_MAX ||
+      config->pages_per_step > ORM_SQLITE_MAX_PAGES_PER_STEP ||
       config->max_busy_retries == 0u ||
       config->max_busy_retries > ORM_SQLITE_MAINTENANCE_MAX_BUSY_RETRIES) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
