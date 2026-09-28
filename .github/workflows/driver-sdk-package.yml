@@ -22,9 +22,29 @@ jobs:
         os: [ubuntu-24.04, windows-2022]
         config: [debug, release]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Verify canonical Driver source surface
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "checkout is not exact head: expected=$expected actual=$actual"
+          }
+          $legacy = git grep -n "orm_driver_get_api_v1" -- orm/include orm/src orm/tests orm/driver-sdk 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $legacy | Write-Host
+            throw 'legacy orm_driver_get_api_v1 remains in active Driver source'
+          }
+          if ($LASTEXITCODE -ne 1) {
+            throw "git grep failed with exit code $LASTEXITCODE"
+          }
 
       - name: Configure shared vcpkg binary cache
         id: vcpkg_cache
