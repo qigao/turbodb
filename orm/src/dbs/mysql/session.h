@@ -1,6 +1,7 @@
 #ifndef TURBODB_ORM_MYSQL_SESSION_H
 #define TURBODB_ORM_MYSQL_SESSION_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -44,6 +45,26 @@ typedef struct mysql_session_error_t {
  */
 mysql_session_status_t mysql_session_connect_and_ping(
     const mysql_session_config_t *config, mysql_session_error_t *error);
+
+typedef struct mysql_session_prepared_probe_t {
+  int64_t signed_value;
+  uint64_t unsigned_value;
+  char text[32];
+  size_t text_size;
+  char decimal[32];
+  size_t decimal_size;
+  uint32_t row_count;
+} mysql_session_prepared_probe_t;
+
+/*
+ * M3 qualification API. Reuses the same bounded CNet/TLS/auth session, then
+ * performs one real COM_STMT_PREPARE/EXECUTE/CLOSE round-trip against the
+ * workflow fixture and decodes one binary result row. Not public Driver ABI.
+ */
+mysql_session_status_t mysql_session_prepared_probe(
+    const mysql_session_config_t *config,
+    mysql_session_prepared_probe_t *out,
+    mysql_session_error_t *error);
 
 #ifdef __cplusplus
 }

@@ -1212,6 +1212,8 @@ if(ORM_MYSQL_LIVE_TESTS)
     src/dbs/mysql/wire/packet.c
     src/dbs/mysql/wire/result.c
     src/dbs/mysql/wire/handshake.c
+    src/dbs/mysql/wire/statement.c
+    src/dbs/mysql/wire/row.c
     src/dbs/mysql/auth/auth.c)
   target_compile_features(orm_mysql_live_test PRIVATE c_std_11)
   target_include_directories(orm_mysql_live_test PRIVATE
