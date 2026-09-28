@@ -411,6 +411,143 @@ static int structured_read(
   return failed;
 }
 
+
+static int qualify_cancel_lease(
+    orm_runtime_t *runtime,
+    const char *host, const char *port,
+    const char *user, const char *password,
+    const char *database, const char *ca_file,
+    const char *server_name, orm_error_t *error) {
+  orm_connection_t *connection = NULL;
+  orm_query_t *query = NULL;
+  orm_query_t *probe = NULL;
+  orm_result_t *probe_result = NULL;
+  orm_flow_config_t flow;
+  cflow_publisher publisher = {0};
+  mysql_driver_live_row row = {0};
+  cflow_step step;
+  int64_t value = 0;
+  int failed = 0;
+
+  connection = connect_database(
+      runtime, host, port, user, password,
+      database, ca_file, server_name, error);
+  if (connection == NULL) {
+    fprintf(stderr,
+            "connect MySQL cancel datasource failed: %s\n",
+            error != NULL ? error->message : "");
+    return 1;
+  }
+
+  if (orm_raw(
+          connection,
+          orm_view(
+              "WITH RECURSIVE seq(n) AS ("
+              "SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<32"
+              ") SELECT n AS s FROM seq"),
+          &query, error) != ORM_STATUS_OK) {
+    failed = 1;
+    goto cleanup;
+  }
+
+  orm_flow_config(&flow, &mysql_driver_live_row_data);
+  if (orm_query_open_flow(
+          query, &flow, &publisher, error) != ORM_STATUS_OK) {
+    failed = 1;
+    goto cleanup;
+  }
+
+  step = cflow_publisher_resume(&publisher, NULL, &row);
+  if (step.kind != CFLOW_STEP_VALUE || row.s != 1L) {
+    fprintf(stderr,
+            "MySQL cancel publisher first row mismatch step=%d value=%ld\n",
+            (int)step.kind, row.s);
+    failed = 1;
+    goto cleanup;
+  }
+
+  if (orm_query_close(query, error) != ORM_STATUS_BUSY ||
+      orm_connection_close(connection, error) != ORM_STATUS_BUSY) {
+    fprintf(stderr,
+            "MySQL live Publisher did not retain query/connection lease: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  cflow_publisher_cancel(&publisher);
+
+  if (orm_query_close(query, error) != ORM_STATUS_BUSY ||
+      orm_connection_close(connection, error) != ORM_STATUS_BUSY) {
+    fprintf(stderr,
+            "MySQL cancel released ownership before Publisher terminal: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  cflow_publisher_destroy(&publisher);
+
+  if (orm_query_close(query, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "MySQL query stayed BUSY after Publisher destroy: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+  orm_query_release(query);
+  query = NULL;
+
+  /*
+   * Early cancellation closes only the in-flight physical CNet session.
+   * The logical datasource remains healthy and can create a fresh session.
+   */
+  if (orm_raw(
+          connection, orm_view("SELECT 42"),
+          &probe, error) != ORM_STATUS_OK ||
+      orm_query_execute(
+          probe, &probe_result, error) != ORM_STATUS_OK ||
+      orm_result_get_int64(
+          probe_result, 0u, 0u, &value, error) != ORM_STATUS_OK ||
+      value != INT64_C(42)) {
+    fprintf(stderr,
+            "MySQL datasource unusable after early cancel value=%lld message=%s\n",
+            (long long)value,
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+
+  orm_result_destroy(probe_result);
+  probe_result = NULL;
+  orm_query_destroy(probe);
+  probe = NULL;
+
+  if (orm_connection_close(connection, error) != ORM_STATUS_OK) {
+    fprintf(stderr,
+            "MySQL connection stayed BUSY after cancel terminal: %s\n",
+            error != NULL ? error->message : "");
+    failed = 1;
+    goto cleanup;
+  }
+  orm_connection_release(connection);
+  connection = NULL;
+
+cleanup:
+  cflow_publisher_destroy(&publisher);
+  orm_result_destroy(probe_result);
+  orm_query_destroy(probe);
+  if (query != NULL) {
+    (void)orm_query_close(query, error);
+    orm_query_release(query);
+  }
+  if (connection != NULL) {
+    (void)orm_connection_close(connection, error);
+    orm_connection_release(connection);
+  }
+  return failed;
+}
+
 int main(void) {
   const char *module = getenv("ORM_MYSQL_PLUGIN");
   const char *host = getenv("ORM_MYSQL_HOST");
@@ -461,6 +598,13 @@ int main(void) {
           ORM_STATUS_OK, &error)) {
     orm_runtime_release(runtime);
     return 1;
+  }
+
+  if (qualify_cancel_lease(
+          runtime, host, port, user, password,
+          database_a, ca_file, server_name, &error) != 0) {
+    failed = 1;
+    goto cleanup;
   }
 
   connection_a = connect_database(
