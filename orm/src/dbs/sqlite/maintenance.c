@@ -414,9 +414,5 @@ static const TurboDb_SqliteMaintenance_vtable sqlite_maintenance_vtable = {
     .checkpoint_create = sqlite_maintenance_checkpoint_create,
     .restore_publish = sqlite_maintenance_restore_publish};
 
-static TurboDb_SqliteMaintenance sqlite_maintenance_binding = {
+TurboDb_SqliteMaintenance orm_sqlite_maintenance = {
     &sqlite_maintenance_identity, &sqlite_maintenance_vtable};
-
-TurboDb_SqliteMaintenance *orm_sqlite_maintenance_binding(void) {
-  return &sqlite_maintenance_binding;
-}
