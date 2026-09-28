@@ -2,6 +2,20 @@
 
 #include <string.h>
 
+mysql_wire_status_t mysql_wire_build_quit(
+    uint8_t *out, size_t out_capacity, size_t *out_size) {
+  if (out_size != NULL)
+    *out_size = 0u;
+  if (out == NULL || out_size == NULL)
+    return MYSQL_WIRE_STATUS_INVALID;
+  if (out_capacity < 1u)
+    return MYSQL_WIRE_STATUS_LIMIT;
+
+  out[0] = MYSQL_COM_QUIT;
+  *out_size = 1u;
+  return MYSQL_WIRE_STATUS_OK;
+}
+
 mysql_wire_status_t mysql_wire_build_query(
     const uint8_t *sql, size_t sql_size,
     uint8_t *out, size_t out_capacity, size_t *out_size) {
