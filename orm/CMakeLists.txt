@@ -1066,6 +1066,32 @@ if(ORM_MYSQL_LIVE_TESTS)
 endif()
 endif()
 
+if(ORM_BUILD_MYSQL_DRIVER AND ORM_BUILD_POSTGRESQL_DRIVER)
+  add_executable(orm_mysql_postgresql_coexistence_test
+    tests/integration/mysql_postgresql_coexistence_test.c)
+  target_compile_features(orm_mysql_postgresql_coexistence_test PRIVATE c_std_11)
+  target_compile_definitions(
+    orm_mysql_postgresql_coexistence_test PRIVATE ORM_C_STATIC)
+  target_include_directories(
+    orm_mysql_postgresql_coexistence_test PRIVATE ${ORM_INCLUDE_DIR})
+  target_link_libraries(
+    orm_mysql_postgresql_coexistence_test PRIVATE turbo_orm)
+  add_dependencies(
+    orm_mysql_postgresql_coexistence_test
+    orm_mysql_driver orm_postgresql_driver)
+  set_target_properties(
+    orm_mysql_postgresql_coexistence_test PROPERTIES
+      C_STANDARD_REQUIRED ON FOLDER "orm/tests")
+  orm_enable_strict_warnings(orm_mysql_postgresql_coexistence_test)
+  if(MSVC)
+    target_compile_options(
+      orm_mysql_postgresql_coexistence_test PRIVATE /WX)
+  else()
+    target_compile_options(
+      orm_mysql_postgresql_coexistence_test PRIVATE -Werror)
+  endif()
+endif()
+
 if(ORM_BUILD_SQLITE_DRIVER AND ORM_BUILD_POSTGRESQL_DRIVER)
   add_executable(orm_sql_plugin_matrix_test
     tests/driver/orm_sql_plugin_matrix.c)
