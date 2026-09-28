@@ -230,10 +230,10 @@ jobs:
           mkdir -p "$driver_dir"
           cmake -E copy "$sqlite_plugin" "$driver_dir/turbodb_driver_sqlite.so"
           cmake -E copy "$postgresql_plugin" "$driver_dir/turbodb_driver_postgresql.so"
-          cat > "$RUNNER_TEMP/remove-driver-rpath.cmake" <<EOF
-file(RPATH_REMOVE FILE "$driver_dir/turbodb_driver_sqlite.so")
-file(RPATH_REMOVE FILE "$driver_dir/turbodb_driver_postgresql.so")
-EOF
+          printf '%s\n' \
+            "file(RPATH_REMOVE FILE \"$driver_dir/turbodb_driver_sqlite.so\")" \
+            "file(RPATH_REMOVE FILE \"$driver_dir/turbodb_driver_postgresql.so\")" \
+            > "$RUNNER_TEMP/remove-driver-rpath.cmake"
           cmake -P "$RUNNER_TEMP/remove-driver-rpath.cmake"
           installed_sqlite="$stage/lib/turbodb/drivers/turbodb_driver_sqlite.so"
           installed_postgresql="$stage/lib/turbodb/drivers/turbodb_driver_postgresql.so"
