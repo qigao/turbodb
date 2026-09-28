@@ -3,7 +3,7 @@
 
 #include "session.h"
 
-#include <orm/orm.h>
+#include <orm.h>
 
 #include <stddef.h>
 #include <stdint.h>
