@@ -274,7 +274,8 @@ if(ORM_BUILD_TIDESDB_DRIVER)
       WINDOWS_EXPORT_ALL_SYMBOLS OFF
       FOLDER "orm/drivers")
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(orm_tidesdb_driver PRIVATE "LINKER:--exclude-libs,ALL")
+    target_link_options(orm_tidesdb_driver PRIVATE
+      "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
   endif()
 endif()
 
