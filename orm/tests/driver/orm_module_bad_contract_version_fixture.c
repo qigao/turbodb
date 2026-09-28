@@ -19,10 +19,16 @@ static orm_status_t ORM_DRIVER_CALL bad_contract_create(
   return ORM_STATUS_UNSUPPORTED;
 }
 
+static uint64_t ORM_DRIVER_CALL
+bad_contract_execution_models(void *self) {
+  return self != NULL ? ORM_DRIVER_EXEC_CALLER_BLOCKING : UINT64_C(0);
+}
+
 static const TurboDb_Driver_vtable bad_contract_vtable = {
     .implementation = "bad-contract-version",
     .capabilities = 0u,
-    .create = bad_contract_create};
+    .create = bad_contract_create,
+    .execution_models = bad_contract_execution_models};
 
 static unsigned bad_contract_state;
 static TurboDb_Driver bad_contract_driver = {
