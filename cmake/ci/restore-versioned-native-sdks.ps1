@@ -6,8 +6,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$saltsVersion = "1.8.0"
-$saltsUtilsVersion = "4.1.0"
+$saltsVersion = "1.8.3"
+$saltsUtilsVersion = "4.1.3"
 
 if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
   throw "GITHUB_TOKEN is required"
