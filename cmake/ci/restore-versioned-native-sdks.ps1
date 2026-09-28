@@ -6,8 +6,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$saltsVersion = "1.7.10"
-$saltsUtilsVersion = "4.0.2"
+$saltsVersion = "1.8.0"
+$saltsUtilsVersion = "4.1.0"
 
 if ([string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
   throw "GITHUB_TOKEN is required"
@@ -82,7 +82,7 @@ $required = @(
   (Join-Path $saltsRoot "include/cmeta/interface.h"),
   (Join-Path $saltsRoot "include/cmeta/function.h"),
   (Join-Path $saltsUtilsRoot "lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"),
-  (Join-Path $saltsUtilsRoot "include/salts/plugin.h"),
+  (Join-Path $saltsRoot "include/salts/plugin.h"),
   (Join-Path $saltsUtilsRoot "include/data_bind.h")
 )
 foreach ($path in $required) {
@@ -91,9 +91,9 @@ foreach ($path in $required) {
   }
 }
 
-$pluginHeader = Get-Content -LiteralPath (Join-Path $saltsUtilsRoot "include/salts/plugin.h") -Raw
+$pluginHeader = Get-Content -LiteralPath (Join-Path $saltsRoot "include/salts/plugin.h") -Raw
 if ($pluginHeader -notmatch '#define\s+SALTS_PLUGIN_ABI_VERSION\s+2u') {
-  throw "SaltsUtils $saltsUtilsVersion does not expose Plugin ABI 2"
+  throw "Salts $saltsVersion does not expose Plugin ABI 2"
 }
 
 "SALTS_ROOT=$saltsRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8

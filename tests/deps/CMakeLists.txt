@@ -23,23 +23,26 @@ endif()
 
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
-find_package(Salts 1.7.10 EXACT CONFIG REQUIRED
+find_package(Salts 1.8.0 EXACT CONFIG REQUIRED
   PATHS "${SALTS_ROOT_PATH}" NO_DEFAULT_PATH)
+
+foreach(required_salts_target IN ITEMS
+    Salts::CMeta
+    Salts::PluginABI
+    Salts::Plugin)
+  if(NOT TARGET ${required_salts_target})
+    message(FATAL_ERROR "published Salts 1.8.0 SDK is missing ${required_salts_target}")
+  endif()
+endforeach()
 
 unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
-find_package(SaltsUtils 4.0.2 EXACT CONFIG REQUIRED
+find_package(SaltsUtils 4.1.0 EXACT CONFIG REQUIRED
   PATHS "${SALTS_UTILS_ROOT_PATH}" NO_DEFAULT_PATH)
 
-foreach(required_target IN ITEMS
-    Salts::CMeta
-    Salts::PluginABI
-    Salts::Plugin
-    Salts::DataBind)
-  if(NOT TARGET ${required_target})
-    message(FATAL_ERROR "published SDK pair is missing ${required_target}")
-  endif()
-endforeach()
+if(NOT TARGET Salts::DataBind)
+  message(FATAL_ERROR "published SaltsUtils 4.1.0 SDK is missing Salts::DataBind")
+endif()
 
 add_executable(turbodb_reflection_plugin_contract
   reflection_plugin_contract.c

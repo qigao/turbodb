@@ -76,8 +76,8 @@ jobs:
           {
             echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
             echo "MongoDB=8.0"
-            echo "Salts.Native=1.7.10"
-            echo "SaltsUtils.Native=4.0.2"
+            echo "Salts.Native=1.8.0"
+            echo "SaltsUtils.Native=4.1.0"
             echo "PluginABI=2"
           } > evidence/mongodb-live/qualification.txt
 

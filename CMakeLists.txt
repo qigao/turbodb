@@ -84,8 +84,14 @@ if(NOT IS_DIRECTORY "${SALTS_ROOT_PATH}")
 endif()
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
-find_package(Salts 1.7.10 EXACT CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
+find_package(Salts 1.8.0 EXACT CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
              NO_DEFAULT_PATH)
+foreach(required_salts_target IN ITEMS Salts::PluginABI Salts::Plugin)
+  if(NOT TARGET ${required_salts_target})
+    message(FATAL_ERROR
+            "The selected Salts 1.8.0 installation must export ${required_salts_target}")
+  endif()
+endforeach()
 
 if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
   message(FATAL_ERROR "SALTS_UTILS_ROOT must name the installed SaltsUtils profile")
@@ -96,10 +102,10 @@ if(NOT IS_DIRECTORY "${SALTS_UTILS_ROOT_PATH}")
 endif()
 unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
-find_package(SaltsUtils 4.0.2 EXACT CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
+find_package(SaltsUtils 4.1.0 EXACT CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT_PATH}"
              NO_DEFAULT_PATH)
 if(NOT TARGET Salts::DataBind)
-  message(FATAL_ERROR "The selected SaltsUtils installation must export Salts::DataBind")
+  message(FATAL_ERROR "The selected SaltsUtils 4.1.0 installation must export Salts::DataBind")
 endif()
 
 find_package(Threads REQUIRED)
