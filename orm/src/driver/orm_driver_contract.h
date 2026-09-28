@@ -22,6 +22,20 @@ orm_status_t ORM_DRIVER_CALL orm_driver_check_prefix(
 orm_status_t ORM_DRIVER_CALL orm_driver_check_bytes(orm_driver_bytes_v1 value,
                                                    uint64_t max_bytes);
 
+
+/* Runtime-only validation for typed objects returned by an admitted
+ * TurboDb.Driver Interface. These checks do not load modules, discover
+ * exports, or participate in Plugin admission. */
+orm_status_t ORM_DRIVER_CALL orm_driver_validate_connection_v1(
+    const void *object, uint32_t bytes, uint64_t capabilities,
+    orm_error_t *error);
+orm_status_t ORM_DRIVER_CALL orm_driver_validate_transaction_v1(
+    const void *object, uint32_t bytes, uint64_t capabilities,
+    orm_error_t *error);
+orm_status_t ORM_DRIVER_CALL orm_driver_validate_cursor_v1(
+    const void *object, uint32_t bytes, uint64_t capabilities,
+    orm_error_t *error);
+
 #ifdef __cplusplus
 }
 #endif
