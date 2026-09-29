@@ -28,6 +28,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
       - name: Prepare Android host
         shell: bash
         run: |
@@ -64,6 +68,29 @@ jobs:
           test -f "$utils/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
           echo "SALTS_ROOT=$salts" >> "$GITHUB_ENV"
           echo "SALTS_UTILS_ROOT=$utils" >> "$GITHUB_ENV"
+
+      - name: Restore Android BoringSSL provider from shared cache only
+        shell: bash
+        run: |
+          set -euxo pipefail
+          manifest="$RUNNER_TEMP/turbodb-android-vcpkg"
+          install_root="$GITHUB_WORKSPACE/vcpkg_installed"
+          rm -rf "$manifest" "$install_root"
+          mkdir -p "$manifest"
+          cat > "$manifest/vcpkg.json" <<'EOF'
+          {
+            "name": "turbodb-android-sdk-deps",
+            "version-string": "1",
+            "dependencies": ["boringssl"],
+            "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+          }
+          EOF
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$manifest" \
+            --x-install-root="$install_root" \
+            --triplet arm64-android \
+            --only-binarycaching
+          echo "VCPKG_INSTALLED_DIR=$install_root" >> "$GITHUB_ENV"
 
       - name: Configure Android Orm SDK
         shell: bash
