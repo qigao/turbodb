@@ -161,7 +161,7 @@ jobs:
           cmake -S tests/deps -B "build/deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_INSTALL=OFF 2>&1 | tee evidence/deps/configure.log
           cmake --build "build/deps-${{ matrix.config }}" --parallel 4 2>&1 | tee evidence/deps/build.log
           ctest --test-dir "build/deps-${{ matrix.config }}" --output-on-failure 2>&1 | tee evidence/deps/ctest.log
-          # Driver SDK consumes only Salts 1.8; prove no hidden SaltsUtils dependency.
+          # Driver SDK consumes only Salts; prove no hidden SaltsUtils dependency.
           (cd orm/driver-sdk && env -u SALTS_UTILS_ROOT cmake --preset "$sdk_preset") 2>&1 | tee evidence/deps/sdk-configure.log
           (cd orm/driver-sdk && cmake --build --preset "$sdk_preset" --parallel 4) 2>&1 | tee evidence/deps/sdk-build.log
           (cd orm/driver-sdk && ctest --preset "$sdk_preset" --output-on-failure) 2>&1 | tee evidence/deps/sdk-ctest.log
@@ -182,7 +182,7 @@ jobs:
           if errorlevel 1 (type evidence\deps\build.log & exit /b 1)
           ctest --test-dir "build\deps-${{ matrix.config }}" --output-on-failure > evidence\deps\ctest.log 2>&1
           if errorlevel 1 (type evidence\deps\ctest.log & exit /b 1)
-          rem Driver SDK consumes only Salts 1.8; prove no hidden SaltsUtils dependency.
+          rem Driver SDK consumes only Salts; prove no hidden SaltsUtils dependency.
           set "SAVED_SALTS_UTILS_ROOT=%SALTS_UTILS_ROOT%"
           set "SALTS_UTILS_ROOT="
           cd /d "%GITHUB_WORKSPACE%\orm\driver-sdk"
