@@ -26,7 +26,7 @@ foreach(required_target IN ITEMS Salts::Core Salts::CSerde
                                  Salts::CFlow Salts::TinyTest
                                  Salts::PluginABI Salts::Plugin)
   if(NOT TARGET ${required_target})
-    message(FATAL_ERROR "published Salts 1.8.3 SDK is missing ${required_target}")
+    message(FATAL_ERROR "published Salts SDK is missing ${required_target}")
   endif()
 endforeach()
 
