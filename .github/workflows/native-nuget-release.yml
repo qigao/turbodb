@@ -204,6 +204,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
       - name: Prepare Android host
         shell: bash
         run: |
@@ -239,6 +243,29 @@ jobs:
           echo "SALTS_ROOT=$packages/salts.native/1.8.3/sdk/android-arm64-v8a" >> "$GITHUB_ENV"
           echo "SALTS_UTILS_ROOT=$packages/saltsutils.native/4.1.3/sdk/android-arm64-v8a" >> "$GITHUB_ENV"
 
+      - name: Restore Android BoringSSL provider from shared cache only
+        shell: bash
+        run: |
+          set -euxo pipefail
+          manifest="$RUNNER_TEMP/turbodb-android-vcpkg"
+          install_root="$GITHUB_WORKSPACE/vcpkg_installed"
+          rm -rf "$manifest" "$install_root"
+          mkdir -p "$manifest"
+          cat > "$manifest/vcpkg.json" <<'EOF'
+          {
+            "name": "turbodb-android-sdk-deps",
+            "version-string": "1",
+            "dependencies": ["boringssl"],
+            "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+          }
+          EOF
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$manifest" \
+            --x-install-root="$install_root" \
+            --triplet arm64-android \
+            --only-binarycaching
+          echo "VCPKG_INSTALLED_DIR=$install_root" >> "$GITHUB_ENV"
+
       - name: Configure, build and install standalone Android Orm SDK
         shell: bash
         run: |
@@ -246,7 +273,12 @@ jobs:
           cmake -S orm -B build/android-orm -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=Android \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-android \
+            -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" \
+            -DVCPKG_MANIFEST_MODE=OFF \
+            -DVCPKG_INSTALL_OPTIONS=--only-binarycaching \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-26 \
             -DANDROID_STL=c++_shared \
