@@ -278,6 +278,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=arm64-android \
             -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" \
             -DVCPKG_MANIFEST_MODE=OFF \
+            -DOPENSSL_ROOT_DIR="$VCPKG_INSTALLED_DIR/arm64-android" \
             -DVCPKG_INSTALL_OPTIONS=--only-binarycaching \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-26 \
