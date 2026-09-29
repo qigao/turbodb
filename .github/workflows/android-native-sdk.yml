@@ -1,0 +1,135 @@
+name: TurboDB Android native SDK
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "orm/**"
+      - "CMakeLists.txt"
+      - "packaging/nuget/**"
+      - ".github/workflows/android-native-sdk.yml"
+      - ".github/workflows/native-nuget-release.yml"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  android:
+    name: Android arm64-v8a Orm SDK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Prepare Android host
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+      - name: Restore Android Salts SDK pair
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          packages="$RUNNER_TEMP/turbodb-android-deps"
+          config="$RUNNER_TEMP/turbodb-android.config"
+          project="$RUNNER_TEMP/turbodb-android.csproj"
+          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
+          cat > "$project" <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="[1.8.3]" />
+              <PackageReference Include="SaltsUtils.Native" Version="[4.1.3]" />
+            </ItemGroup>
+          </Project>
+          EOF
+          dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache
+          salts="$packages/salts.native/1.8.3/sdk/android-arm64-v8a"
+          utils="$packages/saltsutils.native/4.1.3/sdk/android-arm64-v8a"
+          test -f "$salts/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$utils/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          echo "SALTS_ROOT=$salts" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$utils" >> "$GITHUB_ENV"
+
+      - name: Restore Android BoringSSL provider from shared cache only
+        shell: bash
+        run: |
+          set -euxo pipefail
+          manifest="$RUNNER_TEMP/turbodb-android-vcpkg"
+          install_root="$GITHUB_WORKSPACE/vcpkg_installed"
+          rm -rf "$manifest" "$install_root"
+          mkdir -p "$manifest"
+          cat > "$manifest/vcpkg.json" <<'EOF'
+          {
+            "name": "turbodb-android-sdk-deps",
+            "version-string": "1",
+            "dependencies": ["boringssl"],
+            "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+          }
+          EOF
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$manifest" \
+            --x-install-root="$install_root" \
+            --triplet arm64-android \
+            --only-binarycaching
+          echo "VCPKG_INSTALLED_DIR=$install_root" >> "$GITHUB_ENV"
+
+      - name: Configure Android Orm SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S orm -B build/android-orm -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" -DVCPKG_TARGET_TRIPLET=arm64-android -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_MODE=OFF -DOPENSSL_ROOT_DIR="$VCPKG_INSTALLED_DIR/arm64-android"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DORM_BUILD_TESTS=OFF             -DORM_BUILD_SQLITE_DRIVER=OFF             -DORM_BUILD_POSTGRESQL_DRIVER=OFF             -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF             -DORM_BUILD_REDIS_DRIVER=OFF             -DORM_BUILD_MONGODB_DRIVER=OFF             -DORM_BUILD_MYSQL_DRIVER=OFF             -DORM_BUILD_TIDESDB_DRIVER=OFF
+
+      - name: Build and install Android Orm SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/android-orm --target turbo_orm --parallel 2
+          prefix="$GITHUB_WORKSPACE/stage/sdk/android-arm64-v8a"
+          cmake --install build/android-orm --prefix "$prefix"
+          test -f "$prefix/lib/cmake/Orm/OrmConfig.cmake"
+          test -f "$prefix/include/shared/orm/orm.h"
+          test -f "$prefix/include/shared/orm/orm_runtime.h"
+          test -f "$prefix/include/shared/orm/orm_driver_interface.h"
+          test -f "$prefix/lib/libturbo_orm.so"
+          echo "ORM_ROOT=$prefix" >> "$GITHUB_ENV"
+
+      - name: Verify Android external consumer compile and link
+        shell: bash
+        run: |
+          set -euxo pipefail
+          consumer="$RUNNER_TEMP/turbodb-android-consumer"
+          mkdir -p "$consumer"
+          cat > "$consumer/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.23)
+          project(TurboDBAndroidConsumer LANGUAGES C)
+          find_package(Orm 2.1.0 EXACT CONFIG REQUIRED
+                       PATHS "$ENV{ORM_ROOT}" NO_DEFAULT_PATH
+                       NO_CMAKE_FIND_ROOT_PATH)
+          add_executable(turbodb_android_consumer main.c)
+          target_link_libraries(turbodb_android_consumer PRIVATE Orm::C)
+          EOF
+          cat > "$consumer/main.c" <<'EOF'
+          #include <orm.h>
+          int main(void) { return 0; }
+          EOF
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" -DVCPKG_TARGET_TRIPLET=arm64-android -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_MODE=OFF -DOPENSSL_ROOT_DIR="$VCPKG_INSTALLED_DIR/arm64-android"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared
+          cmake --build "$consumer/build" --parallel 2

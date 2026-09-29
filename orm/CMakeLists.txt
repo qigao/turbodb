@@ -146,7 +146,7 @@ endif()
 # Find required base dependencies
 if(NOT TARGET Salts::Core)
   find_package(Salts 1.8.3 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
-               NO_DEFAULT_PATH)
+               NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 endif()
 
 foreach(required_salts_target IN ITEMS Salts::Core Salts::PluginABI Salts::Plugin)
@@ -166,7 +166,7 @@ if(NOT TARGET Salts::DataBind)
   unset(SaltsUtils_DIR CACHE)
   unset(SaltsUtils_DIR)
   find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
-               NO_DEFAULT_PATH)
+               NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 endif()
 if(NOT TARGET Salts::DataBind)
   message(FATAL_ERROR
@@ -741,7 +741,7 @@ if(WIN32)
                         "salts_utils\\.dll"
     POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-else()
+elseif(NOT ANDROID)
   install(
     RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
     DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
