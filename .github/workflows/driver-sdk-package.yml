@@ -75,8 +75,6 @@ jobs:
 
       - name: Restore canonical re2c host tool
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-        with:
-          version: "4.6.3"
 
       - name: Locate MSVC
         if: runner.os == 'Windows'
@@ -110,7 +108,6 @@ jobs:
             "Salts.Native=$env:SALTS_PACKAGE_VERSION",
             "SaltsUtils.Native=$env:SALTS_UTILS_PACKAGE_VERSION",
             'PluginABI=2',
-            'Qigao.Re2c.Binary=4.6.3',
             "SALTS_ROOT=$env:SALTS_ROOT",
             "SALTS_UTILS_ROOT=$env:SALTS_UTILS_ROOT"
           ) | Set-Content -LiteralPath evidence/deps/identity.txt -Encoding utf8NoBOM
