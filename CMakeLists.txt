@@ -95,7 +95,7 @@ find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT_PATH}"
 foreach(required_salts_target IN ITEMS Salts::PluginABI Salts::Plugin)
   if(NOT TARGET ${required_salts_target})
     message(FATAL_ERROR
-            "The selected Salts 1.8.3 installation must export ${required_salts_target}")
+            "The selected Salts installation must export ${required_salts_target}")
   endif()
 endforeach()
 
