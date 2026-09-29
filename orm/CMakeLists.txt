@@ -152,7 +152,7 @@ endif()
 foreach(required_salts_target IN ITEMS Salts::Core Salts::PluginABI Salts::Plugin)
   if(NOT TARGET ${required_salts_target})
     message(FATAL_ERROR
-            "The selected Salts 1.8.3 installation must export ${required_salts_target}")
+            "The selected Salts installation must export ${required_salts_target}")
   endif()
 endforeach()
 
@@ -176,7 +176,7 @@ endif()
 if(ORM_BUILD_MYSQL_DRIVER OR ORM_MYSQL_LIVE_TESTS)
   if(NOT TARGET Salts::CNet)
     message(FATAL_ERROR
-            "The selected Salts 1.8.3 installation must export Salts::CNet for the MySQL Driver")
+            "The selected Salts installation must export Salts::CNet for the MySQL Driver")
   endif()
   find_package(OpenSSL REQUIRED)
 endif()
