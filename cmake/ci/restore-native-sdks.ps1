@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("linux-x64", "windows-x64")]
+  [ValidateSet("linux-x64", "windows-x64", "android-arm64-v8a")]
   [string]$Rid
 )
 
