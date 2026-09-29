@@ -34,7 +34,7 @@ endif()
 
 project(
   TurboDB
-  VERSION 1.0.0
+  VERSION 1.0.1
   DESCRIPTION "C/C++ database libraries"
   HOMEPAGE_URL "https://github.com/qigao/turbodb"
   LANGUAGES C CXX)
