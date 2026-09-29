@@ -1,0 +1,32 @@
+name: Cut TurboDB 1.0.1
+
+on:
+  push:
+    branches:
+      - release/cut-turbodb-1.0.1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cut-turbodb-1.0.1
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create v1.0.1 tag at qualified master
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: "48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.1" >/dev/null 2>&1; then
+            echo "v1.0.1 already exists"
+            exit 0
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/v1.0.1" \
+            -f sha="$SOURCE_SHA"
