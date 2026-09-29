@@ -120,9 +120,10 @@ jobs:
 
           core="$build/bin/libturbo_orm.so"
           driver="$build/bin/turbodb_driver_redis.so"
-          native="$build/bin/libtedis.so.1.0.0"
+          native="$(find "$build/bin" -maxdepth 1 -type f -name 'libtedis.so.*' -print -quit)"
           test -f "$core"
           test -f "$driver"
+          test -n "$native"
           test -f "$native"
 
           readelf -d "$core" > evidence/redis-live/core-dependencies.txt
