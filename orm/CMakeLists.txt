@@ -145,7 +145,7 @@ endif()
 
 # Find required base dependencies
 if(NOT TARGET Salts::Core)
-  find_package(Salts 1.8.3 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
+  find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
                NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 endif()
 
@@ -165,7 +165,7 @@ if(NOT TARGET Salts::DataBind)
   endif()
   unset(SaltsUtils_DIR CACHE)
   unset(SaltsUtils_DIR)
-  find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
+  find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}"
                NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 endif()
 if(NOT TARGET Salts::DataBind)
