@@ -88,7 +88,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
 
       - name: Restore MySQL and PostgreSQL native dependency closure
         shell: bash
@@ -207,8 +207,8 @@ jobs:
             echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
             echo "mysql=8.0.40"
             echo "postgresql=17.6"
-            echo "salts=1.8.3"
-            echo "saltsutils=4.1.3"
+            echo "salts=$SALTS_PACKAGE_VERSION"
+            echo "saltsutils=$SALTS_UTILS_PACKAGE_VERSION"
             echo "runtime=one"
             echo "drivers=mysql,postgresql"
           } > "$evidence/qualification.txt"
