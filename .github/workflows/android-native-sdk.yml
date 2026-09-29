@@ -96,7 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake -S orm -B build/android-orm -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DORM_BUILD_TESTS=OFF             -DORM_BUILD_SQLITE_DRIVER=OFF             -DORM_BUILD_POSTGRESQL_DRIVER=OFF             -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF             -DORM_BUILD_REDIS_DRIVER=OFF             -DORM_BUILD_MONGODB_DRIVER=OFF             -DORM_BUILD_MYSQL_DRIVER=OFF             -DORM_BUILD_TIDESDB_DRIVER=OFF
+          cmake -S orm -B build/android-orm -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" -DVCPKG_TARGET_TRIPLET=arm64-android -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_MODE=OFF -DOPENSSL_ROOT_DIR="$VCPKG_INSTALLED_DIR/arm64-android"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared             -DORM_BUILD_TESTS=OFF             -DORM_BUILD_SQLITE_DRIVER=OFF             -DORM_BUILD_POSTGRESQL_DRIVER=OFF             -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF             -DORM_BUILD_REDIS_DRIVER=OFF             -DORM_BUILD_MONGODB_DRIVER=OFF             -DORM_BUILD_MYSQL_DRIVER=OFF             -DORM_BUILD_TIDESDB_DRIVER=OFF
 
       - name: Build and install Android Orm SDK
         shell: bash
@@ -130,5 +130,5 @@ jobs:
           #include <orm.h>
           int main(void) { return 0; }
           EOF
-          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared
+          cmake -S "$consumer" -B "$consumer/build" -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_SYSTEM_NAME=Android             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" -DVCPKG_TARGET_TRIPLET=arm64-android -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" -DVCPKG_MANIFEST_MODE=OFF -DOPENSSL_ROOT_DIR="$VCPKG_INSTALLED_DIR/arm64-android"             -DANDROID_ABI=arm64-v8a             -DANDROID_PLATFORM=android-26             -DANDROID_STL=c++_shared
           cmake --build "$consumer/build" --parallel 2
