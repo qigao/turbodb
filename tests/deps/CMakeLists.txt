@@ -23,7 +23,7 @@ endif()
 
 unset(Salts_DIR CACHE)
 unset(Salts_DIR)
-find_package(Salts 1.8.3 EXACT CONFIG REQUIRED
+find_package(Salts CONFIG REQUIRED
   PATHS "${SALTS_ROOT_PATH}" NO_DEFAULT_PATH)
 
 foreach(required_salts_target IN ITEMS
@@ -37,7 +37,7 @@ endforeach()
 
 unset(SaltsUtils_DIR CACHE)
 unset(SaltsUtils_DIR)
-find_package(SaltsUtils 4.1.3 EXACT CONFIG REQUIRED
+find_package(SaltsUtils CONFIG REQUIRED
   PATHS "${SALTS_UTILS_ROOT_PATH}" NO_DEFAULT_PATH)
 
 if(NOT TARGET Salts::DataBind)
