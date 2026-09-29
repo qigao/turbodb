@@ -14,7 +14,7 @@ on:
       - "tests/deps/**"
       - "CMakeLists.txt"
       - "CMakeOptions.cmake"
-      - "cmake/ci/restore-versioned-native-sdks.ps1"
+      - "cmake/ci/restore-native-sdks.ps1"
   push:
     branches: [master]
   workflow_dispatch:
@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   package:
-    name: Salts 1.8.3 + SaltsUtils 4.1.3 (${{ matrix.os }}, ${{ matrix.config }})
+    name: Latest Salts + SaltsUtils (${{ matrix.os }}, ${{ matrix.config }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -99,7 +99,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
-          ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid $rid
+          ./cmake/ci/restore-native-sdks.ps1 -Rid $rid
 
       - name: Record exact producer identity
         shell: pwsh
@@ -107,8 +107,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path evidence/deps | Out-Null
           @(
-            'Salts.Native=1.8.3',
-            'SaltsUtils.Native=4.1.3',
+            "Salts.Native=$env:SALTS_PACKAGE_VERSION",
+            "SaltsUtils.Native=$env:SALTS_UTILS_PACKAGE_VERSION",
             'PluginABI=2',
             'Qigao.Re2c.Binary=4.6.3',
             "SALTS_ROOT=$env:SALTS_ROOT",
