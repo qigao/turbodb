@@ -31,7 +31,7 @@ foreach(required_salts_target IN ITEMS
     Salts::PluginABI
     Salts::Plugin)
   if(NOT TARGET ${required_salts_target})
-    message(FATAL_ERROR "published Salts 1.8.3 SDK is missing ${required_salts_target}")
+    message(FATAL_ERROR "published Salts SDK is missing ${required_salts_target}")
   endif()
 endforeach()
 
@@ -41,7 +41,7 @@ find_package(SaltsUtils CONFIG REQUIRED
   PATHS "${SALTS_UTILS_ROOT_PATH}" NO_DEFAULT_PATH)
 
 if(NOT TARGET Salts::DataBind)
-  message(FATAL_ERROR "published SaltsUtils 4.1.3 SDK is missing Salts::DataBind")
+  message(FATAL_ERROR "published SaltsUtils SDK is missing Salts::DataBind")
 endif()
 
 add_executable(turbodb_reflection_plugin_contract
