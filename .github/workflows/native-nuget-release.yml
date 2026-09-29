@@ -6,6 +6,7 @@ on:
     tags: ["v*"]
     paths:
       - ".github/workflows/native-nuget-release.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
