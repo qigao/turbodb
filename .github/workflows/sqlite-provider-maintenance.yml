@@ -66,7 +66,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
-          ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid $rid
+          ./cmake/ci/restore-native-sdks.ps1 -Rid $rid
 
       - name: Install Ninja
         if: runner.os == 'Linux'
