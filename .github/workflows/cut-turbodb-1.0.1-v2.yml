@@ -1,0 +1,436 @@
+name: Cut TurboDB 1.0.1 package
+
+on:
+  push:
+    branches:
+      - release/cut-turbodb-1.0.1-v2
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turbodb-native-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+
+      - id: version
+        name: Validate release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '/^[[:space:]]*VERSION[[:space:]]+[0-9]/{print $2; exit}' CMakeLists.txt)"
+          test -n "$version"
+          tag="v$version"
+          test "$version" = "1.0.1"
+          test "$tag" = "v1.0.1"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux x64 SDK
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+
+      - name: Configure standalone Orm SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S orm -B build/orm-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DORM_BUILD_TESTS=OFF \
+            -DORM_BUILD_SQLITE_DRIVER=OFF \
+            -DORM_BUILD_POSTGRESQL_DRIVER=OFF \
+            -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF \
+            -DORM_BUILD_REDIS_DRIVER=OFF \
+            -DORM_BUILD_MONGODB_DRIVER=OFF \
+            -DORM_BUILD_MYSQL_DRIVER=OFF \
+            -DORM_BUILD_TIDESDB_DRIVER=OFF
+
+      - name: Build and install SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/orm-release --target turbo_orm --parallel 4
+          prefix="$GITHUB_WORKSPACE/stage/sdk/linux-x64"
+          cmake --install build/orm-release --prefix "$prefix" --strip
+          test -f "$prefix/lib/cmake/Orm/OrmConfig.cmake"
+          test -f "$prefix/include/shared/orm/orm.h"
+          test -f "$prefix/include/shared/orm/orm_runtime.h"
+          test -f "$prefix/include/shared/orm/orm_driver_interface.h"
+          test -f "$prefix/lib/libturbo_orm.so"
+          {
+            echo "package=TurboDB.Native"
+            echo "version=${{ needs.metadata.outputs.version }}"
+            echo "rid=linux-x64"
+            echo "salts=1.8.3"
+            echo "saltsutils=4.1.3"
+            echo "profile=release"
+            echo "source=48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+          } > "$prefix/turbodb-sdk-manifest.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-sdk-linux-x64
+          path: stage/sdk/linux-x64
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64 SDK
+    needs: metadata
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Locate MSVC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw "x64 MSVC was not found" }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja -y --no-progress
+
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid windows-x64
+
+      - name: Configure, build and install standalone Orm SDK
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          cmake -S orm -B build\orm-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DORM_BUILD_TESTS=OFF -DORM_BUILD_SQLITE_DRIVER=OFF -DORM_BUILD_POSTGRESQL_DRIVER=OFF -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_MYSQL_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build build\orm-release --target turbo_orm --parallel 4
+          if errorlevel 1 exit /b 1
+          cmake --install build\orm-release --prefix "%GITHUB_WORKSPACE%\stage\sdk\windows-x64"
+          if errorlevel 1 exit /b 1
+
+      - name: Verify Windows SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "stage/sdk/windows-x64"
+          foreach ($file in @(
+            "lib/cmake/Orm/OrmConfig.cmake",
+            "include/shared/orm/orm.h",
+            "include/shared/orm/orm_runtime.h",
+            "include/shared/orm/orm_driver_interface.h",
+            "bin/turbo_orm.dll",
+            "lib/turbo_orm.lib"
+          )) {
+            $path = Join-Path $prefix $file
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing SDK file: $path" }
+          }
+          @(
+            "package=TurboDB.Native",
+            "version=${{ needs.metadata.outputs.version }}",
+            "rid=windows-x64",
+            "salts=1.8.3",
+            "saltsutils=4.1.3",
+            "profile=release",
+            "source=48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+          ) | Set-Content -LiteralPath (Join-Path $prefix "turbodb-sdk-manifest.txt") -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-sdk-windows-x64
+          path: stage/sdk/windows-x64
+          if-no-files-found: error
+
+  android:
+    name: Android arm64-v8a SDK
+    needs: metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Prepare Android host
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+          test -n "${ANDROID_NDK_HOME:-}"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+      - name: Restore Android Salts SDK pair
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          packages="$RUNNER_TEMP/turbodb-android-deps"
+          config="$RUNNER_TEMP/turbodb-android.config"
+          project="$RUNNER_TEMP/turbodb-android.csproj"
+          printf '<configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source https://nuget.pkg.github.com/qigao/index.json \
+            --name github --username qigao --password "$GITHUB_TOKEN" \
+            --store-password-in-clear-text --configfile "$config"
+          cat > "$project" <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="[1.8.3]" />
+              <PackageReference Include="SaltsUtils.Native" Version="[4.1.3]" />
+            </ItemGroup>
+          </Project>
+          EOF
+          dotnet restore "$project" --packages "$packages" --configfile "$config" --no-cache
+          echo "SALTS_ROOT=$packages/salts.native/1.8.3/sdk/android-arm64-v8a" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$packages/saltsutils.native/4.1.3/sdk/android-arm64-v8a" >> "$GITHUB_ENV"
+
+      - name: Restore Android BoringSSL provider from shared cache only
+        shell: bash
+        run: |
+          set -euxo pipefail
+          manifest="$RUNNER_TEMP/turbodb-android-vcpkg"
+          install_root="$GITHUB_WORKSPACE/vcpkg_installed"
+          rm -rf "$manifest" "$install_root"
+          mkdir -p "$manifest"
+          cat > "$manifest/vcpkg.json" <<'EOF'
+          {
+            "name": "turbodb-android-sdk-deps",
+            "version-string": "1",
+            "dependencies": ["boringssl"],
+            "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+          }
+          EOF
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$manifest" \
+            --x-install-root="$install_root" \
+            --triplet arm64-android \
+            --only-binarycaching
+          echo "VCPKG_INSTALLED_DIR=$install_root" >> "$GITHUB_ENV"
+
+      - name: Configure, build and install standalone Android Orm SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S orm -B build/android-orm -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=Android \
+            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
+            -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DVCPKG_TARGET_TRIPLET=arm64-android \
+            -DVCPKG_INSTALLED_DIR="$VCPKG_INSTALLED_DIR" \
+            -DVCPKG_MANIFEST_MODE=OFF \
+            -DOPENSSL_ROOT_DIR="$VCPKG_INSTALLED_DIR/arm64-android" \
+            -DVCPKG_INSTALL_OPTIONS=--only-binarycaching \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_shared \
+            -DORM_BUILD_TESTS=OFF \
+            -DORM_BUILD_SQLITE_DRIVER=OFF \
+            -DORM_BUILD_POSTGRESQL_DRIVER=OFF \
+            -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF \
+            -DORM_BUILD_REDIS_DRIVER=OFF \
+            -DORM_BUILD_MONGODB_DRIVER=OFF \
+            -DORM_BUILD_MYSQL_DRIVER=OFF \
+            -DORM_BUILD_TIDESDB_DRIVER=OFF
+          cmake --build build/android-orm --target turbo_orm --parallel 2
+          prefix="$GITHUB_WORKSPACE/stage/sdk/android-arm64-v8a"
+          cmake --install build/android-orm --prefix "$prefix"
+          test -f "$prefix/lib/cmake/Orm/OrmConfig.cmake"
+          test -f "$prefix/lib/libturbo_orm.so"
+          cat > "$prefix/turbodb-sdk-manifest.txt" <<EOF
+          package=TurboDB.Native
+          version=${{ needs.metadata.outputs.version }}
+          rid=android-arm64-v8a
+          android_api=26
+          salts=1.8.3
+          saltsutils=4.1.3
+          profile=release
+          source=48832c6382fb4d53be10f6ba74c4b7c62c0a914d
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-sdk-android-arm64-v8a
+          path: stage/sdk/android-arm64-v8a
+          if-no-files-found: error
+
+  pack:
+    name: Pack TurboDB.Native
+    needs: [metadata, linux, windows, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "48832c6382fb4d53be10f6ba74c4b7c62c0a914d"
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: turbodb-sdk-*
+          path: package/sdk
+          merge-multiple: false
+
+      - name: Normalize artifact layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p normalized/sdk
+          cp -a package/sdk/turbodb-sdk-linux-x64 normalized/sdk/linux-x64
+          cp -a package/sdk/turbodb-sdk-windows-x64 normalized/sdk/windows-x64
+          cp -a package/sdk/turbodb-sdk-android-arm64-v8a normalized/sdk/android-arm64-v8a
+          rm -rf package
+          mv normalized package
+          test -f package/sdk/linux-x64/lib/cmake/Orm/OrmConfig.cmake
+          test -f package/sdk/linux-x64/lib/libturbo_orm.so
+          test -f package/sdk/windows-x64/lib/cmake/Orm/OrmConfig.cmake
+          test -f package/sdk/windows-x64/bin/turbo_orm.dll
+          test -f package/sdk/android-arm64-v8a/lib/cmake/Orm/OrmConfig.cmake
+          test -f package/sdk/android-arm64-v8a/lib/libturbo_orm.so
+          test "$(find package/sdk -maxdepth 2 -name turbodb-sdk-manifest.txt | wc -l)" -eq 3
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Configure GitHub Packages source
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/turbodb-pack.config"
+          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source "https://nuget.pkg.github.com/qigao/index.json" \
+            --name github --username qigao --password "$GITHUB_TOKEN" \
+            --store-password-in-clear-text --configfile "$config"
+          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
+
+      - name: Create NuGet package
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet restore packaging/nuget/TurboDB.Native.csproj \
+            --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget"
+          dotnet pack packaging/nuget/TurboDB.Native.csproj \
+            --no-restore --configuration Release --output dist \
+            -p:PackageVersion=${{ needs.metadata.outputs.version }} \
+            -p:PackageRoot="$GITHUB_WORKSPACE/package" \
+            -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget" \
+            -p:RepositoryCommit="$GITHUB_SHA"
+          nupkg="dist/TurboDB.Native.${{ needs.metadata.outputs.version }}.nupkg"
+          test -f "$nupkg"
+          unzip -Z1 "$nupkg" | sort | tee "$RUNNER_TEMP/turbodb-nupkg.txt"
+          grep -Fx "sdk/linux-x64/lib/cmake/Orm/OrmConfig.cmake" "$RUNNER_TEMP/turbodb-nupkg.txt"
+          grep -Fx "sdk/linux-x64/include/shared/orm/orm_runtime.h" "$RUNNER_TEMP/turbodb-nupkg.txt"
+          grep -Fx "sdk/windows-x64/lib/cmake/Orm/OrmConfig.cmake" "$RUNNER_TEMP/turbodb-nupkg.txt"
+          grep -Fx "sdk/windows-x64/bin/turbo_orm.dll" "$RUNNER_TEMP/turbodb-nupkg.txt"
+          grep -Fx "sdk/android-arm64-v8a/lib/cmake/Orm/OrmConfig.cmake" "$RUNNER_TEMP/turbodb-nupkg.txt"
+          grep -Fx "sdk/android-arm64-v8a/lib/libturbo_orm.so" "$RUNNER_TEMP/turbodb-nupkg.txt"
+          unzip -p "$nupkg" "TurboDB.Native.nuspec" > "$RUNNER_TEMP/turbodb.nuspec"
+          grep -F 'id="Salts.Native" version="[1.8.3]"' "$RUNNER_TEMP/turbodb.nuspec"
+          grep -F 'id="SaltsUtils.Native" version="[4.1.3]"' "$RUNNER_TEMP/turbodb.nuspec"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TurboDB.Native.${{ needs.metadata.outputs.version }}
+          path: dist/*.nupkg
+          if-no-files-found: error
+
+  publish:
+    name: Publish package and GitHub Release
+    needs: [metadata, pack]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: TurboDB.Native.${{ needs.metadata.outputs.version }}
+          path: dist
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish to qigao GitHub Packages
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dotnet nuget add source "https://nuget.pkg.github.com/qigao/index.json" \
+            --name github --username qigao --password "$GITHUB_TOKEN" \
+            --store-password-in-clear-text
+          dotnet nuget push "dist/TurboDB.Native.${{ needs.metadata.outputs.version }}.nupkg" \
+            --api-key "$GITHUB_TOKEN" --source github --skip-duplicate
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists; package publish was idempotent"
+            exit 0
+          fi
+          gh release create "$TAG" dist/*.nupkg \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "TurboDB $VERSION" --generate-notes
