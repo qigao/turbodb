@@ -16,8 +16,8 @@ This package intentionally does **not** bundle database-specific Driver MODULEs 
 
 Dependencies:
 
-- `Salts.Native 1.8.3`
-- `SaltsUtils.Native 4.1.3`
+- latest published stable `Salts.Native`
+- latest published stable `SaltsUtils.Native`
 
 Typical CMake consumption restores the matching RID trees for all three native packages, sets `SALTS_ROOT` / `SALTS_UTILS_ROOT`, then points `CMAKE_PREFIX_PATH` (or `Orm_DIR`) at the TurboDB RID tree and uses:
 

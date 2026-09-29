@@ -66,14 +66,12 @@ jobs:
 
       - name: Restore canonical re2c host tool
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-        with:
-          version: "4.6.3"
 
       - name: Restore published Salts SDK pair
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid linux-x64
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
 
       - name: Restore cached BoringSSL MySQL feature
         shell: bash
@@ -262,8 +260,8 @@ jobs:
             echo "arch=x64"
             echo "configuration=Release"
             echo "mysql=8.0.40"
-            echo "salts=1.8.3"
-            echo "saltsutils=4.1.3"
+            echo "salts=$SALTS_PACKAGE_VERSION"
+            echo "saltsutils=$SALTS_UTILS_PACKAGE_VERSION"
             echo "transport=Salts::CNet"
             echo "tls=required"
             echo "auth=caching_sha2_password,mysql_native_password"

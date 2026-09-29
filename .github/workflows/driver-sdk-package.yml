@@ -14,7 +14,7 @@ on:
       - "tests/deps/**"
       - "CMakeLists.txt"
       - "CMakeOptions.cmake"
-      - "cmake/ci/restore-versioned-native-sdks.ps1"
+      - "cmake/ci/restore-native-sdks.ps1"
   push:
     branches: [master]
   workflow_dispatch:
@@ -26,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   package:
-    name: Salts 1.8.3 + SaltsUtils 4.1.3 (${{ matrix.os }}, ${{ matrix.config }})
+    name: Latest Salts + SaltsUtils (${{ matrix.os }}, ${{ matrix.config }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -75,8 +75,6 @@ jobs:
 
       - name: Restore canonical re2c host tool
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-        with:
-          version: "4.6.3"
 
       - name: Locate MSVC
         if: runner.os == 'Windows'
@@ -99,18 +97,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
-          ./cmake/ci/restore-versioned-native-sdks.ps1 -Rid $rid
+          ./cmake/ci/restore-native-sdks.ps1 -Rid $rid
 
       - name: Record exact producer identity
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:RE2C_PACKAGE_VERSION)) {
+            throw 'resolved re2c package identity is unavailable'
+          }
           New-Item -ItemType Directory -Force -Path evidence/deps | Out-Null
           @(
-            'Salts.Native=1.8.3',
-            'SaltsUtils.Native=4.1.3',
+            "Salts.Native=$env:SALTS_PACKAGE_VERSION",
+            "SaltsUtils.Native=$env:SALTS_UTILS_PACKAGE_VERSION",
             'PluginABI=2',
-            'Qigao.Re2c.Binary=4.6.3',
+            "Qigao.Re2c.Binary=$env:RE2C_PACKAGE_VERSION",
             "SALTS_ROOT=$env:SALTS_ROOT",
             "SALTS_UTILS_ROOT=$env:SALTS_UTILS_ROOT"
           ) | Set-Content -LiteralPath evidence/deps/identity.txt -Encoding utf8NoBOM
@@ -164,7 +165,7 @@ jobs:
           cmake -S tests/deps -B "build/deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_INSTALL=OFF 2>&1 | tee evidence/deps/configure.log
           cmake --build "build/deps-${{ matrix.config }}" --parallel 4 2>&1 | tee evidence/deps/build.log
           ctest --test-dir "build/deps-${{ matrix.config }}" --output-on-failure 2>&1 | tee evidence/deps/ctest.log
-          # Driver SDK consumes only Salts 1.8; prove no hidden SaltsUtils dependency.
+          # Driver SDK consumes only Salts; prove no hidden SaltsUtils dependency.
           (cd orm/driver-sdk && env -u SALTS_UTILS_ROOT cmake --preset "$sdk_preset") 2>&1 | tee evidence/deps/sdk-configure.log
           (cd orm/driver-sdk && cmake --build --preset "$sdk_preset" --parallel 4) 2>&1 | tee evidence/deps/sdk-build.log
           (cd orm/driver-sdk && ctest --preset "$sdk_preset" --output-on-failure) 2>&1 | tee evidence/deps/sdk-ctest.log
@@ -185,7 +186,7 @@ jobs:
           if errorlevel 1 (type evidence\deps\build.log & exit /b 1)
           ctest --test-dir "build\deps-${{ matrix.config }}" --output-on-failure > evidence\deps\ctest.log 2>&1
           if errorlevel 1 (type evidence\deps\ctest.log & exit /b 1)
-          rem Driver SDK consumes only Salts 1.8; prove no hidden SaltsUtils dependency.
+          rem Driver SDK consumes only Salts; prove no hidden SaltsUtils dependency.
           set "SAVED_SALTS_UTILS_ROOT=%SALTS_UTILS_ROOT%"
           set "SALTS_UTILS_ROOT="
           cd /d "%GITHUB_WORKSPACE%\orm\driver-sdk"
