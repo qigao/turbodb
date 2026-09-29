@@ -2,7 +2,10 @@ name: TurboDB native SDK release
 
 on:
   push:
+    branches: [master]
     tags: ["v*"]
+    paths:
+      - ".github/workflows/native-nuget-release.yml"
 
 permissions:
   contents: read
@@ -15,14 +18,18 @@ concurrency:
 jobs:
   metadata:
     name: Release metadata
+    if: >-
+      github.ref_type == 'tag' ||
+      (github.ref_name == 'master' && startsWith(github.event.head_commit.message, 'release: publish TurboDB package'))
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      source_commit: ${{ steps.version.outputs.source_commit }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
 
       - id: version
         name: Validate release identity
@@ -32,16 +39,19 @@ jobs:
           version="$(awk '/^[[:space:]]*VERSION[[:space:]]+[0-9]/{print $2; exit}' CMakeLists.txt)"
           test -n "$version"
           tag="v$version"
-          if [[ "${GITHUB_REF_TYPE:-}" != "tag" ]]; then
-            echo "TurboDB native SDK release must run against a tag" >&2
-            exit 1
-          fi
-          if [[ "$GITHUB_REF_NAME" != "$tag" ]]; then
-            echo "release tag mismatch: pushed=$GITHUB_REF_NAME expected=$tag" >&2
-            exit 1
+          source_commit="$(git rev-parse HEAD)"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            if [[ "$GITHUB_REF_NAME" != "$tag" ]]; then
+              echo "release tag mismatch: pushed=$GITHUB_REF_NAME expected=$tag" >&2
+              exit 1
+            fi
+          else
+            test "${GITHUB_REF_NAME:-}" = "master"
+            test "${{ startsWith(github.event.head_commit.message, 'release: publish TurboDB package') }}" = "true"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
 
   linux:
     name: Linux x64 SDK
@@ -50,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-dotnet@v4
@@ -120,7 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-dotnet@v4
@@ -197,7 +207,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-dotnet@v4
@@ -300,7 +310,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v4
@@ -391,6 +401,22 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Create bootstrap tag when needed
+        if: github.ref_type != 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.metadata.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)"
+            test "$existing" = "$SOURCE_COMMIT"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SOURCE_COMMIT"
+          fi
 
       - name: Publish to qigao GitHub Packages
         shell: bash
