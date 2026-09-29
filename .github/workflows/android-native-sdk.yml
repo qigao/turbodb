@@ -122,7 +122,8 @@ jobs:
           cmake_minimum_required(VERSION 3.23)
           project(TurboDBAndroidConsumer LANGUAGES C)
           find_package(Orm 2.1.0 EXACT CONFIG REQUIRED
-                       PATHS "$ENV{ORM_ROOT}" NO_DEFAULT_PATH)
+                       PATHS "$ENV{ORM_ROOT}" NO_DEFAULT_PATH
+                       NO_CMAKE_FIND_ROOT_PATH)
           add_executable(turbodb_android_consumer main.c)
           target_link_libraries(turbodb_android_consumer PRIVATE Orm::C)
           EOF
