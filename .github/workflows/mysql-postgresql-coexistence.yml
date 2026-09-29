@@ -81,8 +81,6 @@ jobs:
 
       - name: Restore canonical re2c host tool
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-        with:
-          version: "4.6.3"
 
       - name: Restore published Salts SDK pair
         shell: pwsh
