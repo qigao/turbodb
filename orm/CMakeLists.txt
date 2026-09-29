@@ -741,7 +741,7 @@ if(WIN32)
                         "salts_utils\\.dll"
     POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-else()
+elseif(NOT ANDROID)
   install(
     RUNTIME_DEPENDENCY_SET OrmRuntimeDependencies
     DIRECTORIES ${ORM_RUNTIME_SEARCH_DIRECTORIES}
