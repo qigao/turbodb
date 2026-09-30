@@ -34,6 +34,11 @@ bool QueryController::busy() const noexcept {
   return busy_;
 }
 
+bool QueryController::has_pending_completion() const noexcept {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return completed_ != nullptr;
+}
+
 bool QueryController::Execute(std::uint64_t connection_id, std::string sql,
                               HWND notify_window,
                               std::uint64_t* out_request_id,
