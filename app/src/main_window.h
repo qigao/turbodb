@@ -9,10 +9,18 @@ extern CAppModule _Module;
 #include <atlctrls.h>
 #include <atlsplit.h>
 
+#include "editor/scintilla_runtime.h"
+#include "editor/sql_editor.h"
+#include "language/sql_language_service.h"
+#include "workspace/sql_workspace_session.h"
+
 namespace turbodb::app {
 
 class MainWindow final : public CWindowImpl<MainWindow> {
  public:
+  explicit MainWindow(ScintillaRuntime& editor_runtime) noexcept
+      : editor_runtime_(editor_runtime) {}
+
   DECLARE_WND_CLASS_EX(L"TurboDBStudioMainWindow", CS_DBLCLKS,
                        COLOR_WINDOW)
 
@@ -29,10 +37,14 @@ class MainWindow final : public CWindowImpl<MainWindow> {
   LRESULT OnDestroy(UINT message, WPARAM wparam, LPARAM lparam,
                     BOOL &handled);
 
+  ScintillaRuntime& editor_runtime_;
+  SqlWorkspaceSession workspace_session_;
+  SqlLanguageService language_service_;
+
   CSplitterWindow workspace_splitter_;
   CHorSplitterWindow query_splitter_;
   CStatic explorer_placeholder_;
-  CStatic editor_placeholder_;
+  SqlEditor editor_;
   CStatic result_placeholder_;
 };
 
