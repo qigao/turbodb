@@ -28,6 +28,7 @@ class ExplainController {
                orm_explain_mode_t mode, HWND notify_window,
                std::uint64_t* out_request_id, std::string* error);
   bool busy() const noexcept;
+  bool has_pending_completion() const noexcept;
   std::shared_ptr<const ExecutionPlanSnapshot> TakeCompleted(
       std::uint64_t request_id);
 
