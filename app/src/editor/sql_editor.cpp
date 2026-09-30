@@ -17,11 +17,11 @@ std::string ReadEditorRange(HWND hwnd, LRESULT start, LRESULT end) {
   if (end <= start) return {};
   const std::size_t length = static_cast<std::size_t>(end - start);
   std::string text(length + 1, '\0');
-  Sci_TextRange range{};
-  range.chrg.cpMin = static_cast<Sci_PositionCR>(start);
-  range.chrg.cpMax = static_cast<Sci_PositionCR>(end);
+  Sci_TextRangeFull range{};
+  range.chrg.cpMin = static_cast<Sci_Position>(start);
+  range.chrg.cpMax = static_cast<Sci_Position>(end);
   range.lpstrText = text.data();
-  ::SendMessage(hwnd, SCI_GETTEXTRANGE, 0,
+  ::SendMessage(hwnd, SCI_GETTEXTRANGEFULL, 0,
                 reinterpret_cast<LPARAM>(&range));
   text.resize(length);
   return text;
