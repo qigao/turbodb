@@ -9,6 +9,8 @@ on:
       - "vcpkg.json"
       - ".github/workflows/studio-windows.yml"
       - ".github/actions/setup-native/**"
+      - "cmake/ci/stage-studio.ps1"
+      - "cmake/ci/audit-studio-boundaries.ps1"
   push:
     branches: [master]
     paths:
@@ -18,6 +20,8 @@ on:
       - "vcpkg.json"
       - ".github/workflows/studio-windows.yml"
       - ".github/actions/setup-native/**"
+      - "cmake/ci/stage-studio.ps1"
+      - "cmake/ci/audit-studio-boundaries.ps1"
   workflow_dispatch:
 
 permissions:
@@ -30,7 +34,7 @@ concurrency:
 
 jobs:
   studio:
-    name: Studio editor (windows-x64)
+    name: Studio package (windows-x64)
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
