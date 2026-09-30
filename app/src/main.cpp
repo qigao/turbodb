@@ -36,9 +36,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line,
 
   turbodb::app::ScintillaRuntime editor_runtime;
   if (!editor_runtime.Initialize()) {
-    ::MessageBoxW(nullptr,
-                  L"TurboDB Studio could not load Scintilla.dll and Lexilla.dll.",
-                  L"TurboDB Studio", MB_OK | MB_ICONERROR);
+    if (!self_test) {
+      ::MessageBoxW(
+          nullptr,
+          L"TurboDB Studio could not load Scintilla.dll and Lexilla.dll.",
+          L"TurboDB Studio", MB_OK | MB_ICONERROR);
+    }
     ::CoUninitialize();
     return 1;
   }
@@ -63,7 +66,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line,
   }
 
   if (self_test) {
-    main_window.DestroyWindow();
+    if (!main_window.DestroyWindow()) {
+      _Module.RemoveMessageLoop();
+      _Module.Term();
+      ::CoUninitialize();
+      return 1;
+    }
     _Module.RemoveMessageLoop();
     _Module.Term();
     ::CoUninitialize();
