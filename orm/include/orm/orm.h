@@ -255,6 +255,7 @@ enum {
 typedef struct orm_metadata_entry {
   uint32_t struct_size;
   orm_metadata_kind_t kind;
+  /* Zero-based within one relation for ORM_METADATA_COLUMN entries. */
   uint32_t ordinal;
   uint32_t reserved;
   orm_string_view_t catalog;
