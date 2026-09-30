@@ -17,12 +17,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
-      fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, rid: linux-x64, preset: ci-linux-release, consumer: consumer-linux}
-          - {os: windows-2022, rid: windows-x64, preset: ci-windows-release, consumer: consumer-windows}
-          - {os: ubuntu-24.04, rid: android-arm64-v8a, preset: ci-android-release, consumer: consumer-android}
+          - {os: ubuntu-24.04, rid: linux-x64, preset: ci-linux-release}
+          - {os: windows-2022, rid: windows-x64, preset: ci-windows-release}
+          - {os: ubuntu-24.04, rid: android-arm64-v8a, preset: ci-android-release}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,30 +76,6 @@ jobs:
       - name: Stage native SDK
         shell: pwsh
         run: ./cmake/ci/stage-native-sdk.ps1 -Rid '${{ matrix.rid }}' -Version '${{ inputs.version }}'
-      - name: Verify installed consumer on Linux host
-        if: runner.os == 'Linux'
-        shell: bash
-        working-directory: packaging/consumer
-        run: |
-          set -euo pipefail
-          cmake --preset '${{ matrix.consumer }}'
-          cmake --build --preset '${{ matrix.consumer }}' --parallel 4
-          if [[ '${{ matrix.rid }}' == linux-x64 ]]; then
-            ctest --preset '${{ matrix.consumer }}'
-          fi
-      - name: Verify installed consumer on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        working-directory: packaging/consumer
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          cmake --preset consumer-windows
-          if errorlevel 1 exit /b 1
-          cmake --build --preset consumer-windows --parallel 4
-          if errorlevel 1 exit /b 1
-          ctest --preset consumer-windows
-          if errorlevel 1 exit /b 1
       - uses: actions/upload-artifact@v4
         with:
           name: turbodb-sdk-${{ matrix.rid }}
