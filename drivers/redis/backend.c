@@ -915,7 +915,7 @@ static orm_status_t orm_redis_verify_query_engine(orm_redis_backend_state *state
 
 static const orm_backend_ops orm_redis_backend_ops = {
     sizeof(orm_backend_ops), ORM_BACKEND_OPS_ABI_VERSION, orm_redis_backend_destroy,
-    orm_redis_backend_open,  orm_redis_backend_execute,   orm_redis_backend_begin};
+    orm_redis_backend_open,  orm_redis_backend_execute,   orm_redis_backend_begin, NULL};
 
 static orm_status_t orm_redis_expect_ok(orm_redis_backend_state *state, int count,
                                         const char **arguments, orm_error_t *error,

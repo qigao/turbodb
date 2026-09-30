@@ -27,9 +27,13 @@ static const cmeta_data_field_desc orm_tides_public_row_fields[] = {
 static const cmeta_data_struct_shape orm_tides_public_row_shape = {
     StructMeta(orm_tides_public_row), orm_tides_public_row_fields, 2u};
 static const cmeta_data_desc orm_tides_public_row_data = {
-    ORM_TIDES_PUBLIC_DATA_PREFIX_SIZE, CMETA_DATA_DESC_ABI_VERSION,
-    "orm.test.TidesPublicRow.data", "TidesPublicRow", CMETA_DATA_STRUCT,
-    &orm_tides_public_row_type, &orm_tides_public_row_shape};
+    .struct_size = ORM_TIDES_PUBLIC_DATA_PREFIX_SIZE,
+    .abi_version = CMETA_DATA_DESC_ABI_VERSION,
+    .stable_id = "orm.test.TidesPublicRow.data",
+    .display_name = "TidesPublicRow",
+    .kind = CMETA_DATA_STRUCT,
+    .storage_type = &orm_tides_public_row_type,
+    .shape = &orm_tides_public_row_shape};
 
 
 #endif
