@@ -2196,10 +2196,52 @@ if(TARGET orm_sqlite_driver)
   endif()
 endif()
 if(TARGET orm_postgresql_driver)
-  install(
-    TARGETS orm_postgresql_driver
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers)
+  set(ORM_POSTGRESQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  orm_collect_runtime_search_directories(
+    PostgreSQL::PostgreSQL ORM_POSTGRESQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+  if(WIN32 AND PostgreSQL_LIBRARY)
+    get_filename_component(ORM_POSTGRESQL_DRIVER_LIBRARY_DIR
+                           "${PostgreSQL_LIBRARY}" DIRECTORY)
+    get_filename_component(ORM_POSTGRESQL_DRIVER_PREFIX_DIR
+                           "${ORM_POSTGRESQL_DRIVER_LIBRARY_DIR}" DIRECTORY)
+    list(APPEND ORM_POSTGRESQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES
+         "${ORM_POSTGRESQL_DRIVER_PREFIX_DIR}/bin")
+  endif()
+  list(REMOVE_DUPLICATES ORM_POSTGRESQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
+
+  if(WIN32)
+    # MODULE libraries are LIBRARY artifacts even on DLL platforms. Keep the
+    # Driver DLL beside its private runtime dependency closure under bin/.
+    install(
+      TARGETS orm_postgresql_driver
+      RUNTIME_DEPENDENCY_SET OrmPostgreSQLDriverRuntimeDependencies
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
+              COMPONENT OrmPostgreSQLDriver)
+    install(
+      RUNTIME_DEPENDENCY_SET OrmPostgreSQLDriverRuntimeDependencies
+      DIRECTORIES ${ORM_POSTGRESQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES}
+      PRE_EXCLUDE_REGEXES "api-ms-win-.*" "ext-ms-win-.*"
+                          "clang_rt.asan_dynamic-.*"
+                          "turbo_orm\\.dll" "salts\\.dll"
+                          "salts_utils\\.dll" "salts_.*\\.dll"
+      POST_EXCLUDE_REGEXES ".*[\\/]system32[\\/].*"
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers
+              COMPONENT OrmPostgreSQLDriver)
+  elseif(NOT ANDROID)
+    install(
+      TARGETS orm_postgresql_driver
+      RUNTIME_DEPENDENCY_SET OrmPostgreSQLDriverRuntimeDependencies
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers
+              COMPONENT OrmPostgreSQLDriver)
+    install(
+      RUNTIME_DEPENDENCY_SET OrmPostgreSQLDriverRuntimeDependencies
+      DIRECTORIES ${ORM_POSTGRESQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES}
+      PRE_EXCLUDE_REGEXES "libturbo_orm\\..*" "libsalts\\..*"
+                          "libsalts_.*" "libpq\\.so.*"
+      POST_EXCLUDE_REGEXES "^/lib/.*" "^/usr/lib/.*"
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers
+              COMPONENT OrmPostgreSQLDriver)
+  endif()
 endif()
 if(TARGET orm_mysql_driver)
   set(ORM_MYSQL_DRIVER_RUNTIME_SEARCH_DIRECTORIES)
