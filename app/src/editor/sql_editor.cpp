@@ -68,8 +68,8 @@ LRESULT SqlEditor::OnKeyDown(UINT, WPARAM wparam, LPARAM, BOOL& handled) {
     if (command_target_ != nullptr && ::IsWindow(command_target_))
       (void)::PostMessageW(
           command_target_, kSqlEditorExplainRequested,
-          shift ? static_cast<WPARAM>(ORM_EXPLAIN_ANALYZE)
-                : static_cast<WPARAM>(ORM_EXPLAIN_PLAN),
+          shift ? static_cast<WPARAM>(SqlExplainAction::analyze)
+                : static_cast<WPARAM>(SqlExplainAction::plan),
           0);
     handled = TRUE;
     return 0;
