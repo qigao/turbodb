@@ -27,9 +27,9 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
     return -1;
   }
 
-  if (explorer_placeholder_.Create(workspace_splitter_, client,
-                                   L"Connections / Schemas",
-                                   kPlaceholderStyle) == nullptr) {
+  explorer_.Bind(&explorer_model_, &workspace_session_);
+  if (explorer_.Create(workspace_splitter_, client, nullptr,
+                       kSplitterStyle) == nullptr) {
     return -1;
   }
 
@@ -48,7 +48,7 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
     return -1;
   }
 
-  workspace_splitter_.SetSplitterPanes(explorer_placeholder_, query_splitter_);
+  workspace_splitter_.SetSplitterPanes(explorer_, query_splitter_);
   workspace_splitter_.SetSplitterPosPct(24);
 
   query_splitter_.SetSplitterPanes(editor_, result_placeholder_);
@@ -57,12 +57,26 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
   return 0;
 }
 
+bool MainWindow::AttachConnection(orm_connection_t* connection,
+                                  WorkspaceConnectionIdentity identity,
+                                  std::string* error) {
+  if (!explorer_controller_.Refresh(connection, std::move(identity), error))
+    return false;
+  explorer_.Refresh();
+  return editor_.RefreshLanguage();
+}
+
 LRESULT MainWindow::OnSize(UINT, WPARAM, LPARAM lparam, BOOL &) {
   if (workspace_splitter_.IsWindow()) {
     workspace_splitter_.SetWindowPos(
         nullptr, 0, 0, LOWORD(lparam), HIWORD(lparam),
         SWP_NOACTIVATE | SWP_NOZORDER);
   }
+  return 0;
+}
+
+LRESULT MainWindow::OnExplorerSelectionChanged(UINT, WPARAM, LPARAM, BOOL&) {
+  (void)editor_.RefreshLanguage();
   return 0;
 }
 
