@@ -172,6 +172,12 @@ LRESULT MainWindow::OnSqlExplainRequested(UINT, WPARAM wparam, LPARAM,
     mode = ORM_EXPLAIN_PLAN;
   } else if (action == SqlExplainAction::analyze) {
     mode = ORM_EXPLAIN_ANALYZE;
+    const int choice = ::MessageBoxW(
+        m_hWnd,
+        L"ANALYZE may execute the SQL statement and observe real runtime work.\n\nContinue?",
+        L"TurboDB Studio - Confirm ANALYZE",
+        MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
+    if (choice != IDOK) return 0;
   } else {
     result_view_.ShowError("Invalid execution-plan action.");
     return 0;
