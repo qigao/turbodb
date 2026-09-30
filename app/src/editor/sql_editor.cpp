@@ -120,39 +120,49 @@ bool SqlEditor::RefreshLanguage() {
 
 std::string SqlEditor::Text() const {
   if (!IsWindow()) return {};
-  const LRESULT length = SendMessage(SCI_GETTEXTLENGTH, 0, 0);
+  const LRESULT length = ::SendMessageW(m_hWnd, SCI_GETTEXTLENGTH, 0, 0);
   if (length <= 0) return {};
   std::string text(static_cast<std::size_t>(length) + 1, '\0');
-  SendMessage(SCI_GETTEXT, text.size(),
-              reinterpret_cast<LPARAM>(text.data()));
+  ::SendMessageW(m_hWnd, SCI_GETTEXT, static_cast<WPARAM>(text.size()),
+                 reinterpret_cast<LPARAM>(text.data()));
   text.resize(static_cast<std::size_t>(length));
   return text;
 }
 
 std::string SqlEditor::SelectedText() const {
   if (!IsWindow()) return {};
-  const LRESULT start = SendMessage(SCI_GETSELECTIONSTART, 0, 0);
-  const LRESULT end = SendMessage(SCI_GETSELECTIONEND, 0, 0);
+  const LRESULT start =
+      ::SendMessageW(m_hWnd, SCI_GETSELECTIONSTART, 0, 0);
+  const LRESULT end =
+      ::SendMessageW(m_hWnd, SCI_GETSELECTIONEND, 0, 0);
   return ReadEditorRange(m_hWnd, std::min(start, end), std::max(start, end));
 }
 
 std::string SqlEditor::CurrentWordPrefix() const {
   if (!IsWindow()) return {};
-  const LRESULT current = SendMessage(SCI_GETCURRENTPOS, 0, 0);
+  const LRESULT current = ::SendMessageW(m_hWnd, SCI_GETCURRENTPOS, 0, 0);
   LRESULT start = current;
   while (start > 0) {
-    const int ch = static_cast<int>(
-        SendMessage(SCI_GETCHARAT, static_cast<WPARAM>(start - 1), 0));
+    const int ch = static_cast<int>(::SendMessageW(
+        m_hWnd, SCI_GETCHARAT, static_cast<WPARAM>(start - 1), 0));
     const unsigned char byte = static_cast<unsigned char>(ch);
     const bool identifier_byte =
-        std::isalnum(byte) != 0 || byte == '_' || byte == '
+        std::isalnum(byte) != 0 || byte == '_' || byte == '$' ||
+        byte == '.' || byte >= 0x80;
+    if (!identifier_byte) break;
+    --start;
+  }
+  return ReadEditorRange(m_hWnd, start, current);
+}
+
 EditorCaret SqlEditor::Caret() const noexcept {
   if (!IsWindow()) return {};
-  const LRESULT position = SendMessage(SCI_GETCURRENTPOS, 0, 0);
-  const LRESULT line =
-      SendMessage(SCI_LINEFROMPOSITION, static_cast<WPARAM>(position), 0);
-  const LRESULT line_start =
-      SendMessage(SCI_POSITIONFROMLINE, static_cast<WPARAM>(line), 0);
+  const LRESULT position =
+      ::SendMessageW(m_hWnd, SCI_GETCURRENTPOS, 0, 0);
+  const LRESULT line = ::SendMessageW(
+      m_hWnd, SCI_LINEFROMPOSITION, static_cast<WPARAM>(position), 0);
+  const LRESULT line_start = ::SendMessageW(
+      m_hWnd, SCI_POSITIONFROMLINE, static_cast<WPARAM>(line), 0);
   return {static_cast<std::size_t>(line),
           static_cast<std::size_t>(position - line_start)};
 }
