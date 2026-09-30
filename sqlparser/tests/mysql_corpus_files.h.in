@@ -1,0 +1,4 @@
+#define SQLPARSER_MYSQL_CORPUS_ROOT "@SQLPARSER_MYSQL_CORPUS_ROOT@/"
+#define SQLPARSER_MYSQL_CORPUS_REPORT "@CMAKE_CURRENT_BINARY_DIR@/mysql-spec-results.tsv"
+static const struct mysql_fixture fixtures[] = {
+@SQLPARSER_MYSQL_CORPUS_ENTRIES@};

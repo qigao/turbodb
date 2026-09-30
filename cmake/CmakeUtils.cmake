@@ -186,7 +186,7 @@ function(cmake_add_grammar TARGET_NAME)
   set(options LEXER_DEPENDS_ON_GRAMMAR)
   set(oneValueArgs LEXER_RE GRAMMAR_Y FOLDER LEXER_OUTPUT RE2C_EXECUTABLE
                    LEMON_EXECUTABLE LEMON_TEMPLATE)
-  set(multiValueArgs LEXER_DEPENDS GRAMMAR_DEPENDS)
+  set(multiValueArgs LEXER_DEPENDS GRAMMAR_DEPENDS GRAMMAR_DEFINES)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "${options}" "${oneValueArgs}" "${multiValueArgs}")
   if(DEFINED ARG_UNPARSED_ARGUMENTS OR DEFINED ARG_KEYWORDS_MISSING_VALUES)
       message(FATAL_ERROR "cmake_add_grammar: unrecognized arguments [${ARG_UNPARSED_ARGUMENTS}]; missing values [${ARG_KEYWORDS_MISSING_VALUES}]")
@@ -236,11 +236,15 @@ function(cmake_add_grammar TARGET_NAME)
 
   if(ARG_GRAMMAR_Y)
     set(GRAMMAR_GEN "${CMAKE_CURRENT_BINARY_DIR}/${target_name_lower}_grammar_gen.c")
+    set(grammar_define_args)
+    foreach(define IN LISTS ARG_GRAMMAR_DEFINES)
+      list(APPEND grammar_define_args "-D${define}")
+    endforeach()
     set(GRAMMAR_Y_GEN "${CMAKE_CURRENT_BINARY_DIR}/${target_name_lower}_grammar_gen.y")
     add_custom_command(
       OUTPUT ${GRAMMAR_GEN} ${GRAMMAR_H}
       COMMAND ${CMAKE_COMMAND} -E copy ${ARG_GRAMMAR_Y} ${GRAMMAR_Y_GEN}
-      COMMAND "${ARG_LEMON_EXECUTABLE}" "-T${ARG_LEMON_TEMPLATE}" ${GRAMMAR_Y_GEN}
+      COMMAND "${ARG_LEMON_EXECUTABLE}" "-T${ARG_LEMON_TEMPLATE}" ${grammar_define_args} ${GRAMMAR_Y_GEN}
       DEPENDS ${ARG_GRAMMAR_Y} ${ARG_LEMON_TEMPLATE} ${ARG_GRAMMAR_DEPENDS}
       COMMENT "Generating ${TARGET_NAME} parser with lemon"
       VERBATIM)

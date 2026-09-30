@@ -1,0 +1,17 @@
+# 第三方材料说明
+
+## MySQL 8.4.0 测试语料
+
+`sqlparser/mysql-spec/upstream/` 保存 MySQL 官方测试输入及原始许可证；
+`sqlparser/mysql-spec/cases/` 是按 `manifest.json` 指定行范围提取的原文片段。
+这些第三方材料保留上游许可，不适用仓库 first-party 代码的 Apache-2.0 许可。
+
+- 来源：[mysql/mysql-server](https://github.com/mysql/mysql-server/tree/dc86e412f18b36ce271f791026714e8caa0ec919)
+- 版本：`mysql-8.4.0`
+- Commit：`dc86e412f18b36ce271f791026714e8caa0ec919`
+- Copyright (c) 2000, 2024, Oracle and/or its affiliates.（上游 README）
+- 许可：GPLv2 及上游 LICENSE 所列附加许可；完整原文见
+  [upstream/LICENSE](sqlparser/mysql-spec/upstream/LICENSE)。
+- 本地处理：保留完整来源文件；选取独立 SQL 语句，逐字节复制，不改写 SQL；
+  来源行号、偏移、哈希、上游错误预期及本地覆盖缺口单独记录。
+- 用途：仅供解析器测试读取；不编译、链接或安装进 `TurboDB::SqlParser`。

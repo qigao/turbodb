@@ -1,0 +1,5 @@
+#define SQLPARSER_CORPUS_ROOT "@SQLPARSER_CORPUS_ROOT@"
+#define SQLPARSER_CORPUS_REPORT "@CMAKE_CURRENT_BINARY_DIR@/corpus-results.tsv"
+#define SQLPARSER_SQLITE_CORPUS_REPORT "@CMAKE_CURRENT_BINARY_DIR@/corpus-sqlite-results.tsv"
+static const char *const corpus_files[] = {
+@SQLPARSER_CORPUS_ENTRIES@};

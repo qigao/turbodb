@@ -1,0 +1,1 @@
+DELETE FROM t1 WHERE s1 >= 1000;

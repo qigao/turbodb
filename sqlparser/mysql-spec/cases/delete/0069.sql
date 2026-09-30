@@ -1,0 +1,1 @@
+DELETE FROM t1 USING t1 WHERE post='1';

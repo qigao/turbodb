@@ -1,0 +1,2 @@
+WITH qn AS (SELECT a FROM qn)
+SELECT qn.a FROM qn;

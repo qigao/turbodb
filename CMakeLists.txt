@@ -79,6 +79,10 @@ endif()
 
 include(FindTools)
 
+if(TURBODB_BUILD_SQLPARSER)
+  add_subdirectory(sqlparser)
+endif()
+
 if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS)
   add_subdirectory(drivers/schema)
 endif()
@@ -95,7 +99,7 @@ if(TURBODB_BUILD_DBTOOLS)
   add_subdirectory(dbtools)
 endif()
 
-if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS)
+if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS OR TURBODB_BUILD_SQLPARSER)
   include(CMakePackageConfigHelpers)
   configure_package_config_file(
     cmake/TurboDBConfig.cmake.in

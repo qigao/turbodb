@@ -1,0 +1,1 @@
+select found_rows();

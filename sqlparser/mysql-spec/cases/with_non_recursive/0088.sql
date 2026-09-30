@@ -1,0 +1,5 @@
+WITH qn1 AS (SELECT a FROM qn3),
+qn2 AS (SELECT a FROM qn1),
+qn3 AS (SELECT a FROM t1),
+qn4 AS (SELECT a FROM qn2)
+SELECT a FROM qn4;

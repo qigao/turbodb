@@ -1,0 +1,1 @@
+SHOW SESSION VARIABLES WHERE Variable_name LIKE "abc";

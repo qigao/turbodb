@@ -1,0 +1,3 @@
+# Source offsets and hashes refer to original upstream bytes.
+upstream/** -text
+cases/** -text

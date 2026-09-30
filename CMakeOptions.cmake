@@ -7,6 +7,7 @@ option(BUILD_E2E_TESTS "Build end-to-end tests against external databases" OFF)
 
 option(TURBODB_BUILD_ORM "Build ORM libraries and database drivers" ON)
 option(TURBODB_BUILD_DBTOOLS "Build standalone database tools" ON)
+option(TURBODB_BUILD_SQLPARSER "Build the standalone re2c/Lemon SQL parser" ON)
 
 # The toolchain reads manifest features during project().
 set(VCPKG_MANIFEST_FEATURES "")
