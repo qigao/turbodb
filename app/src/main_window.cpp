@@ -82,7 +82,7 @@ bool MainWindow::CloseActiveConnection(std::string* error) {
   if (!connections_.Close(id, error))
     return false;
   workspace_session_.ClearConnection();
-  explorer_model_.Replace({}, {}, nullptr);
+  explorer_model_.Clear();
   explorer_.Refresh();
   return editor_.RefreshLanguage();
 }
