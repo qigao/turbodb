@@ -37,7 +37,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_public_flow
   SOURCES orm_public_flow_test.c
-  LIBS orm_c_test_static Salts::CFlow Salts::TinyTest
+  LIBS orm_c_test_static Salts::CFlow Salts::DataBind Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 
