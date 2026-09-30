@@ -59,6 +59,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
 
+      - name: Audit Studio dependency boundaries
+        shell: pwsh
+        run: ./cmake/ci/audit-studio-boundaries.ps1
+
       - name: Configure and build Studio editor
         shell: cmd
         run: |
@@ -73,3 +77,25 @@ jobs:
           if errorlevel 1 exit /b 1
           build\ci-windows-release\bin\turbodb-app-query-test.exe
           if errorlevel 1 exit /b 1
+
+      - name: Stage Studio runtime package
+        shell: pwsh
+        run: ./cmake/ci/stage-studio.ps1
+
+      - name: Validate packaged Studio startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'build/stage/studio/windows-x64'
+          $exe = Join-Path $stage 'TurboDBStudio.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'packaged TurboDBStudio.exe is missing' }
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test' -WorkingDirectory $stage -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "packaged Studio self-test failed with exit code $($process.ExitCode)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TurboDBStudio-windows-x64-${{ github.sha }}
+          path: build/stage/TurboDBStudio-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
