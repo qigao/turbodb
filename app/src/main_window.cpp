@@ -38,6 +38,10 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
       nullptr) {
     return -1;
   }
+  if (!editor_.Initialize()) {
+    editor_.DestroyWindow();
+    return -1;
+  }
 
   if (result_placeholder_.Create(query_splitter_, client, L"Results",
                                  kPlaceholderStyle) == nullptr) {
