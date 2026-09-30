@@ -6,14 +6,9 @@ cmake_add_test(
   LIBS turbo_orm Salts::DataBind Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_sql_validation_parity_test PRIVATE c_std_11)
 
 add_dependencies(orm_sql_validation_parity_test orm_sqlite_driver
                  orm_postgresql_driver)
-set_target_properties(orm_sql_validation_parity_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_sql_validation_parity_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_sql_validation_parity_test PRIVATE /WX)
 else()

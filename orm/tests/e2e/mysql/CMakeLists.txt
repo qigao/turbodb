@@ -6,13 +6,8 @@ cmake_add_test(
   LIBS turbo_orm Salts::CFlow Salts::Platform
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_mysql_driver_live_test PRIVATE c_std_11)
 
 add_dependencies(orm_mysql_driver_live_test orm_mysql_driver)
-set_target_properties(orm_mysql_driver_live_test PROPERTIES C_STANDARD_REQUIRED
-                                                            ON)
-target_compile_options(orm_mysql_driver_live_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_mysql_driver_live_test PRIVATE /WX)
 else()
@@ -51,10 +46,7 @@ cmake_add_test(
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/../drivers/mysql ${ORM_MYSQL_SOURCE_DIR}
     ${ORM_MYSQL_SOURCE_DIR}/wire ${ORM_MYSQL_SOURCE_DIR}/auth)
-target_compile_features(orm_mysql_live_test PRIVATE c_std_11)
 
-set_target_properties(orm_mysql_live_test PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_mysql_live_test PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_mysql_live_test PRIVATE /WX)
 else()

@@ -20,7 +20,6 @@ target_link_libraries(turbodb_mysql
   PRIVATE Salts::CNet OpenSSL::Crypto)
 set_target_properties(turbodb_mysql PROPERTIES
   EXPORT_NAME MySQL
-  C_STANDARD_REQUIRED ON
   POSITION_INDEPENDENT_CODE ON
   C_VISIBILITY_PRESET hidden
   FOLDER "mysql")

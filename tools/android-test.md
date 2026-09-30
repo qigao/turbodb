@@ -17,20 +17,22 @@ Android NDK 交叉编译，并使用 `tools/android-test.ps1` 将单个测试 ta
 | 最低 Android API | 24 |
 | STL | `c++_shared` |
 
-共享的 `presets/AndroidPresets.json` 定义 arm64-v8a、armeabi-v7a、x86_64
-和 x86 的 Debug/Release configure、build、install presets。
-`CMakeUserPresets.json` 只保存本机 NDK、Ninja、vcpkg、宿主生成器和依赖路径。
+共享的 `presets/AndroidPresets.json` 只定义 arm64-v8a 的 Debug/Release 基础预设，
+与当前发布 SDK 的 Android ABI 一致。`CMakeUserPresets.json` 提供 configure、
+build、install 入口和本机依赖路径。增加其他 ABI 前，必须准备对应架构的
+Salts/SaltsUtils 安装包，并隔离各 ABI 的依赖根和 TurboDB 安装目录。
 
 Android 的 Salts 与 TurboDB 必须使用相同 ABI 和构建类型。
 ARM64 Release 默认读取：
 
-- `C:/projects/cpp/turbonet/salts/build/android-arm64-v8a-release`
+- `C:/projects/cpp/external/pkgs/salts-android/release`
+- `C:/projects/cpp/external/pkgs/salts-utils-android/release`
 
 ## 前置条件
 
 - PowerShell 7、CMake、Ninja、Android SDK Platform Tools 和 NDK。
 - `CMakeUserPresets.json` 中的本机路径存在。
-- 同 ABI/配置的 Salts Android build tree 已配置并构建。
+- 同 ABI/配置的 Salts 与 SaltsUtils Android SDK 已安装。
 - ADB 设备状态为 `device`，且设备 ABI 与 preset 一致。
 - TurboDB 的宿主 lemon 已构建。当前 Windows 路径为
   `build/Msvc-Release/bin/lemon.exe`；re2c 使用宿主机可执行文件。

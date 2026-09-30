@@ -100,21 +100,21 @@ They are intentionally narrow:
 
 ### Build
 
-Windows Release builds both SQLite and PostgreSQL tools by default:
+Windows development and Release use `win-dev-user` and `win-release-user`.
+Both build ORM, database drivers, and SQLite/PostgreSQL/MySQL tools:
 
 ```powershell
 cmake --fresh --preset win-release-user
-cmake --build --preset win-release-user --target turbodb-sqlite turbodb-postgresql
+cmake --build --preset win-release-user
+ctest --preset win-release-user --output-on-failure
 cmake --build --preset install-win-release-user
 ```
 
-A PostgreSQL-only package uses its own isolated profile:
+Use targets and CTest filters to select individual tools and tests:
 
 ```powershell
-cmake --preset win-release-dbtools-pg-user
-cmake --build --preset win-release-dbtools-pg-user
-ctest --preset win-release-dbtools-pg-user --output-on-failure
-cmake --build --preset install-win-release-dbtools-pg-user
+cmake --build --preset win-release-user --target turbodb-postgresql
+ctest --preset win-release-user -R "^dbtool_" --output-on-failure
 ```
 
 Consumers must select the intended package explicitly. Profiles do not fall back to each other. Runtime ORM Drivers are deployment artifacts under `turbodb/drivers`; changing Driver deployment does not require relinking `Orm::C`.

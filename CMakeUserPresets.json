@@ -106,61 +106,6 @@
             "inherits": ["base-win-release-user", "win-paths"]
         },
         {
-            "name": "win-release-dbtools-user",
-            "displayName": "Release + SQLite/PostgreSQL dbtools (Windows)",
-            "inherits": "win-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools",
-            "cacheVariables": {
-                "TURBODB_BUILD_ORM": "OFF"
-            },
-            "environment": {
-                "PATH": "${sourceDir}/build/Msvc-Release-DbTools/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
-            }
-        },
-        {
-            "name": "win-release-dbtools-pg-user",
-            "displayName": "Release + PostgreSQL dbtools (Windows)",
-            "inherits": "win-release-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG",
-            "cacheVariables": {
-                "TURBODB_BUILD_ORM": "OFF",
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg"
-            },
-            "environment": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "PATH": "${sourceDir}/build/Msvc-Release-DbTools-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
-            }
-        },
-        {
-            "name": "win-release-dbtools-pg-e2e-user",
-            "displayName": "Release + PostgreSQL dbtools E2E (Windows)",
-            "inherits": "win-release-dbtools-pg-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG-E2E",
-            "cacheVariables": {
-                "BUILD_TESTS": "OFF",
-                "BUILD_E2E_TESTS": "ON"
-            },
-            "environment": {
-                "PATH": "${sourceDir}/build/Msvc-Release-DbTools-PG-E2E/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
-            }
-        },
-        {
-            "name": "win-release-pg-e2e-user",
-            "displayName": "Release + PostgreSQL E2E tests (Windows)",
-            "inherits": "win-release-dbtools-pg-user",
-            "binaryDir": "${sourceDir}/build/Msvc-Release-PG",
-            "cacheVariables": {
-                "TURBODB_BUILD_ORM": "ON",
-                "BUILD_TESTS": "OFF",
-                "BUILD_E2E_TESTS": "ON"
-            },
-            "environment": {
-                "PATH": "${sourceDir}/build/Msvc-Release-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
-            }
-        },
-        {
             "name": "linux-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
@@ -231,11 +176,7 @@
             }
         },
         { "name": "android-arm64-v8a-debug-win", "inherits": ["android-arm64-v8a-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"] },
-        { "name": "android-arm64-v8a-release-win", "inherits": ["android-arm64-v8a-release", "android-dependencies-release", "android-win-paths", "android-win-environment"] },
-        { "name": "android-x86_64-debug-win", "inherits": ["android-x86_64-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"] },
-        { "name": "android-x86_64-release-win", "inherits": ["android-x86_64-release", "android-dependencies-release", "android-win-paths", "android-win-environment"] },
-        { "name": "android-x86-debug-win", "inherits": ["android-x86-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"] },
-        { "name": "android-x86-release-win", "inherits": ["android-x86-release", "android-dependencies-release", "android-win-paths", "android-win-environment"] }
+        { "name": "android-arm64-v8a-release-win", "inherits": ["android-arm64-v8a-release", "android-dependencies-release", "android-win-paths", "android-win-environment"] }
     ],
     "buildPresets": [
         {"name": "ci-windows-release", "configurePreset": "ci-windows-release"},
@@ -248,34 +189,18 @@
         {"name": "install-ci-android-release", "configurePreset": "ci-android-release", "targets": ["install"]},
         { "name": "win-dev-user", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "configurePreset": "win-release-user" },
-        { "name": "win-release-dbtools-user", "configurePreset": "win-release-dbtools-user" },
-        { "name": "win-release-dbtools-pg-user", "configurePreset": "win-release-dbtools-pg-user" },
-        { "name": "win-release-dbtools-pg-e2e-user", "configurePreset": "win-release-dbtools-pg-e2e-user" },
-        { "name": "win-release-pg-e2e-user", "configurePreset": "win-release-pg-e2e-user" },
         { "name": "linux-dev-user", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "configurePreset": "linux-release-user" },
         { "name": "linux-release-pg-e2e-user", "configurePreset": "linux-release-pg-e2e-user" },
         { "name": "install-win-dev-user", "configurePreset": "win-dev-user", "targets": ["install"] },
         { "name": "install-win-release-user", "configurePreset": "win-release-user", "targets": ["install"] },
-        { "name": "install-win-release-dbtools-user", "configurePreset": "win-release-dbtools-user", "targets": ["install"] },
-        { "name": "install-win-release-dbtools-pg-user", "configurePreset": "win-release-dbtools-pg-user", "targets": ["install"] },
-        { "name": "install-win-release-dbtools-pg-e2e-user", "configurePreset": "win-release-dbtools-pg-e2e-user", "targets": ["install"] },
-        { "name": "install-win-release-pg-e2e-user", "configurePreset": "win-release-pg-e2e-user", "targets": ["install"] },
         { "name": "install-linux-dev-user", "configurePreset": "linux-dev-user", "targets": ["install"] },
         { "name": "install-linux-release-user", "configurePreset": "linux-release-user", "targets": ["install"] },
         { "name": "install-linux-release-pg-e2e-user", "configurePreset": "linux-release-pg-e2e-user", "targets": ["install"] },
         { "name": "android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win" },
         { "name": "android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win" },
-        { "name": "android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win" },
-        { "name": "android-x86_64-release-win", "configurePreset": "android-x86_64-release-win" },
-        { "name": "android-x86-debug-win", "configurePreset": "android-x86-debug-win" },
-        { "name": "android-x86-release-win", "configurePreset": "android-x86-release-win" },
         { "name": "install-android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win", "targets": ["install"] },
-        { "name": "install-android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win", "targets": ["install"] },
-        { "name": "install-android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win", "targets": ["install"] },
-        { "name": "install-android-x86_64-release-win", "configurePreset": "android-x86_64-release-win", "targets": ["install"] },
-        { "name": "install-android-x86-debug-win", "configurePreset": "android-x86-debug-win", "targets": ["install"] },
-        { "name": "install-android-x86-release-win", "configurePreset": "android-x86-release-win", "targets": ["install"] }
+        { "name": "install-android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win", "targets": ["install"] }
     ],
     "testPresets": [
         {"name": "ci-windows-release", "inherits": "base-test", "configurePreset": "ci-windows-release", "execution": {"noTestsAction": "error"}},
@@ -283,12 +208,8 @@
         {"name": "ci-linux-e2e", "inherits": "base-test", "configurePreset": "ci-linux-e2e", "execution": {"noTestsAction": "error"}, "filter": {"include": {"label": "e2e"}}},
         { "name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user" },
-        { "name": "win-release-dbtools-user", "inherits": "base-test", "configurePreset": "win-release-dbtools-user" },
-        { "name": "win-release-dbtools-pg-user", "inherits": "base-test", "configurePreset": "win-release-dbtools-pg-user" },
-        { "name": "win-release-dbtools-pg-e2e-user", "inherits": "base-test", "configurePreset": "win-release-dbtools-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss)$" } } },
-        { "name": "win-release-pg-e2e-user", "inherits": "base-test", "configurePreset": "win-release-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss)$" } } },
         { "name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" },
-        { "name": "linux-release-pg-e2e-user", "inherits": "base-test", "configurePreset": "linux-release-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss)$" } } }
+        { "name": "linux-release-pg-e2e-user", "inherits": "base-test", "configurePreset": "linux-release-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|orm_sql_validation_parity)$" } } }
     ]
 }

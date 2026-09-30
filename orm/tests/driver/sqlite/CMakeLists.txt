@@ -6,12 +6,8 @@ cmake_add_test(
   LIBS turbo_orm Salts::TinyTest Salts::CFlow Salts::Platform
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_sqlite_plugin_test PRIVATE c_std_11)
 
 add_dependencies(orm_sqlite_plugin_test orm_sqlite_driver)
-set_target_properties(orm_sqlite_plugin_test PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_sqlite_plugin_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_sqlite_plugin_test PRIVATE /WX)
 else()

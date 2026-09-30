@@ -6,16 +6,8 @@ cmake_add_test(
   LIBS turbo_orm Salts::TinyTest Salts::Platform
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_postgres_live_test PRIVATE c_std_11)
 
 add_dependencies(orm_postgres_live_test orm_postgresql_driver)
-set_target_properties(orm_postgres_live_test PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_postgres_live_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
-if(MSVC)
-  target_compile_options(orm_postgres_live_test
-                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
-endif()
 
 set_tests_properties(orm_postgres_live PROPERTIES LABELS e2e RUN_SERIAL TRUE)
 if(WIN32)
@@ -58,22 +50,18 @@ set_property(
 )
 
 set_property(TARGET orm_owner_postgres_test orm_owner_postgres_loss_test
-             PROPERTY C_STANDARD 11)
-set_property(TARGET orm_owner_postgres_test orm_owner_postgres_loss_test
-             PROPERTY C_STANDARD_REQUIRED ON)
-set_property(TARGET orm_owner_postgres_test orm_owner_postgres_loss_test
              PROPERTY LINKER_LANGUAGE CXX)
 
 if(MSVC)
   set_property(
     TARGET orm_owner_postgres_test orm_owner_postgres_loss_test
     APPEND
-    PROPERTY COMPILE_OPTIONS /W4 /WX /Zc:preprocessor)
+    PROPERTY COMPILE_OPTIONS /WX)
 else()
   set_property(
     TARGET orm_owner_postgres_test orm_owner_postgres_loss_test
     APPEND
-    PROPERTY COMPILE_OPTIONS -Wall -Wextra -Wpedantic -Werror)
+    PROPERTY COMPILE_OPTIONS -Werror)
 endif()
 
 set_tests_properties(orm_owner_postgres PROPERTIES LABELS e2e RUN_SERIAL TRUE)

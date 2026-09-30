@@ -5,7 +5,6 @@ add_library(
   plugin.c ${ORM_SOURCE_DIR}/src/driver/orm_driver_backend_bridge.c
   backend.c schema.c orm_postgres_cursor.c orm_postgres_libpq.c
   ${ORM_SOURCE_DIR}/src/flow/orm_text_token.c ${ORM_SOURCE_DIR}/src/sql/orm_sql_render.c)
-target_compile_features(orm_postgresql_driver PRIVATE c_std_11)
 target_compile_definitions(orm_postgresql_driver
                            PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(
@@ -27,7 +26,6 @@ set_target_properties(
   orm_postgresql_driver
   PROPERTIES PREFIX ""
              OUTPUT_NAME "turbodb_driver_postgresql"
-             C_STANDARD_REQUIRED ON
              LINKER_LANGUAGE CXX
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
@@ -45,8 +43,6 @@ if(ORM_POSTGRESQL_DRIVER_NATIVE_LINK_INDEX EQUAL -1)
     FATAL_ERROR
       "orm_postgresql_driver must directly link PostgreSQL::PostgreSQL")
 endif()
-
-target_compile_options(orm_postgresql_driver PRIVATE ${ORM_WARNING_OPTIONS})
 
 install(TARGETS orm_postgresql_driver
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers

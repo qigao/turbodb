@@ -6,16 +6,8 @@ cmake_add_test(
   LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::DataBind Salts::CFlow Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow)
-target_compile_features(orm_row_publisher_test PRIVATE c_std_11)
 
 set_property(TARGET orm_row_publisher_test PROPERTY LINKER_LANGUAGE CXX)
-set_target_properties(orm_row_publisher_test PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_row_publisher_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
-if(MSVC)
-  target_compile_options(orm_row_publisher_test
-                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
-endif()
 
 if(WIN32)
   set_tests_properties(orm_row_publisher PROPERTIES ENVIRONMENT_MODIFICATION
@@ -30,15 +22,6 @@ cmake_add_test(
   LIBS turbo_orm Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_pure_c_build_test PRIVATE c_std_11)
-
-set_target_properties(orm_pure_c_build_test PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_pure_c_build_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
-if(MSVC)
-  target_compile_options(orm_pure_c_build_test
-                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
-endif()
 
 if(WIN32)
   set_tests_properties(orm_pure_c_build PROPERTIES ENVIRONMENT_MODIFICATION
@@ -54,15 +37,8 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${CMAKE_CURRENT_SOURCE_DIR}/../../src/sql)
-target_compile_features(orm_sql_render_test PRIVATE c_std_11)
 
 set_property(TARGET orm_sql_render_test PROPERTY LINKER_LANGUAGE CXX)
-set_target_properties(orm_sql_render_test PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_sql_render_test PRIVATE ${ORM_TEST_WARNING_OPTIONS})
-if(MSVC)
-  target_compile_options(orm_sql_render_test
-                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
-endif()
 
 if(WIN32)
   set_tests_properties(orm_sql_render PROPERTIES ENVIRONMENT_MODIFICATION

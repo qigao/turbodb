@@ -6,10 +6,8 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
   FOLDER "orm/tests/flow/command")
-target_compile_features(orm_command_publisher_mock_test PRIVATE c_std_11)
 set_target_properties(orm_command_publisher_mock_test PROPERTIES
-  C_STANDARD_REQUIRED ON LINKER_LANGUAGE CXX)
-target_compile_options(orm_command_publisher_mock_test PRIVATE ${ORM_TEST_WARNING_OPTIONS})
+   LINKER_LANGUAGE CXX)
 set_tests_properties(orm_command_publisher_mock PROPERTIES TIMEOUT 30)
 if(WIN32)
   set_tests_properties(orm_command_publisher_mock PROPERTIES

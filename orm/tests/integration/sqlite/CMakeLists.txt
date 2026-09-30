@@ -6,16 +6,6 @@ cmake_add_test(
   LIBS orm_c_test_static Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_sqlite_provider_atomicity_test PRIVATE c_std_11)
-
-set_target_properties(orm_sqlite_provider_atomicity_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_sqlite_provider_atomicity_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
-if(MSVC)
-  target_compile_options(orm_sqlite_provider_atomicity_test
-                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
-endif()
 
 if(WIN32)
   set_tests_properties(
@@ -31,16 +21,11 @@ cmake_add_test(
   LIBS turbo_orm Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_sqlite_plugin_maintenance_test PRIVATE c_std_11)
 
 add_dependencies(orm_sqlite_plugin_maintenance_test orm_sqlite_driver)
-set_target_properties(orm_sqlite_plugin_maintenance_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_sqlite_plugin_maintenance_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_sqlite_plugin_maintenance_test PRIVATE /WX
-                                                                    /std:c11)
+                                                                   )
 else()
   target_compile_options(orm_sqlite_plugin_maintenance_test PRIVATE -Werror)
 endif()

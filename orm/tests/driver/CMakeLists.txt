@@ -14,13 +14,8 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${CMAKE_CURRENT_SOURCE_DIR}/../../src/driver)
-target_compile_features(orm_driver_plan_view_test PRIVATE c_std_11)
 
 set_property(TARGET orm_driver_plan_view_test PROPERTY LINKER_LANGUAGE CXX)
-set_target_properties(orm_driver_plan_view_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_driver_plan_view_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 # Keep this new boundary strict without changing legacy core warning defaults.
 if(MSVC)
   target_compile_options(orm_driver_plan_view_test PRIVATE /WX)
@@ -43,12 +38,7 @@ cmake_add_test(
   LIBS Salts::Plugin Salts::CFlow
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_driver_interface_test PRIVATE c_std_11)
 
-set_target_properties(orm_driver_interface_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_driver_interface_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_driver_interface_test PRIVATE /WX)
 else()
@@ -64,12 +54,7 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/driver)
-target_compile_features(orm_driver_backend_bridge_test PRIVATE c_std_11)
 
-set_target_properties(orm_driver_backend_bridge_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_driver_backend_bridge_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_driver_backend_bridge_test PRIVATE /WX)
 else()
@@ -86,12 +71,7 @@ cmake_add_test(
   DEFS ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/driver)
-target_compile_features(orm_driver_backend_adapter_test PRIVATE c_std_11)
 
-set_target_properties(orm_driver_backend_adapter_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_driver_backend_adapter_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_driver_backend_adapter_test PRIVATE /WX)
 else()
@@ -107,13 +87,8 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/driver)
-target_compile_features(orm_driver_owner_bridge_test PRIVATE c_std_11)
 
 set_property(TARGET orm_driver_owner_bridge_test PROPERTY LINKER_LANGUAGE CXX)
-set_target_properties(orm_driver_owner_bridge_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_driver_owner_bridge_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_driver_owner_bridge_test PRIVATE /WX)
 else()
@@ -129,31 +104,22 @@ endif()
 # Qualify canonical Plugin loading/admission with real DSOs. These fixtures
 # publish only Plugin ABI 2 contracts; no TurboDB-private loader entry exists.
 add_library(orm_plugin_no_query_fixture MODULE orm_module_no_entry_fixture.c)
-target_compile_features(orm_plugin_no_query_fixture PRIVATE c_std_11)
 set_target_properties(
   orm_plugin_no_query_fixture
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_plugin_no_query_fixture
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 add_library(orm_plugin_bad_abi_fixture MODULE orm_module_bad_abi_fixture.c)
-target_compile_features(orm_plugin_bad_abi_fixture PRIVATE c_std_11)
 target_link_libraries(orm_plugin_bad_abi_fixture PRIVATE Salts::PluginABI)
 set_target_properties(
   orm_plugin_bad_abi_fixture
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_plugin_bad_abi_fixture
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 add_library(orm_plugin_bad_contract_fixture MODULE
             orm_module_bad_contract_version_fixture.c)
-target_compile_features(orm_plugin_bad_contract_fixture PRIVATE c_std_11)
 target_include_directories(orm_plugin_bad_contract_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
@@ -162,19 +128,15 @@ target_link_libraries(
 set_target_properties(
   orm_plugin_bad_contract_fixture
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_plugin_bad_contract_fixture
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_plugin_bad_contract_fixture PRIVATE
                       "LINKER:--exclude-libs,ALL")
 endif()
 add_library(orm_plugin_bad_storage_fixture MODULE
             orm_module_bad_storage_fixture.c)
-target_compile_features(orm_plugin_bad_storage_fixture PRIVATE c_std_11)
 target_include_directories(orm_plugin_bad_storage_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
@@ -183,19 +145,15 @@ target_link_libraries(
 set_target_properties(
   orm_plugin_bad_storage_fixture
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_plugin_bad_storage_fixture
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_plugin_bad_storage_fixture PRIVATE
                       "LINKER:--exclude-libs,ALL")
 endif()
 add_library(orm_plugin_bad_shape_fixture MODULE
             orm_module_bad_interface_fixture.c)
-target_compile_features(orm_plugin_bad_shape_fixture PRIVATE c_std_11)
 target_include_directories(orm_plugin_bad_shape_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
@@ -204,18 +162,14 @@ target_link_libraries(
 set_target_properties(
   orm_plugin_bad_shape_fixture
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_plugin_bad_shape_fixture
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_plugin_bad_shape_fixture PRIVATE
                       "LINKER:--exclude-libs,ALL")
 endif()
 add_library(orm_runtime_plugin_fixture MODULE orm_runtime_plugin_fixture.c)
-target_compile_features(orm_runtime_plugin_fixture PRIVATE c_std_11)
 target_include_directories(orm_runtime_plugin_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
@@ -224,12 +178,9 @@ target_link_libraries(
 set_target_properties(
   orm_runtime_plugin_fixture
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_runtime_plugin_fixture
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_runtime_plugin_fixture PRIVATE
                       "LINKER:--exclude-libs,ALL")
@@ -241,7 +192,6 @@ cmake_add_test(
   SOURCES orm_runtime_registry_test.c
   LIBS turbo_orm Salts::TinyTest
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_runtime_registry_test PRIVATE c_std_11)
 
 add_dependencies(
   orm_runtime_registry_test
@@ -251,10 +201,6 @@ add_dependencies(
   orm_plugin_bad_contract_fixture
   orm_plugin_bad_shape_fixture
   orm_plugin_bad_storage_fixture)
-set_target_properties(orm_runtime_registry_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_runtime_registry_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_runtime_registry_test PRIVATE /WX)
 else()
@@ -271,25 +217,20 @@ set_tests_properties(
 # addition to canonical salts_plugin_query. It is not the export-surface
 # fixture.
 add_library(orm_runtime_race_fixture MODULE orm_runtime_race_fixture.c)
-target_compile_features(orm_runtime_race_fixture PRIVATE c_std_11)
 target_include_directories(orm_runtime_race_fixture PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(orm_runtime_race_fixture
                       PRIVATE Salts::PluginABI Salts::Platform Salts::CFlow)
 set_target_properties(
   orm_runtime_race_fixture
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_runtime_race_fixture
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_runtime_race_fixture PRIVATE
                       "LINKER:--exclude-libs,ALL")
 endif()
 add_library(orm_runtime_race_fixture_two MODULE orm_runtime_race_fixture.c)
-target_compile_features(orm_runtime_race_fixture_two PRIVATE c_std_11)
 target_compile_definitions(orm_runtime_race_fixture_two
                            PRIVATE ORM_RUNTIME_RACE_DRIVER_ID="race2")
 target_include_directories(orm_runtime_race_fixture_two
@@ -299,12 +240,9 @@ target_link_libraries(orm_runtime_race_fixture_two
 set_target_properties(
   orm_runtime_race_fixture_two
   PROPERTIES PREFIX ""
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/tests/driver")
-target_compile_options(orm_runtime_race_fixture_two
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_runtime_race_fixture_two PRIVATE
                       "LINKER:--exclude-libs,ALL")
@@ -318,14 +256,10 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/runtime)
-target_compile_features(orm_runtime_race_test PRIVATE c_std_11)
 
 set_property(TARGET orm_runtime_race_test PROPERTY LINKER_LANGUAGE CXX)
 add_dependencies(orm_runtime_race_test orm_runtime_race_fixture
                  orm_runtime_race_fixture_two)
-set_target_properties(orm_runtime_race_test PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_runtime_race_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_runtime_race_test PRIVATE /WX)
 else()

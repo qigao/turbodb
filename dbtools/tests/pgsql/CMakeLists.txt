@@ -10,7 +10,7 @@ if(BUILD_TESTS)
   set_target_properties(dbtool_postgresql_test
                         PROPERTIES FOLDER "dbtools/tests" LINKER_LANGUAGE CXX)
   if(MSVC)
-    target_compile_options(dbtool_postgresql_test PRIVATE /W4 /WX /std:c11)
+    target_compile_options(dbtool_postgresql_test PRIVATE /W4 /WX)
   else()
     target_compile_options(dbtool_postgresql_test PRIVATE -Wall -Wextra
                                                           -Wpedantic -Werror)

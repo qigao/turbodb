@@ -1,9 +1,8 @@
 add_executable(turbodb-sqlite main.c)
-target_compile_features(turbodb-sqlite PRIVATE c_std_11)
 target_link_libraries(turbodb-sqlite PRIVATE turbodb_dbtool_core)
 set_target_properties(turbodb-sqlite PROPERTIES FOLDER "dbtools")
 if(MSVC)
-  target_compile_options(turbodb-sqlite PRIVATE /W4 /WX /std:c11)
+  target_compile_options(turbodb-sqlite PRIVATE /W4 /WX)
 else()
   target_compile_options(turbodb-sqlite PRIVATE -Wall -Wextra -Wpedantic
                                                 -Werror)

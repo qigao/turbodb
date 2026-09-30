@@ -5,7 +5,6 @@ add_library(
   plugin.c ${ORM_SOURCE_DIR}/src/driver/orm_driver_backend_bridge.c
   backend.c async.c maintenance.c schema.c
   orm_sqlite_cursor.c ${ORM_SOURCE_DIR}/src/sql/orm_sql_render.c)
-target_compile_features(orm_sqlite_driver PRIVATE c_std_11)
 target_compile_definitions(orm_sqlite_driver PRIVATE ORM_C_STATIC)
 target_include_directories(
   orm_sqlite_driver
@@ -35,7 +34,6 @@ set_target_properties(
   orm_sqlite_driver
   PROPERTIES PREFIX ""
              OUTPUT_NAME "turbodb_driver_sqlite"
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "drivers/sqlite")
@@ -45,8 +43,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # remains the only intentional generic loader entry.
   target_link_options(orm_sqlite_driver PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
-
-target_compile_options(orm_sqlite_driver PRIVATE ${ORM_WARNING_OPTIONS})
 
 install(TARGETS orm_sqlite_driver
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers

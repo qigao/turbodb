@@ -62,8 +62,6 @@ target_compile_definitions(orm_owner_test_core
 target_include_directories(orm_owner_test_core PUBLIC ../../include/orm)
 target_link_libraries(orm_owner_test_core PUBLIC Salts::Core)
 set_target_properties(orm_owner_test_core PROPERTIES
-  C_STANDARD 11
-  C_STANDARD_REQUIRED ON
   FOLDER "orm/tests/ownership")
 
 cmake_add_test(
@@ -142,8 +140,6 @@ set_property(
     "${CMAKE_CURRENT_SOURCE_DIR}/../../src/abi;${CMAKE_CURRENT_SOURCE_DIR}/../../src/flow"
 )
 
-set_property(TARGET ${owner_test_targets} PROPERTY C_STANDARD 11)
-set_property(TARGET ${owner_test_targets} PROPERTY C_STANDARD_REQUIRED ON)
 set_property(TARGET ${owner_test_targets} PROPERTY CXX_STANDARD 17)
 set_property(TARGET ${owner_test_targets} PROPERTY CXX_STANDARD_REQUIRED ON)
 set_property(TARGET ${owner_test_targets} PROPERTY LINKER_LANGUAGE CXX)
@@ -155,12 +151,12 @@ if(MSVC)
   set_property(
     TARGET ${owner_warning_targets}
     APPEND
-    PROPERTY COMPILE_OPTIONS /W4 /WX /Zc:preprocessor)
+    PROPERTY COMPILE_OPTIONS /WX)
 else()
   set_property(
     TARGET ${owner_warning_targets}
     APPEND
-    PROPERTY COMPILE_OPTIONS -Wall -Wextra -Wpedantic -Werror)
+    PROPERTY COMPILE_OPTIONS -Werror)
 endif()
 
 set_tests_properties(${owner_test_names} PROPERTIES TIMEOUT 60)
@@ -189,15 +185,14 @@ cmake_add_test(
 
 set_target_properties(
   orm_postgres_connection_test
-  PROPERTIES C_STANDARD 11
-             C_STANDARD_REQUIRED ON
+  PROPERTIES
              LINKER_LANGUAGE CXX)
 if(MSVC)
   target_compile_options(orm_postgres_connection_test
-                         PRIVATE /W4 /WX /Zc:preprocessor)
+                         PRIVATE /WX)
 else()
   target_compile_options(orm_postgres_connection_test
-                         PRIVATE -Wall -Wextra -Wpedantic -Werror)
+                         PRIVATE -Werror)
 endif()
 
 set_tests_properties(orm_postgres_connection PROPERTIES TIMEOUT 30)

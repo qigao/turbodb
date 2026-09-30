@@ -1,14 +1,13 @@
 foreach(driver IN ITEMS mysql postgresql)
   add_library(orm_coexistence_${driver}_fixture MODULE ../orm_runtime_plugin_fixture.c)
-  target_compile_features(orm_coexistence_${driver}_fixture PRIVATE c_std_11)
-  target_compile_definitions(orm_coexistence_${driver}_fixture
+    target_compile_definitions(orm_coexistence_${driver}_fixture
     PRIVATE ORM_FIXTURE_DRIVER_ID="${driver}")
   target_include_directories(orm_coexistence_${driver}_fixture
     PRIVATE ${ORM_SOURCE_DIR}/include/orm)
   target_link_libraries(orm_coexistence_${driver}_fixture
     PRIVATE Salts::PluginABI Salts::CSerde Salts::CFlow)
   set_target_properties(orm_coexistence_${driver}_fixture PROPERTIES
-    PREFIX "" C_STANDARD_REQUIRED ON C_VISIBILITY_PRESET hidden
+    PREFIX ""  C_VISIBILITY_PRESET hidden
     WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/tests/driver/cross_driver")
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(orm_coexistence_${driver}_fixture PRIVATE "LINKER:--exclude-libs,ALL")
@@ -24,10 +23,8 @@ cmake_add_test(
   SOURCES orm_runtime_coexistence_test.c
   LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyTest Salts::TinyMock
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/runtime)
-target_compile_features(orm_runtime_coexistence_test PRIVATE c_std_11)
 set_target_properties(orm_runtime_coexistence_test PROPERTIES
-  C_STANDARD_REQUIRED ON LINKER_LANGUAGE CXX)
-target_compile_options(orm_runtime_coexistence_test PRIVATE ${ORM_TEST_WARNING_OPTIONS})
+   LINKER_LANGUAGE CXX)
 add_dependencies(orm_runtime_coexistence_test
   orm_coexistence_mysql_fixture orm_coexistence_postgresql_fixture)
 set_tests_properties(orm_runtime_coexistence PROPERTIES TIMEOUT 30 ENVIRONMENT
@@ -45,14 +42,9 @@ cmake_add_test(
   LIBS turbo_orm
   INCLUDES ${ORM_SOURCE_DIR}/include/orm
   ARGS sqlite "$<TARGET_FILE:orm_sqlite_driver>" "$<TARGET_FILE:orm_postgresql_driver>")
-target_compile_features(orm_sql_plugin_matrix_test PRIVATE c_std_11)
 
 add_dependencies(orm_sql_plugin_matrix_test orm_sqlite_driver
                  orm_postgresql_driver)
-set_target_properties(orm_sql_plugin_matrix_test
-                      PROPERTIES C_STANDARD_REQUIRED ON)
-target_compile_options(orm_sql_plugin_matrix_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 if(MSVC)
   target_compile_options(orm_sql_plugin_matrix_test PRIVATE /WX)
 else()

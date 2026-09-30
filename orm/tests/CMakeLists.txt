@@ -2,7 +2,6 @@ find_package(SQLite3 REQUIRED)
 find_package(PostgreSQL REQUIRED)
 
 get_target_property(ORM_SOURCE_DIR turbo_orm SOURCE_DIR)
-get_target_property(ORM_TEST_WARNING_OPTIONS turbo_orm COMPILE_OPTIONS)
 get_target_property(ORM_MYSQL_SOURCE_DIR turbodb_mysql SOURCE_DIR)
 
 set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)

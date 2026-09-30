@@ -7,7 +7,6 @@ add_library(
   orm_redis_lib.c
   orm_redis_cursor.c
   ${ORM_SOURCE_DIR}/src/flow/orm_text_token.c)
-target_compile_features(orm_redis_driver PRIVATE c_std_11)
 target_compile_definitions(orm_redis_driver
                            PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(
@@ -29,7 +28,6 @@ set_target_properties(
   orm_redis_driver
   PROPERTIES PREFIX ""
              OUTPUT_NAME "turbodb_driver_redis"
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "drivers/redis")
@@ -37,8 +35,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_redis_driver PRIVATE "LINKER:--exclude-libs,ALL"
                       "LINKER:-z,defs")
 endif()
-
-target_compile_options(orm_redis_driver PRIVATE ${ORM_WARNING_OPTIONS})
 
 install(TARGETS orm_redis_driver
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers

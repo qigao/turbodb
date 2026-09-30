@@ -4,7 +4,6 @@ add_library(orm_c_test_static STATIC ${orm_core_sources})
 target_sources(orm_c_test_static PRIVATE ${ORM_SOURCE_DIR}/../drivers/sqlite/backend.c
                                          ${ORM_SOURCE_DIR}/../drivers/sqlite/async.c
                                          ${ORM_SOURCE_DIR}/../drivers/sqlite/orm_sqlite_cursor.c)
-target_compile_features(orm_c_test_static PRIVATE c_std_11)
 # Internal tests that compile cursor/backend sources directly must see the
 # same opaque-handle layout as the static core. This definition is not part of
 # the installed Orm::C/Orm::Cpp interface.
@@ -29,7 +28,5 @@ target_compile_definitions(orm_c_test_static
                            PRIVATE ORM_LEGACY_SQLITE_FACTORY)
 target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
 set_target_properties(orm_c_test_static PROPERTIES
-  C_STANDARD_REQUIRED ON
   FOLDER "orm/tests/core")
-target_compile_options(orm_c_test_static PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 set(ORM_INTERNAL_TEST_LIBRARY orm_c_test_static PARENT_SCOPE)

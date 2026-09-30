@@ -47,54 +47,6 @@
                 "BUILD_TESTS": "ON",
                 "BUILD_EXAMPLES": "OFF"
             }
-        },
-        {
-            "name": "android-x86_64-debug",
-            "hidden": true,
-            "inherits": ["android-base", "developer-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86_64-debug",
-            "cacheVariables": {
-                "ANDROID_ABI": "x86_64",
-                "VCPKG_TARGET_TRIPLET": "x64-android",
-                "BUILD_TESTS": "ON",
-                "BUILD_EXAMPLES": "OFF"
-            }
-        },
-        {
-            "name": "android-x86_64-release",
-            "hidden": true,
-            "inherits": ["android-base", "release-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86_64-release",
-            "cacheVariables": {
-                "ANDROID_ABI": "x86_64",
-                "VCPKG_TARGET_TRIPLET": "x64-android",
-                "BUILD_TESTS": "ON",
-                "BUILD_EXAMPLES": "OFF"
-            }
-        },
-        {
-            "name": "android-x86-debug",
-            "hidden": true,
-            "inherits": ["android-base", "developer-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86-debug",
-            "cacheVariables": {
-                "ANDROID_ABI": "x86",
-                "VCPKG_TARGET_TRIPLET": "x86-android",
-                "BUILD_TESTS": "ON",
-                "BUILD_EXAMPLES": "OFF"
-            }
-        },
-        {
-            "name": "android-x86-release",
-            "hidden": true,
-            "inherits": ["android-base", "release-mode"],
-            "binaryDir": "${sourceDir}/build/android-x86-release",
-            "cacheVariables": {
-                "ANDROID_ABI": "x86",
-                "VCPKG_TARGET_TRIPLET": "x86-android",
-                "BUILD_TESTS": "ON",
-                "BUILD_EXAMPLES": "OFF"
-            }
         }
     ]
 }

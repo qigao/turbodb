@@ -10,7 +10,6 @@ add_library(
   orm_mongo_lib.c
   orm_mongo_cursor.c
   ${ORM_SOURCE_DIR}/src/flow/orm_text_token.c)
-target_compile_features(orm_mongodb_driver PRIVATE c_std_11)
 target_compile_definitions(orm_mongodb_driver
                            PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(
@@ -44,7 +43,6 @@ set_target_properties(
   orm_mongodb_driver
   PROPERTIES PREFIX ""
              OUTPUT_NAME "turbodb_driver_mongodb"
-             C_STANDARD_REQUIRED ON
              C_VISIBILITY_PRESET hidden
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "drivers/mongodb")
@@ -52,8 +50,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_mongodb_driver PRIVATE "LINKER:--exclude-libs,ALL"
                       "LINKER:-z,defs")
 endif()
-
-target_compile_options(orm_mongodb_driver PRIVATE ${ORM_WARNING_OPTIONS})
 
 install(TARGETS orm_mongodb_driver
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers

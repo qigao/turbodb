@@ -24,21 +24,6 @@ set(ORM_VERSION 2.1.0)
 set(ORM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 include(GNUInstallDirs)
-if(MSVC)
-  set(ORM_WARNING_OPTIONS /W4 /permissive-)
-  if(ORM_WARNINGS_AS_ERRORS)
-    list(APPEND ORM_WARNING_OPTIONS /WX)
-  endif()
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    list(APPEND ORM_WARNING_OPTIONS /Zc:preprocessor)
-  endif()
-else()
-  set(ORM_WARNING_OPTIONS -Wall -Wextra -Wpedantic)
-  if(ORM_WARNINGS_AS_ERRORS)
-    list(APPEND ORM_WARNING_OPTIONS -Werror)
-  endif()
-endif()
-
 add_library(turbo_orm SHARED)
 add_subdirectory(src/abi)
 add_subdirectory(src/flow)
@@ -47,8 +32,6 @@ add_subdirectory(src/runtime)
 add_subdirectory(src/sql)
 add_library(orm_cpp INTERFACE)
 add_subdirectory(driver-sdk)
-target_compile_options(turbo_orm PRIVATE ${ORM_WARNING_OPTIONS})
-target_compile_features(turbo_orm PRIVATE c_std_11)
 target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD
                                              ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(
@@ -76,7 +59,7 @@ endif()
 
 set_target_properties(
   turbo_orm
-  PROPERTIES C_STANDARD_REQUIRED ON
+  PROPERTIES
              LINKER_LANGUAGE C
              C_VISIBILITY_PRESET hidden)
 target_compile_features(orm_cpp INTERFACE cxx_std_17)
@@ -125,3 +108,7 @@ cmake_install_headers(
   include/orm/orm_sqlite.h
   DESTINATION
   ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
+
+if(BUILD_TESTS OR BUILD_E2E_TESTS)
+  add_subdirectory(tests)
+endif()

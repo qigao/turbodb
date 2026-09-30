@@ -1,9 +1,8 @@
 add_executable(turbodb-postgresql main.c)
-target_compile_features(turbodb-postgresql PRIVATE c_std_11)
 target_link_libraries(turbodb-postgresql PRIVATE turbodb_dbtool_core)
 set_target_properties(turbodb-postgresql PROPERTIES FOLDER "dbtools")
 if(MSVC)
-  target_compile_options(turbodb-postgresql PRIVATE /W4 /WX /std:c11)
+  target_compile_options(turbodb-postgresql PRIVATE /W4 /WX)
 else()
   target_compile_options(turbodb-postgresql PRIVATE -Wall -Wextra -Wpedantic
                                                     -Werror)

@@ -14,7 +14,7 @@ set_target_properties(
              SOVERSION ${PROJECT_VERSION_MAJOR})
 
 if(MSVC)
-  target_compile_options(turbodb_dbtool_core PRIVATE /W4 /WX /std:c11)
+  target_compile_options(turbodb_dbtool_core PRIVATE /W4 /WX)
 else()
   target_compile_options(turbodb_dbtool_core PRIVATE -Wall -Wextra -Wpedantic
                                                      -Werror)

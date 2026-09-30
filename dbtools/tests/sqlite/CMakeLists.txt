@@ -8,7 +8,7 @@ if(BUILD_TESTS)
                              PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
   set_target_properties(dbtool_sqlite_test PROPERTIES FOLDER "dbtools/tests")
   if(MSVC)
-    target_compile_options(dbtool_sqlite_test PRIVATE /W4 /WX /std:c11)
+    target_compile_options(dbtool_sqlite_test PRIVATE /W4 /WX)
   else()
     target_compile_options(dbtool_sqlite_test PRIVATE -Wall -Wextra
                                                       -Wpedantic -Werror)

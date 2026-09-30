@@ -108,12 +108,13 @@ ORM 和 CLI 实现。`TurboDB::SchemaABI` 只发布头文件与 Salts Plugin ABI
 schema ABI 头文件安装在 `include/turbodb/schema`，归属 `SchemaABI` component。
 
 ```powershell
+cmake --preset win-release-user
 cmake --build --preset win-release-user
 ctest --preset win-release-user -R "^dbtool_"
-cmake --preset win-release-dbtools-user
-cmake --build --preset win-release-dbtools-user
-ctest --preset win-release-dbtools-user
 ```
+
+Windows 本地构建统一使用 `win-dev-user` / `win-release-user`，按 target 或
+CTest 过滤器选择工具和测试，不再提供独立的 dbtools / PostgreSQL 预设。
 
 测试覆盖原生 SQL 行为、SQLite 事务回滚、PostgreSQL 多结果排空、插件 ABI 和
 契约拒绝、模块身份、lease 与可重试关闭；完整配置还直接消费真实 ORM 驱动。

@@ -7,15 +7,8 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/../drivers/redis)
-target_compile_features(orm_redis_query_test PRIVATE c_std_11)
 
 set_property(TARGET orm_redis_query_test PROPERTY LINKER_LANGUAGE CXX)
-target_compile_options(orm_redis_query_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
-if(MSVC)
-  target_compile_options(orm_redis_query_test
-                         PRIVATE $<$<COMPILE_LANGUAGE:C>:/std:c11>)
-endif()
 
 if(WIN32)
   set_tests_properties(orm_redis_query PROPERTIES ENVIRONMENT_MODIFICATION
@@ -30,7 +23,6 @@ cmake_add_test(
   LIBS turbo_orm Salts::Core
   DEFS "ORM_REDIS_TEST_PLUGIN_PATH=\"$<TARGET_FILE:orm_redis_driver>\""
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_redis_backend_contract_test PRIVATE c_std_11)
 
 add_dependencies(orm_redis_backend_contract_test orm_redis_driver)
 if(WIN32)
@@ -38,10 +30,10 @@ if(WIN32)
 endif()
 if(MSVC)
   target_compile_options(orm_redis_backend_contract_test
-                         PRIVATE /W4 /WX /std:c11 /wd5072)
+                         PRIVATE /WX /wd5072)
 else()
   target_compile_options(orm_redis_backend_contract_test
-                         PRIVATE -Wall -Wextra -Wpedantic -Werror)
+                         PRIVATE -Werror)
 endif()
 
 if(WIN32)

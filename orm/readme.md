@@ -404,10 +404,12 @@ Cross-database ORM cases live in `orm/tests/e2e/cross_driver/`.
 All E2E tests carry the CTest `e2e` label. `BUILD_E2E_TESTS` builds the suites
 for the enabled ORM and dbtools modules, independently of `BUILD_TESTS`.
 
-The PostgreSQL E2E presets set `BUILD_TESTS=OFF` and `BUILD_E2E_TESTS=ON`.
-They build all drivers and filter test execution to the PostgreSQL cases.
-They replace the former `*-pg-live-user` presets. Connection settings are read
-from the environment when the tests run, so building them needs no live server.
+Windows uses `win-dev-user` or `win-release-user` for both ordinary tests and
+E2E builds. To build E2E tests, set `BUILD_E2E_TESTS` to `true` in the selected
+configure preset's `cacheVariables` in `CMakeUserPresets.json`, then configure
+and build with that preset. The default remains OFF. Use CTest labels and names
+to select the tests to run. Connection settings are read from the environment
+when the tests run, so building them needs no live server.
 The ORM tests use `TURBODB_ORM_PGSQL_TEST_CONNINFO`; the dbtools test uses
 `TURBODB_DBTOOLS_PG_TEST_CONNINFO`. Use disposable test databases because these
 tests create and remove test tables.
@@ -415,15 +417,15 @@ tests create and remove test tables.
 ```powershell
 $env:TURBODB_ORM_PGSQL_TEST_CONNINFO = 'host=127.0.0.1 port=5432 dbname=turbodb user=turbodb password=...'
 $env:TURBODB_DBTOOLS_PG_TEST_CONNINFO = $env:TURBODB_ORM_PGSQL_TEST_CONNINFO
-cmake --preset win-release-pg-e2e-user
-cmake --build --preset win-release-pg-e2e-user
-ctest --preset win-release-pg-e2e-user --output-on-failure
+cmake --preset win-release-user
+cmake --build --preset win-release-user
+ctest --preset win-release-user -L e2e -R '^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|orm_sql_validation_parity)$' --output-on-failure
 ```
 
-For dbtools alone, use `win-release-dbtools-pg-e2e-user`. The ordinary
-`win-release-dbtools-pg-user` preset builds and runs its unit tests without a
-database server. MySQL handshake/auth parsing remains a unit test because it
-uses in-memory fixtures.
+To run only the dbtools PostgreSQL E2E case, use the same preset with
+`-L e2e -R '^dbtool_postgresql_live_test$'`. Use `-LE e2e` to run ordinary tests
+when E2E is enabled. MySQL handshake/auth parsing remains a unit test because
+it uses in-memory fixtures.
 
 The cursor and Publisher lifecycle tests use TinyTest; driver boundary tests use
 TinyMock where a native server is unnecessary. TidesDB also has a public

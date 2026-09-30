@@ -6,13 +6,8 @@ cmake_add_test(
   LIBS turbo_orm Salts::CFlow Salts::Platform
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-target_compile_features(orm_redis_live_driver_test PRIVATE c_std_11)
 
 add_dependencies(orm_redis_live_driver_test orm_redis_driver)
-set_target_properties(orm_redis_live_driver_test PROPERTIES C_STANDARD_REQUIRED
-                                                            ON)
-target_compile_options(orm_redis_live_driver_test
-                       PRIVATE ${ORM_TEST_WARNING_OPTIONS})
 
 set_tests_properties(orm_redis_live_driver PROPERTIES LABELS e2e RUN_SERIAL
                                                       TRUE)
