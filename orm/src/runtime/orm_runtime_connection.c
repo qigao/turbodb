@@ -182,10 +182,17 @@ static orm_row_cursor_step runtime_cursor_next(
   }
 }
 
-static void runtime_cursor_cancel(void *context) {
+static orm_status_t runtime_cursor_cancel_checked(void *context, orm_error_t *error) {
   orm_runtime_cursor *cursor = context;
   if (cursor != NULL && cursor->native.context != NULL)
-    cursor->ops.cancel(cursor->native.context);
+    return cursor->ops.cancel(cursor->native.context, error);
+  return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT, "invalid cursor cancellation");
+}
+
+static void runtime_cursor_cancel(void *context) {
+  orm_error_t error;
+  orm_error_init(&error);
+  (void)runtime_cursor_cancel_checked(context, &error);
 }
 
 static void runtime_cursor_destroy(void *context) {
@@ -287,6 +294,9 @@ static orm_status_t runtime_driver_open_cursor(
 
   out_cursor->ops = &runtime_cursor_ops;
   out_cursor->context = cursor;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  out_cursor->cancel_checked = runtime_cursor_cancel_checked;
+#endif
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 

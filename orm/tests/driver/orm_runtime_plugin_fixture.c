@@ -96,9 +96,11 @@ static orm_status_t ORM_DRIVER_CALL fixture_cursor_next(
   return ORM_STATUS_OK;
 }
 
-static void ORM_DRIVER_CALL fixture_cursor_cancel(void *context) {
+static orm_status_t ORM_DRIVER_CALL fixture_cursor_cancel(void *context, orm_error_t *error) {
   fixture_cursor_context *cursor = context;
   if (cursor != NULL && cursor->live) cursor->emitted = 1;
+  fixture_error(error, ORM_STATUS_OK);
+  return ORM_STATUS_OK;
 }
 
 static void ORM_DRIVER_CALL fixture_cursor_destroy(void *context) {

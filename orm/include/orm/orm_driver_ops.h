@@ -121,7 +121,8 @@ typedef struct orm_driver_transaction_ops_v1 {
 typedef struct orm_driver_cursor_ops_v1 {
   orm_driver_header_v1 header;
   orm_driver_next_fn next;
-  orm_driver_cancel_fn cancel;
+  /* Idempotent cancellation reports drain failures without releasing context. */
+  orm_driver_finish_fn cancel;
   orm_driver_destroy_fn destroy;
   orm_driver_shape_fn configure_shape;
   orm_driver_column_count_fn column_count;

@@ -697,10 +697,16 @@ static orm_status_t ORM_DRIVER_CALL bridge_cursor_next(
   return bridge_result(error, ORM_STATUS_OK, NULL);
 }
 
-static void ORM_DRIVER_CALL bridge_cursor_cancel(void *context) {
+static orm_status_t ORM_DRIVER_CALL bridge_cursor_cancel(void *context, orm_error_t *error) {
   bridge_cursor *wrapper = (bridge_cursor *)context;
-  if (wrapper != NULL && bridge_row_cursor_valid(&wrapper->cursor))
-    wrapper->cursor.ops->cancel(wrapper->cursor.context);
+  if (wrapper == NULL || !bridge_row_cursor_valid(&wrapper->cursor))
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT, "invalid cursor cancellation");
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (wrapper->cursor.cancel_checked != NULL)
+    return wrapper->cursor.cancel_checked(wrapper->cursor.context, error);
+#endif
+  wrapper->cursor.ops->cancel(wrapper->cursor.context);
+  return bridge_result(error, ORM_STATUS_OK, NULL);
 }
 
 static void ORM_DRIVER_CALL bridge_cursor_destroy(void *context) {

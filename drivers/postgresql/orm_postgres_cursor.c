@@ -611,6 +611,12 @@ static void orm_postgres_cursor_cancel(void *context) {
     return;
   orm_postgres_drain(state);
   state->terminal = 1;
+  /* Draining ends synchronous connection use, while the Publisher still owns
+   * its query/connection references until destruction. */
+  if (state->config.release_owner != NULL) {
+    state->config.release_owner(state->config.owner);
+    state->config.release_owner = NULL;
+  }
 }
 
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)

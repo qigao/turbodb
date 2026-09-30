@@ -83,7 +83,7 @@ cmake_add_test(
   SOURCES orm_driver_backend_adapter_test.c ../../src/driver/orm_driver_backend_bridge.c
   LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::Core Salts::CSTL Salts::CSerde
     Salts::TinyTest
-  DEFS ORM_C_STATIC
+  DEFS ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/driver)
 target_compile_features(orm_driver_backend_adapter_test PRIVATE c_std_11)

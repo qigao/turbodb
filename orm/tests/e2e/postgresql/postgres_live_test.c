@@ -144,12 +144,15 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
   config.driver = orm_view("postgresql");
   config.options = &option;
   config.option_count = 1u;
-  config.max_result_rows = 1u;
-
   status = orm_runtime_connect(runtime, &config, &connection, error);
   if (status != ORM_STATUS_OK)
     goto cleanup;
   status = orm_test_async_query(connection, error);
+  if (status != ORM_STATUS_OK) goto cleanup;
+  orm_disconnect(connection);
+  connection = NULL;
+  config.max_result_rows = 1u;
+  status = orm_runtime_connect(runtime, &config, &connection, error);
   if (status != ORM_STATUS_OK) goto cleanup;
   status = orm_postgres_live_raw(
       connection,
