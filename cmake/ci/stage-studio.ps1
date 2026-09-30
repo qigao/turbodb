@@ -96,6 +96,9 @@ function Resolve-Dependency([string]$Name) {
   if ($Name -match "^(?i:turbodb_driver_.*\.dll)$") {
     throw "Studio acquired an implicit runtime Driver dependency: $Name"
   }
+  if ($Name -match "^(?i:sqlite3|libpq|libmysql|libmariadb|chttp|libchttp)\.dll$") {
+    throw "provider/client runtime leaked into base Studio closure: $Name"
+  }
 
   $matches = [System.Collections.Generic.List[string]]::new()
   foreach ($root in $allowedRoots) {
@@ -176,6 +179,7 @@ while ($queue.Count -gt 0) {
 $forbidden = Get-ChildItem -LiteralPath $StageDir -File |
   Where-Object {
     $_.Name -match "^(?i:turbodb_driver_.*\.dll)$" -or
+    $_.Name -match "^(?i:sqlite3|libpq|libmysql|libmariadb|chttp|libchttp)\.dll$" -or
     $_.Extension -in @(".lib", ".pdb", ".h", ".hpp", ".c", ".cpp")
   }
 if ($forbidden) {
