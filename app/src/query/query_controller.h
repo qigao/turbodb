@@ -6,6 +6,7 @@
 #include <string>
 #include <thread>
 
+#include <winsock2.h>
 #include <windows.h>
 
 #include "connection/connection_manager.h"
