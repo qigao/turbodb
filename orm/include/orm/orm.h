@@ -127,6 +127,7 @@ typedef struct orm_connection orm_connection_t;
 typedef struct orm_query orm_query_t;
 typedef struct orm_result orm_result_t;
 typedef struct orm_transaction orm_transaction_t;
+typedef struct orm_metadata_snapshot orm_metadata_snapshot_t;
 typedef vstr orm_string_view_t;
 
 typedef struct orm_blob {
@@ -241,6 +242,32 @@ typedef struct orm_command_result {
 #define ORM_COMMAND_RESULT_INIT \
   { sizeof(orm_command_result_t), ORM_C_ABI_VERSION, 0u }
 
+typedef int32_t orm_metadata_kind_t;
+enum {
+  ORM_METADATA_CATALOG = 0,
+  ORM_METADATA_SCHEMA = 1,
+  ORM_METADATA_TABLE = 2,
+  ORM_METADATA_VIEW = 3,
+  ORM_METADATA_COLUMN = 4,
+  ORM_METADATA_INDEX = 5
+};
+
+typedef struct orm_metadata_entry {
+  uint32_t struct_size;
+  orm_metadata_kind_t kind;
+  uint32_t ordinal;
+  uint32_t reserved;
+  orm_string_view_t catalog;
+  orm_string_view_t schema;
+  orm_string_view_t relation;
+  orm_string_view_t name;
+} orm_metadata_entry_t;
+
+#define ORM_METADATA_ENTRY_INIT \
+  { sizeof(orm_metadata_entry_t), ORM_METADATA_CATALOG, 0u, 0u, \
+    {NULL, 0u}, {NULL, 0u}, {NULL, 0u}, {NULL, 0u} }
+
+
 ORM_C_API uint32_t ORM_C_CALL orm_c_abi_version(void);
 ORM_C_API const char *ORM_C_CALL orm_status_message(orm_status_t status);
 ORM_C_API void ORM_C_CALL orm_error_init(orm_error_t *error);
@@ -284,6 +311,28 @@ orm_connection_retain(orm_connection_t *connection);
 ORM_C_API void ORM_C_CALL orm_connection_release(
     orm_connection_t *connection);
 ORM_C_API void ORM_C_CALL orm_disconnect(orm_connection_t *connection);
+
+/*
+ * Returns one bounded, owned metadata snapshot for the active SQL connection.
+ * Provider-specific discovery remains inside TurboDB. Unsupported providers
+ * return ORM_STATUS_UNSUPPORTED without attempting a fallback.
+ *
+ * Entry string views remain valid until orm_metadata_snapshot_destroy().
+ * The total entry count and copied string bytes are bounded by the connection's
+ * max_result_rows and max_result_bytes limits.
+ */
+ORM_C_API orm_status_t ORM_C_CALL orm_connection_metadata_snapshot(
+    orm_connection_t *connection, orm_metadata_snapshot_t **out_snapshot,
+    orm_error_t *error);
+ORM_C_API void ORM_C_CALL orm_metadata_snapshot_destroy(
+    orm_metadata_snapshot_t *snapshot);
+ORM_C_API orm_status_t ORM_C_CALL orm_metadata_snapshot_count(
+    const orm_metadata_snapshot_t *snapshot, uint64_t *out_count,
+    orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_metadata_snapshot_get(
+    const orm_metadata_snapshot_t *snapshot, uint64_t index,
+    orm_metadata_entry_t *out_entry, orm_error_t *error);
+
 
 ORM_C_API orm_status_t ORM_C_CALL orm_transaction_begin(
     orm_connection_t *connection, orm_isolation_t isolation,
