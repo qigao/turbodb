@@ -30,6 +30,8 @@ if(TURBODB_BUILD_ORM OR
 endif()
 if(TURBODB_BUILD_APP)
   list(APPEND VCPKG_MANIFEST_FEATURES app)
+  list(APPEND VCPKG_OVERLAY_PORTS
+       "${CMAKE_CURRENT_LIST_DIR}/app/vcpkg-ports")
 endif()
 
 option(ENABLE_SANITIZER_ADDRESS "Enable AddressSanitizer" OFF)
