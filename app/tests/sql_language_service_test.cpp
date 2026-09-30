@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <orm_runtime.h>
+
 #include "explorer/schema_explorer_model.h"
 #include "language/sql_language_service.h"
 #include "workspace/sql_workspace_session.h"
@@ -16,6 +18,118 @@ bool Contains(const std::vector<std::string>& values, const std::string& value) 
 int Fail(const char* message) {
   std::cerr << message << '\n';
   return 1;
+}
+
+bool ExecuteSql(orm_connection_t* connection, const char* sql,
+                orm_error_t* error) {
+  orm_query_t* query = nullptr;
+  orm_result_t* result = nullptr;
+  if (orm_raw(connection, orm_view(sql), &query, error) != ORM_STATUS_OK)
+    return false;
+  const bool ok =
+      orm_query_execute(query, &result, error) == ORM_STATUS_OK;
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+  return ok;
+}
+
+bool SqliteMetadataSmoke() {
+  orm_error_t error;
+  orm_error_init(&error);
+
+  orm_runtime_config_t runtime_config;
+  orm_runtime_config_init(&runtime_config);
+  orm_runtime_t* runtime = nullptr;
+  if (orm_runtime_create(&runtime_config, &runtime, &error) != ORM_STATUS_OK)
+    return false;
+
+  orm_driver_load_config_t load{};
+  load.struct_size = static_cast<uint32_t>(sizeof(load));
+  load.abi_version = ORM_RUNTIME_ABI_VERSION;
+  load.module_path = orm_view(TURBODB_APP_SQLITE_PLUGIN_PATH);
+  load.expected_driver_id = orm_view("sqlite");
+  if (orm_runtime_load_driver(runtime, &load, &error) != ORM_STATUS_OK) {
+    orm_runtime_release(runtime);
+    return false;
+  }
+
+  orm_config_t config;
+  orm_config(&config);
+  orm_option_t filename{orm_view("filename"), orm_view(":memory:")};
+  config.driver = orm_view("sqlite");
+  config.options = &filename;
+  config.option_count = 1u;
+
+  orm_connection_t* connection = nullptr;
+  bool ok = orm_runtime_connect(runtime, &config, &connection, &error) ==
+            ORM_STATUS_OK;
+  if (ok)
+    ok = ExecuteSql(
+        connection,
+        "create table users(id integer primary key, name text not null)",
+        &error);
+  if (ok)
+    ok = ExecuteSql(connection,
+                    "create view user_names as select name from users",
+                    &error);
+
+  orm_metadata_snapshot_t* snapshot = nullptr;
+  if (ok)
+    ok = orm_connection_metadata_snapshot(connection, &snapshot, &error) ==
+         ORM_STATUS_OK;
+
+  bool saw_main = false;
+  bool saw_table = false;
+  bool saw_view = false;
+  bool saw_id = false;
+  bool saw_name = false;
+  uint64_t count = 0u;
+  if (ok)
+    ok = orm_metadata_snapshot_count(snapshot, &count, &error) == ORM_STATUS_OK;
+  for (uint64_t i = 0u; ok && i < count; ++i) {
+    orm_metadata_entry_t entry = ORM_METADATA_ENTRY_INIT;
+    if (orm_metadata_snapshot_get(snapshot, i, &entry, &error) !=
+        ORM_STATUS_OK) {
+      ok = false;
+      break;
+    }
+    const std::string catalog =
+        entry.catalog.data == nullptr
+            ? std::string{}
+            : std::string(static_cast<const char*>(entry.catalog.data),
+                          entry.catalog.len);
+    const std::string relation =
+        entry.relation.data == nullptr
+            ? std::string{}
+            : std::string(static_cast<const char*>(entry.relation.data),
+                          entry.relation.len);
+    const std::string name =
+        entry.name.data == nullptr
+            ? std::string{}
+            : std::string(static_cast<const char*>(entry.name.data),
+                          entry.name.len);
+    saw_main = saw_main ||
+               (entry.kind == ORM_METADATA_CATALOG && name == "main");
+    saw_table = saw_table ||
+                (entry.kind == ORM_METADATA_TABLE && catalog == "main" &&
+                 name == "users");
+    saw_view = saw_view ||
+               (entry.kind == ORM_METADATA_VIEW && catalog == "main" &&
+                name == "user_names");
+    saw_id = saw_id ||
+             (entry.kind == ORM_METADATA_COLUMN && catalog == "main" &&
+              relation == "users" && name == "id" && entry.ordinal == 0u);
+    saw_name = saw_name ||
+               (entry.kind == ORM_METADATA_COLUMN && catalog == "main" &&
+                relation == "users" && name == "name" && entry.ordinal == 1u);
+  }
+
+  orm_metadata_snapshot_destroy(snapshot);
+  orm_disconnect(connection);
+  if (orm_runtime_close(runtime, &error) != ORM_STATUS_OK) ok = false;
+  orm_runtime_release(runtime);
+
+  return ok && saw_main && saw_table && saw_view && saw_id && saw_name;
 }
 
 }  // namespace
@@ -128,6 +242,10 @@ int main() {
   session.SetCatalog("otherdb");
   if (!session.schema().empty() || !session.relation().empty()) {
     return Fail("catalog selection must clear deeper workspace context");
+  }
+
+  if (!SqliteMetadataSmoke()) {
+    return Fail("SQLite provider-neutral metadata snapshot smoke failed");
   }
 
   return 0;
