@@ -54,6 +54,12 @@ int main() {
     return Fail("qualified column metadata must participate in completion");
   }
 
+  const auto schema_column_completion = language.Complete(session, "app.users.");
+  if (!Contains(schema_column_completion, "app.users.id") ||
+      !Contains(schema_column_completion, "app.users.email")) {
+    return Fail("schema-qualified columns must participate in completion");
+  }
+
   session.SetConnection(
       {77u, SqlProvider::postgresql, 0xaau, "local-postgresql"});
   if (!session.catalog().empty() || !session.schema().empty() ||
