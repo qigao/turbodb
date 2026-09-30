@@ -14,12 +14,16 @@
 typedef struct orm_row_publisher_state {
   orm_row_cursor cursor;
   const cmeta_data_desc *row_shape;
+  const cmeta_type_desc *output_type;
   DataBindNativeOptions bind_options;
   const DataBindMessagePlan *message_plan;
+  orm_object_row_factory_t object_factory;
+  const DataBindMessageObjectStateProvider *object_state_provider;
   void *scratch;
   size_t max_buffer_bytes;
   cflow_publisher_terminal terminal;
   int cancelled;
+  int object_mode;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   orm_native_cleanup native_cleanup;
 #endif
@@ -124,7 +128,7 @@ static const char *orm_row_publisher_name(void *state_) {
 static const cmeta_type_desc *orm_row_publisher_output_type(void *state_) {
   const orm_row_publisher_state *state =
       (const orm_row_publisher_state *)state_;
-  return state->row_shape->storage_type;
+  return state->output_type;
 }
 
 static void orm_row_publisher_cancel_cursor(orm_row_publisher_state *state) {
@@ -227,7 +231,56 @@ static cflow_step orm_row_publisher_resume_admitted(
                                    "driver returned an invalid cursor step");
   }
 
-  if (state->message_plan != NULL) {
+  if (state->object_mode) {
+    cmeta_object_ref object = CMETA_OBJECT_REF_INIT;
+    orm_error_t factory_error;
+    DataBindMessagePlanDiagnostic diagnostic =
+        DATA_BIND_MESSAGE_PLAN_DIAGNOSTIC_INIT;
+    orm_status_t factory_status;
+
+    orm_error_init(&factory_error);
+    factory_status = state->object_factory.create(
+        state->object_factory.context, out_value, &object, &factory_error);
+    if (factory_status != ORM_STATUS_OK) {
+      return orm_row_publisher_fail(
+          state, factory_status,
+          factory_error.message[0] != '\0'
+              ? factory_error.message
+              : "object row factory create failed");
+    }
+
+    if (!cmeta_object_ref_valid(&object) ||
+        !cmeta_data_desc_equal(object.data, state->row_shape)) {
+      if (cmeta_object_ref_valid(&object))
+        cmeta_object_release(&object);
+      state->object_factory.destroy(
+          state->object_factory.context, out_value);
+      return orm_row_publisher_fail(
+          state, ORM_STATUS_TYPE_ERROR,
+          "object row factory returned an incompatible CMeta object");
+    }
+
+    bind_status = data_bind_message_plan_decode_object(
+        state->message_plan, &state->bind_options, &reader, &object,
+        state->object_state_provider, &diagnostic);
+    cmeta_object_release(&object);
+
+    if (bind_status != DATA_BIND_OK) {
+      char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+      state->object_factory.destroy(
+          state->object_factory.context, out_value);
+      (void)snprintf(
+          message, sizeof(message),
+          bind_status == DATA_BIND_ERR_VALIDATION
+              ? "row validation failed: databind=%d field=%s detail=%s"
+              : "row binding failed: databind=%d field=%s detail=%s",
+          (int)bind_status,
+          diagnostic.schema_field[0] != '\0' ? diagnostic.schema_field : "-",
+          diagnostic.message[0] != '\0' ? diagnostic.message : "-");
+      return orm_row_publisher_fail(
+          state, orm_row_status_to_orm(bind_status), message);
+    }
+  } else if (state->message_plan != NULL) {
     DataBindMessagePlanDiagnostic diagnostic =
         DATA_BIND_MESSAGE_PLAN_DIAGNOSTIC_INIT;
     bind_status = data_bind_message_plan_decode_native(
@@ -393,6 +446,103 @@ void orm_row_publisher_prepared_destroy(orm_row_publisher_prepared *prepared) {
   }
 }
 
+static int orm_object_row_factory_valid(
+    const orm_object_row_factory_t *factory) {
+  return factory != NULL &&
+         factory->struct_size >= sizeof(*factory) &&
+         factory->abi_version == ORM_C_ABI_VERSION &&
+         factory->output_type != NULL &&
+         cmeta_type_desc_valid(factory->output_type) &&
+         factory->output_type->size != 0u &&
+         factory->create != NULL &&
+         factory->destroy != NULL;
+}
+
+static orm_status_t orm_row_publisher_prepare_object(
+    const orm_row_publisher_config *config,
+    orm_row_publisher_prepared **out_prepared,
+    orm_error_t *error) {
+  orm_row_publisher_state *state = NULL;
+  DataBindNativeOptions options = DATA_BIND_NATIVE_OPTIONS_INIT;
+  const cmeta_data_desc *plan_data;
+  size_t bitmap_bytes;
+
+  if (!orm_object_row_factory_valid(config->object_factory) ||
+      config->message_plan == NULL ||
+      config->scratch_bytes == 0u ||
+      config->max_depth == 0u ||
+      config->max_depth == SIZE_MAX) {
+    orm_row_set_error(
+        error, ORM_STATUS_INVALID_ARGUMENT,
+        "invalid provider-backed object row configuration");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+
+  plan_data = data_bind_message_plan_object_data(config->message_plan);
+  if (plan_data == NULL ||
+      !cmeta_data_desc_equal(plan_data, config->row_shape)) {
+    orm_row_set_error(
+        error, ORM_STATUS_TYPE_ERROR,
+        "DataBind MessagePlan object shape does not match ORM row_shape");
+    return ORM_STATUS_TYPE_ERROR;
+  }
+
+  {
+    const size_t field_count =
+        data_bind_message_plan_field_count(config->message_plan);
+    if (field_count > SIZE_MAX - 7u) {
+      orm_row_set_error(
+          error, ORM_STATUS_LIMIT_EXCEEDED,
+          "DataBind MessagePlan field bitmap overflow");
+      return ORM_STATUS_LIMIT_EXCEEDED;
+    }
+    bitmap_bytes = (field_count + 7u) / 8u;
+    if (bitmap_bytes > config->scratch_bytes) {
+      orm_row_set_error(
+          error, ORM_STATUS_LIMIT_EXCEEDED,
+          "object row scratch cannot hold field-state bitmap");
+      return ORM_STATUS_LIMIT_EXCEEDED;
+    }
+  }
+
+  state = (orm_row_publisher_state *)calloc(1u, sizeof(*state));
+  if (state == NULL) {
+    orm_row_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+
+  state->scratch = calloc(1u, config->scratch_bytes);
+  if (state->scratch == NULL) {
+    free(state);
+    orm_row_set_error(error, ORM_STATUS_OUT_OF_MEMORY, NULL);
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+
+  options.workspace = state->scratch;
+  options.workspace_bytes = config->scratch_bytes;
+  options.max_depth = config->max_depth + 1u;
+  options.max_items = config->max_container_items;
+  options.max_owned_bytes = config->max_buffer_bytes;
+
+  state->bind_options = options;
+  state->message_plan = config->message_plan;
+  state->object_factory = *config->object_factory;
+  state->object_state_provider = config->object_state_provider;
+  state->row_shape = config->row_shape;
+  state->output_type = config->object_factory->output_type;
+  state->max_buffer_bytes = config->max_buffer_bytes;
+  state->object_mode = 1;
+  state->terminal = CFLOW_PUBLISHER_OPEN;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  state->native_cleanup.run = orm_row_publisher_run_cleanup;
+  state->native_cleanup.finish = orm_row_publisher_finish_cleanup;
+  state->native_cleanup.context = state;
+#endif
+  *out_prepared = state;
+  orm_row_set_error(error, ORM_STATUS_OK, NULL);
+  return ORM_STATUS_OK;
+}
+
 orm_status_t orm_row_publisher_prepare(
     const orm_row_publisher_config *config,
     orm_row_publisher_prepared **out_prepared, orm_error_t *error) {
@@ -412,6 +562,8 @@ orm_status_t orm_row_publisher_prepare(
                       "invalid DataBind source configuration");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
+  if (config->object_factory != NULL)
+    return orm_row_publisher_prepare_object(config, out_prepared, error);
   if (config->message_plan != NULL) {
     const size_t field_count =
         data_bind_message_plan_field_count(config->message_plan);
@@ -503,6 +655,7 @@ orm_status_t orm_row_publisher_prepare(
   state->message_plan = config->message_plan;
   state->max_buffer_bytes = config->max_buffer_bytes;
   state->row_shape = config->row_shape;
+  state->output_type = config->row_shape->storage_type;
   state->terminal = CFLOW_PUBLISHER_OPEN;
 #if defined(ORM_NATIVE_OWNER_CANDIDATE)
   state->native_cleanup.run = orm_row_publisher_run_cleanup;
