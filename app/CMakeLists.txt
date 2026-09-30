@@ -57,6 +57,10 @@ add_executable(
   src/editor/scintilla_runtime.h
   src/editor/sql_editor.cpp
   src/editor/sql_editor.h
+  src/explorer/schema_explorer_model.cpp
+  src/explorer/schema_explorer_model.h
+  src/explorer/schema_explorer_view.cpp
+  src/explorer/schema_explorer_view.h
   src/language/sql_language_service.cpp
   src/language/sql_language_service.h
   src/workspace/sql_workspace_session.h)
@@ -92,6 +96,8 @@ add_executable(
   turbodb-app-language-test
   EXCLUDE_FROM_ALL
   tests/sql_language_service_test.cpp
+  src/explorer/schema_explorer_model.cpp
+  src/explorer/schema_explorer_model.h
   src/language/sql_language_service.cpp
   src/language/sql_language_service.h
   src/workspace/sql_workspace_session.h)
@@ -100,4 +106,5 @@ target_include_directories(
   turbodb-app-language-test
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(turbodb-app-language-test PRIVATE Orm::C)
 set_target_properties(turbodb-app-language-test PROPERTIES FOLDER "app/tests")
