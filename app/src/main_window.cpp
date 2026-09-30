@@ -9,8 +9,6 @@ namespace {
 
 constexpr DWORD kSplitterStyle =
     WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-constexpr DWORD kPlaceholderStyle =
-    WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE;
 constexpr DWORD kEditorStyle =
     WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
 
