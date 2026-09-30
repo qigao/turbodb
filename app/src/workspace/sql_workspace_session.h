@@ -55,6 +55,7 @@ class SqlWorkspaceSession {
     connection_ = std::move(connection);
     catalog_.clear();
     schema_.clear();
+    relation_.clear();
     relations_.clear();
     execution_state_ = WorkspaceExecutionState::idle;
   }
@@ -63,15 +64,29 @@ class SqlWorkspaceSession {
     connection_.reset();
     catalog_.clear();
     schema_.clear();
+    relation_.clear();
     relations_.clear();
     execution_state_ = WorkspaceExecutionState::idle;
   }
 
   const std::string& catalog() const noexcept { return catalog_; }
   const std::string& schema() const noexcept { return schema_; }
+  const std::string& relation() const noexcept { return relation_; }
 
-  void SetCatalog(std::string catalog) { catalog_ = std::move(catalog); }
-  void SetSchema(std::string schema) { schema_ = std::move(schema); }
+  void SetCatalog(std::string catalog) {
+    catalog_ = std::move(catalog);
+    schema_.clear();
+    relation_.clear();
+  }
+
+  void SetSchema(std::string schema) {
+    schema_ = std::move(schema);
+    relation_.clear();
+  }
+
+  void SetRelation(std::string relation) {
+    relation_ = std::move(relation);
+  }
 
   const std::vector<RelationMetadata>& relations() const noexcept {
     return relations_;
@@ -96,6 +111,7 @@ class SqlWorkspaceSession {
   std::optional<WorkspaceConnectionIdentity> connection_;
   std::string catalog_;
   std::string schema_;
+  std::string relation_;
   std::vector<RelationMetadata> relations_;
   WorkspaceExecutionState execution_state_ = WorkspaceExecutionState::idle;
 };
