@@ -16,6 +16,8 @@ constexpr UINT kExplorerSelectionChanged = WM_APP + 0x120;
 
 class SchemaExplorerView final : public CWindowImpl<SchemaExplorerView> {
  public:
+  static constexpr UINT kTreeControlId = 4101u;
+
   DECLARE_WND_CLASS_EX(L"TurboDBStudioSchemaExplorer", CS_DBLCLKS,
                        COLOR_WINDOW)
 
@@ -30,8 +32,6 @@ class SchemaExplorerView final : public CWindowImpl<SchemaExplorerView> {
   void Refresh();
 
  private:
-  static constexpr UINT kTreeControlId = 4101u;
-
   LRESULT OnCreate(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnSize(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnSelectionChanged(int id_ctrl, LPNMHDR header, BOOL& handled);
