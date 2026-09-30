@@ -2,7 +2,7 @@
 
 include(CMakeFindDependencyMacro)
 set(_TurboDB_PREFIX "${PACKAGE_PREFIX_DIR}")
-find_dependency(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+find_dependency(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 if(@TURBODB_BUILD_ORM@)
   # The static MySQL client needs the producer's Crypto library at link time.
   # Resolve the bundled package rather than requiring a consumer SSL install.
