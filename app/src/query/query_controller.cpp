@@ -125,14 +125,8 @@ void QueryController::Run(std::uint64_t request_id,
   orm_query_t* query = nullptr;
   orm_result_t* result = nullptr;
 
-  orm_status_t status =
-      orm_raw(connection, orm_view_tstr(nullptr), &query, &error);
-  if (status == ORM_STATUS_OK) {
-    orm_query_destroy(query);
-    query = nullptr;
-  }
   const orm_string_view_t sql_view{sql.data(), sql.size()};
-  status = orm_raw(connection, sql_view, &query, &error);
+  orm_status_t status = orm_raw(connection, sql_view, &query, &error);
   if (status == ORM_STATUS_OK)
     status = orm_query_execute(query, &result, &error);
 
