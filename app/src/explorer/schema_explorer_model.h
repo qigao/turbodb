@@ -41,6 +41,7 @@ struct ExplorerNode {
 
 class SchemaExplorerModel {
  public:
+  void Clear() noexcept;
   bool Replace(const WorkspaceConnectionIdentity& connection,
                const std::vector<SchemaMetadataRecord>& records,
                std::string* error);
