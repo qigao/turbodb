@@ -1221,6 +1221,17 @@ orm_status_t orm_connect_with_factory_context_v1(
     return ORM_STATUS_OUT_OF_MEMORY;
   }
   status = orm_limits_from_config(config, &connection->limits, error);
+  if (status == ORM_STATUS_OK) {
+    if (!orm_view_valid(config->driver, false) ||
+        config->driver.len > ORM_DRIVER_ID_MAX_BYTES) {
+      status = ORM_STATUS_INVALID_ARGUMENT;
+      orm_error_set(error, status, "invalid ORM driver id");
+    } else {
+      connection->driver_id_size = (uint32_t)config->driver.len;
+      memcpy(connection->driver_id, config->driver.data, config->driver.len);
+      connection->driver_id[config->driver.len] = '\0';
+    }
+  }
   if (status == ORM_STATUS_OK)
     status = factory(config, &connection->limits, factory_context,
                      &connection->backend, error);
