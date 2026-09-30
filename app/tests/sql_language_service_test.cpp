@@ -96,7 +96,7 @@ int main() {
   if (!explorer.Replace(identity, records, &explorer_error)) {
     return Fail("schema explorer model rejected valid metadata");
   }
-  if (explorer.nodes().size() != 7u || explorer.relations().size() != 2u) {
+  if (explorer.nodes().size() != 8u || explorer.relations().size() != 2u) {
     return Fail("schema explorer model shape mismatch");
   }
 
