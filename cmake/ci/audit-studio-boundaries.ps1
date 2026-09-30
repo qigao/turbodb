@@ -20,7 +20,7 @@ function Get-DependencyName($Dependency) {
 function Assert-GitGrepEmpty([string]$Pattern, [string[]]$Paths, [string]$Reason) {
   Push-Location $RepositoryRoot
   try {
-    $args = @("grep", "-n", "-I", "-E", $Pattern, "--") + $Paths
+    $args = @("grep", "-n", "-I", "-i", "-E", $Pattern, "--") + $Paths
     $output = & git @args 2>&1
     $code = $LASTEXITCODE
     if ($code -eq 0) {
@@ -65,19 +65,19 @@ if ($options -notmatch '(?s)if\(TURBODB_BUILD_APP\).*?list\(APPEND VCPKG_MANIFES
 }
 
 $appCMake = Get-Content -LiteralPath (Join-Path $RepositoryRoot "app/CMakeLists.txt") -Raw
-if ($appCMake -match '(?i)chttp') {
+if ($appCMake -match 'chttp') {
   throw "Studio CMake must not acquire a mandatory chttp dependency"
 }
 
-Assert-GitGrepEmpty '(?i)(scintilla|lexilla|atlapp\.h|turbodb_app_editor_deps)' `
+Assert-GitGrepEmpty '(scintilla|lexilla|atlapp\.h|turbodb_app_editor_deps)' `
   @("orm", "dbtools", "drivers", "mysql", "redis", "tidesdb") `
   "GUI dependencies leaked outside the app boundary"
 
-Assert-GitGrepEmpty '(?i)(#\s*include\s*[<"](sqlite3\.h|libpq-fe\.h|mysql\.h|mysql/mysql\.h)[>"])' `
+Assert-GitGrepEmpty '(#\s*include\s*[<"](sqlite3\.h|libpq-fe\.h|mysql\.h|mysql/mysql\.h)[>"])' `
   @("app/src", "app/tests") `
   "Studio code must not include provider-native database client headers"
 
-Assert-GitGrepEmpty '(?i)(EXPLAIN QUERY PLAN|EXPLAIN \(FORMAT|EXPLAIN \(ANALYZE|information_schema|pg_catalog|sqlite_master)' `
+Assert-GitGrepEmpty '(EXPLAIN QUERY PLAN|EXPLAIN \(FORMAT|EXPLAIN \(ANALYZE|information_schema|pg_catalog|sqlite_master)' `
   @("app/src", "app/tests") `
   "Studio code must not construct provider-specific SQL"
 
