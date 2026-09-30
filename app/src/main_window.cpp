@@ -1,5 +1,8 @@
 #include "main_window.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace turbodb::app {
 
 namespace {
@@ -33,7 +36,8 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
     return -1;
   }
 
-  editor_.Bind(&editor_runtime_, &workspace_session_, &language_service_);
+  editor_.Bind(&editor_runtime_, &workspace_session_, &language_service_,
+               m_hWnd);
   if (editor_.Create(query_splitter_, client, nullptr, kEditorStyle) ==
       nullptr) {
     return -1;
@@ -43,15 +47,15 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
     return -1;
   }
 
-  if (result_placeholder_.Create(query_splitter_, client, L"Results",
-                                 kPlaceholderStyle) == nullptr) {
+  if (result_view_.Create(query_splitter_, client, nullptr,
+                          kSplitterStyle) == nullptr) {
     return -1;
   }
 
   workspace_splitter_.SetSplitterPanes(explorer_, query_splitter_);
   workspace_splitter_.SetSplitterPosPct(24);
 
-  query_splitter_.SetSplitterPanes(editor_, result_placeholder_);
+  query_splitter_.SetSplitterPanes(editor_, result_view_);
   query_splitter_.SetSplitterPosPct(64);
 
   return 0;
@@ -86,6 +90,10 @@ bool MainWindow::OpenConnection(const ConnectionProfile& profile,
 }
 
 bool MainWindow::CloseActiveConnection(std::string* error) {
+  if (query_controller_.busy()) {
+    if (error != nullptr) *error = "cannot close connection while SQL is running";
+    return false;
+  }
   const auto& identity = workspace_session_.connection();
   if (!identity.has_value()) return true;
   const std::uint64_t id = identity->id;
@@ -108,6 +116,49 @@ LRESULT MainWindow::OnSize(UINT, WPARAM, LPARAM lparam, BOOL &) {
 
 LRESULT MainWindow::OnExplorerSelectionChanged(UINT, WPARAM, LPARAM, BOOL&) {
   (void)editor_.RefreshLanguage();
+  return 0;
+}
+
+LRESULT MainWindow::OnSqlExecuteRequested(UINT, WPARAM, LPARAM, BOOL&) {
+  const auto& identity = workspace_session_.connection();
+  if (!identity.has_value()) {
+    result_view_.ShowError("Open a TurboDB connection before executing SQL.");
+    return 0;
+  }
+
+  std::string sql = editor_.SelectedText();
+  if (sql.empty()) sql = editor_.Text();
+  const bool has_content = std::any_of(
+      sql.begin(), sql.end(),
+      [](unsigned char ch) { return std::isspace(ch) == 0; });
+  if (!has_content) {
+    result_view_.ShowError("SQL text is empty.");
+    return 0;
+  }
+
+  std::string error;
+  std::uint64_t request_id = 0u;
+  if (!query_controller_.Execute(identity->id, std::move(sql), m_hWnd,
+                                 &request_id, &error)) {
+    result_view_.ShowError(error);
+    return 0;
+  }
+
+  active_request_id_ = request_id;
+  workspace_session_.SetExecutionState(WorkspaceExecutionState::running);
+  result_view_.SetRunning(request_id);
+  return 0;
+}
+
+LRESULT MainWindow::OnQueryExecutionCompleted(UINT, WPARAM wparam, LPARAM,
+                                              BOOL&) {
+  const std::uint64_t request_id = static_cast<std::uint64_t>(wparam);
+  auto result = query_controller_.TakeCompleted(request_id);
+  if (!result) return 0;
+
+  if (active_request_id_ == request_id) active_request_id_ = 0u;
+  workspace_session_.SetExecutionState(WorkspaceExecutionState::idle);
+  result_view_.Render(*result);
   return 0;
 }
 
