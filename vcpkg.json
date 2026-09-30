@@ -33,6 +33,14 @@
           ]
         }
       ]
+    },
+    "app": {
+      "description": "Build the optional TurboDB Studio Windows desktop application",
+      "dependencies": [
+        "wtl",
+        "scintilla",
+        "lexilla"
+      ]
     }
   },
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01",
