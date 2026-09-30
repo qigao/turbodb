@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <PackageId>TurboDB.Driver.PostgreSQL.Native</PackageId>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">1.0.2</PackageVersion>
+    <Authors>qigao</Authors>
+    <Description>Prebuilt canonical TurboDB PostgreSQL runtime Driver MODULE for Linux x64 and Windows x64.</Description>
+    <PackageTags>turbodb;orm;postgresql;driver;plugin;native;c;cpp</PackageTags>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>PostgreSQLDriver.README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/qigao/turbodb</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="TurboDB.Native" Version="*" />
+    <None Include="PostgreSQLDriver.README.md" Pack="true" PackagePath="\" />
+    <None Include="$(PackageRoot)/sdk/**/*" Pack="true" PackagePath="sdk/" />
+  </ItemGroup>
+</Project>
