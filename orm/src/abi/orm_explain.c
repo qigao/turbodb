@@ -364,9 +364,16 @@ static void explain_parse_text_fields(const char *text,
 
   using_pos = strstr(cursor, " using ");
   const char *on_pos = strstr(cursor, " on ");
-  if (using_pos != NULL && on_pos != NULL && using_pos < on_pos) {
+  if (using_pos != NULL) {
     const char *begin = using_pos + strlen(" using ");
-    node->index_name = explain_subview(begin, on_pos);
+    const char *end = begin;
+    if (on_pos != NULL && using_pos < on_pos) {
+      end = on_pos;
+    } else {
+      while (*end != '\0' && !isspace((unsigned char)*end) && *end != '(')
+        ++end;
+    }
+    node->index_name = explain_subview(begin, end);
   }
   if (on_pos != NULL) {
     const char *begin = on_pos + strlen(" on ");
@@ -700,24 +707,31 @@ static orm_status_t explain_load_mysql_plan(
       }
     }
 
-    char raw[1024];
-    const int written = snprintf(
-        raw, sizeof(raw), "%.*s\t%.*s\t%.*s\t%.*s\t%.*s",
-        (int)select_value.len,
-        select_value.data != NULL ? (const char *)select_value.data : "",
-        (int)access_value.len,
-        access_value.data != NULL ? (const char *)access_value.data : "",
-        (int)table_value.len,
-        table_value.data != NULL ? (const char *)table_value.data : "",
-        (int)key_value.len,
-        key_value.data != NULL ? (const char *)key_value.data : "",
-        (int)extra_value.len,
-        extra_value.data != NULL ? (const char *)extra_value.data : "");
-    if (written < 0 || (size_t)written >= sizeof(raw))
-      return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
-                          "MySQL EXPLAIN row exceeds raw-detail buffer");
-    const orm_string_view_t raw_view = {raw, (size_t)written};
+    const orm_string_view_t fields[] = {
+        select_value, access_value, table_value, key_value, extra_value};
+    size_t raw_size = 4u;
+    for (size_t field = 0u; field < sizeof(fields) / sizeof(fields[0]); ++field) {
+      if (fields[field].len > SIZE_MAX - raw_size)
+        return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
+                            "MySQL EXPLAIN row exceeds platform range");
+      raw_size += fields[field].len;
+    }
+    char *raw = (char *)malloc(raw_size + 1u);
+    if (raw == NULL)
+      return explain_fail(error, ORM_STATUS_OUT_OF_MEMORY,
+                          "allocate MySQL EXPLAIN raw row");
+    size_t offset = 0u;
+    for (size_t field = 0u; field < sizeof(fields) / sizeof(fields[0]); ++field) {
+      if (field != 0u) raw[offset++] = '\t';
+      if (fields[field].len != 0u) {
+        memcpy(raw + offset, fields[field].data, fields[field].len);
+        offset += fields[field].len;
+      }
+    }
+    raw[offset] = '\0';
+    const orm_string_view_t raw_view = {raw, offset};
     status = explain_append_raw(plan, raw_view, error);
+    free(raw);
     if (status != ORM_STATUS_OK) return status;
     status = explain_add_node(plan, &node, error);
     if (status != ORM_STATUS_OK) return status;
