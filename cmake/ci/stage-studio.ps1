@@ -33,8 +33,6 @@ function Require-File([string]$Path, [string]$Role) {
 
 $StudioExe = Require-File $StudioExe "Studio executable"
 $VcpkgBin = Require-Directory $VcpkgBin "vcpkg runtime"
-$SaltsBin = Require-Directory $SaltsBin "Salts runtime"
-$SaltsUtilsBin = Require-Directory $SaltsUtilsBin "SaltsUtils runtime"
 
 if ([string]::IsNullOrWhiteSpace($env:VSINSTALL)) {
   throw "VSINSTALL is required to locate dumpbin.exe"
@@ -52,13 +50,16 @@ $dumpbin = Require-File $dumpbin "dumpbin"
 
 $buildBin = Split-Path -Parent $StudioExe
 $system32 = Require-Directory (Join-Path $env:SystemRoot "System32") "Windows System32"
-$searchDirs = @(
-  $buildBin,
-  $VcpkgBin,
-  $SaltsBin,
-  $SaltsUtilsBin,
-  $system32
-)
+$searchDirs = @($buildBin, $VcpkgBin)
+foreach ($candidate in @($SaltsBin, $SaltsUtilsBin)) {
+  if (-not [string]::IsNullOrWhiteSpace($candidate) -and
+      (Test-Path -LiteralPath $candidate -PathType Container)) {
+    $searchDirs += (Resolve-Path -LiteralPath $candidate).Path
+  } else {
+    Write-Host "Optional runtime search directory is absent: $candidate"
+  }
+}
+$searchDirs += $system32
 
 if (Test-Path -LiteralPath $StageDir) {
   Remove-Item -LiteralPath $StageDir -Recurse -Force
@@ -151,10 +152,19 @@ while ($queue.Count -ne 0) {
   }
 }
 
-$unexpectedDrivers = Get-ChildItem -LiteralPath $stageBin -Filter "turbodb_driver_*.dll" -File
+$unexpectedDrivers = @(Get-ChildItem -LiteralPath $stageBin -Filter "turbodb_driver_*.dll" -File)
 if ($unexpectedDrivers.Count -ne 0) {
   throw "Driver plugins must not be bundled in the base Studio package"
 }
+
+@"
+TurboDB Studio does not bundle database Driver plugins.
+
+Deploy only the Driver plugins your installation requires under an explicit
+TurboDB driver deployment location such as bin/turbodb/drivers, and pass the
+exact module path through the existing TurboDB runtime-driver model. Studio
+does not scan for, download, alias, or fall back to another Driver plugin.
+"@ | Set-Content -LiteralPath (Join-Path $StageDir "DRIVER-DEPLOYMENT.txt") -Encoding utf8NoBOM
 
 $manifestPath = Join-Path $StageDir "runtime-manifest.txt"
 $manifest | Sort-Object | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
