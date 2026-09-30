@@ -9,6 +9,8 @@ on:
       - "vcpkg.json"
       - ".github/workflows/studio-windows.yml"
       - ".github/actions/setup-native/**"
+      - "cmake/ci/stage-studio.ps1"
+      - "cmake/ci/audit-studio-boundary.ps1"
   push:
     branches: [master]
     paths:
@@ -18,6 +20,8 @@ on:
       - "vcpkg.json"
       - ".github/workflows/studio-windows.yml"
       - ".github/actions/setup-native/**"
+      - "cmake/ci/stage-studio.ps1"
+      - "cmake/ci/audit-studio-boundary.ps1"
   workflow_dispatch:
 
 permissions:
@@ -59,11 +63,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
 
+      - name: Audit core-only dependency closure
+        shell: cmd
+        run: |
+          set "TURBODB_PINNED_VCPKG_ROOT=%VCPKG_ROOT%"
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%TURBODB_PINNED_VCPKG_ROOT%"
+          set "VCPKG_INSTALLED_DIR=%CD%\build\vcpkg-core-audit"
+          cmake -S . -B build\ci-windows-core-audit -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_INSTALLED_DIR="%VCPKG_INSTALLED_DIR%" -DCMAKE_PREFIX_PATH="%VCPKG_INSTALLED_DIR%\x64-windows" -DTURBODB_BUILD_APP=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF -DBUILD_EXAMPLES=OFF -DTIDESDB_BUILD_TESTS=OFF -DTIDESDB_WITH_SNAPPY=OFF -DTIDESDB_WITH_LZ4=OFF
+          if errorlevel 1 exit /b 1
+          powershell -NoProfile -ExecutionPolicy Bypass -File cmake\ci\audit-studio-boundary.ps1 -RepoRoot "%CD%" -VcpkgStatus "%VCPKG_INSTALLED_DIR%\vcpkg\status"
+          if errorlevel 1 exit /b 1
+
       - name: Configure and build Studio editor
         shell: cmd
         run: |
+          set "TURBODB_PINNED_VCPKG_ROOT=%VCPKG_ROOT%"
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%TURBODB_PINNED_VCPKG_ROOT%"
           cmake --preset ci-windows-release -DTURBODB_BUILD_APP=ON -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF
           if errorlevel 1 exit /b 1
           cmake --build --preset ci-windows-release --target turbodb-studio turbodb-app-language-test turbodb-app-query-test --parallel 4
@@ -73,3 +92,23 @@ jobs:
           if errorlevel 1 exit /b 1
           build\ci-windows-release\bin\turbodb-app-query-test.exe
           if errorlevel 1 exit /b 1
+
+      - name: Stage Studio runtime package
+        shell: pwsh
+        run: ./cmake/ci/stage-studio.ps1 -StudioExe ./build/ci-windows-release/bin/TurboDBStudio.exe -StageDir ./build/stage/studio -VcpkgBin ./vcpkg_installed/x64-windows/bin -SaltsBin "$env:SALTS_ROOT/bin" -SaltsUtilsBin "$env:SALTS_UTILS_ROOT/bin"
+
+      - name: Smoke staged Studio runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $studio = (Resolve-Path ./build/stage/studio/bin/TurboDBStudio.exe).Path
+          $process = Start-Process -FilePath $studio -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "staged TurboDB Studio self-test failed: $($process.ExitCode)" }
+          $drivers = @(Get-ChildItem ./build/stage/studio/bin -Filter 'turbodb_driver_*.dll' -File)
+          if ($drivers.Count -ne 0) { throw 'base Studio package must not bundle driver plugins' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-studio-windows-x64-${{ github.sha }}
+          path: build/stage/studio
+          if-no-files-found: error

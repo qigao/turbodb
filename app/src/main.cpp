@@ -1,5 +1,7 @@
 #include <windows.h>
 
+#include <cwchar>
+
 #include <atlbase.h>
 #include <atlapp.h>
 
@@ -10,7 +12,11 @@ CAppModule _Module;
 #include "editor/scintilla_runtime.h"
 #include "main_window.h"
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line,
+                    int show_command) {
+  const bool self_test =
+      command_line != nullptr && std::wcscmp(command_line, L"--self-test") == 0;
+
   const HRESULT com_result =
       ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   if (FAILED(com_result)) {
@@ -29,16 +35,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
 
   turbodb::app::ScintillaRuntime editor_runtime;
   if (!editor_runtime.Initialize()) {
-    ::MessageBoxW(nullptr,
-                  L"TurboDB Studio could not load Scintilla.dll and Lexilla.dll.",
-                  L"TurboDB Studio", MB_OK | MB_ICONERROR);
+    if (!self_test) {
+      ::MessageBoxW(
+          nullptr,
+          L"TurboDB Studio could not load Scintilla.dll and Lexilla.dll.",
+          L"TurboDB Studio", MB_OK | MB_ICONERROR);
+    }
     ::CoUninitialize();
-    return 1;
+    return 2;
   }
 
   if (FAILED(_Module.Init(nullptr, instance))) {
     ::CoUninitialize();
-    return 1;
+    return 3;
+  }
+
+  if (self_test) {
+    _Module.Term();
+    ::CoUninitialize();
+    return 0;
   }
 
   CMessageLoop message_loop;
