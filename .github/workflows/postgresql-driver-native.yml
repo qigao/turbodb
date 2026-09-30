@@ -1,0 +1,433 @@
+name: PostgreSQL Driver native package
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/postgresql-driver-native.yml"
+      - "vcpkg.json"
+      - "cmake/ci/restore-native-sdks.ps1"
+      - "orm/CMakeLists.txt"
+      - "orm/include/orm/orm_driver_*.h"
+      - "orm/include/orm/orm_runtime.h"
+      - "orm/src/abi/**"
+      - "orm/src/driver/**"
+      - "orm/src/runtime/**"
+      - "orm/src/dbs/postgres/**"
+      - "orm/src/dbs/sql/**"
+      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "packaging/nuget/TurboDB.Driver.PostgreSQL.Native.csproj"
+      - "packaging/nuget/PostgreSQLDriver.README.md"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/postgresql-driver-native.yml"
+      - "vcpkg.json"
+      - "cmake/ci/restore-native-sdks.ps1"
+      - "orm/CMakeLists.txt"
+      - "orm/include/orm/orm_driver_*.h"
+      - "orm/include/orm/orm_runtime.h"
+      - "orm/src/abi/**"
+      - "orm/src/driver/**"
+      - "orm/src/runtime/**"
+      - "orm/src/dbs/postgres/**"
+      - "orm/src/dbs/sql/**"
+      - "orm/tests/driver/orm_postgresql_plugin_test.c"
+      - "packaging/nuget/TurboDB.Driver.PostgreSQL.Native.csproj"
+      - "packaging/nuget/PostgreSQLDriver.README.md"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish package and driver-specific GitHub Release
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: postgresql-driver-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    name: Package metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      source_commit: ${{ steps.meta.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '/^[[:space:]]*VERSION[[:space:]]+[0-9]/{print $2; exit}' CMakeLists.txt)"
+          test -n "$version"
+          source_commit="$(git rev-parse HEAD)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=postgresql-driver-v$version" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux x64 PostgreSQL Driver
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
+      - name: Restore cached PostgreSQL build provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset VCPKG_OVERLAY_PORTS
+          install_root="$RUNNER_TEMP/postgresql-driver-vcpkg"
+          "$VCPKG_ROOT/vcpkg" install             --x-manifest-root="$GITHUB_WORKSPACE"             --x-install-root="$install_root"             --triplet=x64-linux             --only-binarycaching             --x-feature=postgresql
+          grep -F "Package: libpq" "$install_root/vcpkg/status"
+          echo "TURBODB_DRIVER_VCPKG_ROOT=$install_root" >> "$GITHUB_ENV"
+      - name: Configure Driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S orm -B build/postgresql-driver -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE"             -DVCPKG_MANIFEST_MODE=OFF             -DVCPKG_INSTALLED_DIR="$TURBODB_DRIVER_VCPKG_ROOT"             -DVCPKG_TARGET_TRIPLET=x64-linux             -DORM_BUILD_TESTS=ON             -DORM_BUILD_SQLITE_DRIVER=OFF             -DORM_BUILD_POSTGRESQL_DRIVER=ON             -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF             -DORM_BUILD_REDIS_DRIVER=OFF             -DORM_BUILD_MONGODB_DRIVER=OFF             -DORM_BUILD_MYSQL_DRIVER=OFF             -DORM_BUILD_TIDESDB_DRIVER=OFF             -DORM_POSTGRES_LIVE_TESTS=OFF             -DORM_SQL_VALIDATION_PARITY_TESTS=OFF
+      - name: Build, load-test and install Driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          build="$GITHUB_WORKSPACE/build/postgresql-driver"
+          prefix="$GITHUB_WORKSPACE/stage/postgresql-driver/linux-x64"
+          export LD_LIBRARY_PATH="$build/bin:$TURBODB_DRIVER_VCPKG_ROOT/x64-linux/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          cmake --build "$build" --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
+          ctest --test-dir "$build" -R '^orm_postgresql_plugin$' --output-on-failure --no-tests=error
+          cmake --install "$build" --prefix "$prefix" --component OrmPostgreSQLDriver --strip
+          module="$prefix/lib/turbodb/drivers/turbodb_driver_postgresql.so"
+          test -f "$module"
+          ORM_POSTGRESQL_PLUGIN="$module" "$build/orm_postgresql_plugin_test"
+          mkdir -p evidence/postgresql-driver-linux
+          ldd "$module" | tee evidence/postgresql-driver-linux/ldd.txt
+          if grep -E 'libpq\.so' evidence/postgresql-driver-linux/ldd.txt; then
+            echo "Linux Driver unexpectedly retained a dynamic libpq dependency" >&2
+            exit 1
+          fi
+          ! find "$prefix" -type f -name 'libturbo_orm.so*' -print -quit | grep -q .
+          ! find "$prefix" -type f -name 'libsalts*.so*' -print -quit | grep -q .
+          ! find "$prefix" -type f -name 'libpq.so*' -print -quit | grep -q .
+          driver_abi="$(sed -n 's/^#define ORM_DRIVER_INTERFACE_CONTRACT_VERSION UINT32_C(\([0-9][0-9]*\)).*/\1/p' orm/include/orm/orm_driver_interface.h)"
+          plugin_abi="$(sed -n 's/^#define SALTS_PLUGIN_ABI_VERSION \([0-9][0-9]*\)u.*/\1/p' "$SALTS_ROOT/include/salts/plugin.h")"
+          test -n "$driver_abi"
+          test -n "$plugin_abi"
+          cat > "$prefix/turbodb-postgresql-driver-manifest.txt" <<EOF
+          package=TurboDB.Driver.PostgreSQL.Native
+          version=${{ needs.metadata.outputs.version }}
+          rid=linux-x64
+          driver_id=postgresql
+          driver_interface_abi=$driver_abi
+          plugin_abi=$plugin_abi
+          generic_package=TurboDB.Native
+          runtime_dependency_policy=embedded-libpq-static
+          source=${{ needs.metadata.outputs.source_commit }}
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-driver-linux-x64
+          path: stage/postgresql-driver/linux-x64
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: postgresql-driver-linux-evidence
+          path: evidence/postgresql-driver-linux
+          if-no-files-found: warn
+
+  windows:
+    name: Windows x64 PostgreSQL Driver
+    needs: metadata
+    runs-on: windows-2022
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+      - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Locate MSVC and export build environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install ninja -y --no-progress
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw "x64 MSVC was not found" }
+          $canonicalVcpkgRoot = $env:VCPKG_ROOT
+          $vsdev = Join-Path $vs "Common7/Tools/VsDevCmd.bat"
+          $command = 'call "' + $vsdev + '" -arch=x64 -host_arch=x64 >nul && set'
+          $lines = & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "VsDevCmd failed" }
+          foreach ($line in $lines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              "$($matches[1])=$($matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            }
+          }
+          "VCPKG_ROOT=$canonicalVcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
+
+      - name: Normalize Windows SDK roots for CMake
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:SALTS_ROOT) -or
+              [string]::IsNullOrWhiteSpace($env:SALTS_UTILS_ROOT)) {
+            throw "restored SDK roots are unavailable"
+          }
+          $salts = (Resolve-Path -LiteralPath $env:SALTS_ROOT).Path.Replace('\', '/')
+          $utils = (Resolve-Path -LiteralPath $env:SALTS_UTILS_ROOT).Path.Replace('\', '/')
+          "SALTS_ROOT=$salts" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SALTS_UTILS_ROOT=$utils" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Restore cached PostgreSQL build provider
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $install = Join-Path $env:RUNNER_TEMP "postgresql-driver-vcpkg"
+          $args = @(
+            "install",
+            "--x-manifest-root=$env:GITHUB_WORKSPACE",
+            "--x-install-root=$install",
+            "--triplet=x64-windows",
+            "--only-binarycaching",
+            "--x-feature=postgresql"
+          )
+          & "$env:VCPKG_ROOT/vcpkg.exe" @args
+          if ($LASTEXITCODE -ne 0) { throw "cache-only libpq restore failed" }
+          $status = Join-Path $install "vcpkg/status"
+          if (-not (Select-String -LiteralPath $status -SimpleMatch "Package: libpq")) { throw "libpq was not restored" }
+          "TURBODB_DRIVER_VCPKG_ROOT=$install" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Configure Driver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $build = Join-Path $env:GITHUB_WORKSPACE "build/postgresql-driver"
+          $args = @(
+            "-S", "orm",
+            "-B", $build,
+            "-G", "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_TOOLCHAIN_FILE=$env:QIGAO_VCPKG_TOOLCHAIN_FILE",
+            "-DVCPKG_MANIFEST_MODE=OFF",
+            "-DVCPKG_INSTALLED_DIR=$env:TURBODB_DRIVER_VCPKG_ROOT",
+            "-DVCPKG_TARGET_TRIPLET=x64-windows",
+            "-DORM_BUILD_TESTS=ON",
+            "-DORM_BUILD_SQLITE_DRIVER=OFF",
+            "-DORM_BUILD_POSTGRESQL_DRIVER=ON",
+            "-DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF",
+            "-DORM_BUILD_REDIS_DRIVER=OFF",
+            "-DORM_BUILD_MONGODB_DRIVER=OFF",
+            "-DORM_BUILD_MYSQL_DRIVER=OFF",
+            "-DORM_BUILD_TIDESDB_DRIVER=OFF",
+            "-DORM_POSTGRES_LIVE_TESTS=OFF",
+            "-DORM_SQL_VALIDATION_PARITY_TESTS=OFF"
+          )
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver configure failed" }
+      - name: Build, load-test and install Driver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $build = Join-Path $env:GITHUB_WORKSPACE "build/postgresql-driver"
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "stage/postgresql-driver/windows-x64"
+          & cmake --build $build --target orm_postgresql_driver orm_postgresql_plugin_test --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver build failed" }
+
+          $basePath = $env:PATH
+          $driverBuildDir = Join-Path $build "bin"
+          $vcpkgBin = Join-Path $env:TURBODB_DRIVER_VCPKG_ROOT "x64-windows/bin"
+          $saltsBin = Join-Path $env:SALTS_ROOT "bin"
+          $saltsUtilsBin = Join-Path $env:SALTS_UTILS_ROOT "bin"
+          foreach ($dir in @($driverBuildDir, $vcpkgBin, $saltsBin, $saltsUtilsBin)) {
+            $env:PATH = "$dir;$env:PATH"
+          }
+          & ctest --test-dir $build -R '^orm_postgresql_plugin$' --output-on-failure --no-tests=error
+          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver plugin test failed" }
+
+          & cmake --install $build --prefix $prefix --component OrmPostgreSQLDriver
+          if ($LASTEXITCODE -ne 0) { throw "PostgreSQL Driver install failed" }
+          $driverDir = Join-Path $prefix "bin/turbodb/drivers"
+          $module = Join-Path $driverDir "turbodb_driver_postgresql.dll"
+          if (-not (Test-Path -LiteralPath $module -PathType Leaf)) { throw "installed Driver module is missing" }
+
+          if (Test-Path -LiteralPath (Join-Path $driverDir "turbo_orm.dll")) { throw "Driver package duplicated generic turbo_orm.dll" }
+          if (Get-ChildItem -LiteralPath $driverDir -Filter "salts*.dll" -File -ErrorAction SilentlyContinue) { throw "Driver package duplicated Salts DLLs" }
+          if (-not (Get-ChildItem -LiteralPath $driverDir -Filter "libpq.dll" -File -ErrorAction SilentlyContinue)) { throw "Driver package is missing libpq.dll" }
+
+          $env:PATH = "$saltsBin;$saltsUtilsBin;$basePath"
+          if (($env:PATH -split ';') -contains $vcpkgBin) { throw "installed Driver smoke must not use vcpkg bin from PATH" }
+          if (($env:PATH -split ';') -contains $driverDir) { throw "installed Driver smoke must not inject Driver directory into PATH" }
+          $env:ORM_POSTGRESQL_PLUGIN = $module
+          & (Join-Path $build "orm_postgresql_plugin_test.exe")
+          if ($LASTEXITCODE -ne 0) { throw "installed Driver load smoke failed" }
+
+          $driverAbiLine = Select-String -LiteralPath "orm/include/orm/orm_driver_interface.h" -Pattern '^#define ORM_DRIVER_INTERFACE_CONTRACT_VERSION UINT32_C\(([0-9]+)\)' | Select-Object -First 1
+          $pluginAbiLine = Select-String -LiteralPath (Join-Path $env:SALTS_ROOT "include/salts/plugin.h") -Pattern '^#define SALTS_PLUGIN_ABI_VERSION ([0-9]+)u' | Select-Object -First 1
+          if (-not $driverAbiLine -or -not $pluginAbiLine) { throw "failed to resolve ABI metadata" }
+          $driverAbi = $driverAbiLine.Matches[0].Groups[1].Value
+          $pluginAbi = $pluginAbiLine.Matches[0].Groups[1].Value
+          @(
+            "package=TurboDB.Driver.PostgreSQL.Native",
+            "version=${{ needs.metadata.outputs.version }}",
+            "rid=windows-x64",
+            "driver_id=postgresql",
+            "driver_interface_abi=$driverAbi",
+            "plugin_abi=$pluginAbi",
+            "generic_package=TurboDB.Native",
+            "runtime_dependency_policy=bundled-driver-private-closure",
+            "source=${{ needs.metadata.outputs.source_commit }}"
+          ) | Set-Content -LiteralPath (Join-Path $prefix "turbodb-postgresql-driver-manifest.txt") -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-driver-windows-x64
+          path: stage/postgresql-driver/windows-x64
+          if-no-files-found: error
+
+  pack:
+    name: Pack PostgreSQL Driver NuGet
+    needs: [metadata, linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: postgresql-driver-linux-x64
+          path: package/sdk/linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: postgresql-driver-windows-x64
+          path: package/sdk/windows-x64
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Configure GitHub Packages source
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/postgresql-driver-pack.config"
+          printf '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>\n' > "$config"
+          dotnet nuget add source "https://nuget.pkg.github.com/qigao/index.json"             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text --configfile "$config"
+          echo "NUGET_CONFIG=$config" >> "$GITHUB_ENV"
+      - name: Verify payload and pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package/sdk/linux-x64/lib/turbodb/drivers/turbodb_driver_postgresql.so
+          test -f package/sdk/linux-x64/turbodb-postgresql-driver-manifest.txt
+          test -f package/sdk/windows-x64/bin/turbodb/drivers/turbodb_driver_postgresql.dll
+          test -f package/sdk/windows-x64/turbodb-postgresql-driver-manifest.txt
+          test ! -e package/sdk/linux-x64/lib/libturbo_orm.so
+          test ! -e package/sdk/windows-x64/bin/turbo_orm.dll
+          dotnet restore packaging/nuget/TurboDB.Driver.PostgreSQL.Native.csproj             --configfile "$NUGET_CONFIG" --packages "$RUNNER_TEMP/pack-nuget"
+          dotnet pack packaging/nuget/TurboDB.Driver.PostgreSQL.Native.csproj             --no-restore --configuration Release --output dist             -p:PackageVersion=${{ needs.metadata.outputs.version }}             -p:PackageRoot="$GITHUB_WORKSPACE/package"             -p:RestorePackagesPath="$RUNNER_TEMP/pack-nuget"             -p:RepositoryCommit="${{ needs.metadata.outputs.source_commit }}"
+          nupkg="dist/TurboDB.Driver.PostgreSQL.Native.${{ needs.metadata.outputs.version }}.nupkg"
+          test -f "$nupkg"
+          unzip -Z1 "$nupkg" | sort | tee "$RUNNER_TEMP/postgresql-driver-nupkg.txt"
+          grep -Fx "sdk/linux-x64/lib/turbodb/drivers/turbodb_driver_postgresql.so" "$RUNNER_TEMP/postgresql-driver-nupkg.txt"
+          grep -Fx "sdk/windows-x64/bin/turbodb/drivers/turbodb_driver_postgresql.dll" "$RUNNER_TEMP/postgresql-driver-nupkg.txt"
+          grep -Fx "sdk/linux-x64/turbodb-postgresql-driver-manifest.txt" "$RUNNER_TEMP/postgresql-driver-nupkg.txt"
+          grep -Fx "sdk/windows-x64/turbodb-postgresql-driver-manifest.txt" "$RUNNER_TEMP/postgresql-driver-nupkg.txt"
+          ! grep -E '(^|/)libturbo_orm\.|(^|/)turbo_orm\.dll$|include/shared/orm/' "$RUNNER_TEMP/postgresql-driver-nupkg.txt"
+          unzip -p "$nupkg" "TurboDB.Driver.PostgreSQL.Native.nuspec" > "$RUNNER_TEMP/postgresql-driver.nuspec"
+          grep -F 'id="TurboDB.Native"' "$RUNNER_TEMP/postgresql-driver.nuspec"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TurboDB.Driver.PostgreSQL.Native.${{ needs.metadata.outputs.version }}
+          path: dist/*.nupkg
+          if-no-files-found: error
+
+  publish:
+    name: Publish PostgreSQL Driver package
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true
+    needs: [metadata, pack]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.metadata.outputs.source_commit }}
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: TurboDB.Driver.PostgreSQL.Native.${{ needs.metadata.outputs.version }}
+          path: dist
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Publish to GitHub Packages
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dotnet nuget add source "https://nuget.pkg.github.com/qigao/index.json"             --name github --username qigao --password "$GITHUB_TOKEN"             --store-password-in-clear-text
+          dotnet nuget push "dist/TurboDB.Driver.PostgreSQL.Native.${{ needs.metadata.outputs.version }}.nupkg"             --api-key "$GITHUB_TOKEN" --source github --skip-duplicate
+      - name: Publish driver-specific GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          SOURCE_COMMIT: ${{ needs.metadata.outputs.source_commit }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)"
+            test "$existing" = "$SOURCE_COMMIT"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SOURCE_COMMIT"
+          fi
+          asset="dist/TurboDB.Driver.PostgreSQL.Native.$VERSION.nupkg"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$asset" --repo "$GITHUB_REPOSITORY" --verify-tag               --title "TurboDB PostgreSQL Driver $VERSION"               --notes "Independent PostgreSQL TurboDb.Driver native deployment package."
+          fi
