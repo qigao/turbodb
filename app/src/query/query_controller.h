@@ -29,6 +29,7 @@ class QueryController {
                std::string* error);
   bool RequestCancel(std::string* error) const;
   bool busy() const noexcept;
+  bool has_pending_completion() const noexcept;
   std::shared_ptr<const QueryResultSnapshot> TakeCompleted(
       std::uint64_t request_id);
 
