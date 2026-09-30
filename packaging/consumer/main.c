@@ -4,7 +4,28 @@
 
 enum { MODULE_PATH_CAPACITY = 4096 };
 
+static int verify_empty_runtime(void) {
+  orm_runtime_config_t config;
+  orm_runtime_t *runtime = NULL;
+  orm_error_t error;
+  orm_error_init(&error);
+  orm_runtime_config_init(&config);
+  if (orm_runtime_create(&config, &runtime, &error) != ORM_STATUS_OK)
+    return 0;
+  if (orm_runtime_close(runtime, &error) != ORM_STATUS_OK) {
+    orm_runtime_release(runtime);
+    return 0;
+  }
+  orm_runtime_release(runtime);
+  return 1;
+}
+
 int main(void) {
+  if (!verify_empty_runtime()) {
+    fprintf(stderr, "installed SDK: empty runtime without drivers failed\n");
+    return 1;
+  }
+
   mysql_session_error_t mysql_error = {0};
   if (mysql_session_connect_and_ping(NULL, &mysql_error) != MYSQL_SESSION_INVALID) {
     fprintf(stderr, "installed MySQL client: invalid config was accepted\n");
