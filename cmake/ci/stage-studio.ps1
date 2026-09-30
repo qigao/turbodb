@@ -70,7 +70,7 @@ New-Item -ItemType Directory -Path $stageBin -Force | Out-Null
 function Get-ImportedDlls([string]$Binary) {
   $output = & $dumpbin /nologo /dependents $Binary 2>&1
   if ($LASTEXITCODE -ne 0) {
-    throw "dumpbin failed for $Binary: $($output -join '; ')"
+    throw "dumpbin failed for ${Binary}: $($output -join '; ')"
   }
 
   $names = @()
