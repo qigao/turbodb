@@ -88,9 +88,11 @@ bool MainWindow::OpenConnection(const ConnectionProfile& profile,
 }
 
 bool MainWindow::CloseActiveConnection(std::string* error) {
-  if (query_controller_.busy() || explain_controller_.busy()) {
+  if (query_controller_.busy() || query_controller_.has_pending_completion() ||
+      explain_controller_.busy() ||
+      explain_controller_.has_pending_completion()) {
     if (error != nullptr)
-      *error = "cannot close connection while SQL or EXPLAIN is running";
+      *error = "cannot close connection while SQL/EXPLAIN work is active or pending UI consumption";
     return false;
   }
   const auto& identity = workspace_session_.connection();
@@ -119,8 +121,10 @@ LRESULT MainWindow::OnExplorerSelectionChanged(UINT, WPARAM, LPARAM, BOOL&) {
 }
 
 LRESULT MainWindow::OnSqlExecuteRequested(UINT, WPARAM, LPARAM, BOOL&) {
-  if (explain_controller_.busy()) {
-    result_view_.ShowError("Wait for the active PLAN/ANALYZE request to finish.");
+  if (explain_controller_.busy() ||
+      explain_controller_.has_pending_completion()) {
+    result_view_.ShowError(
+        "Wait for the active PLAN/ANALYZE result to be consumed.");
     return 0;
   }
   const auto& identity = workspace_session_.connection();
@@ -155,8 +159,10 @@ LRESULT MainWindow::OnSqlExecuteRequested(UINT, WPARAM, LPARAM, BOOL&) {
 
 LRESULT MainWindow::OnSqlExplainRequested(UINT, WPARAM wparam, LPARAM,
                                               BOOL&) {
-  if (query_controller_.busy()) {
-    result_view_.ShowError("Wait for the active SQL request to finish.");
+  if (query_controller_.busy() ||
+      query_controller_.has_pending_completion()) {
+    result_view_.ShowError(
+        "Wait for the active SQL result to be consumed.");
     return 0;
   }
 
