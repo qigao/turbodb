@@ -260,12 +260,12 @@ static int mysql_session_send_packet(
     mysql_session_t *session, uint8_t sequence_id,
     const uint8_t *payload, size_t payload_size,
     mysql_session_send_kind_t kind) {
-  uint8_t stack_packet[MYSQL_SESSION_PACKET_CAPACITY];
-  uint8_t *packet = stack_packet;
   const size_t command_capacity =
       session->command_capacity != 0u
           ? session->command_capacity
           : MYSQL_SESSION_CONTROL_CAPACITY;
+  mem_buffer_t *packet;
+  uint8_t *bytes;
   size_t total;
   int status;
 
@@ -279,30 +279,35 @@ static int mysql_session_send_packet(
   }
 
   total = payload_size + 4u;
-  if (total > sizeof(stack_packet)) {
-    packet = (uint8_t *)malloc(total);
-    if (packet == NULL) {
-      mysql_session_set_error(session, MYSQL_SESSION_IO,
-                              "send", "allocate bounded MySQL command packet");
-      return SALTS_ENOMEM;
-    }
+  packet = mem_get_buffer(mem_global(), total);
+  if (packet == NULL) {
+    mysql_session_set_error(session, MYSQL_SESSION_IO,
+                            "send", "allocate retained MySQL command packet");
+    return SALTS_ENOMEM;
+  }
+  bytes = (uint8_t *)mem_buffer_data(packet);
+  if (bytes == NULL) {
+    mem_buffer_release(packet);
+    mysql_session_set_error(session, MYSQL_SESSION_IO,
+                            "send", "access retained MySQL command packet");
+    return SALTS_EIO;
   }
 
-  packet[0] = (uint8_t)(payload_size & 0xffu);
-  packet[1] = (uint8_t)((payload_size >> 8u) & 0xffu);
-  packet[2] = (uint8_t)((payload_size >> 16u) & 0xffu);
-  packet[3] = sequence_id;
+  bytes[0] = (uint8_t)(payload_size & 0xffu);
+  bytes[1] = (uint8_t)((payload_size >> 8u) & 0xffu);
+  bytes[2] = (uint8_t)((payload_size >> 16u) & 0xffu);
+  bytes[3] = sequence_id;
   if (payload_size != 0u)
-    memcpy(packet + 4u, payload, payload_size);
+    memcpy(bytes + 4u, payload, payload_size);
+  mem_set_used(packet, total);
 
-  status = cnet_send(&session->client, session->connection, packet, total);
-  if (packet != stack_packet)
-    free(packet);
+  status = cnet_send_buffer(&session->client, session->connection, packet);
+  mem_buffer_release(packet);
   if (status != SALTS_OK) {
     if (session->error != NULL)
       session->error->cnet_status = status;
     mysql_session_set_error(session, MYSQL_SESSION_IO,
-                            "send", "CNet send admission failed");
+                            "send", "CNet retained send admission failed");
     return status;
   }
   session->pending_send = kind;
