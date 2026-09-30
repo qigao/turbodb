@@ -73,7 +73,8 @@ static orm_status_t explain_copy_view(orm_execution_plan_t *plan,
   if (input.data == NULL)
     return explain_fail(error, ORM_STATUS_INVALID_ARGUMENT,
                         "execution-plan string view is invalid");
-  if (plan->copied_bytes > plan->max_bytes ||
+  if (input.len == SIZE_MAX ||
+      plan->copied_bytes > plan->max_bytes ||
       (uint64_t)input.len > plan->max_bytes - plan->copied_bytes)
     return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
                         "execution-plan byte budget exceeded");
@@ -167,7 +168,8 @@ static orm_status_t explain_append_raw(orm_execution_plan_t *plan,
                                        orm_error_t *error) {
   const size_t old_size = plan->raw_detail.len;
   const size_t separator = old_size == 0u ? 0u : 1u;
-  if (line.len > SIZE_MAX - old_size - separator)
+  if (old_size > SIZE_MAX - separator - 1u ||
+      line.len > SIZE_MAX - old_size - separator - 1u)
     return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
                         "execution-plan raw detail exceeds platform range");
   const size_t new_size = old_size + separator + line.len;
@@ -201,7 +203,8 @@ static orm_status_t explain_query(orm_connection_t *connection,
   if (sql.len == 0u || sql.data == NULL)
     return explain_fail(error, ORM_STATUS_INVALID_ARGUMENT,
                         "SQL to explain is empty");
-  if (prefix_size > SIZE_MAX - sql.len)
+  if (prefix_size > SIZE_MAX - sql.len ||
+      prefix_size + sql.len == SIZE_MAX)
     return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
                         "explained SQL exceeds platform range");
   const size_t total = prefix_size + sql.len;
@@ -411,10 +414,12 @@ static void explain_parse_text_fields(const char *text,
 
 static int explain_text_indent(orm_string_view_t line) {
   int indent = 0;
+  size_t offset = 0u;
   const char *text = (const char *)line.data;
-  while ((size_t)indent < line.len &&
-         (text[indent] == ' ' || text[indent] == '\t')) {
-    indent += text[indent] == '\t' ? 2 : 1;
+  while (offset < line.len &&
+         (text[offset] == ' ' || text[offset] == '\t')) {
+    indent += text[offset] == '\t' ? 2 : 1;
+    ++offset;
   }
   return indent;
 }
@@ -739,9 +744,91 @@ static orm_status_t explain_load_mysql_plan(
   return ORM_STATUS_OK;
 }
 
+static orm_status_t explain_mysql_version(
+    orm_connection_t *connection, int *major, int *minor, int *patch,
+    orm_error_t *error) {
+  *major = *minor = *patch = 0;
+  orm_query_t *query = NULL;
+  orm_result_t *result = NULL;
+  orm_status_t status =
+      orm_raw(connection, orm_view("SELECT VERSION()"), &query, error);
+  if (status == ORM_STATUS_OK)
+    status = orm_query_execute(query, &result, error);
+  orm_query_destroy(query);
+  if (status != ORM_STATUS_OK) {
+    orm_result_destroy(result);
+    return status;
+  }
+
+  uint64_t rows = 0u, columns = 0u;
+  status = explain_result_counts(result, &rows, &columns, error);
+  if (status != ORM_STATUS_OK || rows == 0u || columns == 0u) {
+    orm_result_destroy(result);
+    return status != ORM_STATUS_OK
+               ? status
+               : explain_fail(error, ORM_STATUS_UNSUPPORTED,
+                              "MySQL server version is unavailable");
+  }
+  orm_string_view_t version = {NULL, 0u};
+  status = explain_text_cell(result, 0u, 0u, &version, error);
+  if (status != ORM_STATUS_OK) {
+    orm_result_destroy(result);
+    return status;
+  }
+  if (version.data == NULL || version.len == 0u ||
+      version.len == SIZE_MAX) {
+    orm_result_destroy(result);
+    return explain_fail(error, ORM_STATUS_UNSUPPORTED,
+                        "MySQL server version is invalid");
+  }
+
+  char *owned = (char *)malloc(version.len + 1u);
+  if (owned == NULL) {
+    orm_result_destroy(result);
+    return explain_fail(error, ORM_STATUS_OUT_OF_MEMORY,
+                        "copy MySQL server version");
+  }
+  memcpy(owned, version.data, version.len);
+  owned[version.len] = '\0';
+  orm_result_destroy(result);
+
+  if (strstr(owned, "MariaDB") != NULL) {
+    free(owned);
+    return explain_fail(
+        error, ORM_STATUS_UNSUPPORTED,
+        "MySQL ANALYZE mode requires MySQL 8.0.18 or newer");
+  }
+  char trailing = '\0';
+  const int parsed = sscanf(
+      owned, "%d.%d.%d%c", major, minor, patch, &trailing);
+  free(owned);
+  if (parsed < 3 || *major < 0 || *minor < 0 || *patch < 0)
+    return explain_fail(error, ORM_STATUS_UNSUPPORTED,
+                        "MySQL server version cannot prove ANALYZE support");
+  return ORM_STATUS_OK;
+}
+
+static orm_status_t explain_mysql_require_analyze(
+    orm_connection_t *connection, orm_error_t *error) {
+  int major = 0, minor = 0, patch = 0;
+  orm_status_t status =
+      explain_mysql_version(connection, &major, &minor, &patch, error);
+  if (status != ORM_STATUS_OK) return status;
+  if (major > 8 || (major == 8 && (minor > 0 || patch >= 18)))
+    return ORM_STATUS_OK;
+  return explain_fail(
+      error, ORM_STATUS_UNSUPPORTED,
+      "MySQL ANALYZE mode requires MySQL 8.0.18 or newer");
+}
+
 static orm_status_t explain_load_mysql(
     orm_connection_t *connection, orm_string_view_t sql,
     orm_execution_plan_t *plan, orm_error_t *error) {
+  if (plan->mode == ORM_EXPLAIN_ANALYZE) {
+    orm_status_t capability =
+        explain_mysql_require_analyze(connection, error);
+    if (capability != ORM_STATUS_OK) return capability;
+  }
   const char *prefix =
       plan->mode == ORM_EXPLAIN_ANALYZE ? "EXPLAIN ANALYZE " : "EXPLAIN ";
   orm_result_t *result = NULL;
