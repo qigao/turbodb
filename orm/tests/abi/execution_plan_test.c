@@ -47,6 +47,11 @@ static const cserde_reader_ops explain_reader_ops = {
    .value.slice = {(const unsigned char *)(text_), sizeof(text_) - 1u, \
                    CSERDE_VIEW_STABLE}}
 
+static const cserde_token mysql_version_row[] = {
+    {.kind = CSERDE_MAP_BEGIN},
+    TEXT_TOKEN("VERSION()"), TEXT_TOKEN("8.0.36"),
+    {.kind = CSERDE_MAP_END}};
+
 static const cserde_token mysql_plan_row[] = {
     {.kind = CSERDE_MAP_BEGIN},
     TEXT_TOKEN("select_type"), TEXT_TOKEN("SIMPLE"),
@@ -98,6 +103,9 @@ static const cserde_token pg_analyze_row1[] = {
     TEXT_TOKEN("Execution Time: 0.12 ms"),
     {.kind = CSERDE_MAP_END}};
 
+static const explain_fixture_row mysql_version_rows[] = {
+    {mysql_version_row,
+     sizeof(mysql_version_row) / sizeof(mysql_version_row[0])}};
 static const explain_fixture_row mysql_plan_rows[] = {
     {mysql_plan_row, sizeof(mysql_plan_row) / sizeof(mysql_plan_row[0])}};
 static const explain_fixture_row mysql_analyze_rows[] = {
@@ -177,7 +185,11 @@ static orm_status_t explain_fake_open(
   const char *sql = plan->raw_sql;
 
   if (strcmp(backend->provider, "mysql") == 0) {
-    if (starts_with(sql, "EXPLAIN ANALYZE ")) {
+    if (strcmp(sql, "SELECT VERSION()") == 0) {
+      rows = mysql_version_rows;
+      row_count = sizeof(mysql_version_rows) / sizeof(mysql_version_rows[0]);
+      columns = 1u;
+    } else if (starts_with(sql, "EXPLAIN ANALYZE ")) {
       rows = mysql_analyze_rows;
       row_count = sizeof(mysql_analyze_rows) / sizeof(mysql_analyze_rows[0]);
       columns = 1u;
