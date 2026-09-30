@@ -940,6 +940,8 @@ static orm_status_t orm_open_rows(
     orm_transaction_t *transaction,
     const orm_flow_config_t *config,
     const struct DataBindMessagePlan *message_plan,
+    const orm_object_row_factory_t *object_factory,
+    const DataBindMessageObjectStateProvider *object_state_provider,
     const orm_async_config_t *async_config,
     cflow_publisher *out_publisher,
     orm_error_t *error) {
@@ -998,6 +1000,8 @@ static orm_status_t orm_open_rows(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
   publisher_config.message_plan = message_plan;
+  publisher_config.object_factory = object_factory;
+  publisher_config.object_state_provider = object_state_provider;
   status = orm_row_publisher_prepare(&publisher_config, &prepared, error);
   if (status != ORM_STATUS_OK) goto release_query;
   if (async_config != NULL &&
@@ -1680,7 +1684,8 @@ orm_status_t ORM_C_CALL orm_query_open_flow(
     cflow_publisher *out_publisher, orm_error_t *error) {
   return orm_open_rows(query,
                        query != NULL ? &query->connection->backend : NULL,
-                       NULL, config, NULL, NULL, out_publisher, error);
+                       NULL, config, NULL, NULL, NULL, NULL,
+                       out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_async_flow(
@@ -1697,8 +1702,8 @@ orm_status_t ORM_C_CALL orm_query_open_async_flow(
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   orm_backend *backend = &query->connection->backend;
-  return orm_open_rows(query, backend, NULL, config, NULL, async_config,
-                       out_publisher, error);
+  return orm_open_rows(query, backend, NULL, config, NULL, NULL, NULL,
+                       async_config, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
@@ -1714,8 +1719,8 @@ orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_rows(query, NULL, transaction, config, NULL, NULL,
-                       out_publisher, error);
+  return orm_open_rows(query, NULL, transaction, config, NULL, NULL, NULL,
+                       NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_validated_flow(
@@ -1729,7 +1734,7 @@ orm_status_t ORM_C_CALL orm_query_open_validated_flow(
   }
   return orm_open_rows(
       query, query != NULL ? &query->connection->backend : NULL,
-      NULL, config, message_plan, NULL, out_publisher, error);
+      NULL, config, message_plan, NULL, NULL, NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
@@ -1752,7 +1757,7 @@ orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
     return ORM_STATUS_INVALID_STATE;
   }
   return orm_open_rows(
-      query, NULL, transaction, config, message_plan, NULL,
+      query, NULL, transaction, config, message_plan, NULL, NULL, NULL,
       out_publisher, error);
 }
 
