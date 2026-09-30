@@ -135,6 +135,7 @@ static orm_status_t metadata_snapshot_add(
     orm_error_t *error) {
   orm_status_t status;
   orm_metadata_owned_entry entry = {0};
+  const uint64_t bytes_before = snapshot->copied_bytes;
 
   if (metadata_snapshot_has(snapshot, kind, catalog, schema, relation, name))
     return ORM_STATUS_OK;
@@ -153,6 +154,7 @@ static orm_status_t metadata_snapshot_add(
     status = metadata_copy_string(snapshot, name, &entry.name, error);
   if (status != ORM_STATUS_OK) {
     metadata_owned_entry_destroy(&entry);
+    snapshot->copied_bytes = bytes_before;
     return status;
   }
 
@@ -413,6 +415,13 @@ static orm_status_t metadata_load_mysql(
         status = metadata_text(result, row, 1u, &name, error);
       if (status == ORM_STATUS_OK)
         status = metadata_ordinal(result, row, 2u, &ordinal, error);
+      if (status == ORM_STATUS_OK) {
+        if (ordinal == 0u)
+          status = metadata_fail(error, ORM_STATUS_OUT_OF_RANGE,
+                                 "MySQL metadata ordinal is zero");
+        else
+          --ordinal;
+      }
       if (status == ORM_STATUS_OK)
         status = metadata_snapshot_add(
             snapshot, ORM_METADATA_COLUMN, current,
@@ -530,6 +539,13 @@ static orm_status_t metadata_load_postgresql(
       status = metadata_text(result, row, 2u, &name, error);
     if (status == ORM_STATUS_OK)
       status = metadata_ordinal(result, row, 3u, &ordinal, error);
+    if (status == ORM_STATUS_OK) {
+      if (ordinal == 0u)
+        status = metadata_fail(error, ORM_STATUS_OUT_OF_RANGE,
+                               "PostgreSQL metadata ordinal is zero");
+      else
+        --ordinal;
+    }
     if (status == ORM_STATUS_OK)
       status = metadata_snapshot_add(
           snapshot, ORM_METADATA_COLUMN, catalog, schema,
