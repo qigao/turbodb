@@ -107,4 +107,9 @@ target_include_directories(
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(turbodb-app-language-test PRIVATE Orm::C)
+target_compile_definitions(
+  turbodb-app-language-test
+  PRIVATE
+    TURBODB_APP_SQLITE_PLUGIN_PATH="$<TARGET_FILE:orm_sqlite_driver>")
+add_dependencies(turbodb-app-language-test orm_sqlite_driver)
 set_target_properties(turbodb-app-language-test PROPERTIES FOLDER "app/tests")
