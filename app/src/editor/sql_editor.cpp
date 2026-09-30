@@ -1,6 +1,7 @@
 #include "editor/sql_editor.h"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 
 #include <Scintilla.h>
@@ -138,8 +139,93 @@ std::string SqlEditor::SelectedText() const {
 std::string SqlEditor::CurrentWordPrefix() const {
   if (!IsWindow()) return {};
   const LRESULT current = SendMessage(SCI_GETCURRENTPOS, 0, 0);
-  const LRESULT start = SendMessage(
-      SCI_WORDSTARTPOSITION, static_cast<WPARAM>(current), TRUE);
+  LRESULT start = current;
+  while (start > 0) {
+    const int ch = static_cast<int>(
+        SendMessage(SCI_GETCHARAT, static_cast<WPARAM>(start - 1), 0));
+    const unsigned char byte = static_cast<unsigned char>(ch);
+    const bool identifier_byte =
+        std::isalnum(byte) != 0 || byte == '_' || byte == '
+EditorCaret SqlEditor::Caret() const noexcept {
+  if (!IsWindow()) return {};
+  const LRESULT position = SendMessage(SCI_GETCURRENTPOS, 0, 0);
+  const LRESULT line =
+      SendMessage(SCI_LINEFROMPOSITION, static_cast<WPARAM>(position), 0);
+  const LRESULT line_start =
+      SendMessage(SCI_POSITIONFROMLINE, static_cast<WPARAM>(line), 0);
+  return {static_cast<std::size_t>(line),
+          static_cast<std::size_t>(position - line_start)};
+}
+
+void SqlEditor::SetText(std::string_view text) {
+  if (!IsWindow()) return;
+  std::string owned(text);
+  SendMessage(SCI_SETTEXT, 0, reinterpret_cast<LPARAM>(owned.c_str()));
+}
+
+void SqlEditor::ReplaceSelection(std::string_view text) {
+  if (!IsWindow()) return;
+  std::string owned(text);
+  SendMessage(SCI_REPLACESEL, 0, reinterpret_cast<LPARAM>(owned.c_str()));
+}
+
+void SqlEditor::Undo() {
+  if (IsWindow()) SendMessage(SCI_UNDO, 0, 0);
+}
+
+void SqlEditor::Redo() {
+  if (IsWindow()) SendMessage(SCI_REDO, 0, 0);
+}
+
+bool SqlEditor::FindNext(std::string_view needle, bool match_case) {
+  if (!IsWindow() || needle.empty()) return false;
+  const LRESULT current = SendMessage(SCI_GETCURRENTPOS, 0, 0);
+  const LRESULT length = SendMessage(SCI_GETTEXTLENGTH, 0, 0);
+  SendMessage(SCI_SETTARGETSTART, static_cast<WPARAM>(current), 0);
+  SendMessage(SCI_SETTARGETEND, static_cast<WPARAM>(length), 0);
+  SendMessage(SCI_SETSEARCHFLAGS, match_case ? SCFIND_MATCHCASE : 0, 0);
+  const LRESULT found = SendMessage(
+      SCI_SEARCHINTARGET, static_cast<WPARAM>(needle.size()),
+      reinterpret_cast<LPARAM>(needle.data()));
+  if (found < 0) return false;
+  const LRESULT target_end = SendMessage(SCI_GETTARGETEND, 0, 0);
+  SendMessage(SCI_SETSEL, static_cast<WPARAM>(found),
+              static_cast<LPARAM>(target_end));
+  SendMessage(SCI_SCROLLCARET, 0, 0);
+  return true;
+}
+
+void SqlEditor::ShowCompletionItems(const std::vector<std::string>& items,
+                                    std::size_t prefix_bytes) {
+  if (!IsWindow() || items.empty()) return;
+  std::string joined;
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    if (i != 0) joined.push_back(kCompletionSeparator);
+    joined += items[i];
+  }
+  SendMessage(SCI_AUTOCSHOW, static_cast<WPARAM>(prefix_bytes),
+              reinterpret_cast<LPARAM>(joined.c_str()));
+}
+
+void SqlEditor::ClearDiagnosticMarkers() {
+  if (IsWindow()) SendMessage(SCI_MARKERDELETEALL, kDiagnosticMarker, 0);
+}
+
+void SqlEditor::MarkDiagnosticLine(std::size_t zero_based_line) {
+  if (!IsWindow() ||
+      zero_based_line > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return;
+  }
+  SendMessage(SCI_MARKERADD, static_cast<WPARAM>(zero_based_line),
+              kDiagnosticMarker);
+}
+
+}  // namespace turbodb::app
+ ||
+        byte == '.' || byte >= 0x80;
+    if (!identifier_byte) break;
+    --start;
+  }
   return ReadEditorRange(m_hWnd, start, current);
 }
 
