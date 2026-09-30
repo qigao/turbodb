@@ -1,5 +1,6 @@
 #include "results/result_workspace_view.h"
 
+#include <climits>
 #include <iomanip>
 #include <sstream>
 
