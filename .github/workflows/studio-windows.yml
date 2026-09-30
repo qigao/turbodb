@@ -68,9 +68,10 @@ jobs:
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
-          cmake --preset ci-windows-release -B build\ci-windows-core-audit -DTURBODB_BUILD_APP=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF -DVCPKG_INSTALLED_DIR=%CD%/build/vcpkg-core-audit
+          set "VCPKG_INSTALLED_DIR=%CD%\build\vcpkg-core-audit"
+          cmake --preset ci-windows-release -B build\ci-windows-core-audit -DTURBODB_BUILD_APP=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF
           if errorlevel 1 exit /b 1
-          powershell -NoProfile -ExecutionPolicy Bypass -File cmake\ci\audit-studio-boundary.ps1 -RepoRoot "%CD%" -VcpkgStatus "%CD%\build\vcpkg-core-audit\vcpkg\status"
+          powershell -NoProfile -ExecutionPolicy Bypass -File cmake\ci\audit-studio-boundary.ps1 -RepoRoot "%CD%" -VcpkgStatus "%VCPKG_INSTALLED_DIR%\vcpkg\status"
           if errorlevel 1 exit /b 1
 
       - name: Configure and build Studio editor
