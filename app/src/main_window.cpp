@@ -72,7 +72,17 @@ bool MainWindow::OpenConnection(const ConnectionProfile& profile,
   }
 
   explorer_.Refresh();
-  return editor_.RefreshLanguage();
+  if (editor_.RefreshLanguage())
+    return true;
+
+  std::string ignored;
+  (void)connections_.Close(identity.id, &ignored);
+  workspace_session_.ClearConnection();
+  explorer_model_.Clear();
+  explorer_.Refresh();
+  if (error != nullptr && error->empty())
+    *error = "initialize SQL language service for connection";
+  return false;
 }
 
 bool MainWindow::CloseActiveConnection(std::string* error) {
