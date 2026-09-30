@@ -3,6 +3,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <utility>
 
 namespace turbodb::app {
 
@@ -90,7 +91,8 @@ bool CopyCell(orm_result_t* result, std::uint64_t row, std::uint64_t column,
         if (error != nullptr) *error = "ORM returned an invalid BLOB view";
         return false;
       }
-      cell.bytes.assign(static_cast<const char*>(value.data), value.size);
+      if (value.size != 0u)
+        cell.bytes.assign(static_cast<const char*>(value.data), value.size);
       break;
     }
     default:
