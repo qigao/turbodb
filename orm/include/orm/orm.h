@@ -128,6 +128,7 @@ typedef struct orm_query orm_query_t;
 typedef struct orm_result orm_result_t;
 typedef struct orm_transaction orm_transaction_t;
 typedef struct orm_metadata_snapshot orm_metadata_snapshot_t;
+typedef struct orm_execution_plan orm_execution_plan_t;
 typedef vstr orm_string_view_t;
 
 typedef struct orm_blob {
@@ -268,6 +269,48 @@ typedef struct orm_metadata_entry {
   { sizeof(orm_metadata_entry_t), ORM_METADATA_CATALOG, 0u, 0u, \
     {NULL, 0u}, {NULL, 0u}, {NULL, 0u}, {NULL, 0u} }
 
+typedef int32_t orm_explain_mode_t;
+enum {
+  /* PLAN does not intentionally execute the explained statement. */
+  ORM_EXPLAIN_PLAN = 0,
+  /* ANALYZE may execute the explained statement and observe real runtime work. */
+  ORM_EXPLAIN_ANALYZE = 1
+};
+
+typedef uint32_t orm_execution_plan_node_flags_t;
+enum {
+  ORM_PLAN_NODE_HAS_ESTIMATED_ROWS = UINT32_C(1) << 0,
+  ORM_PLAN_NODE_HAS_ACTUAL_ROWS = UINT32_C(1) << 1,
+  ORM_PLAN_NODE_HAS_STARTUP_COST = UINT32_C(1) << 2,
+  ORM_PLAN_NODE_HAS_TOTAL_COST = UINT32_C(1) << 3,
+  ORM_PLAN_NODE_HAS_ACTUAL_STARTUP_MS = UINT32_C(1) << 4,
+  ORM_PLAN_NODE_HAS_ACTUAL_TOTAL_MS = UINT32_C(1) << 5
+};
+
+#define ORM_EXECUTION_PLAN_ROOT_INDEX UINT64_MAX
+
+typedef struct orm_execution_plan_node {
+  uint32_t struct_size;
+  orm_execution_plan_node_flags_t flags;
+  uint64_t parent_index;
+  uint64_t ordinal;
+  orm_string_view_t node_type;
+  orm_string_view_t relation;
+  orm_string_view_t index_name;
+  orm_string_view_t detail;
+  double estimated_rows;
+  double actual_rows;
+  double startup_cost;
+  double total_cost;
+  double actual_startup_ms;
+  double actual_total_ms;
+} orm_execution_plan_node_t;
+
+#define ORM_EXECUTION_PLAN_NODE_INIT \
+  { sizeof(orm_execution_plan_node_t), 0u, ORM_EXECUTION_PLAN_ROOT_INDEX, 0u, \
+    {NULL, 0u}, {NULL, 0u}, {NULL, 0u}, {NULL, 0u}, \
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }
+
 
 ORM_C_API uint32_t ORM_C_CALL orm_c_abi_version(void);
 ORM_C_API const char *ORM_C_CALL orm_status_message(orm_status_t status);
@@ -333,6 +376,36 @@ ORM_C_API orm_status_t ORM_C_CALL orm_metadata_snapshot_count(
 ORM_C_API orm_status_t ORM_C_CALL orm_metadata_snapshot_get(
     const orm_metadata_snapshot_t *snapshot, uint64_t index,
     orm_metadata_entry_t *out_entry, orm_error_t *error);
+
+/*
+ * Acquires a bounded provider-neutral execution plan for one raw SQL statement.
+ *
+ * PLAN and ANALYZE are never substituted for one another. ANALYZE may execute
+ * the supplied statement; unsupported provider/version combinations return
+ * ORM_STATUS_UNSUPPORTED. The returned snapshot owns all strings and raw
+ * provider detail until orm_execution_plan_destroy().
+ */
+ORM_C_API orm_status_t ORM_C_CALL orm_query_explain(
+    orm_connection_t *connection, orm_string_view_t sql,
+    orm_explain_mode_t mode, orm_execution_plan_t **out_plan,
+    orm_error_t *error);
+ORM_C_API void ORM_C_CALL orm_execution_plan_destroy(
+    orm_execution_plan_t *plan);
+ORM_C_API orm_status_t ORM_C_CALL orm_execution_plan_mode(
+    const orm_execution_plan_t *plan, orm_explain_mode_t *out_mode,
+    orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_execution_plan_provider(
+    const orm_execution_plan_t *plan, orm_string_view_t *out_provider,
+    orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_execution_plan_node_count(
+    const orm_execution_plan_t *plan, uint64_t *out_count,
+    orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_execution_plan_node(
+    const orm_execution_plan_t *plan, uint64_t index,
+    orm_execution_plan_node_t *out_node, orm_error_t *error);
+ORM_C_API orm_status_t ORM_C_CALL orm_execution_plan_raw_detail(
+    const orm_execution_plan_t *plan, orm_string_view_t *out_detail,
+    orm_error_t *error);
 
 
 ORM_C_API orm_status_t ORM_C_CALL orm_transaction_begin(
