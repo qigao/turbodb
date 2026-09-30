@@ -15,6 +15,8 @@
 
 namespace turbodb::app {
 
+constexpr UINT kSqlEditorExecuteRequested = WM_APP + 0x122;
+
 struct EditorCaret {
   std::size_t line = 0;
   std::size_t column = 0;
@@ -29,7 +31,8 @@ class SqlEditor final : public CWindowImpl<SqlEditor, CWindow> {
   END_MSG_MAP()
 
   void Bind(ScintillaRuntime* runtime, SqlWorkspaceSession* session,
-            const SqlLanguageService* language_service) noexcept;
+            const SqlLanguageService* language_service,
+            HWND command_target) noexcept;
   bool Initialize();
 
   std::string Text() const;
@@ -59,6 +62,7 @@ class SqlEditor final : public CWindowImpl<SqlEditor, CWindow> {
   ScintillaRuntime* runtime_ = nullptr;
   SqlWorkspaceSession* session_ = nullptr;
   const SqlLanguageService* language_service_ = nullptr;
+  HWND command_target_ = nullptr;
 };
 
 }  // namespace turbodb::app
