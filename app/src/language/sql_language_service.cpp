@@ -113,6 +113,13 @@ std::vector<std::string> SqlLanguageService::Complete(
       if (HasPrefixInsensitive(qualified, normalized_prefix)) {
         matches.emplace(qualified);
       }
+      if (!relation.schema.empty()) {
+        const std::string schema_qualified =
+            relation.schema + "." + relation.name + "." + column;
+        if (HasPrefixInsensitive(schema_qualified, normalized_prefix)) {
+          matches.emplace(schema_qualified);
+        }
+      }
     }
   }
 
