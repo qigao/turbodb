@@ -29,6 +29,7 @@ function Assert-GitGrepEmpty([string]$Pattern, [string[]]$Paths, [string]$Reason
     if ($code -ne 1) {
       throw "git grep failed while auditing Studio boundaries"
     }
+    $global:LASTEXITCODE = 0
   } finally {
     Pop-Location
   }
@@ -73,7 +74,7 @@ Assert-GitGrepEmpty '(scintilla|lexilla|atlapp\.h|turbodb_app_editor_deps)' `
   @("orm", "dbtools", "drivers", "mysql", "redis", "tidesdb") `
   "GUI dependencies leaked outside the app boundary"
 
-Assert-GitGrepEmpty '(#\s*include\s*[<"](sqlite3\.h|libpq-fe\.h|mysql\.h|mysql/mysql\.h)[>"])' `
+Assert-GitGrepEmpty '(#[[:space:]]*include[[:space:]]*[<"](sqlite3\.h|libpq-fe\.h|mysql\.h|mysql/mysql\.h)[>"])' `
   @("app/src", "app/tests") `
   "Studio code must not include provider-native database client headers"
 
@@ -82,3 +83,4 @@ Assert-GitGrepEmpty '(EXPLAIN QUERY PLAN|EXPLAIN \(FORMAT|EXPLAIN \(ANALYZE|info
   "Studio code must not construct provider-specific SQL"
 
 Write-Host "Studio dependency-boundary audit passed"
+exit 0
