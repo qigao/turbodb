@@ -136,6 +136,11 @@ add_executable(
   src/query/query_result_model.h
   src/workspace/sql_workspace_session.h)
 target_compile_features(turbodb-app-query-test PRIVATE cxx_std_17)
+target_compile_definitions(
+  turbodb-app-query-test
+  PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX)
 target_include_directories(
   turbodb-app-query-test
   PRIVATE
