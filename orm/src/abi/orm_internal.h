@@ -4,6 +4,7 @@
 #include "orm_row_publisher.h"
 
 #include <orm.h>
+#include <orm_driver_base.h>
 #include <cstl.h>
 
 #include <stdbool.h>
@@ -154,6 +155,8 @@ struct orm_connection {
   orm_error_t cleanup_error;
 #endif
   orm_limits limits;
+  uint32_t driver_id_size;
+  char driver_id[ORM_DRIVER_ID_MAX_BYTES + 1u];
   orm_backend backend;
 };
 
