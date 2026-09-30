@@ -53,6 +53,8 @@ add_executable(
   src/main.cpp
   src/main_window.cpp
   src/main_window.h
+  src/connection/connection_manager.cpp
+  src/connection/connection_manager.h
   src/editor/scintilla_runtime.cpp
   src/editor/scintilla_runtime.h
   src/editor/sql_editor.cpp
@@ -96,6 +98,8 @@ add_executable(
   turbodb-app-language-test
   EXCLUDE_FROM_ALL
   tests/sql_language_service_test.cpp
+  src/connection/connection_manager.cpp
+  src/connection/connection_manager.h
   src/explorer/schema_explorer_model.cpp
   src/explorer/schema_explorer_model.h
   src/language/sql_language_service.cpp
