@@ -88,8 +88,9 @@ bool MainWindow::OpenConnection(const ConnectionProfile& profile,
 }
 
 bool MainWindow::CloseActiveConnection(std::string* error) {
-  if (query_controller_.busy()) {
-    if (error != nullptr) *error = "cannot close connection while SQL is running";
+  if (query_controller_.busy() || explain_controller_.busy()) {
+    if (error != nullptr)
+      *error = "cannot close connection while SQL or EXPLAIN is running";
     return false;
   }
   const auto& identity = workspace_session_.connection();
@@ -118,6 +119,10 @@ LRESULT MainWindow::OnExplorerSelectionChanged(UINT, WPARAM, LPARAM, BOOL&) {
 }
 
 LRESULT MainWindow::OnSqlExecuteRequested(UINT, WPARAM, LPARAM, BOOL&) {
+  if (explain_controller_.busy()) {
+    result_view_.ShowError("Wait for the active PLAN/ANALYZE request to finish.");
+    return 0;
+  }
   const auto& identity = workspace_session_.connection();
   if (!identity.has_value()) {
     result_view_.ShowError("Open a TurboDB connection before executing SQL.");
@@ -148,6 +153,50 @@ LRESULT MainWindow::OnSqlExecuteRequested(UINT, WPARAM, LPARAM, BOOL&) {
   return 0;
 }
 
+LRESULT MainWindow::OnSqlExplainRequested(UINT, WPARAM wparam, LPARAM,
+                                              BOOL&) {
+  if (query_controller_.busy()) {
+    result_view_.ShowError("Wait for the active SQL request to finish.");
+    return 0;
+  }
+
+  const orm_explain_mode_t mode =
+      static_cast<orm_explain_mode_t>(wparam);
+  if (mode != ORM_EXPLAIN_PLAN && mode != ORM_EXPLAIN_ANALYZE) {
+    result_view_.ShowError("Invalid execution-plan mode.");
+    return 0;
+  }
+
+  const auto& identity = workspace_session_.connection();
+  if (!identity.has_value()) {
+    result_view_.ShowError("Open a TurboDB connection before explaining SQL.");
+    return 0;
+  }
+
+  std::string sql = editor_.SelectedText();
+  if (sql.empty()) sql = editor_.Text();
+  const bool has_content = std::any_of(
+      sql.begin(), sql.end(),
+      [](unsigned char ch) { return std::isspace(ch) == 0; });
+  if (!has_content) {
+    result_view_.ShowError("SQL text is empty.");
+    return 0;
+  }
+
+  std::string error;
+  std::uint64_t request_id = 0u;
+  if (!explain_controller_.Execute(identity->id, std::move(sql), mode,
+                                   m_hWnd, &request_id, &error)) {
+    result_view_.ShowError(error);
+    return 0;
+  }
+
+  active_explain_request_id_ = request_id;
+  workspace_session_.SetExecutionState(WorkspaceExecutionState::running);
+  result_view_.SetExplainRunning(request_id, mode);
+  return 0;
+}
+
 LRESULT MainWindow::OnQueryExecutionCompleted(UINT, WPARAM wparam, LPARAM,
                                               BOOL&) {
   const std::uint64_t request_id = static_cast<std::uint64_t>(wparam);
@@ -157,6 +206,19 @@ LRESULT MainWindow::OnQueryExecutionCompleted(UINT, WPARAM wparam, LPARAM,
   if (active_request_id_ == request_id) active_request_id_ = 0u;
   workspace_session_.SetExecutionState(WorkspaceExecutionState::idle);
   result_view_.Render(*result);
+  return 0;
+}
+
+LRESULT MainWindow::OnExplainExecutionCompleted(UINT, WPARAM wparam, LPARAM,
+                                                BOOL&) {
+  const std::uint64_t request_id = static_cast<std::uint64_t>(wparam);
+  auto plan = explain_controller_.TakeCompleted(request_id);
+  if (!plan) return 0;
+
+  if (active_explain_request_id_ == request_id)
+    active_explain_request_id_ = 0u;
+  workspace_session_.SetExecutionState(WorkspaceExecutionState::idle);
+  result_view_.RenderPlan(*plan);
   return 0;
 }
 
