@@ -18,6 +18,7 @@ extern CAppModule _Module;
 #include "explorer/schema_explorer_model.h"
 #include "explorer/schema_explorer_view.h"
 #include "language/sql_language_service.h"
+#include "plan/explain_controller.h"
 #include "query/query_controller.h"
 #include "results/result_workspace_view.h"
 #include "workspace/sql_workspace_session.h"
@@ -29,7 +30,8 @@ class MainWindow final : public CWindowImpl<MainWindow> {
   explicit MainWindow(ScintillaRuntime& editor_runtime) noexcept
       : editor_runtime_(editor_runtime),
         explorer_controller_(explorer_model_, workspace_session_),
-        query_controller_(connections_) {}
+        query_controller_(connections_),
+        explain_controller_(connections_) {}
 
   bool OpenConnection(const ConnectionProfile& profile, std::string* error);
   bool CloseActiveConnection(std::string* error);
@@ -42,7 +44,9 @@ class MainWindow final : public CWindowImpl<MainWindow> {
     MESSAGE_HANDLER(WM_SIZE, OnSize)
     MESSAGE_HANDLER(kExplorerSelectionChanged, OnExplorerSelectionChanged)
     MESSAGE_HANDLER(kSqlEditorExecuteRequested, OnSqlExecuteRequested)
+    MESSAGE_HANDLER(kSqlEditorExplainRequested, OnSqlExplainRequested)
     MESSAGE_HANDLER(kQueryExecutionCompleted, OnQueryExecutionCompleted)
+    MESSAGE_HANDLER(kExplainExecutionCompleted, OnExplainExecutionCompleted)
     MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
   END_MSG_MAP()
 
@@ -54,8 +58,12 @@ class MainWindow final : public CWindowImpl<MainWindow> {
                                      LPARAM lparam, BOOL& handled);
   LRESULT OnSqlExecuteRequested(UINT message, WPARAM wparam,
                                 LPARAM lparam, BOOL& handled);
+  LRESULT OnSqlExplainRequested(UINT message, WPARAM wparam,
+                                LPARAM lparam, BOOL& handled);
   LRESULT OnQueryExecutionCompleted(UINT message, WPARAM wparam,
                                    LPARAM lparam, BOOL& handled);
+  LRESULT OnExplainExecutionCompleted(UINT message, WPARAM wparam,
+                                      LPARAM lparam, BOOL& handled);
   LRESULT OnDestroy(UINT message, WPARAM wparam, LPARAM lparam,
                     BOOL &handled);
 
@@ -66,7 +74,9 @@ class MainWindow final : public CWindowImpl<MainWindow> {
   SchemaExplorerModel explorer_model_;
   SchemaExplorerController explorer_controller_;
   QueryController query_controller_;
+  ExplainController explain_controller_;
   std::uint64_t active_request_id_ = 0u;
+  std::uint64_t active_explain_request_id_ = 0u;
 
   CSplitterWindow workspace_splitter_;
   CHorSplitterWindow query_splitter_;
