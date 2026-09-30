@@ -52,7 +52,19 @@ add_executable(
   WIN32
   src/main.cpp
   src/main_window.cpp
-  src/main_window.h)
+  src/main_window.h
+  src/editor/scintilla_runtime.cpp
+  src/editor/scintilla_runtime.h
+  src/editor/sql_editor.cpp
+  src/editor/sql_editor.h
+  src/language/sql_language_service.cpp
+  src/language/sql_language_service.h
+  src/workspace/sql_workspace_session.h)
+
+target_include_directories(
+  turbodb-studio
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 target_compile_features(turbodb-studio PRIVATE cxx_std_17)
 target_compile_definitions(
