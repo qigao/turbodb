@@ -470,7 +470,7 @@ spec("Driver backend DTO bridge") {
                     cursor.context, &columns, &error),
                 ORM_STATUS_OK);
     check_equal(columns, UINT64_C(2));
-    cursor_ops->cancel(cursor.context);
+    check_equal(cursor_ops->cancel(cursor.context, &error), ORM_STATUS_OK);
     check_equal(backend_state.cursor_cancel_calls, 1u);
     cursor_ops->destroy(cursor.context);
     check_equal(backend_state.cursor_destroy_calls, 1u);
