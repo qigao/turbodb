@@ -101,9 +101,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $studio = Resolve-Path ./build/stage/studio/bin/TurboDBStudio.exe
-          & $studio --self-test
-          if ($LASTEXITCODE -ne 0) { throw "staged TurboDB Studio self-test failed: $LASTEXITCODE" }
+          $studio = (Resolve-Path ./build/stage/studio/bin/TurboDBStudio.exe).Path
+          $process = Start-Process -FilePath $studio -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "staged TurboDB Studio self-test failed: $($process.ExitCode)" }
           $drivers = @(Get-ChildItem ./build/stage/studio/bin -Filter 'turbodb_driver_*.dll' -File)
           if ($drivers.Count -ne 0) { throw 'base Studio package must not bundle driver plugins' }
 
