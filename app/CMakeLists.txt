@@ -53,10 +53,16 @@ add_executable(
   src/main.cpp
   src/main_window.cpp
   src/main_window.h
+  src/connection/connection_manager.cpp
+  src/connection/connection_manager.h
   src/editor/scintilla_runtime.cpp
   src/editor/scintilla_runtime.h
   src/editor/sql_editor.cpp
   src/editor/sql_editor.h
+  src/explorer/schema_explorer_model.cpp
+  src/explorer/schema_explorer_model.h
+  src/explorer/schema_explorer_view.cpp
+  src/explorer/schema_explorer_view.h
   src/language/sql_language_service.cpp
   src/language/sql_language_service.h
   src/workspace/sql_workspace_session.h)
@@ -92,6 +98,10 @@ add_executable(
   turbodb-app-language-test
   EXCLUDE_FROM_ALL
   tests/sql_language_service_test.cpp
+  src/connection/connection_manager.cpp
+  src/connection/connection_manager.h
+  src/explorer/schema_explorer_model.cpp
+  src/explorer/schema_explorer_model.h
   src/language/sql_language_service.cpp
   src/language/sql_language_service.h
   src/workspace/sql_workspace_session.h)
@@ -100,4 +110,10 @@ target_include_directories(
   turbodb-app-language-test
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(turbodb-app-language-test PRIVATE Orm::C)
+target_compile_definitions(
+  turbodb-app-language-test
+  PRIVATE
+    TURBODB_APP_SQLITE_PLUGIN_PATH="$<TARGET_FILE:orm_sqlite_driver>")
+add_dependencies(turbodb-app-language-test orm_sqlite_driver)
 set_target_properties(turbodb-app-language-test PROPERTIES FOLDER "app/tests")

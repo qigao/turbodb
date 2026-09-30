@@ -27,9 +27,9 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
     return -1;
   }
 
-  if (explorer_placeholder_.Create(workspace_splitter_, client,
-                                   L"Connections / Schemas",
-                                   kPlaceholderStyle) == nullptr) {
+  explorer_.Bind(&explorer_model_, &workspace_session_);
+  if (explorer_.Create(workspace_splitter_, client, nullptr,
+                       kSplitterStyle) == nullptr) {
     return -1;
   }
 
@@ -48,7 +48,7 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
     return -1;
   }
 
-  workspace_splitter_.SetSplitterPanes(explorer_placeholder_, query_splitter_);
+  workspace_splitter_.SetSplitterPanes(explorer_, query_splitter_);
   workspace_splitter_.SetSplitterPosPct(24);
 
   query_splitter_.SetSplitterPanes(editor_, result_placeholder_);
@@ -57,12 +57,57 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
   return 0;
 }
 
+bool MainWindow::OpenConnection(const ConnectionProfile& profile,
+                                std::string* error) {
+  WorkspaceConnectionIdentity identity;
+  if (!connections_.Open(profile, &identity, error))
+    return false;
+
+  orm_connection_t* connection = connections_.Get(identity.id);
+  if (connection == nullptr ||
+      !explorer_controller_.Refresh(connection, identity, error)) {
+    std::string ignored;
+    (void)connections_.Close(identity.id, &ignored);
+    return false;
+  }
+
+  explorer_.Refresh();
+  if (editor_.RefreshLanguage())
+    return true;
+
+  std::string ignored;
+  (void)connections_.Close(identity.id, &ignored);
+  workspace_session_.ClearConnection();
+  explorer_model_.Clear();
+  explorer_.Refresh();
+  if (error != nullptr && error->empty())
+    *error = "initialize SQL language service for connection";
+  return false;
+}
+
+bool MainWindow::CloseActiveConnection(std::string* error) {
+  const auto& identity = workspace_session_.connection();
+  if (!identity.has_value()) return true;
+  const std::uint64_t id = identity->id;
+  if (!connections_.Close(id, error))
+    return false;
+  workspace_session_.ClearConnection();
+  explorer_model_.Clear();
+  explorer_.Refresh();
+  return editor_.RefreshLanguage();
+}
+
 LRESULT MainWindow::OnSize(UINT, WPARAM, LPARAM lparam, BOOL &) {
   if (workspace_splitter_.IsWindow()) {
     workspace_splitter_.SetWindowPos(
         nullptr, 0, 0, LOWORD(lparam), HIWORD(lparam),
         SWP_NOACTIVATE | SWP_NOZORDER);
   }
+  return 0;
+}
+
+LRESULT MainWindow::OnExplorerSelectionChanged(UINT, WPARAM, LPARAM, BOOL&) {
+  (void)editor_.RefreshLanguage();
   return 0;
 }
 
