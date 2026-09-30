@@ -31,10 +31,12 @@ std::string ReadEditorRange(HWND hwnd, LRESULT start, LRESULT end) {
 }  // namespace
 
 void SqlEditor::Bind(ScintillaRuntime* runtime, SqlWorkspaceSession* session,
-                     const SqlLanguageService* language_service) noexcept {
+                     const SqlLanguageService* language_service,
+                     HWND command_target) noexcept {
   runtime_ = runtime;
   session_ = session;
   language_service_ = language_service;
+  command_target_ = command_target;
 }
 
 bool SqlEditor::Initialize() {
@@ -52,6 +54,12 @@ LRESULT SqlEditor::OnKeyDown(UINT, WPARAM wparam, LPARAM, BOOL& handled) {
     const std::string prefix = CurrentWordPrefix();
     const auto items = language_service_->Complete(*session_, prefix);
     ShowCompletionItems(items, prefix.size());
+    handled = TRUE;
+    return 0;
+  }
+  if ((control && wparam == VK_RETURN) || wparam == VK_F5) {
+    if (command_target_ != nullptr && ::IsWindow(command_target_))
+      (void)::PostMessageW(command_target_, kSqlEditorExecuteRequested, 0, 0);
     handled = TRUE;
     return 0;
   }
