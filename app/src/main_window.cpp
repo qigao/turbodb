@@ -57,11 +57,32 @@ LRESULT MainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL &) {
   return 0;
 }
 
-bool MainWindow::AttachConnection(orm_connection_t* connection,
-                                  WorkspaceConnectionIdentity identity,
-                                  std::string* error) {
-  if (!explorer_controller_.Refresh(connection, std::move(identity), error))
+bool MainWindow::OpenConnection(const ConnectionProfile& profile,
+                                std::string* error) {
+  WorkspaceConnectionIdentity identity;
+  if (!connections_.Open(profile, &identity, error))
     return false;
+
+  orm_connection_t* connection = connections_.Get(identity.id);
+  if (connection == nullptr ||
+      !explorer_controller_.Refresh(connection, identity, error)) {
+    std::string ignored;
+    (void)connections_.Close(identity.id, &ignored);
+    return false;
+  }
+
+  explorer_.Refresh();
+  return editor_.RefreshLanguage();
+}
+
+bool MainWindow::CloseActiveConnection(std::string* error) {
+  const auto& identity = workspace_session_.connection();
+  if (!identity.has_value()) return true;
+  const std::uint64_t id = identity->id;
+  if (!connections_.Close(id, error))
+    return false;
+  workspace_session_.ClearConnection();
+  explorer_model_.Replace({}, {}, nullptr);
   explorer_.Refresh();
   return editor_.RefreshLanguage();
 }
