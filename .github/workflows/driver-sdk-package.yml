@@ -9,7 +9,6 @@ on:
       - "orm/**"
       - "drivers/**"
       - "dbtools/**"
-      - "app/**"
       - "tidesdb/**"
       - "tools/**"
       - "cmake/**"
@@ -29,7 +28,6 @@ on:
       - "orm/**"
       - "drivers/**"
       - "dbtools/**"
-      - "app/**"
       - "tidesdb/**"
       - "tools/**"
       - "cmake/**"
@@ -129,48 +127,6 @@ jobs:
           done
           echo "MongoDB feature was not published to shared cache" >&2
           exit 1
-
-  studio-shell:
-    name: TurboDB Studio WTL shell (windows-x64)
-    if: >-
-      github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: publish TurboDB package')
-    runs-on: windows-2022
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-native
-        with:
-          platform: windows-x64-studio
-
-      - name: Locate MSVC and install Ninja
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
-          "VSINSTALL=$vs" >> $env:GITHUB_ENV
-          choco install ninja -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Ninja install failed' }
-
-      - name: Install published native SDK pair
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
-
-      - name: Configure and build Studio shell
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          cmake --preset ci-windows-release -DTURBODB_BUILD_APP=ON -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF
-          if errorlevel 1 exit /b 1
-          cmake --build --preset ci-windows-release --target turbodb-studio --parallel 4
-          if errorlevel 1 exit /b 1
 
   native:
     needs: mongodb-cache
