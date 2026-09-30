@@ -5,9 +5,9 @@
 
 extern CAppModule _Module;
 
+#include <atlwin.h>
 #include <atlctrls.h>
 #include <atlsplit.h>
-#include <atlwin.h>
 
 namespace turbodb::app {
 
