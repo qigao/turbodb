@@ -8,15 +8,6 @@
         "libpq",
         "zstd"
       ]
-    },
-    {
-      "kind": "git",
-      "repository": "https://github.com/microsoft/vcpkg",
-      "baseline": "4cb050be2cfa7a947cdd2dd1a70e24b17774c979",
-      "packages": [
-        "scintilla",
-        "lexilla"
-      ]
     }
   ]
 }
