@@ -1,6 +1,7 @@
 #include "explorer/schema_explorer_model.h"
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <tuple>
 #include <utility>
@@ -124,7 +125,7 @@ bool SchemaExplorerModel::ApplySelection(
   const auto& node = nodes_[index];
   switch (node.kind) {
     case ExplorerNodeKind::connection:
-      session.SetCatalog({});
+      session.SetCatalog(std::string{});
       return true;
     case ExplorerNodeKind::catalog:
       session.SetCatalog(node.catalog);
@@ -164,6 +165,11 @@ bool SchemaExplorerController::Refresh(
     return false;
   }
 
+  if (count > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    if (error != nullptr) *error = "metadata snapshot exceeds platform size";
+    orm_metadata_snapshot_destroy(snapshot);
+    return false;
+  }
   std::vector<SchemaMetadataRecord> records;
   records.reserve(static_cast<std::size_t>(count));
   for (uint64_t i = 0u; i < count; ++i) {
