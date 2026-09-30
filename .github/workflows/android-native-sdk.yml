@@ -8,7 +8,8 @@ on:
       - "CMakeLists.txt"
       - "packaging/nuget/**"
       - ".github/workflows/android-native-sdk.yml"
-      - ".github/workflows/native-nuget-release.yml"\n      - "cmake/ci/restore-native-sdks.ps1"
+      - ".github/workflows/native-nuget-release.yml"
+      - "cmake/ci/restore-native-sdks.ps1"
 
 permissions:
   contents: read
