@@ -11,6 +11,8 @@ namespace {
 constexpr UINT kGridId = 4201u;
 constexpr UINT kMessageId = 4202u;
 constexpr UINT kStatusId = 4203u;
+constexpr UINT kPlanTreeId = 4204u;
+constexpr UINT kPlanRawId = 4205u;
 constexpr int kStatusHeight = 24;
 
 }  // namespace
@@ -34,6 +36,19 @@ LRESULT ResultWorkspaceView::OnCreate(UINT, WPARAM, LPARAM, BOOL&) {
     return -1;
   }
 
+  const DWORD tree_style = WS_CHILD | WS_TABSTOP | TVS_HASBUTTONS |
+                           TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS;
+  if (plan_tree_.Create(m_hWnd, client, nullptr, tree_style,
+                        WS_EX_CLIENTEDGE, kPlanTreeId) == nullptr) {
+    return -1;
+  }
+  const DWORD raw_style = WS_CHILD | ES_MULTILINE | ES_READONLY |
+                          ES_AUTOVSCROLL | WS_VSCROLL | WS_HSCROLL;
+  if (plan_raw_.Create(m_hWnd, client, nullptr, raw_style,
+                       WS_EX_CLIENTEDGE, kPlanRawId) == nullptr) {
+    return -1;
+  }
+
   if (status_.Create(m_hWnd, client, L"Ready",
                      WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0,
                      kStatusId) == nullptr) {
@@ -41,6 +56,7 @@ LRESULT ResultWorkspaceView::OnCreate(UINT, WPARAM, LPARAM, BOOL&) {
   }
 
   ShowGrid(false);
+  ShowPlan(false);
   Layout(client.right - client.left, client.bottom - client.top);
   return 0;
 }
@@ -60,6 +76,14 @@ void ResultWorkspaceView::Layout(int width, int height) {
   if (message_.IsWindow())
     message_.SetWindowPos(nullptr, 0, 0, width, body_height,
                           SWP_NOACTIVATE | SWP_NOZORDER);
+  const int tree_height = body_height * 3 / 5;
+  if (plan_tree_.IsWindow())
+    plan_tree_.SetWindowPos(nullptr, 0, 0, width, tree_height,
+                            SWP_NOACTIVATE | SWP_NOZORDER);
+  if (plan_raw_.IsWindow())
+    plan_raw_.SetWindowPos(nullptr, 0, tree_height, width,
+                           body_height - tree_height,
+                           SWP_NOACTIVATE | SWP_NOZORDER);
   if (status_.IsWindow())
     status_.SetWindowPos(nullptr, 0, body_height, width, kStatusHeight,
                          SWP_NOACTIVATE | SWP_NOZORDER);
@@ -68,6 +92,18 @@ void ResultWorkspaceView::Layout(int width, int height) {
 void ResultWorkspaceView::ShowGrid(bool visible) {
   if (grid_.IsWindow()) grid_.ShowWindow(visible ? SW_SHOW : SW_HIDE);
   if (message_.IsWindow()) message_.ShowWindow(visible ? SW_HIDE : SW_SHOW);
+  if (visible) ShowPlan(false);
+}
+
+void ResultWorkspaceView::ShowPlan(bool visible) {
+  if (plan_tree_.IsWindow())
+    plan_tree_.ShowWindow(visible ? SW_SHOW : SW_HIDE);
+  if (plan_raw_.IsWindow())
+    plan_raw_.ShowWindow(visible ? SW_SHOW : SW_HIDE);
+  if (visible) {
+    if (grid_.IsWindow()) grid_.ShowWindow(SW_HIDE);
+    if (message_.IsWindow()) message_.ShowWindow(SW_HIDE);
+  }
 }
 
 std::wstring ResultWorkspaceView::Utf8(std::string_view text) {
@@ -111,6 +147,7 @@ std::wstring ResultWorkspaceView::CellText(const QueryCell& cell) {
 }
 
 void ResultWorkspaceView::SetRunning(std::uint64_t request_id) {
+  ShowPlan(false);
   ShowGrid(false);
   message_.SetWindowText(
       L"Executing SQL on a background worker.\r\n"
@@ -120,14 +157,97 @@ void ResultWorkspaceView::SetRunning(std::uint64_t request_id) {
   status_.SetWindowText(text.c_str());
 }
 
+void ResultWorkspaceView::SetExplainRunning(std::uint64_t request_id,
+                                            orm_explain_mode_t mode) {
+  ShowGrid(false);
+  ShowPlan(false);
+  const wchar_t* action =
+      mode == ORM_EXPLAIN_ANALYZE ? L"ANALYZE" : L"PLAN";
+  std::wstring body =
+      mode == ORM_EXPLAIN_ANALYZE
+          ? L"Executing ANALYZE on a background worker.\r\n"
+            L"ANALYZE may execute the SQL statement."
+          : L"Acquiring execution PLAN on a background worker.";
+  message_.SetWindowText(body.c_str());
+  const std::wstring text =
+      std::wstring(action) + L" request " + std::to_wstring(request_id);
+  status_.SetWindowText(text.c_str());
+}
+
 void ResultWorkspaceView::ShowError(std::string message) {
+  ShowPlan(false);
   ShowGrid(false);
   const std::wstring wide = Utf8(message);
   message_.SetWindowText(wide.c_str());
   status_.SetWindowText(L"Not executed");
 }
 
+std::wstring ResultWorkspaceView::PlanNodeText(
+    const ExecutionPlanNodeSnapshot& node) {
+  std::wostringstream text;
+  text << Utf8(node.node_type.empty() ? std::string_view{"Plan Node"}
+                                      : std::string_view{node.node_type});
+  if (!node.relation.empty()) text << L" | " << Utf8(node.relation);
+  if (!node.index_name.empty()) text << L" | index=" << Utf8(node.index_name);
+  if ((node.flags & ORM_PLAN_NODE_HAS_ESTIMATED_ROWS) != 0u)
+    text << L" | est rows=" << node.estimated_rows;
+  if ((node.flags & ORM_PLAN_NODE_HAS_ACTUAL_ROWS) != 0u)
+    text << L" | actual rows=" << node.actual_rows;
+  if ((node.flags & ORM_PLAN_NODE_HAS_TOTAL_COST) != 0u)
+    text << L" | cost=" << node.total_cost;
+  if ((node.flags & ORM_PLAN_NODE_HAS_ACTUAL_TOTAL_MS) != 0u)
+    text << L" | " << node.actual_total_ms << L" ms";
+  return text.str();
+}
+
+void ResultWorkspaceView::RenderPlan(const ExecutionPlanSnapshot& plan) {
+  if (plan.status != ORM_STATUS_OK) {
+    ShowPlan(false);
+    ShowGrid(false);
+    std::wstring body =
+        (plan.mode == ORM_EXPLAIN_ANALYZE ? L"ANALYZE failed" : L"PLAN failed");
+    body += L" (TurboDB status " + std::to_wstring(plan.status) + L")";
+    if (!plan.message.empty()) body += L": " + Utf8(plan.message);
+    message_.SetWindowText(body.c_str());
+  } else {
+    ShowPlan(true);
+    plan_tree_.DeleteAllItems();
+    plan_items_.assign(plan.nodes.size(), nullptr);
+    for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
+      const auto& node = plan.nodes[i];
+      HTREEITEM parent = TVI_ROOT;
+      if (node.parent_index != ORM_EXECUTION_PLAN_ROOT_INDEX &&
+          node.parent_index < plan_items_.size())
+        parent = plan_items_[static_cast<std::size_t>(node.parent_index)];
+      const std::wstring label = PlanNodeText(node);
+      TVINSERTSTRUCTW insert{};
+      insert.hParent = parent;
+      insert.hInsertAfter = TVI_LAST;
+      insert.item.mask = TVIF_TEXT;
+      insert.item.pszText = const_cast<wchar_t*>(label.c_str());
+      plan_items_[i] = TreeView_InsertItem(plan_tree_.m_hWnd, &insert);
+    }
+    for (HTREEITEM item : plan_items_) {
+      if (item != nullptr) plan_tree_.Expand(item);
+    }
+    const std::wstring raw = Utf8(plan.raw_detail);
+    plan_raw_.SetWindowText(raw.c_str());
+  }
+
+  const double elapsed_ms =
+      static_cast<double>(plan.elapsed_microseconds) / 1000.0;
+  std::wostringstream status_text;
+  status_text << (plan.mode == ORM_EXPLAIN_ANALYZE ? L"ANALYZE" : L"PLAN")
+              << L" | provider=" << Utf8(plan.provider)
+              << L" | nodes=" << plan.nodes.size()
+              << L" | " << std::fixed << std::setprecision(2)
+              << elapsed_ms << L" ms";
+  const std::wstring status = status_text.str();
+  status_.SetWindowText(status.c_str());
+}
+
 void ResultWorkspaceView::Render(const QueryResultSnapshot& result) {
+  ShowPlan(false);
   const double elapsed_ms =
       static_cast<double>(result.elapsed_microseconds) / 1000.0;
   std::wostringstream status_text;

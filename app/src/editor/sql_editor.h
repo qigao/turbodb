@@ -16,6 +16,12 @@
 namespace turbodb::app {
 
 constexpr UINT kSqlEditorExecuteRequested = WM_APP + 0x122;
+constexpr UINT kSqlEditorExplainRequested = WM_APP + 0x123;
+
+enum class SqlExplainAction : unsigned int {
+  plan = 0u,
+  analyze = 1u,
+};
 
 struct EditorCaret {
   std::size_t line = 0;

@@ -65,6 +65,10 @@ add_executable(
   src/explorer/schema_explorer_view.h
   src/language/sql_language_service.cpp
   src/language/sql_language_service.h
+  src/plan/execution_plan_model.cpp
+  src/plan/execution_plan_model.h
+  src/plan/explain_controller.cpp
+  src/plan/explain_controller.h
   src/query/query_controller.cpp
   src/query/query_controller.h
   src/query/query_result_model.cpp
@@ -130,6 +134,10 @@ add_executable(
   tests/query_controller_test.cpp
   src/connection/connection_manager.cpp
   src/connection/connection_manager.h
+  src/plan/execution_plan_model.cpp
+  src/plan/execution_plan_model.h
+  src/plan/explain_controller.cpp
+  src/plan/explain_controller.h
   src/query/query_controller.cpp
   src/query/query_controller.h
   src/query/query_result_model.cpp

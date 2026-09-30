@@ -63,6 +63,17 @@ LRESULT SqlEditor::OnKeyDown(UINT, WPARAM wparam, LPARAM, BOOL& handled) {
     handled = TRUE;
     return 0;
   }
+  if (wparam == VK_F6) {
+    const bool shift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    if (command_target_ != nullptr && ::IsWindow(command_target_))
+      (void)::PostMessageW(
+          command_target_, kSqlEditorExplainRequested,
+          shift ? static_cast<WPARAM>(SqlExplainAction::analyze)
+                : static_cast<WPARAM>(SqlExplainAction::plan),
+          0);
+    handled = TRUE;
+    return 0;
+  }
   handled = FALSE;
   return 0;
 }
