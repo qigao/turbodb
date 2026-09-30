@@ -90,15 +90,6 @@ static orm_status_t explain_copy_view(orm_execution_plan_t *plan,
   return ORM_STATUS_OK;
 }
 
-static orm_status_t explain_copy_cstr(orm_execution_plan_t *plan,
-                                      const char *input,
-                                      orm_string_view_t *out,
-                                      orm_error_t *error) {
-  const orm_string_view_t view =
-      input != NULL ? orm_view(input) : (orm_string_view_t){NULL, 0u};
-  return explain_copy_view(plan, view, out, error);
-}
-
 static orm_status_t explain_reserve_node(orm_execution_plan_t *plan,
                                          orm_error_t *error) {
   if (plan->count >= plan->max_nodes)
@@ -588,9 +579,8 @@ static orm_status_t explain_load_sqlite(
     node.node_type = explain_subview(text, space != NULL ? space : end);
 
     const char *relation = NULL;
-    if (detail.len >= 5u &&
-        (strncmp(text, "SCAN ", 5u) == 0 ||
-         strncmp(text, "SEARCH ", 7u) == 0)) {
+    if ((detail.len >= 5u && strncmp(text, "SCAN ", 5u) == 0) ||
+        (detail.len >= 7u && strncmp(text, "SEARCH ", 7u) == 0)) {
       const char *on = strstr(text, " ");
       if (on != NULL) {
         ++on;
@@ -901,6 +891,9 @@ orm_status_t ORM_C_CALL orm_query_explain(
                             "driver does not expose execution plans");
   }
 
+  if (status == ORM_STATUS_OK && plan->count == 0u)
+    status = explain_fail(error, ORM_STATUS_TYPE_ERROR,
+                          "provider returned an execution plan with no nodes");
   if (status != ORM_STATUS_OK) {
     orm_execution_plan_destroy(plan);
     return status;
