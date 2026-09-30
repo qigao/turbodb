@@ -71,7 +71,7 @@ jobs:
           if errorlevel 1 exit /b 1
           set "VCPKG_ROOT=%TURBODB_PINNED_VCPKG_ROOT%"
           set "VCPKG_INSTALLED_DIR=%CD%\build\vcpkg-core-audit"
-          cmake --preset ci-windows-release -B build\ci-windows-core-audit -DTURBODB_BUILD_APP=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF
+          cmake -S . -B build\ci-windows-core-audit -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_INSTALLED_DIR="%VCPKG_INSTALLED_DIR%" -DCMAKE_PREFIX_PATH="%VCPKG_INSTALLED_DIR%\x64-windows" -DTURBODB_BUILD_APP=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF -DBUILD_EXAMPLES=OFF -DTIDESDB_BUILD_TESTS=OFF -DTIDESDB_WITH_SNAPPY=OFF -DTIDESDB_WITH_LZ4=OFF
           if errorlevel 1 exit /b 1
           powershell -NoProfile -ExecutionPolicy Bypass -File cmake\ci\audit-studio-boundary.ps1 -RepoRoot "%CD%" -VcpkgStatus "%VCPKG_INSTALLED_DIR%\vcpkg\status"
           if errorlevel 1 exit /b 1
