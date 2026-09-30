@@ -72,8 +72,7 @@ static orm_status_t metadata_copy_string(
   if (input.data == NULL)
     return metadata_fail(error, ORM_STATUS_INVALID_ARGUMENT,
                          "metadata string view is invalid");
-  if (input.len > SIZE_MAX ||
-      snapshot->copied_bytes > snapshot->max_bytes ||
+  if (snapshot->copied_bytes > snapshot->max_bytes ||
       (uint64_t)input.len > snapshot->max_bytes - snapshot->copied_bytes)
     return metadata_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
                          "metadata string budget exceeded");
@@ -602,6 +601,7 @@ orm_status_t ORM_C_CALL orm_connection_metadata_snapshot(
 orm_status_t ORM_C_CALL orm_metadata_snapshot_count(
     const orm_metadata_snapshot_t *snapshot, uint64_t *out_count,
     orm_error_t *error) {
+  if (out_count != NULL) *out_count = 0u;
   if (snapshot == NULL || out_count == NULL)
     return metadata_fail(error, ORM_STATUS_INVALID_ARGUMENT,
                          "invalid metadata count request");
