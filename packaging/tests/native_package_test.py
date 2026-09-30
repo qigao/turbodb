@@ -43,14 +43,15 @@ class NativePackageTest(unittest.TestCase):
                     self.assertTrue(path in self.files, f"Missing SDK file: {path}")
                     self.assertGreater(self.package.getinfo(path).file_size, 0)
 
-    def test_native_dependencies(self):
+    def test_github_dependencies_are_not_embedded(self):
         manifest = ET.fromstring(self.package.read("TurboDB.Native.nuspec"))
         dependencies = {
             node.attrib["id"] for node in manifest.iter()
             if node.tag.rsplit("}", 1)[-1] == "dependency"
         }
-        self.assertTrue({"Salts.Native", "SaltsUtils.Native"} <= dependencies,
-                        f"Missing native SDK dependencies: {dependencies}")
+        forbidden = {"Salts.Native", "SaltsUtils.Native"}
+        self.assertTrue(forbidden.isdisjoint(dependencies),
+                        f"GitHub package dependency metadata must be omitted: {dependencies}")
 
 
 if __name__ == "__main__":
