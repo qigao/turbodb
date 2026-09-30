@@ -33,6 +33,11 @@ bool ExplainController::busy() const noexcept {
   return busy_;
 }
 
+bool ExplainController::has_pending_completion() const noexcept {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return completed_ != nullptr;
+}
+
 bool ExplainController::Execute(std::uint64_t connection_id, std::string sql,
                                 orm_explain_mode_t mode, HWND notify_window,
                                 std::uint64_t* out_request_id,
