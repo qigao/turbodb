@@ -66,8 +66,10 @@ jobs:
           if errorlevel 1 exit /b 1
           cmake --preset ci-windows-release -DTURBODB_BUILD_APP=ON -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF
           if errorlevel 1 exit /b 1
-          cmake --build --preset ci-windows-release --target turbodb-studio turbodb-app-language-test --parallel 4
+          cmake --build --preset ci-windows-release --target turbodb-studio turbodb-app-language-test turbodb-app-query-test --parallel 4
           if errorlevel 1 exit /b 1
           set "PATH=%CD%\vcpkg_installed\x64-windows\bin;%PATH%"
           build\ci-windows-release\bin\turbodb-app-language-test.exe
+          if errorlevel 1 exit /b 1
+          build\ci-windows-release\bin\turbodb-app-query-test.exe
           if errorlevel 1 exit /b 1

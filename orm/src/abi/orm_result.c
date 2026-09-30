@@ -18,6 +18,7 @@ typedef struct orm_result_cell {
 
 struct orm_result {
   vec_t cells;
+  vec_t column_names;
   uint64_t row_count;
   uint64_t column_count;
   uint64_t affected_rows;
@@ -43,7 +44,12 @@ void ORM_C_CALL orm_result_destroy(orm_result_t *result) {
     return;
   for (index = 0u; index < vec_size(&result->cells); ++index)
     orm_result_cell_destroy((orm_result_cell *)vec_at(&result->cells, index));
+  for (index = 0u; index < vec_size(&result->column_names); ++index) {
+    tstr *name = (tstr *)vec_at(&result->column_names, index);
+    if (name != NULL) tstr_freep(name);
+  }
   vec_destroy(&result->cells);
+  vec_destroy(&result->column_names);
   free(result);
 }
 
@@ -73,6 +79,13 @@ static orm_status_t orm_result_create(const orm_limits *limits,
     free(result);
     return orm_result_fail(error, ORM_STATUS_OUT_OF_MEMORY,
                            "initialize ORM result storage");
+  }
+  if (vec_init_bytes(&result->column_names, sizeof(tstr),
+                     _Alignof(tstr), limits->max_columns) != STL_OK) {
+    vec_destroy(&result->cells);
+    free(result);
+    return orm_result_fail(error, ORM_STATUS_OUT_OF_MEMORY,
+                           "initialize ORM result column metadata");
   }
   *out_result = result;
   return ORM_STATUS_OK;
@@ -158,6 +171,62 @@ static orm_status_t orm_result_copy_cell(orm_result_t *result,
   return ORM_STATUS_OK;
 }
 
+static orm_status_t orm_result_copy_column_name(
+    orm_result_t *result, const orm_limits *limits, uint64_t column,
+    const cserde_token *token, orm_error_t *error) {
+  if (token == NULL || token->kind != CSERDE_STRING)
+    return orm_result_fail(error, ORM_STATUS_TYPE_ERROR,
+                           "ORM result column name must be text");
+  if (token->value.slice.size != 0u && token->value.slice.data == NULL)
+    return orm_result_fail(error, ORM_STATUS_TYPE_ERROR,
+                           "ORM result contains an invalid column name");
+
+  if (result->row_count == 0u) {
+    const uint64_t bytes = (uint64_t)token->value.slice.size;
+    if (result->payload_bytes > limits->max_result_bytes ||
+        bytes > limits->max_result_bytes - result->payload_bytes)
+      return orm_result_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
+                             "ORM result column metadata exceeds byte limit");
+    const void *name_data =
+        token->value.slice.size != 0u ? token->value.slice.data : "";
+    tstr owned =
+        tstr_new_len(name_data, token->value.slice.size);
+    if (owned == NULL)
+      return orm_result_fail(error, ORM_STATUS_OUT_OF_MEMORY,
+                             "copy ORM result column name");
+    if (vec_push(&result->column_names, &owned) != STL_OK) {
+      tstr_free(owned);
+      return orm_result_fail(error, ORM_STATUS_OUT_OF_MEMORY,
+                             "grow ORM result column metadata");
+    }
+    result->payload_bytes += bytes;
+    return ORM_STATUS_OK;
+  }
+
+  if (column >= (uint64_t)vec_size(&result->column_names))
+    return orm_result_fail(error, ORM_STATUS_TYPE_ERROR,
+                           "ORM result column metadata is inconsistent");
+  const tstr *existing =
+      (const tstr *)vec_at_const(&result->column_names, (size_t)column);
+  if (existing == NULL ||
+      tstr_len(*existing) != token->value.slice.size ||
+      (token->value.slice.size != 0u &&
+       memcmp(*existing, token->value.slice.data, token->value.slice.size) != 0))
+    return orm_result_fail(error, ORM_STATUS_TYPE_ERROR,
+                           "ORM result rows changed column names");
+  return ORM_STATUS_OK;
+}
+
+static void orm_result_rollback_column_names(orm_result_t *result,
+                                             size_t name_start) {
+  while (vec_size(&result->column_names) > name_start) {
+    tstr name = NULL;
+    if (vec_pop(&result->column_names, &name) != STL_OK)
+      break;
+    tstr_free(name);
+  }
+}
+
 static void orm_result_rollback_row(orm_result_t *result, size_t row_start,
                                     uint64_t payload_start) {
   while (vec_size(&result->cells) > row_start) {
@@ -175,6 +244,7 @@ static orm_status_t orm_result_copy_row(orm_result_t *result,
                                         cserde_reader *reader,
                                         orm_error_t *error) {
   const size_t row_start = vec_size(&result->cells);
+  const size_t name_start = vec_size(&result->column_names);
   const uint64_t payload_start = result->payload_bytes;
   uint64_t columns = 0u;
   cserde_token token;
@@ -205,6 +275,10 @@ static orm_status_t orm_result_copy_row(orm_result_t *result,
                                "ORM result exceeds configured column limit");
       break;
     }
+    status = orm_result_copy_column_name(
+        result, limits, columns, &token, error);
+    if (status != ORM_STATUS_OK)
+      break;
     reader_status = cserde_reader_next(reader, &token);
     if (reader_status != CSERDE_OK) {
       status = orm_result_reader_error(reader_status, error);
@@ -238,6 +312,8 @@ static orm_status_t orm_result_copy_row(orm_result_t *result,
                              "ORM result rows have inconsistent columns");
   if (status != ORM_STATUS_OK) {
     orm_result_rollback_row(result, row_start, payload_start);
+    if (result->row_count == 0u)
+      orm_result_rollback_column_names(result, name_start);
     return status;
   }
   if (result->row_count == 0u)
@@ -417,6 +493,32 @@ orm_status_t ORM_C_CALL orm_result_column_count(const orm_result_t *result,
   return orm_result_get_count(result, out_count,
                               result != NULL ? result->column_count : 0u,
                               error);
+}
+
+orm_status_t ORM_C_CALL orm_result_column_name(
+    const orm_result_t *result, uint64_t column,
+    orm_string_view_t *out_name, orm_error_t *error) {
+  if (out_name != NULL) {
+    out_name->data = NULL;
+    out_name->len = 0u;
+  }
+  if (result == NULL || out_name == NULL)
+    return orm_result_fail(error, ORM_STATUS_INVALID_ARGUMENT,
+                           "invalid ORM result column-name access");
+  if (column >= result->column_count)
+    return orm_result_fail(error, ORM_STATUS_OUT_OF_RANGE,
+                           "ORM result column is out of range");
+  if (column >= (uint64_t)vec_size(&result->column_names))
+    return orm_result_fail(error, ORM_STATUS_UNSUPPORTED,
+                           "ORM result has no materialized column names");
+  const tstr *name =
+      (const tstr *)vec_at_const(&result->column_names, (size_t)column);
+  if (name == NULL || *name == NULL)
+    return orm_result_fail(error, ORM_STATUS_INTERNAL_ERROR,
+                           "ORM result column metadata is inconsistent");
+  *out_name = tstr_to_v(*name);
+  orm_error_set(error, ORM_STATUS_OK, NULL);
+  return ORM_STATUS_OK;
 }
 
 orm_status_t ORM_C_CALL orm_result_affected_rows(const orm_result_t *result,
