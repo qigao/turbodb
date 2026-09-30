@@ -443,6 +443,12 @@ ORM_C_API orm_status_t ORM_C_CALL orm_result_row_count(
     const orm_result_t *result, uint64_t *out_count, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_result_column_count(
     const orm_result_t *result, uint64_t *out_count, orm_error_t *error);
+/* Returns an owned materialized column name when row metadata supplied one.
+ * Empty result sets whose cursor exposes only a count return UNSUPPORTED rather
+ * than synthesizing a provider-specific label. The view lives with result. */
+ORM_C_API orm_status_t ORM_C_CALL orm_result_column_name(
+    const orm_result_t *result, uint64_t column,
+    orm_string_view_t *out_name, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_result_affected_rows(
     const orm_result_t *result, uint64_t *out_count, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_result_is_null(
