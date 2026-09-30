@@ -90,6 +90,43 @@ int main() {
       result->rows[1][1].bytes != "Linus")
     return Fail("SELECT typed row values mismatch");
 
+  orm_connection_t* native = connections.Get(identity.id);
+  if (native == nullptr)
+    return Fail("active SQLite connection disappeared");
+
+  orm_error_t plan_error;
+  orm_error_init(&plan_error);
+  orm_execution_plan_t* plan = nullptr;
+  if (orm_query_explain(
+          native, orm_view("select id, name from users order by id"),
+          ORM_EXPLAIN_PLAN, &plan, &plan_error) != ORM_STATUS_OK)
+    return Fail("SQLite execution PLAN acquisition failed");
+
+  uint64_t plan_nodes = 0u;
+  orm_string_view_t plan_provider{};
+  orm_string_view_t raw_plan{};
+  if (orm_execution_plan_node_count(plan, &plan_nodes, &plan_error) !=
+          ORM_STATUS_OK ||
+      orm_execution_plan_provider(plan, &plan_provider, &plan_error) !=
+          ORM_STATUS_OK ||
+      orm_execution_plan_raw_detail(plan, &raw_plan, &plan_error) !=
+          ORM_STATUS_OK ||
+      plan_nodes == 0u || raw_plan.len == 0u ||
+      std::string(static_cast<const char*>(plan_provider.data),
+                  plan_provider.len) != "sqlite") {
+    orm_execution_plan_destroy(plan);
+    return Fail("SQLite normalized execution PLAN shape mismatch");
+  }
+  orm_execution_plan_destroy(plan);
+  plan = nullptr;
+
+  if (orm_query_explain(
+          native, orm_view("select id from users"),
+          ORM_EXPLAIN_ANALYZE, &plan, &plan_error) !=
+          ORM_STATUS_UNSUPPORTED ||
+      plan != nullptr)
+    return Fail("SQLite ANALYZE must be explicitly unsupported");
+
   if (!Execute(controller, identity.id, "select from", &result))
     return Fail("invalid SQL request did not complete");
   if (result->kind != QueryOutcomeKind::error ||
