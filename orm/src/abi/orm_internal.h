@@ -127,6 +127,9 @@ typedef struct orm_backend_ops {
   orm_status_t (*begin_transaction)(void *context, orm_isolation_t isolation,
                                     orm_transaction_backend *out_transaction,
                                     orm_error_t *error);
+  orm_status_t (*open_async_cursor)(void *context, const orm_query_plan *plan,
+      const orm_limits *limits, const orm_async_config_t *async_config,
+      orm_row_cursor *out_cursor, orm_error_t *error);
 } orm_backend_ops;
 
 struct orm_backend {

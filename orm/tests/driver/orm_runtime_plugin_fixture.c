@@ -6,6 +6,13 @@
 #define FIXTURE_HEADER(T) {(uint32_t)sizeof(T), ORM_DRIVER_ABI_VERSION}
 #define FIXTURE_TABLE(p) {(p), (uint32_t)sizeof(*(p)), 0u}
 
+#ifndef ORM_FIXTURE_DRIVER_ID
+#define ORM_FIXTURE_DRIVER_ID "fixture"
+#endif
+#ifndef ORM_FIXTURE_ROW_VALUE
+#define ORM_FIXTURE_ROW_VALUE 7
+#endif
+
 typedef struct fixture_module_context {
   uint32_t live_connections;
 } fixture_module_context;
@@ -34,7 +41,7 @@ static fixture_module_context fixture_module;
 static fixture_connection_context fixture_connections[4];
 static fixture_transaction_context fixture_transactions[4];
 static fixture_cursor_context fixture_cursors[8];
-static const char fixture_id[] = "fixture";
+static const char fixture_id[] = ORM_FIXTURE_DRIVER_ID;
 
 static void fixture_error(orm_error_t *error, orm_status_t status) {
   if (error == NULL) return;
@@ -49,7 +56,7 @@ static cserde_status fixture_reader_next(void *context, cserde_token *out) {
   if (cursor->emitted) return CSERDE_DONE;
   memset(out, 0, sizeof(*out));
   out->kind = CSERDE_SINT;
-  out->value.sint = INT64_C(7);
+  out->value.sint = ORM_FIXTURE_ROW_VALUE;
   cursor->emitted = 1;
   return CSERDE_OK;
 }
@@ -306,8 +313,8 @@ static void ORM_DRIVER_CALL fixture_destroy_connection(void *context) {
   memset(connection, 0, sizeof(*connection));
 }
 
-static const orm_driver_connection_ops_v1 fixture_connection_ops = {
-    FIXTURE_HEADER(orm_driver_connection_ops_v1),
+static const orm_driver_connection_ops_v2 fixture_connection_ops = {
+    FIXTURE_HEADER(orm_driver_connection_ops_v2),
     fixture_destroy_connection, fixture_open_cursor,
     fixture_execute_command, fixture_begin_transaction};
 
@@ -366,7 +373,7 @@ static uint64_t ORM_DRIVER_CALL fixture_execution_models(void *self) {
 }
 
 static const TurboDb_Driver_vtable fixture_driver_vtable = {
-    .implementation = "fixture",
+    .implementation = fixture_id,
     .capabilities = FIXTURE_CAPABILITIES,
     .create = fixture_create_connection,
     .execution_models = fixture_execution_models,

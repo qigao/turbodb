@@ -786,6 +786,7 @@ static orm_status_t bridge_backend_open_cursor(
     const orm_driver_plan_view_v1 *view,
     const orm_driver_limits_v1 *driver_limits,
     orm_driver_cursor_v1 *out,
+    const orm_async_config_t *async_config,
     orm_error_t *error) {
   if (out != NULL) memset(out, 0, sizeof(*out));
   if (!bridge_backend_valid(backend) || view == NULL ||
@@ -808,9 +809,18 @@ static orm_status_t bridge_backend_open_cursor(
           view, driver_limits, plan, error);
   if (status == ORM_STATUS_OK)
     status = bridge_driver_limits(driver_limits, &limits, error);
-  if (status == ORM_STATUS_OK)
-    status = backend->ops->open_cursor(
-        backend->context, plan, &limits, &cursor, error);
+  if (status == ORM_STATUS_OK) {
+    if (async_config != NULL) {
+      if (backend->ops->open_async_cursor == NULL)
+        status = bridge_result(error, ORM_STATUS_UNSUPPORTED, "backend has no async query support");
+      else
+        status = backend->ops->open_async_cursor(
+            backend->context, plan, &limits, async_config, &cursor, error);
+    } else {
+      status = backend->ops->open_cursor(
+          backend->context, plan, &limits, &cursor, error);
+    }
+  }
   if (status != ORM_STATUS_OK) {
     bridge_row_cursor_dispose(&cursor);
     orm_driver_backend_plan_destroy(plan);
@@ -1085,7 +1095,17 @@ static orm_status_t ORM_DRIVER_CALL bridge_connection_open_cursor(
     return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT,
                          "invalid Driver backend connection");
   return bridge_backend_open_cursor(
-      &wrapper->backend, view, limits, out, error);
+      &wrapper->backend, view, limits, out, NULL, error);
+}
+
+static orm_status_t ORM_DRIVER_CALL bridge_connection_open_async_cursor(
+    void *context, const orm_driver_plan_view_v1 *view,
+    const orm_driver_limits_v1 *limits, const orm_async_config_t *async_config,
+    orm_driver_cursor_v1 *out, orm_error_t *error) {
+  bridge_connection *wrapper = (bridge_connection *)context;
+  if (wrapper == NULL || async_config == NULL)
+    return bridge_result(error, ORM_STATUS_INVALID_ARGUMENT, "invalid async cursor request");
+  return bridge_backend_open_cursor(&wrapper->backend, view, limits, out, async_config, error);
 }
 
 static orm_status_t ORM_DRIVER_CALL bridge_connection_execute_command(
@@ -1125,12 +1145,13 @@ static orm_status_t ORM_DRIVER_CALL bridge_connection_begin_transaction(
   return status;
 }
 
-static const orm_driver_connection_ops_v1 bridge_connection_ops = {
-    BRIDGE_HEADER(orm_driver_connection_ops_v1),
+static const orm_driver_connection_ops_v2 bridge_connection_ops = {
+    BRIDGE_HEADER(orm_driver_connection_ops_v2),
     bridge_connection_destroy,
     bridge_connection_open_cursor,
     bridge_connection_execute_command,
-    bridge_connection_begin_transaction};
+    bridge_connection_begin_transaction,
+    bridge_connection_open_async_cursor};
 
 orm_status_t orm_driver_backend_connection_create(
     orm_backend_factory_v1 factory,

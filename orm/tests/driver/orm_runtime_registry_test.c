@@ -382,6 +382,13 @@ spec("runtime driver registry") {
     check_equal(orm_query_create(connection, orm_view("rows"),
                                  &query, &error),
                 ORM_STATUS_OK);
+    cflow_scheduler scheduler = {0};
+    check_true(cflow_scheduler_test_init(&scheduler));
+    const orm_async_config_t async = {sizeof(async), &scheduler, 1u, 10u};
+    check_equal(orm_query_open_async_flow(query, &flow_config, &async, &rows, &error),
+                ORM_STATUS_UNSUPPORTED);
+    check_false(cflow_publisher_valid(&rows));
+    cflow_scheduler_destroy(&scheduler);
     check_equal(orm_query_open_flow(query, &flow_config, &rows, &error),
                 ORM_STATUS_OK);
 

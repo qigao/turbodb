@@ -1,4 +1,5 @@
 #include "orm_driver_backend_bridge.h"
+#include "orm_driver_contract.h"
 
 #include <tinytest.h>
 
@@ -369,10 +370,51 @@ static orm_driver_connection_v1 connection(void) {
 }
 
 spec("Driver backend DTO bridge") {
+  it("rejects a previous Driver ABI on either the connection or its operation table") {
+    enum { PREVIOUS_DRIVER_ABI = 1u };
+    orm_driver_connection_v1 c = connection();
+    const orm_driver_connection_ops_v2 *original = c.ops.data;
+    orm_driver_connection_ops_v2 ops = *original;
+    orm_error_t error;
+    c.ops.data = &ops;
+    c.header.abi_version = PREVIOUS_DRIVER_ABI;
+    check_equal(orm_driver_validate_connection_v1(&c, sizeof(c), ORM_DRIVER_CAP_SELECT, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    c.header.abi_version = ORM_DRIVER_ABI_VERSION;
+    ops.header.abi_version = PREVIOUS_DRIVER_ABI;
+    check_equal(orm_driver_validate_connection_v1(&c, sizeof(c), ORM_DRIVER_CAP_SELECT, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    original->destroy(c.context);
+  }
+
+  it("requires the complete ABI 2 connection table even for synchronous capabilities") {
+    orm_driver_connection_v1 c = connection();
+    const orm_driver_connection_ops_v2 *original = c.ops.data;
+    orm_driver_connection_ops_v2 ops = *original;
+    orm_error_t error;
+    c.ops.data = &ops;
+    const uint32_t prefix = (uint32_t)offsetof(orm_driver_connection_ops_v2, open_async_cursor);
+    c.ops.bytes = prefix;
+    check_equal(orm_driver_validate_connection_v1(&c, sizeof(c), ORM_DRIVER_CAP_SELECT, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    c.ops.bytes = sizeof(ops);
+    ops.header.struct_size = prefix;
+    check_equal(orm_driver_validate_connection_v1(&c, sizeof(c), ORM_DRIVER_CAP_SELECT, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    ops.header.struct_size = prefix + 1u;
+    check_equal(orm_driver_validate_connection_v1(&c, sizeof(c), ORM_DRIVER_CAP_SELECT, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    ops.header.struct_size = sizeof(ops);
+    ops.open_async_cursor = NULL;
+    check_equal(orm_driver_validate_connection_v1(&c, sizeof(c), ORM_DRIVER_CAP_SELECT, &error),
+                ORM_STATUS_OK);
+    original->destroy(c.context);
+  }
+
   it("wraps command execution with a materialized local plan") {
     orm_driver_connection_v1 c = connection();
-    const orm_driver_connection_ops_v1 *ops =
-        (const orm_driver_connection_ops_v1 *)c.ops.data;
+    const orm_driver_connection_ops_v2 *ops =
+        (const orm_driver_connection_ops_v2 *)c.ops.data;
     adapter_plan plan;
     adapter_plan_insert(&plan);
     orm_driver_plan_view_v1 view = adapter_view(&plan);
@@ -391,8 +433,8 @@ spec("Driver backend DTO bridge") {
 
   it("keeps the exact materialized plan alive for cursor lifetime") {
     orm_driver_connection_v1 c = connection();
-    const orm_driver_connection_ops_v1 *ops =
-        (const orm_driver_connection_ops_v1 *)c.ops.data;
+    const orm_driver_connection_ops_v2 *ops =
+        (const orm_driver_connection_ops_v2 *)c.ops.data;
     adapter_plan plan;
     adapter_plan_raw(&plan, "select 1");
     orm_driver_plan_view_v1 view = adapter_view(&plan);
@@ -437,8 +479,8 @@ spec("Driver backend DTO bridge") {
 
   it("wraps transaction command savepoint commit and destruction") {
     orm_driver_connection_v1 c = connection();
-    const orm_driver_connection_ops_v1 *ops =
-        (const orm_driver_connection_ops_v1 *)c.ops.data;
+    const orm_driver_connection_ops_v2 *ops =
+        (const orm_driver_connection_ops_v2 *)c.ops.data;
     orm_driver_transaction_v1 transaction;
     orm_error_t error;
     memset(&transaction, 0, sizeof(transaction));

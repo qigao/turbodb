@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+/* NULL ops selects the explicitly configured Plugin. Non-NULL operations are
+ * borrowed for this call and let embedded callers supply an existing backend. */
 dbtool_status dbtool_cli_execute(int argc, const char *const *argv,
                                  dbtool_driver_kind driver,
                                  const dbtool_schema_driver_ops *ops,

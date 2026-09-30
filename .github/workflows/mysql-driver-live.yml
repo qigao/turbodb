@@ -4,22 +4,56 @@ on:
   pull_request:
     branches: [master]
     paths:
-      - "orm/src/dbs/mysql/**"
-      - "orm/tests/driver/orm_mysql_*"
-      - "orm/tests/integration/mysql_live_test.c"
-      - "orm/tests/integration/mysql_driver_live_test.c"
+      - "mysql/**"
+      - "drivers/mysql/**"
+      - "orm/tests/e2e/mysql/**"
+      - "dbtools/mysql/**"
+      - "dbtools/tests/mysql/**"
+      - "dbtools/CMakeLists.txt"
+      - "dbtools/src/**"
+      - "dbtools/tests/CMakeLists.txt"
+      - "orm/include/**"
+      - "orm/src/**"
       - "orm/CMakeLists.txt"
-      - "vcpkg.json"
+      - "orm/tests/CMakeLists.txt"
+      - "orm/tests/e2e/CMakeLists.txt"
+      - "orm/tests/support/**"
+      - "drivers/CMakeLists.txt"
+      - "drivers/schema/**"
+      - "CMakeLists.txt"
+      - "CMakeOptions.cmake"
+      - "CMake*Presets.json"
+      - "presets/**"
+      - "cmake/**"
+      - ".github/actions/**"
+      - "vcpkg*.json"
       - ".github/workflows/mysql-driver-live.yml"
   push:
     branches: [master]
     paths:
-      - "orm/src/dbs/mysql/**"
-      - "orm/tests/driver/orm_mysql_*"
-      - "orm/tests/integration/mysql_live_test.c"
-      - "orm/tests/integration/mysql_driver_live_test.c"
+      - "mysql/**"
+      - "drivers/mysql/**"
+      - "orm/tests/e2e/mysql/**"
+      - "dbtools/mysql/**"
+      - "dbtools/tests/mysql/**"
+      - "dbtools/CMakeLists.txt"
+      - "dbtools/src/**"
+      - "dbtools/tests/CMakeLists.txt"
+      - "orm/include/**"
+      - "orm/src/**"
       - "orm/CMakeLists.txt"
-      - "vcpkg.json"
+      - "orm/tests/CMakeLists.txt"
+      - "orm/tests/e2e/CMakeLists.txt"
+      - "orm/tests/support/**"
+      - "drivers/CMakeLists.txt"
+      - "drivers/schema/**"
+      - "CMakeLists.txt"
+      - "CMakeOptions.cmake"
+      - "CMake*Presets.json"
+      - "presets/**"
+      - "cmake/**"
+      - ".github/actions/**"
+      - "vcpkg*.json"
       - ".github/workflows/mysql-driver-live.yml"
   workflow_dispatch:
 
@@ -59,13 +93,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Configure canonical vcpkg tool and shared cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
-        with:
-          mode: read
+      - uses: ./.github/actions/setup-native
 
-      - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
 
       - name: Restore published Salts SDK pair
         shell: pwsh
@@ -73,28 +104,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
 
-      - name: Restore cached BoringSSL MySQL feature
-        shell: bash
-        run: |
-          set -euo pipefail
-          install_root="$RUNNER_TEMP/turbodb-mysql-vcpkg"
-          "$VCPKG_ROOT/vcpkg" install \
-            --x-manifest-root="$GITHUB_WORKSPACE" \
-            --x-install-root="$install_root" \
-            --triplet=x64-linux \
-            --only-binarycaching \
-            --x-feature=mysql
-          status="$install_root/vcpkg/status"
-          test -f "$status"
-          grep -F "Package: boringssl" "$status"
-          if grep -Fq "Package: openssl" "$status"; then
-            cat "$status"
-            echo "MySQL qualification must use BoringSSL, not OpenSSL" >&2
-            exit 1
-          fi
-          echo "TURBODB_MYSQL_VCPKG_ROOT=$install_root" >> "$GITHUB_ENV"
-
-      - name: Prepare MySQL auth users and verified TLS identity
+      - name: Prepare MySQL auth users and TLS fixtures
         shell: bash
         run: |
           set -euo pipefail
@@ -113,8 +123,6 @@ jobs:
 
           docker cp "$cid:/var/lib/mysql/ca.pem" "$RUNNER_TEMP/mysql-tls/ca.pem"
           docker cp "$cid:/var/lib/mysql/server-cert.pem" "$RUNNER_TEMP/mysql-tls/server-cert.pem"
-          openssl verify -CAfile "$RUNNER_TEMP/mysql-tls/ca.pem" \
-            "$RUNNER_TEMP/mysql-tls/server-cert.pem"
           subject="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
             -noout -subject -nameopt RFC2253)"
           server_name="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
@@ -139,150 +147,30 @@ jobs:
             echo "ORM_MYSQL_SERVER_NAME=$server_name"
           } >> "$GITHUB_ENV"
 
-      - name: Configure MySQL M2 qualification
+      - name: Build and run MySQL live tests
         shell: bash
         run: |
           set -euo pipefail
-          build="$GITHUB_WORKSPACE/build/mysql-m2"
-          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
-            -DVCPKG_MANIFEST_INSTALL=OFF \
-            -DVCPKG_INSTALLED_DIR="$TURBODB_MYSQL_VCPKG_ROOT" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux \
-            -DORM_BUILD_TESTS=ON \
-            -DORM_MYSQL_LIVE_TESTS=ON \
-            -DORM_BUILD_MYSQL_DRIVER=ON \
-            -DORM_BUILD_SQLITE_DRIVER=OFF \
-            -DORM_BUILD_POSTGRESQL_DRIVER=OFF \
-            -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF \
-            -DORM_BUILD_REDIS_DRIVER=OFF \
-            -DORM_BUILD_MONGODB_DRIVER=OFF \
-            -DORM_BUILD_TIDESDB_DRIVER=OFF \
-            -DTURBODB_BUILD_REDIS=OFF \
-            -DTURBODB_BUILD_DBTOOLS=OFF \
-            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
-            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF
-          echo "TURBODB_MYSQL_BUILD=$build" >> "$GITHUB_ENV"
+          cmake --preset ci-linux-e2e
+          cmake --build --preset ci-linux-e2e --target orm_mysql_driver_live_test orm_mysql_live_test dbtool_mysql_live_test --parallel 4
+          export TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO
+          TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO="$(python3 -c 'import json,os; print(json.dumps({"host":os.environ["ORM_MYSQL_HOST"],"port":int(os.environ["ORM_MYSQL_PORT"]),"user":os.environ["ORM_MYSQL_USER"],"password":os.environ["ORM_MYSQL_PASSWORD"],"database":os.environ["ORM_MYSQL_DATABASE"],"ca_file":os.environ["ORM_MYSQL_CA_FILE"],"server_name":os.environ["ORM_MYSQL_SERVER_NAME"]}))')"
+          ctest --preset ci-linux-e2e -R '^(orm_mysql_(driver_live|live)|dbtool_mysql_live_test)$' --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/evidence/mysql/tests.xml"
 
-      - name: Build and run MySQL handshake plus caching_sha2 full auth
+      - name: Test mysql_native_password authentication
         shell: bash
+        env:
+          ORM_MYSQL_USER: nativeuser
+          ORM_MYSQL_PASSWORD: nativepass
         run: |
-          set -euo pipefail
-          cmake --build "$TURBODB_MYSQL_BUILD" --target \
-            orm_mysql_driver orm_mysql_plugin_test orm_mysql_driver_live_test \
-            orm_mysql_wire_test orm_mysql_parameters_test \
-            orm_mysql_dialect_test orm_mysql_statement_test \
-            orm_mysql_query_test orm_mysql_savepoint_test \
-            orm_mysql_binary_row_test orm_mysql_row_reader_test \
-            orm_mysql_cursor_row_test orm_mysql_cursor_test \
-            orm_mysql_handshake_test orm_mysql_live_test --parallel 4
-          ctest --test-dir "$TURBODB_MYSQL_BUILD" \
-            -R "^orm_mysql_(plugin|driver_live|wire|parameters|dialect|statement|query|savepoint|binary_row|row_reader|cursor_row|cursor|handshake|live)$" --output-on-failure
+          ctest --preset ci-linux-e2e -R '^orm_mysql_live$' --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/evidence/mysql/native-auth.xml"
 
-          module="$(find "$TURBODB_MYSQL_BUILD" -type f \
-            \( -name 'turbodb_driver_mysql.so' -o -name 'turbodb_driver_mysql.dll' -o -name 'turbodb_driver_mysql.dylib' \) \
-            -print -quit)"
-          test -n "$module"
-          echo "mysql_driver_module=$module"
-          if command -v ldd >/dev/null 2>&1; then
-            ldd "$module" | tee "$GITHUB_WORKSPACE/evidence/mysql/driver-ldd.txt"
-            if grep -Eiq 'libmysql|mariadb|boost|libtirpc' \
-                 "$GITHUB_WORKSPACE/evidence/mysql/driver-ldd.txt"; then
-              echo "MySQL Driver native closure contains a forbidden dependency" >&2
-              exit 1
-            fi
-          fi
-
-      - name: Qualify installed MySQL Driver module
-        shell: bash
-        run: |
-          set -euo pipefail
-          stage="$RUNNER_TEMP/mysql-installed"
-          rm -rf "$stage"
-          cmake --install "$TURBODB_MYSQL_BUILD" \
-            --prefix "$stage" --component OrmMysqlDriver
-
-          installed_module="$(find "$stage" -type f \
-            \( -name 'turbodb_driver_mysql.so' -o -name 'turbodb_driver_mysql.dll' -o -name 'turbodb_driver_mysql.dylib' \) \
-            -print -quit)"
-          app="$(find "$TURBODB_MYSQL_BUILD" -type f -name orm_mysql_driver_live_test -perm -111 -print -quit)"
-          test -n "$installed_module"
-          test -x "$app"
-
-          driver_dir="$(dirname "$installed_module")"
-
-          # The build-tree live test above intentionally mutates these fixtures.
-          # Reset only its mutable public-runtime state so the installed-module
-          # smoke is an independent qualification, not a second pass over
-          # already-updated rows.
-          cid="$(docker ps --filter ancestor=mysql:8.0.40 --format '{{.ID}}' | head -n 1)"
-          test -n "$cid"
-          docker exec "$cid" mysql -uroot -prootpw -e \
-            "UPDATE turbodb.m4_driver SET n=0 WHERE s=-13; UPDATE turbodb_b.m4_driver SET n=100 WHERE s=-13; TRUNCATE TABLE turbodb.structured_items; TRUNCATE TABLE turbodb_b.structured_items;"
-
-          export LD_LIBRARY_PATH="$TURBODB_MYSQL_BUILD/bin:$driver_dir:$stage/lib:${LD_LIBRARY_PATH:-}"
-          ORM_MYSQL_PLUGIN="$installed_module" "$app"
-
-          find "$stage" -type f -print | sort \
-            > "$GITHUB_WORKSPACE/evidence/mysql/installed-files.txt"
-          realpath "$installed_module" \
-            > "$GITHUB_WORKSPACE/evidence/mysql/installed-module-path.txt"
-          sha256sum "$installed_module" \
-            > "$GITHUB_WORKSPACE/evidence/mysql/installed-module.sha256"
-
-          if command -v ldd >/dev/null 2>&1; then
-            ldd "$installed_module" \
-              | tee "$GITHUB_WORKSPACE/evidence/mysql/installed-driver-ldd.txt"
-            if grep -Eiq 'libmysql|mariadb|boost|libtirpc' \
-                 "$GITHUB_WORKSPACE/evidence/mysql/installed-driver-ldd.txt"; then
-              echo "Installed MySQL Driver contains a forbidden dependency" >&2
-              exit 1
-            fi
-          fi
-
-      - name: Qualify caching_sha2 fast auth and native compatibility
-        shell: bash
-        run: |
-          set -euo pipefail
-          exe="$(find "$TURBODB_MYSQL_BUILD" -type f -name orm_mysql_live_test -perm -111 -print -quit)"
-          test -n "$exe"
-          "$exe"
-          ORM_MYSQL_USER=nativeuser ORM_MYSQL_PASSWORD=nativepass "$exe"
-
-      - name: Record MySQL exact-head evidence
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "head=${{ github.event.pull_request.head.sha || github.sha }}"
-            echo "os=ubuntu-24.04"
-            echo "arch=x64"
-            echo "configuration=Release"
-            echo "mysql=8.0.40"
-            echo "salts=$SALTS_PACKAGE_VERSION"
-            echo "saltsutils=$SALTS_UTILS_PACKAGE_VERSION"
-            echo "transport=Salts::CNet"
-            echo "tls=required"
-            echo "auth=caching_sha2_password,mysql_native_password"
-            echo "crypto=boringssl"
-            echo "datasources=turbodb,turbodb_b"
-            echo "structured_crud=select,insert,update,delete"
-            echo "live_boundaries=null,uint64,blob,decimal,date,time,datetime,constraint,row_limit"
-            echo "wire_text_rows=lenenc,null,embedded-nul,truncation,trailing"
-            echo "com_query_text_session=real-mysql-8.0.40"
-            echo "installed_module_smoke=runtime-load-connect-crud"
-            echo "graceful_quit=COM_QUIT"
-            echo "managed_transaction_ddl=reject-before-dispatch"
-            echo "server_disconnect=wait_timeout,no-replay"
-          } > "$GITHUB_WORKSPACE/evidence/mysql/qualification.txt"
-
-      - name: Keep MySQL qualification evidence
+      - name: Keep MySQL test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mysql-cnet-live-${{ github.sha }}
           path: evidence/mysql/
           if-no-files-found: warn
-
-

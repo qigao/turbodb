@@ -1,413 +1,56 @@
-name: Published dependency contract
+name: Native build and tests
+
 on:
   pull_request:
     branches: [master]
     paths:
-      - "orm/include/**"
-      - "orm/src/abi/**"
-      - "orm/src/driver/**"
-      - "orm/src/runtime/**"
-      - "orm/src/flow/**"
-      - "orm/src/dbs/sql/**"
-      - "orm/driver-sdk/**"
-      - "orm/cmake/**"
-      - "tests/deps/**"
-      - "CMakeLists.txt"
-      - "CMakeOptions.cmake"
-      - "cmake/ci/restore-native-sdks.ps1"
+      - "mysql/**"
+      - "redis/**"
+      - "orm/**"
+      - "drivers/**"
+      - "dbtools/**"
+      - "tidesdb/**"
+      - "tools/**"
+      - "cmake/**"
+      - "packaging/**"
+      - "presets/**"
+      - "CMake*.txt"
+      - "CMake*.cmake"
+      - "CMake*Presets.json"
+      - "vcpkg*.json"
+      - ".github/workflows/**"
+      - ".github/actions/**"
   push:
     branches: [master]
+    paths:
+      - "mysql/**"
+      - "redis/**"
+      - "orm/**"
+      - "drivers/**"
+      - "dbtools/**"
+      - "tidesdb/**"
+      - "tools/**"
+      - "cmake/**"
+      - "packaging/**"
+      - "presets/**"
+      - "CMake*.txt"
+      - "CMake*.cmake"
+      - "CMake*Presets.json"
+      - "vcpkg*.json"
+      - ".github/workflows/**"
+      - ".github/actions/**"
   workflow_dispatch:
+
 permissions:
   contents: read
   packages: read
+
 concurrency:
-  group: published-deps-${{ github.workflow }}-${{ github.ref }}
+  group: native-tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
-  package:
-    name: Latest Salts + SaltsUtils (${{ matrix.os }}, ${{ matrix.config }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-2022]
-        config: [debug, release]
-    steps:
-      - name: Checkout exact TurboDB head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-
-      - name: Verify canonical Driver source surface
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          if git grep -n "orm_driver_get_api_v1" -- \
-              orm/include orm/src orm/tests orm/driver-sdk; then
-            echo 'legacy orm_driver_get_api_v1 remains in active Driver source' >&2
-            exit 1
-          fi
-          if git grep -n -E '(^|[^A-Za-z0-9_])(dlopen|dlsym|LoadLibrary(A|W|ExA|ExW)?|GetProcAddress)([^A-Za-z0-9_]|$)' -- \
-              orm/include orm/src; then
-            echo 'TurboDB-private generic DSO loader primitive remains in ORM production source' >&2
-            exit 1
-          fi
-          if git grep -n -E 'ORM_WITH_(REDIS|MONGO(DB)?)' -- \
-              CMakeOptions.cmake orm/CMakeLists.txt orm/src; then
-            echo 'legacy built-in Redis/MongoDB ORM selection remains in active source' >&2
-            exit 1
-          fi
-          if git grep -n -E 'atexit[[:space:]]*\([[:space:]]*mongoc_cleanup' -- \
-              orm/src; then
-            echo 'MongoDB Driver must not register process-exit native cleanup' >&2
-            exit 1
-          fi
-
-      - name: Configure shared vcpkg binary cache
-        id: vcpkg_cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
-        with:
-          mode: read
-
-      - name: Restore canonical re2c host tool
-        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
-
-      - name: Locate MSVC
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
-          "VSINSTALL=$vs" >> $env:GITHUB_ENV
-
-      - name: Install Ninja
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: choco install ninja -y --no-progress
-
-      - name: Restore published native SDK pair
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $rid = if ('${{ runner.os }}' -eq 'Windows') { 'windows-x64' } else { 'linux-x64' }
-          ./cmake/ci/restore-native-sdks.ps1 -Rid $rid
-
-      - name: Record exact producer identity
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:RE2C_PACKAGE_VERSION)) {
-            throw 'resolved re2c package identity is unavailable'
-          }
-          New-Item -ItemType Directory -Force -Path evidence/deps | Out-Null
-          @(
-            "Salts.Native=$env:SALTS_PACKAGE_VERSION",
-            "SaltsUtils.Native=$env:SALTS_UTILS_PACKAGE_VERSION",
-            'PluginABI=2',
-            "Qigao.Re2c.Binary=$env:RE2C_PACKAGE_VERSION",
-            "SALTS_ROOT=$env:SALTS_ROOT",
-            "SALTS_UTILS_ROOT=$env:SALTS_UTILS_ROOT"
-          ) | Set-Content -LiteralPath evidence/deps/identity.txt -Encoding utf8NoBOM
-
-      - name: Reject ambient dependency fallback on Linux
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          good_salts="$SALTS_ROOT"
-          good_utils="$SALTS_UTILS_ROOT"
-          bad="$RUNNER_TEMP/turbodb-missing-sdk"
-          mkdir -p "$bad"
-          export CMAKE_PREFIX_PATH="$good_salts;$good_utils"
-          export SALTS_ROOT="$bad"
-          export SALTS_UTILS_ROOT="$bad"
-          if cmake -S tests/deps -B build/deps-negative -G Ninja >evidence/deps/ambient-negative.log 2>&1; then
-            cat evidence/deps/ambient-negative.log
-            echo 'dependency contract accepted ambient SDKs' >&2
-            exit 1
-          fi
-          export SALTS_ROOT="$good_salts"
-          export SALTS_UTILS_ROOT="$good_utils"
-
-      - name: Reject ambient dependency fallback on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          set "GOOD_SALTS_ROOT=%SALTS_ROOT%"
-          set "GOOD_SALTS_UTILS_ROOT=%SALTS_UTILS_ROOT%"
-          set "CMAKE_PREFIX_PATH=%GOOD_SALTS_ROOT%;%GOOD_SALTS_UTILS_ROOT%"
-          set "SALTS_ROOT=%RUNNER_TEMP%\turbodb-missing-sdk"
-          set "SALTS_UTILS_ROOT=%RUNNER_TEMP%\turbodb-missing-sdk"
-          if not exist "%SALTS_ROOT%" mkdir "%SALTS_ROOT%"
-          cmake -S tests\deps -B build\deps-negative -G Ninja > evidence\deps\ambient-negative.log 2>&1
-          if not errorlevel 1 (type evidence\deps\ambient-negative.log & echo dependency contract accepted ambient SDKs & exit /b 1)
-          set "SALTS_ROOT=%GOOD_SALTS_ROOT%"
-          set "SALTS_UTILS_ROOT=%GOOD_SALTS_UTILS_ROOT%"
-
-      - name: Qualify Reflection + Plugin ABI on Linux
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          build_type=Release
-          sdk_preset=sdk-linux-release
-          if [[ '${{ matrix.config }}' == debug ]]; then
-            build_type=Debug
-            sdk_preset=sdk-linux-debug
-          fi
-          cmake -S tests/deps -B "build/deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_INSTALL=OFF 2>&1 | tee evidence/deps/configure.log
-          cmake --build "build/deps-${{ matrix.config }}" --parallel 4 2>&1 | tee evidence/deps/build.log
-          ctest --test-dir "build/deps-${{ matrix.config }}" --output-on-failure 2>&1 | tee evidence/deps/ctest.log
-          # Driver SDK consumes only Salts; prove no hidden SaltsUtils dependency.
-          (cd orm/driver-sdk && env -u SALTS_UTILS_ROOT cmake --preset "$sdk_preset") 2>&1 | tee evidence/deps/sdk-configure.log
-          (cd orm/driver-sdk && cmake --build --preset "$sdk_preset" --parallel 4) 2>&1 | tee evidence/deps/sdk-build.log
-          (cd orm/driver-sdk && ctest --preset "$sdk_preset" --output-on-failure) 2>&1 | tee evidence/deps/sdk-ctest.log
-
-      - name: Qualify Reflection + Plugin ABI on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "BUILD_TYPE=Release"
-          set "SDK_PRESET=sdk-windows-release"
-          if "${{ matrix.config }}"=="debug" set "BUILD_TYPE=Debug"
-          if "${{ matrix.config }}"=="debug" set "SDK_PRESET=sdk-windows-debug"
-          cmake -S tests\deps -B "build\deps-${{ matrix.config }}" -G Ninja -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DVCPKG_INSTALLED_DIR="%GITHUB_WORKSPACE%\vcpkg_installed" -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_MANIFEST_INSTALL=OFF > evidence\deps\configure.log 2>&1
-          if errorlevel 1 (type evidence\deps\configure.log & exit /b 1)
-          cmake --build "build\deps-${{ matrix.config }}" --parallel 4 > evidence\deps\build.log 2>&1
-          if errorlevel 1 (type evidence\deps\build.log & exit /b 1)
-          ctest --test-dir "build\deps-${{ matrix.config }}" --output-on-failure > evidence\deps\ctest.log 2>&1
-          if errorlevel 1 (type evidence\deps\ctest.log & exit /b 1)
-          rem Driver SDK consumes only Salts; prove no hidden SaltsUtils dependency.
-          set "SAVED_SALTS_UTILS_ROOT=%SALTS_UTILS_ROOT%"
-          set "SALTS_UTILS_ROOT="
-          cd /d "%GITHUB_WORKSPACE%\orm\driver-sdk"
-          cmake --preset "%SDK_PRESET%" > "%GITHUB_WORKSPACE%\evidence\deps\sdk-configure.log" 2>&1
-          if errorlevel 1 (type "%GITHUB_WORKSPACE%\evidence\deps\sdk-configure.log" & exit /b 1)
-          cmake --build --preset "%SDK_PRESET%" --parallel 4 > "%GITHUB_WORKSPACE%\evidence\deps\sdk-build.log" 2>&1
-          if errorlevel 1 (type "%GITHUB_WORKSPACE%\evidence\deps\sdk-build.log" & exit /b 1)
-          ctest --preset "%SDK_PRESET%" --output-on-failure > "%GITHUB_WORKSPACE%\evidence\deps\sdk-ctest.log" 2>&1
-          if errorlevel 1 (type "%GITHUB_WORKSPACE%\evidence\deps\sdk-ctest.log" & exit /b 1)
-          set "SALTS_UTILS_ROOT=%SAVED_SALTS_UTILS_ROOT%"
-          cd /d "%GITHUB_WORKSPACE%"
-
-      - name: Install Ninja
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-
-      - name: Qualify SQL-free generic core on Linux
-        if: runner.os == 'Linux' && matrix.config == 'release'
-        shell: bash
-        run: |
-          set -euo pipefail
-          build="$GITHUB_WORKSPACE/build/core-only-linux"
-          cmake -S "$GITHUB_WORKSPACE" -B "$build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$QIGAO_VCPKG_TOOLCHAIN_FILE" \
-            -DORM_BUILD_SQLITE_DRIVER=OFF \
-            -DORM_BUILD_POSTGRESQL_DRIVER=OFF \
-            -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF \
-            -DORM_BUILD_REDIS_DRIVER=OFF \
-            -DORM_BUILD_MONGODB_DRIVER=OFF \
-            -DORM_BUILD_TIDESDB_DRIVER=OFF \
-            -DORM_BUILD_TESTS=OFF \
-            -DBUILD_TESTS=OFF \
-            -DENABLE_TESTS=OFF \
-            -DTURBODB_BUILD_REDIS=OFF \
-            -DTURBODB_BUILD_DBTOOLS=OFF \
-            -DTURBODB_DBTOOLS_WITH_SQLITE=OFF \
-            -DTURBODB_DBTOOLS_WITH_PGSQL=OFF \
-            -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE \
-            -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE \
-            -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE \
-            -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE \
-            -DCMAKE_DISABLE_FIND_PACKAGE_mongoc=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_bson=TRUE \
-            2>&1 | tee evidence/deps/core-only-configure.log
-          cmake --build "$build" --target turbo_orm --parallel 4 \
-            2>&1 | tee evidence/deps/core-only-build.log
-          readelf -d "$build/bin/libturbo_orm.so" \
-            > evidence/deps/core-only-dependencies.txt
-          if grep -Eiq 'sqlite|libpq|postgres|tidesdb|redis|tedis|mongoc|bson' evidence/deps/core-only-dependencies.txt; then
-            cat evidence/deps/core-only-dependencies.txt
-            echo 'generic turbo_orm has a database-native dependency' >&2
-            exit 1
-          fi
-          sha256sum "$build/bin/libturbo_orm.so" \
-            > evidence/deps/core-only.sha256
-
-      - name: Qualify SQL-free generic core on Windows
-        if: runner.os == 'Windows' && matrix.config == 'release'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "BUILD=%GITHUB_WORKSPACE%\build\core-only-windows"
-          cmake -S "%GITHUB_WORKSPACE%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="%QIGAO_VCPKG_TOOLCHAIN_FILE%" -DORM_BUILD_SQLITE_DRIVER=OFF -DORM_BUILD_POSTGRESQL_DRIVER=OFF -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=OFF -DORM_BUILD_MONGODB_DRIVER=OFF -DORM_BUILD_TIDESDB_DRIVER=OFF -DORM_BUILD_TESTS=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF -DTURBODB_BUILD_REDIS=OFF -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_DBTOOLS_WITH_SQLITE=OFF -DTURBODB_DBTOOLS_WITH_PGSQL=OFF -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PostgreSQL=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TidesDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_TurboDB=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_mongoc=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_bson=TRUE > evidence\deps\core-only-configure.log 2>&1
-          if errorlevel 1 (type evidence\deps\core-only-configure.log & exit /b 1)
-          cmake --build "%BUILD%" --target turbo_orm --parallel 4 > evidence\deps\core-only-build.log 2>&1
-          if errorlevel 1 (type evidence\deps\core-only-build.log & exit /b 1)
-          dumpbin /DEPENDENTS "%BUILD%\bin\turbo_orm.dll" > evidence\deps\core-only-dependencies.txt
-          findstr /i /c:"sqlite" /c:"libpq" /c:"postgres" /c:"tidesdb" /c:"redis" /c:"tedis" /c:"mongoc" /c:"bson" evidence\deps\core-only-dependencies.txt >nul
-          if not errorlevel 1 (type evidence\deps\core-only-dependencies.txt & echo generic turbo_orm has a database-native dependency & exit /b 1)
-          certutil -hashfile "%BUILD%\bin\turbo_orm.dll" SHA256 > evidence\deps\core-only.sha256
-
-      - name: Configure root preset paths
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $preset = Get-Content CMakeUserPresets.json -Raw | ConvertFrom-Json -AsHashtable
-          foreach ($item in $preset.configurePresets) {
-            if ($item.name -eq 'win-toolchain') {
-              $item.environment.PROJECT_ROOT = $env:GITHUB_WORKSPACE
-              $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
-              $item.environment.VCPKG_ROOT = $env:VCPKG_ROOT
-            }
-            if ($item.name -in @('win-paths', 'linux-paths')) {
-              $item.toolchainFile = $env:QIGAO_VCPKG_TOOLCHAIN_FILE
-            }
-            if ($item.name -eq 'linux-paths') {
-              $item.environment.PKG_ROOT = "$env:GITHUB_WORKSPACE/external/pkgs"
-              $item.environment.VCPKG_ROOT = $env:VCPKG_ROOT
-            }
-          }
-          $preset | ConvertTo-Json -Depth 30 | Set-Content CMakeUserPresets.json -Encoding utf8NoBOM
-          git diff -- CMakeUserPresets.json | Set-Content -LiteralPath evidence/deps/ci-preset-paths.diff -Encoding utf8NoBOM
-
-      - name: Build and test TurboDB on Linux
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          profile=linux-release-user
-          if [[ '${{ matrix.config }}' == debug ]]; then profile=linux-dev-user; fi
-          cmake --preset "$profile" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_BUILD_SQLITE_DRIVER=ON -DORM_BUILD_POSTGRESQL_DRIVER=OFF -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF 2>&1 | tee evidence/deps/root-configure.log
-          cmake --build --preset "$profile" --parallel 4 2>&1 | tee evidence/deps/root-build.log
-
-          core_module="$(find build -type f -name 'libturbo_orm.so' -print -quit)"
-          redis_module="$(find build -type f -name 'turbodb_driver_redis.so' -print -quit)"
-          redis_native="$(find build -type f -name 'libtedis.so.1*' ! -type l -print -quit)"
-          mongodb_module="$(find build -type f -name 'turbodb_driver_mongodb.so' -print -quit)"
-          test -n "$core_module"
-          test -n "$redis_module"
-          test -n "$redis_native"
-          test -n "$mongodb_module"
-
-          readelf -d "$core_module" > evidence/deps/root-core-dependencies.txt
-          readelf -d "$redis_module" > evidence/deps/redis-driver-dependencies.txt
-          readelf -d "$redis_native" > evidence/deps/redis-native-dependencies.txt
-          readelf -d "$mongodb_module" > evidence/deps/mongodb-driver-dependencies.txt
-          nm -D --defined-only "$redis_module" > evidence/deps/redis-driver-exports.txt
-          nm --defined-only "$mongodb_module" > evidence/deps/mongodb-driver-symbols.txt
-          nm -D --defined-only "$mongodb_module" > evidence/deps/mongodb-driver-exports.txt
-
-          grep -Eiq 'tedis' evidence/deps/redis-driver-dependencies.txt
-          if grep -q 'NOOPEN' evidence/deps/redis-native-dependencies.txt; then
-            cat evidence/deps/redis-native-dependencies.txt
-            echo 'Redis native client is marked unavailable to dlopen' >&2
-            exit 1
-          fi
-          grep -Eq '[[:space:]]salts_plugin_query$' evidence/deps/redis-driver-exports.txt
-
-          if ! grep -Eiq 'mongoc' evidence/deps/mongodb-driver-dependencies.txt; then
-            if ! grep -Eq '[[:space:]][Tt][[:space:]]mongoc_client_new$' evidence/deps/mongodb-driver-symbols.txt; then
-              cat evidence/deps/mongodb-driver-dependencies.txt
-              grep -E 'mongoc_client_new|mongoc_' evidence/deps/mongodb-driver-symbols.txt || true
-              echo 'MongoDB Driver contains neither shared nor static mongoc implementation' >&2
-              exit 1
-            fi
-          fi
-          grep -Eq '[[:space:]]salts_plugin_query$' evidence/deps/mongodb-driver-exports.txt
-          if grep -Eiq '[[:space:]]mongoc_[A-Za-z0-9_]*$|[[:space:]]bson_[A-Za-z0-9_]*$' evidence/deps/mongodb-driver-exports.txt; then
-            cat evidence/deps/mongodb-driver-exports.txt
-            echo 'MongoDB native symbols leaked from Driver MODULE' >&2
-            exit 1
-          fi
-
-          if grep -Eiq 'tedis|redis|mongoc|bson' evidence/deps/root-core-dependencies.txt; then
-            cat evidence/deps/root-core-dependencies.txt
-            echo 'generic turbo_orm imports a Redis/MongoDB native library' >&2
-            exit 1
-          fi
-
-          tides_module="$(find build -type f -name 'turbodb_driver_tidesdb.so' -print -quit)"
-          if [[ -n "$tides_module" ]]; then
-            readelf -d "$tides_module" > evidence/deps/tidesdb-driver-dynamic.txt
-            tides_native="$(find build -type f -name 'libtidesdb.so*' ! -type l -print -quit)"
-            if [[ -n "$tides_native" ]]; then
-              readelf -d "$tides_native" > evidence/deps/tidesdb-native-dynamic.txt
-            fi
-            ldd -r "$tides_module" > evidence/deps/tidesdb-driver-ldd.txt 2>&1 || true
-            python3 -c 'import ctypes,sys; ctypes.CDLL(sys.argv[1])' "$tides_module" > evidence/deps/tidesdb-driver-dlopen.txt 2>&1 || true
-          fi
-
-          ctest --preset "$profile" --output-on-failure 2>&1 | tee evidence/deps/root-ctest.log
-
-      - name: Build and test TurboDB on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-          if errorlevel 1 exit /b 1
-          set "PROFILE=win-release-user"
-          set "BUILD=build\Msvc-Release"
-          if "${{ matrix.config }}"=="debug" set "PROFILE=win-dev-user"
-          if "${{ matrix.config }}"=="debug" set "BUILD=build\Msvc"
-          cmake --preset "%PROFILE%" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DORM_BUILD_SQLITE_DRIVER=ON -DORM_BUILD_POSTGRESQL_DRIVER=OFF -DORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=OFF -DORM_BUILD_REDIS_DRIVER=ON -DORM_BUILD_MONGODB_DRIVER=ON -DTURBODB_DBTOOLS_WITH_SQLITE=ON -DTURBODB_DBTOOLS_WITH_PGSQL=OFF > evidence\deps\root-configure.log 2>&1
-          if errorlevel 1 (type evidence\deps\root-configure.log & exit /b 1)
-          findstr /c:"z-applocal" "%BUILD%\build.ninja" >nul
-          if not errorlevel 1 (echo forbidden vcpkg applocal command generated & exit /b 1)
-          cmake --build --preset "%PROFILE%" --parallel 4 > evidence\deps\root-build.log 2>&1
-          if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-build.log & exit /b 1)
-
-          dumpbin /DEPENDENTS "%BUILD%\bin\turbo_orm.dll" > evidence\deps\root-core-dependencies.txt 2>&1
-
-          set "REDIS_DRIVER="
-          for /f "delims=" %%F in ('dir /s /b "%BUILD%\turbodb_driver_redis.dll" 2^>nul') do set "REDIS_DRIVER=%%F"
-          if not defined REDIS_DRIVER (echo missing Redis Driver module & exit /b 1)
-          dumpbin /DEPENDENTS "%REDIS_DRIVER%" > evidence\deps\redis-driver-dependencies.txt 2>&1
-          dumpbin /EXPORTS "%REDIS_DRIVER%" > evidence\deps\redis-driver-exports.txt 2>&1
-          findstr /i /c:"tedis.dll" evidence\deps\redis-driver-dependencies.txt >nul
-          if errorlevel 1 (type evidence\deps\redis-driver-dependencies.txt & echo Redis Driver does not import tedis.dll & exit /b 1)
-          findstr /c:"salts_plugin_query" evidence\deps\redis-driver-exports.txt >nul
-          if errorlevel 1 (type evidence\deps\redis-driver-exports.txt & echo Redis Driver does not export salts_plugin_query & exit /b 1)
-
-          set "MONGODB_DRIVER="
-          for /f "delims=" %%F in ('dir /s /b "%BUILD%\turbodb_driver_mongodb.dll" 2^>nul') do set "MONGODB_DRIVER=%%F"
-          if not defined MONGODB_DRIVER (echo missing MongoDB Driver module & exit /b 1)
-          dumpbin /DEPENDENTS "%MONGODB_DRIVER%" > evidence\deps\mongodb-driver-dependencies.txt 2>&1
-          dumpbin /EXPORTS "%MONGODB_DRIVER%" > evidence\deps\mongodb-driver-exports.txt 2>&1
-          findstr /i /c:"mongoc" evidence\deps\mongodb-driver-dependencies.txt >nul
-          if errorlevel 1 (type evidence\deps\mongodb-driver-dependencies.txt & echo MongoDB Driver does not import mongoc & exit /b 1)
-          findstr /c:"salts_plugin_query" evidence\deps\mongodb-driver-exports.txt >nul
-          if errorlevel 1 (type evidence\deps\mongodb-driver-exports.txt & echo MongoDB Driver does not export salts_plugin_query & exit /b 1)
-
-          findstr /i /c:"tedis.dll" /c:"redis.dll" /c:"mongoc" /c:"bson" evidence\deps\root-core-dependencies.txt >nul
-          if not errorlevel 1 (type evidence\deps\root-core-dependencies.txt & echo generic turbo_orm imports Redis/MongoDB native libraries & exit /b 1)
-
-          for /f "delims=" %%F in ('dir /s /b "%BUILD%\turbodb_driver_tidesdb.dll" 2^>nul') do (
-            dumpbin /DEPENDENTS "%%F" > evidence\deps\tidesdb-driver-dependencies.txt 2>&1
-            dumpbin /EXPORTS "%%F" > evidence\deps\tidesdb-driver-exports.txt 2>&1
-          )
-
-          ctest --preset "%PROFILE%" --output-on-failure > evidence\deps\root-ctest.log 2>&1
-          if not "%ERRORLEVEL%"=="0" (type evidence\deps\root-ctest.log & exit /b 1)
-
-      - name: Keep dependency qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: published-deps-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
-          path: evidence/
-          if-no-files-found: warn
+  native:
+    if: >-
+      github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: publish TurboDB package')
+    uses: ./.github/workflows/native-sdk.yml

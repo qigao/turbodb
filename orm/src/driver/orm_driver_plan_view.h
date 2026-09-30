@@ -9,7 +9,7 @@
  * view has been consumed. This function acquires no #28 execution lease.
  *
  * borrow clears its complete output before validation. Accessor DTO outputs
- * must have an ABI 1 header with struct_size >= the known DTO size and <= the
+ * must have the current Driver ABI header with struct_size >= the known DTO size and <= the
  * descriptor limit, and enough writable storage for that declared size.
  * Invalid output headers are not modified. After a valid header, errors clear
  * the known payload while preserving the caller header and unknown tail.

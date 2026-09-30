@@ -6,7 +6,8 @@
       "name": "pkgconf",
       "host": true
     },
-    "zstd"
+    "zstd",
+    "boringssl"
   ],
   "features": {
     "sqlite": {
@@ -31,12 +32,6 @@
             "zstd"
           ]
         }
-      ]
-    },
-    "mysql": {
-      "description": "Build/qualify the CNet MySQL wire Driver with cached BoringSSL and without libmysql/OpenSSL",
-      "dependencies": [
-        "boringssl"
       ]
     }
   },

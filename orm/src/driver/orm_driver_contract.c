@@ -83,17 +83,9 @@ static orm_status_t driver_check_capabilities(uint64_t caps) {
 
 static orm_status_t driver_check_connection_ops(orm_driver_table_v1 table,
                                                 uint64_t caps) {
-  orm_driver_connection_ops_v1 ops = {0};
+  orm_driver_connection_ops_v2 ops = {0};
   uint32_t declared = 0u;
-  uint32_t required = DRIVER_FIELD_END(orm_driver_connection_ops_v1, destroy);
-  orm_status_t status;
-  if ((caps & DRIVER_ROW_CAPS) != 0u)
-    required = DRIVER_FIELD_END(orm_driver_connection_ops_v1, open_cursor);
-  if ((caps & DRIVER_COMMAND_CAPS) != 0u)
-    required = DRIVER_FIELD_END(orm_driver_connection_ops_v1, execute_command);
-  if ((caps & ORM_DRIVER_CAP_TRANSACTION) != 0u)
-    required = DRIVER_FIELD_END(orm_driver_connection_ops_v1, begin_transaction);
-  status = driver_copy_table(table, required, &ops, &declared);
+  orm_status_t status = driver_copy_table(table, sizeof(ops), &ops, &declared);
   if (status != ORM_STATUS_OK)
     return status;
   if (ops.destroy == NULL ||

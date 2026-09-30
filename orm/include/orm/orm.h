@@ -190,6 +190,15 @@ typedef struct orm_flow_config {
   size_t max_buffer_bytes;
 } orm_flow_config_t;
 
+/* Borrowed single-owner scheduler. Poll and timeout use its clock ticks.
+ * A delayed, non-concurrent scheduler is required; no worker is created. */
+typedef struct orm_async_config {
+  uint32_t struct_size;
+  cflow_scheduler *scheduler;
+  uint64_t poll_interval_ticks;
+  uint64_t timeout_ticks;
+} orm_async_config_t;
+
 typedef struct orm_command_result {
   uint32_t struct_size;
   uint32_t abi_version;
@@ -381,6 +390,18 @@ ORM_C_API orm_status_t ORM_C_CALL orm_result_get_boolean(
  */
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_flow(
     orm_query_t *query, const orm_flow_config_t *config,
+    cflow_publisher *out_publisher, orm_error_t *error);
+
+/* Opens a non-transactional row query with asynchronous progress: native
+ * nonblocking I/O for MySQL/PostgreSQL, a serial worker for SQLite.
+ * Connection establishment and transaction control keep their synchronous APIs.
+ * Unsupported drivers return UNSUPPORTED without issuing a query. The async
+ * scheduler must also drive the Subscription and outlive publisher destruction.
+ * Cancellation abandons the active native query; it does not roll back effects
+ * of arbitrary SQL functions or authorize an automatic retry. */
+ORM_C_API orm_status_t ORM_C_CALL orm_query_open_async_flow(
+    orm_query_t *query, const orm_flow_config_t *config,
+    const orm_async_config_t *async_config,
     cflow_publisher *out_publisher, orm_error_t *error);
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
     orm_query_t *query, orm_transaction_t *transaction,

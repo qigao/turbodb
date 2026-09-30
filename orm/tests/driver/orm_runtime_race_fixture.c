@@ -131,8 +131,8 @@ static void ORM_DRIVER_CALL race_destroy_connection(void *context) {
   memset(connection, 0, sizeof(*connection));
 }
 
-static const orm_driver_connection_ops_v1 connection_ops = {
-    RACE_HEADER(orm_driver_connection_ops_v1),
+static const orm_driver_connection_ops_v2 connection_ops = {
+    RACE_HEADER(orm_driver_connection_ops_v2),
     race_destroy_connection, NULL, NULL, NULL};
 
 static orm_status_t ORM_DRIVER_CALL race_create_connection(

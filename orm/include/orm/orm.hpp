@@ -2,6 +2,7 @@
 #define ORM_HPP
 
 #include "orm.h"
+#include "orm_flow.hpp"
 
 #include <cstdint>
 #include <stdexcept>
@@ -107,6 +108,7 @@ public:
     if (cflow_publisher_valid(&publisher_)) cflow_publisher_cancel(&publisher_);
   }
   [[nodiscard]] cflow_publisher *native_handle() noexcept { return &publisher_; }
+  [[nodiscard]] flow pipe() && { return flow(query_, publisher_); }
 private:
   friend class query;
   publisher(orm_query_t *query, cflow_publisher native) noexcept
@@ -209,6 +211,18 @@ public:
     orm_error_init(&error);
     detail::check(orm_query_open_command_flow(handle_, &native, &error), error);
     return publisher<orm_command_result_t>(std::exchange(handle_, nullptr), native);
+  }
+  template <typename Row>
+  [[nodiscard]] publisher<Row> open_async(const cmeta_data_desc &row_shape,
+                                         const orm_async_config_t &async_config) && {
+    orm_flow_config_t config;
+    orm_flow_config(&config, &row_shape);
+    cflow_publisher native{};
+    orm_error_t error;
+    orm_error_init(&error);
+    detail::check(orm_query_open_async_flow(handle_, &config, &async_config,
+                                           &native, &error), error);
+    return publisher<Row>(std::exchange(handle_, nullptr), native);
   }
   template <typename Row>
   [[nodiscard]] publisher<Row> open(transaction &owner,

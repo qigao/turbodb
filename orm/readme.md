@@ -38,26 +38,125 @@ as text.
 
 ## C API
 
-Load the installed Orm package, include `orm.h` /
+Add TurboDB to the build with `add_subdirectory`, include `orm.h` /
 `orm_runtime.h`, and link `Orm::C`. The generic shared core owns query
 planning, result/Publisher plumbing and the canonical Driver runtime.
 Database-native dependencies stay in Driver modules rather than the generic
 core.
 
 ```cmake
-find_package(Orm CONFIG REQUIRED)
 target_link_libraries(app PRIVATE Orm::C)
 ```
 
 New connections use an explicit `orm_runtime_t` and an explicitly supplied
-Driver module path. The installed `Orm` CMake package does not advertise
-SQLite/PostgreSQL capability flags because Driver deployment is independent of
-the core package.
+Driver module path. Driver deployment is independent of the core library.
+The build no longer generates an `OrmConfig.cmake` package; `Orm::C` and
+`Orm::Cpp` are targets for source-tree integration.
 
+### Plugin architecture and ownership
+
+The runtime uses the installed `Salts::Plugin` implementation and its ABI 2
+contract. `SALTS_ROOT` and `SALTS_UTILS_ROOT` in the selected user preset select
+the SDKs. The build requires both `Salts::Plugin` and `Salts::PluginABI`; it does
+not compile a private copy of the loader. `Orm::DriverABI` publishes the ORM
+driver headers and their `Salts::PluginABI`, Core, CFlow and CSerde dependencies.
+It does not link the host loader or a native database library.
+
+The ORM driver boundary accepts only Driver ABI 2 and `TurboDb.Driver` contract
+version 4. Rebuild and deploy the core and all drivers together; older plugins
+are rejected. `orm_driver_connection_ops_v2` must contain the complete operation
+table, including a nullable `open_async_cursor` callback.
+
+| Boundary | Responsibility |
+| --- | --- |
+| `src/abi` | Public C handles, plans, results and retained ownership |
+| `src/flow` | Demand, cancellation, typed row decoding and command Publishers |
+| `src/driver` | Driver contract validation and plan/backend adapters |
+| `src/runtime/orm_runtime.c` | Runtime budgets, references and shutdown state |
+| `src/runtime/orm_runtime_plugin.c` | Driver admission, metadata snapshots and extension leases |
+| `src/runtime/orm_runtime_connection.c` | Leased connections, cursors and transactions |
+| `src/sql` | Database-independent SQL rendering |
+| `../drivers/<database>` | One native backend and its plugin CMake target |
+| `../mysql` | Standalone `TurboDB::MySQL` client library |
+| `driver-sdk` | The source-tree `Orm::DriverABI` target |
+
+Each implementation directory declares its own sources in `CMakeLists.txt`.
+The repository root builds `orm/`, then `drivers/`, then `orm/tests/`.
+`orm/CMakeLists.txt` declares only the generic core, C++ facade and driver ABI.
+The `drivers/` dispatcher builds SQLite, PostgreSQL, MySQL, Redis and TidesDB
+from their own directories. Native MySQL code belongs to the root `mysql/`
+library; its ORM adapter is in `drivers/mysql/`.
+MongoDB remains in `drivers/mongodb/` without being added to the build.
+The shared core owns no native database dependency; each plugin owns its
+native SDK links and install rule.
+The private test core recompiles the production target's source selection with
+the test ABI, so splitting a production module cannot silently drop it from
+ownership tests. Unit/integration tests and E2E tests retain separate switches
+and database directories.
+
+Salts owns module identity, generation checks, lifecycle and leases. The ORM
+stores a bounded index of admitted drivers plus copied metadata, rather than a
+second module registry. Admission is serialized and validates the manifest ID,
+`TurboDb.Driver` contract version and CMeta shape before publishing a slot.
+All metadata copies occur while the admission lease is valid. A stored binding
+is borrowed; invoking it requires a new live lease.
+
+A connection retains a runtime dependent and a plugin lease. Cursors,
+transactions and Publishers retain the connection through the existing owner
+protocol. Destruction releases native resources first, then the plugin lease,
+then the runtime dependent. Extension handles similarly retain a lease until
+explicit release. Runtime counters and transitions use the runtime mutex;
+plugin callbacks execute outside that lock. Limits remain in
+`orm_runtime_config_t`; exhaustion returns the existing limit or busy status.
+
+Shutdown stops admission and processes plugins in reverse registration order:
+request stop, poll quiescence, unload. Active or pending operations return
+`ORM_STATUS_BUSY`. A quiescing plugin leaves shutdown resumable; a cleanup
+failure quarantines the runtime under the existing error callback policy.
+
+This separation replaces the monolithic runtime without introducing another
+loader or a new connection protocol. Keeping the monolith would preserve the
+same coupling between control state and cursor execution; splitting into
+separate public libraries would add ABI and deployment changes unnecessarily.
+The chosen internal boundaries add no per-row dispatch or allocation. Existing
+runtime APIs, module filenames, contract versions and caller-blocking
+execution semantics remain unchanged. PostgreSQL connections use the runtime
+plugin; the direct connector compatibility component has been removed.
+
+Consumers rebuild against the installed SDKs. Applications using the removed
+PostgreSQL direct connector must load the PostgreSQL plugin and connect through
+`orm_runtime_connect`; database formats do not change. A rollback restores the previous
+source layout and matching SDK installation together. Verification uses the
+runtime registry/race tests, SQLite/PostgreSQL plugin tests, ownership tests and
+the independent PostgreSQL E2E build. Live E2E execution additionally requires
+the database environment described below.
+
+
+### 客户端按需使用驱动
+
+构建端提供完整的五个驱动；客户端链接 `Orm::C`（或 `Orm::Cpp`），只部署
+并显式加载需要的插件。一个 runtime 可以加载多个驱动；未加载的驱动不连接、
+不初始化，也不要求客户端链接其原生数据库库。选定插件使用的原生运行库仍需
+由客户端部署环境提供。
+
+插件文件名、`TurboDb.Driver` 契约及安装路径保持不变。每个插件拥有独立安装
+component：`OrmSqliteDriver`、`OrmPostgresqlDriver`、`OrmMysqlDriver`、
+`OrmRedisDriver`、`OrmTidesdbDriver`。这些 component 只选择插件产物，
+不会自动打包 ORM、Salts 或数据库原生运行库。
+
+本次目录调整选择将具体数据库实现移出 ORM，保留公共契约与通用适配代码在
+ORM 内。继续放在 `src/dbs/` 会让核心继续承担驱动构建职责；拆成独立仓库或
+新公共库则会引入当前不需要的版本与发布边界。目录调整不改变查询算法、
+资源状态归属、错误码、插件 ABI 或运行时开销。
+
+迁移只涉及 CMake 源码引用：核心先定义，驱动随后定义，测试最后引用现有
+targets。驱动构建失败会直接终止构建，不产生自动降级路径。回退时应一起恢复
+目录和 CMake 引用，无须迁移数据库数据。验证覆盖五个插件构建、单驱动加载、
+多驱动共存的本地契约测试、核心 DLL 依赖检查及独立 E2E 构建。
 
 ### Runtime-loaded Drivers
 
-SQLite, PostgreSQL, Redis, TidesDB, and MongoDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
+SQLite, PostgreSQL, MySQL, Redis, TidesDB, and MongoDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
 The application loads an exact module path into an `orm_runtime_t`, then
 connects by the canonical Plugin manifest ID. Runtime loading does not scan
 directories, infer aliases, retry older ABIs, or fall back to a built-in
@@ -218,7 +317,9 @@ must outlive that Publisher.
   strings instead of being narrowed.
 - MongoDB: native row cursor and direct insert/update/delete commands;
   transactions require a deployment that supports MongoDB sessions.
-- TidesDB: iterator-backed row Publisher and direct commands. Stateful ordering,
+- TidesDB: iterator-backed row Publisher, direct commands, and a
+  [bounded SQL frontend](../drivers/tidesdb/sql/readme.md) for parameterized
+  SELECT/INSERT/UPDATE/DELETE. Stateful ordering,
   grouping and aggregation are not executed eagerly by the backend; express
   them as bounded CFlow operators when pushdown cannot preserve semantics.
   SELECT requires an explicit projection. Iterator scans are capped by
@@ -240,37 +341,7 @@ must outlive that Publisher.
 Backend options are validated at connection creation. Unknown options are
 rejected instead of silently enabling a fallback.
 
-### Legacy PostgreSQL compatibility component (2.1.x)
-
-For 2.1.x source compatibility, `ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT=ON`
-may additionally export `Orm::PostgreSQL` and `orm_postgresql_connect()`.
-This is not the runtime Driver architecture and new code should not use it.
-It is retained only as a migration component and is scheduled for removal at
-the 3.0 connection-API cutover:
-
-```cmake
-find_package(Orm CONFIG REQUIRED)
-target_link_libraries(app PRIVATE Orm::PostgreSQL)
-```
-
-```c
-#include <orm_postgresql.h>
-
-orm_config_t config;
-orm_connection_t *connection = NULL;
-orm_error_t error;
-
-orm_config(&config);
-config.driver = orm_view("postgresql");
-/* Supply a borrowed "conninfo" option for this call. */
-if (orm_postgresql_connect(&config, &connection, &error) != ORM_STATUS_OK) {
-  /* Consume the error at the application boundary. */
-}
-```
-
-C++ consumers include `orm_postgresql.hpp` and call
-`orm::postgresql_connection(config)`. This is an inline wrapper over the same C
-connector; there is no C++ implementation library.
+### Composite keys
 
 Composite keys are expressed as one atomic, bounded batch:
 
@@ -289,13 +360,22 @@ unchanged.
 
 ## Build and test
 
-Runtime Driver build options are `ORM_BUILD_SQLITE_DRIVER`,
-`ORM_BUILD_POSTGRESQL_DRIVER`, `ORM_BUILD_REDIS_DRIVER`,
-`ORM_BUILD_TIDESDB_DRIVER`, and `ORM_BUILD_MONGODB_DRIVER`. The optional
-`ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT` switch controls only the 2.1.x direct
-connector compatibility target. Driver options do not change the generic
-`Orm::C` package contract or put native database libraries into its link
-closure.
+ORM builds SQLite, PostgreSQL, MySQL, Redis and TidesDB drivers together.
+There are no per-database build switches. MongoDB sources remain in the tree,
+but its native driver and database-dependent tests are excluded from the build.
+`TURBODB_BUILD_ORM` and `TURBODB_BUILD_DBTOOLS` select the modules to build.
+The database tools always support SQLite and PostgreSQL. Enabling either module
+selects both vcpkg manifest features before toolchain initialization.
+Redis and TidesDB are built from their repository modules; Salts and SaltsUtils
+come from the installed SDKs selected by the preset.
+Native database libraries stay outside the generic `Orm::C` link interface.
+
+The root `mysql/` directory provides the standalone `TurboDB::MySQL` static
+client and installed headers, without ORM dependencies. `drivers/mysql/`
+owns the `orm_mysql_driver` MODULE and links that client; its output remains
+`turbodb_driver_mysql`. Both are built when `TURBODB_BUILD_ORM` is enabled.
+Native API tests live in `mysql/tests/`; ORM contract and integration tests
+remain under `orm/tests/`. See [MySQL client boundaries](../mysql/readme.md).
 
 ```sh
 cmake --preset win-dev-user
@@ -303,20 +383,51 @@ cmake --build --preset win-dev-user
 ctest --preset win-dev-user --output-on-failure
 ```
 
-The PostgreSQL live gate is opt-in and fail-fast. Set a non-empty conninfo in
-the environment before configuring the dedicated preset; the value is never
-printed by the test:
+`BUILD_TESTS` controls unit tests and local contract/integration checks.
+`orm/tests/CMakeLists.txt` dispatches to `abi/`, `driver/`, `flow/`,
+`integration/`, and `ownership/`, each with its own `CMakeLists.txt`.
+Driver tests are further grouped into `mysql/`, `postgresql/`, `sqlite/`,
+`mongodb/`, and `cross_driver/`, each with its own `CMakeLists.txt`.
+Generic driver and runtime tests remain directly under `driver/`.
+Database-specific flow and ABI tests also have their own subdirectories.
+Integration tests are split into `integration/sqlite/` and
+`integration/tidesdb/`. Each directory declares its target sources and test
+properties directly; parent files only select and add the relevant directories.
+Shared test headers are provided by the `support/` interface target.
+`BUILD_E2E_TESTS` independently controls tests against external databases and
+defaults to OFF. ORM E2E tests live in per-driver subdirectories of
+`orm/tests/e2e/`, each with its own `CMakeLists.txt`.
+Dbtools tests are organized under `dbtools/tests/sqlite/` and
+`dbtools/tests/pgsql/`; PostgreSQL E2E cases have a separate `pgsql/e2e/`
+directory and `CMakeLists.txt`.
+Cross-database ORM cases live in `orm/tests/e2e/cross_driver/`.
+All E2E tests carry the CTest `e2e` label. `BUILD_E2E_TESTS` builds the suites
+for the enabled ORM and dbtools modules, independently of `BUILD_TESTS`.
+
+The PostgreSQL E2E presets set `BUILD_TESTS=OFF` and `BUILD_E2E_TESTS=ON`.
+They build all drivers and filter test execution to the PostgreSQL cases.
+They replace the former `*-pg-live-user` presets. Connection settings are read
+from the environment when the tests run, so building them needs no live server.
+The ORM tests use `TURBODB_ORM_PGSQL_TEST_CONNINFO`; the dbtools test uses
+`TURBODB_DBTOOLS_PG_TEST_CONNINFO`. Use disposable test databases because these
+tests create and remove test tables.
 
 ```powershell
 $env:TURBODB_ORM_PGSQL_TEST_CONNINFO = 'host=127.0.0.1 port=5432 dbname=turbodb user=turbodb password=...'
-cmake --preset win-release-pg-live-user --fresh
-cmake --build --preset win-release-pg-live-user
-ctest --preset win-release-pg-live-user -R '^orm_postgres_live$' --output-on-failure
+$env:TURBODB_DBTOOLS_PG_TEST_CONNINFO = $env:TURBODB_ORM_PGSQL_TEST_CONNINFO
+cmake --preset win-release-pg-e2e-user
+cmake --build --preset win-release-pg-e2e-user
+ctest --preset win-release-pg-e2e-user --output-on-failure
 ```
+
+For dbtools alone, use `win-release-dbtools-pg-e2e-user`. The ordinary
+`win-release-dbtools-pg-user` preset builds and runs its unit tests without a
+database server. MySQL handshake/auth parsing remains a unit test because it
+uses in-memory fixtures.
 
 The cursor and Publisher lifecycle tests use TinyTest; driver boundary tests use
 TinyMock where a native server is unnecessary. TidesDB also has a public
 end-to-end temporary-database test.
 
-See `docs/architecture/orm-cflow-c-core.md` for the ownership, backpressure,
-failure, and migration decision.
+Stream/Reactive 管道、MySQL/PostgreSQL 原生异步与 SQLite 后台行查询的 API、调度、
+背压与关闭约束见 [Stream / Async](stream-async.md)。

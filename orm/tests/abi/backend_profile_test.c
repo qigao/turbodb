@@ -3,7 +3,7 @@
 #include <tinytest.h>
 
 spec("ORM backend profile") {
-  it("matches the configured SQLite capability") {
+  it("provides the SQLite backend in the internal test core") {
     const orm_option_t filename = {orm_view("filename"), orm_view(":memory:")};
     orm_config_t config;
     orm_connection_t *connection = (orm_connection_t *)1;
@@ -17,15 +17,9 @@ spec("ORM backend profile") {
     config.option_count = 1u;
 
     status = orm_connect(&config, &connection, &error);
-#if ORM_EXPECT_SQLITE
     check_equal(status, ORM_STATUS_OK);
     check_not_null(connection);
     check_equal(error.status, ORM_STATUS_OK);
     orm_disconnect(connection);
-#else
-    check_equal(status, ORM_STATUS_UNSUPPORTED);
-    check_null(connection);
-    check_equal(error.status, ORM_STATUS_UNSUPPORTED);
-#endif
   }
 }

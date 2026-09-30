@@ -9,27 +9,27 @@
 #define ORM_DRIVER_CALL
 #endif
 
-#define ORM_DRIVER_ABI_VERSION UINT32_C(1)
+#define ORM_DRIVER_ABI_VERSION UINT32_C(2)
 #define ORM_DRIVER_HEADER_BYTES UINT32_C(8)
 #define ORM_DRIVER_DESCRIPTOR_MAX_BYTES UINT32_C(65536)
 #define ORM_DRIVER_ID_MAX_BYTES UINT32_C(63)
 #define ORM_DRIVER_BUNDLE_ID_BYTES UINT32_C(32)
 
 /*
- * Current Driver ABI 1 development compatibility bundle.
- * SHA-256("TurboDB|DriverABI=1|ORM_C_ABI=4|CFlowABI=4|CSerdeReaderABI=1|CMetaDataABI=1").
+ * Driver ABI 2 SDK bundle; host and all drivers require a coordinated rebuild.
+ * SHA-256("TurboDB|DriverABI=2|ORM_C_ABI=4|CFlowABI=4|CSerdeReaderABI=1|CMetaDataABI=1").
  * #35 owns the release manifest/cutover; host and modules must compile against
  * the same SDK bundle rather than inventing fixture-local IDs.
  */
 #define ORM_DRIVER_BUNDLE_ID_INIT { \
-  UINT8_C(0xab), UINT8_C(0x7a), UINT8_C(0x72), UINT8_C(0xf6), \
-  UINT8_C(0x8f), UINT8_C(0x24), UINT8_C(0x34), UINT8_C(0xde), \
-  UINT8_C(0x9c), UINT8_C(0x06), UINT8_C(0x51), UINT8_C(0xbf), \
-  UINT8_C(0xfa), UINT8_C(0x23), UINT8_C(0x83), UINT8_C(0x9c), \
-  UINT8_C(0x81), UINT8_C(0x44), UINT8_C(0xf7), UINT8_C(0x87), \
-  UINT8_C(0x0a), UINT8_C(0xc2), UINT8_C(0xfe), UINT8_C(0x94), \
-  UINT8_C(0xf1), UINT8_C(0x25), UINT8_C(0x04), UINT8_C(0x12), \
-  UINT8_C(0x3c), UINT8_C(0x39), UINT8_C(0x9f), UINT8_C(0x8e) \
+  UINT8_C(0xb1), UINT8_C(0x58), UINT8_C(0x42), UINT8_C(0x55), \
+  UINT8_C(0xfc), UINT8_C(0xbc), UINT8_C(0x3e), UINT8_C(0x0c), \
+  UINT8_C(0x5f), UINT8_C(0x8e), UINT8_C(0x99), UINT8_C(0x04), \
+  UINT8_C(0xce), UINT8_C(0x34), UINT8_C(0x15), UINT8_C(0x6e), \
+  UINT8_C(0x56), UINT8_C(0xeb), UINT8_C(0x5b), UINT8_C(0xec), \
+  UINT8_C(0x16), UINT8_C(0x4f), UINT8_C(0xdf), UINT8_C(0x91), \
+  UINT8_C(0xe6), UINT8_C(0x10), UINT8_C(0x48), UINT8_C(0x79), \
+  UINT8_C(0x7e), UINT8_C(0x67), UINT8_C(0x36), UINT8_C(0xc7) \
 }
 
 #ifdef __cplusplus

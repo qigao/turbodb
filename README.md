@@ -181,7 +181,7 @@ The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` 
 
 Salts owns canonical CMeta reflection plus Plugin ABI 2 publication, loading, lifecycle, and leases. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
 
-Main build areas are independently configurable through CMake options. Runtime database modules use explicit `ORM_BUILD_*_DRIVER` switches; standalone dbtools use their own `TURBODB_DBTOOLS_*` switches. The generic `Orm::C` package does not encode which Drivers were built or deployed.
+The `TURBODB_BUILD_ORM` and `TURBODB_BUILD_DBTOOLS` switches select modules. ORM builds SQLite, PostgreSQL, MySQL, Redis and TidesDB drivers together; consumers choose which plugins to load at runtime. MongoDB is not included. The generic `Orm::C` target does not link database clients.
 
 ## Design principles
 

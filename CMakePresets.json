@@ -3,7 +3,8 @@
     "include": [
         "presets/BuildPresets.json",
         "presets/TestPresets.json",
-        "presets/AndroidPresets.json"
+        "presets/AndroidPresets.json",
+        "presets/CiPresets.json"
     ],
     "configurePresets": [
         {

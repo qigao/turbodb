@@ -4,6 +4,11 @@
         "CMakePresets.json"
     ],
     "configurePresets": [
+        {"name": "ci-environment", "hidden": true, "environment": {"PKG_ROOT": "$penv{TURBODB_CI_PKG_ROOT}", "VCPKG_ROOT": "$penv{VCPKG_ROOT}", "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed", "SALTS_ROOT": "$env{PKG_ROOT}/salts/release", "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release"}, "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"}},
+        {"name": "ci-windows-release", "inherits": ["ci-windows-base", "ci-environment"]},
+        {"name": "ci-linux-release", "inherits": ["ci-linux-base", "ci-environment"]},
+        {"name": "ci-linux-e2e", "inherits": ["ci-linux-e2e-base", "ci-environment"]},
+        {"name": "ci-android-release", "inherits": ["ci-android-base", "ci-environment"], "environment": {"SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release", "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"}, "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release"}},
         {
             "name": "win-toolchain",
             "hidden": true,
@@ -75,36 +80,42 @@
             "name": "win-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "ORM_BUILD_SQLITE_DRIVER": "ON",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
-                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
             "environment": {
-                "PATH": "${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$penv{PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
+                "PATH": "${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": ["base-win-dev-user", "win-paths"]
         },
         {
             "name": "win-release-user",
             "cacheVariables": {
-                "ORM_BUILD_SQLITE_DRIVER": "ON",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
-                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
             "environment": {
-                "PATH": "${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$penv{PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "PATH": "${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
             },
             "inherits": ["base-win-release-user", "win-paths"]
+        },
+        {
+            "name": "win-release-dbtools-user",
+            "displayName": "Release + SQLite/PostgreSQL dbtools (Windows)",
+            "inherits": "win-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools",
+            "cacheVariables": {
+                "TURBODB_BUILD_ORM": "OFF"
+            },
+            "environment": {
+                "PATH": "${sourceDir}/build/Msvc-Release-DbTools/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
         },
         {
             "name": "win-release-dbtools-pg-user",
@@ -112,117 +123,111 @@
             "inherits": "win-release-user",
             "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG",
             "cacheVariables": {
-                "ORM_BUILD_SQLITE_DRIVER": "OFF",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "OFF",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
-                "TURBODB_DBTOOLS_WITH_SQLITE": "OFF",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
+                "TURBODB_BUILD_ORM": "OFF",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg"
             },
             "environment": {
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "PATH": "${sourceDir}/build/Msvc-Release-DbTools-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$penv{PATH}"
+                "PATH": "${sourceDir}/build/Msvc-Release-DbTools-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
             }
         },
         {
-            "name": "win-release-pg-live-user",
-            "displayName": "Release + PostgreSQL live tests (Windows)",
+            "name": "win-release-dbtools-pg-e2e-user",
+            "displayName": "Release + PostgreSQL dbtools E2E (Windows)",
+            "inherits": "win-release-dbtools-pg-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Release-DbTools-PG-E2E",
+            "cacheVariables": {
+                "BUILD_TESTS": "OFF",
+                "BUILD_E2E_TESTS": "ON"
+            },
+            "environment": {
+                "PATH": "${sourceDir}/build/Msvc-Release-DbTools-PG-E2E/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
+            "name": "win-release-pg-e2e-user",
+            "displayName": "Release + PostgreSQL E2E tests (Windows)",
             "inherits": "win-release-dbtools-pg-user",
             "binaryDir": "${sourceDir}/build/Msvc-Release-PG",
             "cacheVariables": {
-                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
-                "ORM_POSTGRES_LIVE_TESTS": "ON",
-                "TURBODB_DBTOOLS_PG_LIVE_TESTS": "ON"
+                "TURBODB_BUILD_ORM": "ON",
+                "BUILD_TESTS": "OFF",
+                "BUILD_E2E_TESTS": "ON"
             },
             "environment": {
-                "PATH": "${sourceDir}/build/Msvc-Release-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$penv{PATH}"
+                "PATH": "${sourceDir}/build/Msvc-Release-PG/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
             }
         },
         {
             "name": "linux-dev-user",
             "cacheVariables": {
                 "ENABLE_SANITIZER_ADDRESS": "ON",
-                "ORM_BUILD_SQLITE_DRIVER": "ON",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
-                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
             },
             "environment": {
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": ["base-linux-dev-user", "linux-paths"]
         },
         {
             "name": "linux-release-user",
             "cacheVariables": {
-                "ORM_BUILD_SQLITE_DRIVER": "ON",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "ON",
                 "TURBODB_BUILD_DBTOOLS": "ON",
-                "TURBODB_DBTOOLS_WITH_SQLITE": "ON",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },
             "environment": {
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
             },
             "inherits": ["release-linux-ninja", "linux-paths"]
         },
         {
-            "name": "linux-release-pg-live-user",
-            "displayName": "Release + PostgreSQL live tests (Linux)",
+            "name": "linux-release-pg-e2e-user",
+            "displayName": "Release + PostgreSQL E2E tests (Linux)",
             "inherits": "linux-release-user",
             "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
             "cacheVariables": {
-                "ORM_BUILD_SQLITE_DRIVER": "OFF",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "ON",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
-                "ORM_POSTGRES_LIVE_TESTS": "ON",
-                "TURBODB_DBTOOLS_WITH_SQLITE": "OFF",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "ON",
+                "BUILD_TESTS": "OFF",
+                "BUILD_E2E_TESTS": "ON",
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
                 "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg"
             },
             "environment": {
                 "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
             }
         },
         {
             "name": "android-dependencies-debug",
             "hidden": true,
             "environment": {
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug"
             },
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/debug",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "OFF",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
-                "TURBODB_BUILD_DBTOOLS": "OFF",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF"
+                "TURBODB_BUILD_DBTOOLS": "OFF"
             }
         },
         {
             "name": "android-dependencies-release",
             "hidden": true,
             "environment": {
-                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release"
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"
             },
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release",
-                "ORM_BUILD_POSTGRESQL_DRIVER": "OFF",
-                "ORM_BUILD_LEGACY_POSTGRESQL_COMPONENT": "OFF",
-                "TURBODB_BUILD_DBTOOLS": "OFF",
-                "TURBODB_DBTOOLS_WITH_PGSQL": "OFF"
+                "TURBODB_BUILD_DBTOOLS": "OFF"
             }
         },
         { "name": "android-arm64-v8a-debug-win", "inherits": ["android-arm64-v8a-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"] },
@@ -233,20 +238,32 @@
         { "name": "android-x86-release-win", "inherits": ["android-x86-release", "android-dependencies-release", "android-win-paths", "android-win-environment"] }
     ],
     "buildPresets": [
+        {"name": "ci-windows-release", "configurePreset": "ci-windows-release"},
+        {"name": "install-ci-windows-release", "configurePreset": "ci-windows-release", "targets": ["install"]},
+        {"name": "ci-linux-release", "configurePreset": "ci-linux-release"},
+        {"name": "install-ci-linux-release", "configurePreset": "ci-linux-release", "targets": ["install"]},
+        {"name": "ci-linux-e2e", "configurePreset": "ci-linux-e2e"},
+        {"name": "install-ci-linux-e2e", "configurePreset": "ci-linux-e2e", "targets": ["install"]},
+        {"name": "ci-android-release", "configurePreset": "ci-android-release"},
+        {"name": "install-ci-android-release", "configurePreset": "ci-android-release", "targets": ["install"]},
         { "name": "win-dev-user", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "configurePreset": "win-release-user" },
+        { "name": "win-release-dbtools-user", "configurePreset": "win-release-dbtools-user" },
         { "name": "win-release-dbtools-pg-user", "configurePreset": "win-release-dbtools-pg-user" },
-        { "name": "win-release-pg-live-user", "configurePreset": "win-release-pg-live-user" },
+        { "name": "win-release-dbtools-pg-e2e-user", "configurePreset": "win-release-dbtools-pg-e2e-user" },
+        { "name": "win-release-pg-e2e-user", "configurePreset": "win-release-pg-e2e-user" },
         { "name": "linux-dev-user", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "configurePreset": "linux-release-user" },
-        { "name": "linux-release-pg-live-user", "configurePreset": "linux-release-pg-live-user" },
+        { "name": "linux-release-pg-e2e-user", "configurePreset": "linux-release-pg-e2e-user" },
         { "name": "install-win-dev-user", "configurePreset": "win-dev-user", "targets": ["install"] },
         { "name": "install-win-release-user", "configurePreset": "win-release-user", "targets": ["install"] },
+        { "name": "install-win-release-dbtools-user", "configurePreset": "win-release-dbtools-user", "targets": ["install"] },
         { "name": "install-win-release-dbtools-pg-user", "configurePreset": "win-release-dbtools-pg-user", "targets": ["install"] },
-        { "name": "install-win-release-pg-live-user", "configurePreset": "win-release-pg-live-user", "targets": ["install"] },
+        { "name": "install-win-release-dbtools-pg-e2e-user", "configurePreset": "win-release-dbtools-pg-e2e-user", "targets": ["install"] },
+        { "name": "install-win-release-pg-e2e-user", "configurePreset": "win-release-pg-e2e-user", "targets": ["install"] },
         { "name": "install-linux-dev-user", "configurePreset": "linux-dev-user", "targets": ["install"] },
         { "name": "install-linux-release-user", "configurePreset": "linux-release-user", "targets": ["install"] },
-        { "name": "install-linux-release-pg-live-user", "configurePreset": "linux-release-pg-live-user", "targets": ["install"] },
+        { "name": "install-linux-release-pg-e2e-user", "configurePreset": "linux-release-pg-e2e-user", "targets": ["install"] },
         { "name": "android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win" },
         { "name": "android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win" },
         { "name": "android-x86_64-debug-win", "configurePreset": "android-x86_64-debug-win" },
@@ -261,12 +278,17 @@
         { "name": "install-android-x86-release-win", "configurePreset": "android-x86-release-win", "targets": ["install"] }
     ],
     "testPresets": [
+        {"name": "ci-windows-release", "inherits": "base-test", "configurePreset": "ci-windows-release", "execution": {"noTestsAction": "error"}},
+        {"name": "ci-linux-release", "inherits": "base-test", "configurePreset": "ci-linux-release", "execution": {"noTestsAction": "error"}},
+        {"name": "ci-linux-e2e", "inherits": "base-test", "configurePreset": "ci-linux-e2e", "execution": {"noTestsAction": "error"}, "filter": {"include": {"label": "e2e"}}},
         { "name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user" },
         { "name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user" },
+        { "name": "win-release-dbtools-user", "inherits": "base-test", "configurePreset": "win-release-dbtools-user" },
         { "name": "win-release-dbtools-pg-user", "inherits": "base-test", "configurePreset": "win-release-dbtools-pg-user" },
-        { "name": "win-release-pg-live-user", "inherits": "base-test", "configurePreset": "win-release-pg-live-user" },
+        { "name": "win-release-dbtools-pg-e2e-user", "inherits": "base-test", "configurePreset": "win-release-dbtools-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss)$" } } },
+        { "name": "win-release-pg-e2e-user", "inherits": "base-test", "configurePreset": "win-release-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss)$" } } },
         { "name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user" },
         { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" },
-        { "name": "linux-release-pg-live-user", "inherits": "base-test", "configurePreset": "linux-release-pg-live-user" }
+        { "name": "linux-release-pg-e2e-user", "inherits": "base-test", "configurePreset": "linux-release-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss)$" } } }
     ]
 }

@@ -4,9 +4,10 @@
     <IsPackable>true</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <PackageId>TurboDB.Native</PackageId>
-    <PackageVersion Condition="'$(PackageVersion)' == ''">1.0.2</PackageVersion>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">2.0.0</PackageVersion>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <Authors>qigao</Authors>
-    <Description>Prebuilt TurboDB Orm C/C++ SDK install trees for Linux x64, Windows x64, and Android arm64-v8a native consumers.</Description>
+    <Description>Prebuilt TurboDB ORM and SQLite/PostgreSQL/MySQL/Redis/TidesDB driver SDK install trees for Linux x64, Windows x64, and Android arm64-v8a native consumers.</Description>
     <PackageTags>turbodb;orm;database;native;c;cpp;cmake;android</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

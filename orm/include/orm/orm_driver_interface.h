@@ -15,7 +15,7 @@
  * equality, never descriptor pointer identity, admits the interface shape.
  */
 #define ORM_DRIVER_INTERFACE_CONTRACT_ID "TurboDb.Driver"
-#define ORM_DRIVER_INTERFACE_CONTRACT_VERSION UINT32_C(3)
+#define ORM_DRIVER_INTERFACE_CONTRACT_VERSION UINT32_C(4)
 
 #ifdef __cplusplus
 extern "C" {

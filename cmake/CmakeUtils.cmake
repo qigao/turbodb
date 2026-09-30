@@ -1,5 +1,9 @@
-# TurboDB CMake utilities
+# Project-independent CMake utilities.
+# Project paths, export sets and code generators are supplied by callers.
+include_guard(GLOBAL)
 
+# Configure an existing target. Installation requires an explicit EXPORT_SET;
+# NO_INSTALL skips installation. Version defaults use standard PROJECT_VERSION.
 function(cmake_config_target target_name)
     set(options NO_INSTALL NO_VERSION)
     set(oneValueArgs FOLDER VERSION SOVERSION EXPORT_NAME EXPORT_SET ALIAS OUTPUT_NAME
@@ -7,9 +11,13 @@ function(cmake_config_target target_name)
     set(multiValueArgs)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-    get_target_property(target_type ${target_name} TYPE)
-    if(NOT target_type)
+    if(NOT TARGET "${target_name}")
         message(FATAL_ERROR "cmake_config_target: target '${target_name}' does not exist")
+    endif()
+    get_target_property(target_type ${target_name} TYPE)
+
+    if(NOT ARG_NO_INSTALL AND NOT ARG_EXPORT_SET)
+        message(FATAL_ERROR "cmake_config_target: EXPORT_SET is required unless NO_INSTALL is specified")
     endif()
 
     if(ARG_ALIAS)
@@ -50,15 +58,7 @@ function(cmake_config_target target_name)
     endif()
 
     if(NOT ARG_NO_INSTALL)
-        if(ARG_EXPORT_SET)
-            set(export_set ${ARG_EXPORT_SET})
-        else()
-            set(export_set ${CMAKE_CONFIG_TARGET_EXPORT_SET})
-        endif()
-        if(NOT export_set)
-            message(FATAL_ERROR
-                "cmake_config_target: EXPORT_SET or CMAKE_CONFIG_TARGET_EXPORT_SET must name the export set")
-        endif()
+        include(GNUInstallDirs)
 
         set(runtime_dependency_args)
         if(ARG_RUNTIME_DEPENDENCY_SET)
@@ -67,7 +67,7 @@ function(cmake_config_target target_name)
         endif()
         install(
             TARGETS ${target_name}
-            EXPORT ${export_set}
+            EXPORT ${ARG_EXPORT_SET}
             ${runtime_dependency_args}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -76,6 +76,8 @@ function(cmake_config_target target_name)
 
 endfunction()
 
+# PACKAGE and CONFIG_TEMPLATE are required. The caller owns the template and
+# dependency discovery it contains; this helper only generates/installs the package.
 function(cmake_config_package)
     set(options)
     set(oneValueArgs PACKAGE EXPORT_SET NAMESPACE CONFIG_TEMPLATE VERSION COMPATIBILITY DESTINATION)
@@ -85,14 +87,14 @@ function(cmake_config_package)
     if(NOT ARG_PACKAGE)
         message(FATAL_ERROR "cmake_config_package: PACKAGE is required")
     endif()
+    if(NOT ARG_CONFIG_TEMPLATE)
+        message(FATAL_ERROR "cmake_config_package: CONFIG_TEMPLATE is required")
+    endif()
     if(NOT ARG_EXPORT_SET)
         set(ARG_EXPORT_SET "${ARG_PACKAGE}Targets")
     endif()
     if(NOT ARG_NAMESPACE)
         set(ARG_NAMESPACE "${ARG_PACKAGE}::")
-    endif()
-    if(NOT ARG_CONFIG_TEMPLATE)
-        set(ARG_CONFIG_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/${ARG_PACKAGE}Config.cmake.in")
     endif()
     if(NOT ARG_VERSION)
         set(ARG_VERSION "${PROJECT_VERSION}")
@@ -104,6 +106,7 @@ function(cmake_config_package)
         set(ARG_COMPATIBILITY SameMajorVersion)
     endif()
     if(NOT ARG_DESTINATION)
+        include(GNUInstallDirs)
         set(ARG_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${ARG_PACKAGE}")
     endif()
     if(NOT EXISTS "${ARG_CONFIG_TEMPLATE}")
@@ -141,6 +144,7 @@ function(cmake_install_headers)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     if(NOT ARG_DESTINATION)
+        include(GNUInstallDirs)
         set(ARG_DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
     endif()
 
@@ -164,11 +168,27 @@ function(cmake_install_headers)
     endif()
 endfunction()
 
+# LEXER_RE requires RE2C_EXECUTABLE. GRAMMAR_Y requires LEMON_EXECUTABLE
+# and LEMON_TEMPLATE. Tool targets can be supplied through the dependency lists.
+# Generated file paths and codegen targets are returned as <TARGET_NAME>_*.
 function(cmake_add_grammar TARGET_NAME)
   set(options LEXER_DEPENDS_ON_GRAMMAR)
-  set(oneValueArgs LEXER_RE GRAMMAR_Y FOLDER LEXER_OUTPUT)
-  set(multiValueArgs LEXER_DEPENDS)
+  set(oneValueArgs LEXER_RE GRAMMAR_Y FOLDER LEXER_OUTPUT RE2C_EXECUTABLE
+                   LEMON_EXECUTABLE LEMON_TEMPLATE)
+  set(multiValueArgs LEXER_DEPENDS GRAMMAR_DEPENDS)
   cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+  if(NOT ARG_LEXER_RE AND NOT ARG_GRAMMAR_Y)
+    message(FATAL_ERROR "cmake_add_grammar: LEXER_RE or GRAMMAR_Y is required")
+  endif()
+  if(ARG_LEXER_RE AND NOT ARG_RE2C_EXECUTABLE)
+    message(FATAL_ERROR "cmake_add_grammar: LEXER_RE requires RE2C_EXECUTABLE")
+  endif()
+  if(ARG_GRAMMAR_Y AND (NOT ARG_LEMON_EXECUTABLE OR NOT ARG_LEMON_TEMPLATE))
+    message(FATAL_ERROR "cmake_add_grammar: GRAMMAR_Y requires LEMON_EXECUTABLE and LEMON_TEMPLATE")
+  endif()
+  if(ARG_LEXER_DEPENDS_ON_GRAMMAR AND (NOT ARG_LEXER_RE OR NOT ARG_GRAMMAR_Y))
+    message(FATAL_ERROR "cmake_add_grammar: LEXER_DEPENDS_ON_GRAMMAR requires LEXER_RE and GRAMMAR_Y")
+  endif()
   string(TOLOWER "${TARGET_NAME}" target_name_lower)
 
   if(ARG_GRAMMAR_Y)
@@ -183,14 +203,11 @@ function(cmake_add_grammar TARGET_NAME)
     endif()
     set(lexer_depends ${ARG_LEXER_RE} ${ARG_LEXER_DEPENDS})
     if(ARG_LEXER_DEPENDS_ON_GRAMMAR)
-      if(NOT ARG_GRAMMAR_Y)
-        message(FATAL_ERROR "cmake_add_grammar: LEXER_DEPENDS_ON_GRAMMAR requires GRAMMAR_Y")
-      endif()
       list(APPEND lexer_depends ${GRAMMAR_H})
     endif()
     add_custom_command(
       OUTPUT ${LEXER_GEN}
-      COMMAND ${RE2C_EXECUTABLE} -o ${LEXER_GEN} ${ARG_LEXER_RE}
+      COMMAND "${ARG_RE2C_EXECUTABLE}" -o ${LEXER_GEN} ${ARG_LEXER_RE}
       DEPENDS ${lexer_depends}
       COMMENT "Generating ${TARGET_NAME} lexer with re2c"
       VERBATIM)
@@ -209,8 +226,8 @@ function(cmake_add_grammar TARGET_NAME)
     add_custom_command(
       OUTPUT ${GRAMMAR_GEN} ${GRAMMAR_H}
       COMMAND ${CMAKE_COMMAND} -E copy ${ARG_GRAMMAR_Y} ${GRAMMAR_Y_GEN}
-      COMMAND ${LEMON_EXECUTABLE} -T${LEMPAR} ${GRAMMAR_Y_GEN}
-      DEPENDS ${ARG_GRAMMAR_Y} ${LEMON_DEPENDS}
+      COMMAND "${ARG_LEMON_EXECUTABLE}" "-T${ARG_LEMON_TEMPLATE}" ${GRAMMAR_Y_GEN}
+      DEPENDS ${ARG_GRAMMAR_Y} ${ARG_LEMON_TEMPLATE} ${ARG_GRAMMAR_DEPENDS}
       COMMENT "Generating ${TARGET_NAME} parser with lemon"
       VERBATIM)
     set(GRAMMAR_TARGET "${TARGET_NAME}_grammar_codegen")
@@ -224,6 +241,7 @@ function(cmake_add_grammar TARGET_NAME)
   endif()
 endfunction()
 
+# DIRS is explicit; no source-tree layout is assumed.
 function(cmake_add_source VAR)
   set(options RECURSE)
   set(oneValueArgs)
@@ -236,7 +254,7 @@ function(cmake_add_source VAR)
   endif()
 
   if(NOT ARG_DIRS)
-    set(ARG_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    message(FATAL_ERROR "cmake_add_source: DIRS is required")
   endif()
 
   if(NOT ARG_PATTERNS)
@@ -259,11 +277,32 @@ function(cmake_add_source VAR)
   set(${VAR} ${collected} PARENT_SCOPE)
 endfunction()
 
+# TEST_NAME optionally separates the CTest name from the explicit target NAME.
+# TARGET registers another test for an existing executable; ARGS are test arguments.
 function(cmake_add_test)
   set(options)
-  set(oneValueArgs NAME FOLDER)
-  set(multiValueArgs SOURCES LIBS DEFS INCLUDES)
+  set(oneValueArgs NAME TARGET TEST_NAME FOLDER)
+  set(multiValueArgs SOURCES LIBS DEFS INCLUDES ARGS)
   cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  if(ARG_TARGET)
+    if(ARG_NAME OR ARG_SOURCES OR ARG_LIBS OR ARG_DEFS OR ARG_INCLUDES OR ARG_FOLDER)
+      message(FATAL_ERROR "cmake_add_test: TARGET only accepts TEST_NAME and ARGS")
+    endif()
+    if(NOT ARG_TEST_NAME OR NOT TARGET "${ARG_TARGET}")
+      message(FATAL_ERROR "cmake_add_test: TARGET requires an existing executable and TEST_NAME")
+    endif()
+    get_target_property(target_type "${ARG_TARGET}" TYPE)
+    if(NOT target_type STREQUAL "EXECUTABLE")
+      message(FATAL_ERROR "cmake_add_test: TARGET must be an executable")
+    endif()
+    add_test(NAME ${ARG_TEST_NAME} COMMAND ${ARG_TARGET} ${ARG_ARGS})
+    return()
+  endif()
+
+  if(ARG_TEST_NAME AND NOT ARG_NAME)
+    message(FATAL_ERROR "cmake_add_test: TEST_NAME requires NAME")
+  endif()
 
   if(ARG_NAME)
     if(TARGET ${ARG_NAME})
@@ -273,7 +312,10 @@ function(cmake_add_test)
     target_link_libraries(${ARG_NAME} PRIVATE ${ARG_LIBS})
     target_compile_definitions(${ARG_NAME} PRIVATE ${ARG_DEFS})
     target_include_directories(${ARG_NAME} PRIVATE ${ARG_INCLUDES})
-    add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
+    if(NOT ARG_TEST_NAME)
+      set(ARG_TEST_NAME "${ARG_NAME}")
+    endif()
+    add_test(NAME ${ARG_TEST_NAME} COMMAND ${ARG_NAME} ${ARG_ARGS})
     if(ARG_FOLDER)
       set_target_properties(${ARG_NAME} PROPERTIES FOLDER ${ARG_FOLDER})
     endif()
@@ -287,7 +329,7 @@ function(cmake_add_test)
       target_link_libraries(${name} PRIVATE ${ARG_LIBS})
       target_compile_definitions(${name} PRIVATE ${ARG_DEFS})
       target_include_directories(${name} PRIVATE ${ARG_INCLUDES})
-      add_test(NAME ${name} COMMAND ${name})
+      add_test(NAME ${name} COMMAND ${name} ${ARG_ARGS})
       
       if(ARG_FOLDER)
         set_target_properties(${name} PROPERTIES FOLDER ${ARG_FOLDER})

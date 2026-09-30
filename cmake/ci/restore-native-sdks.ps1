@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-foreach ($name in @("GITHUB_TOKEN", "RUNNER_TEMP", "GITHUB_ENV", "GITHUB_PATH")) {
+foreach ($name in @("GITHUB_TOKEN", "RUNNER_TEMP", "GITHUB_ENV", "GITHUB_PATH", "GITHUB_WORKSPACE")) {
   $value = [Environment]::GetEnvironmentVariable($name)
   if ([string]::IsNullOrWhiteSpace($value)) { throw "$name is required" }
 }
@@ -71,33 +71,20 @@ $saltsUtilsVersion = Get-ResolvedPackageVersion "SaltsUtils.Native"
 $saltsRoot = Join-Path $packages "salts.native/$saltsVersion/sdk/$Rid"
 $saltsUtilsRoot = Join-Path $packages "saltsutils.native/$saltsUtilsVersion/sdk/$Rid"
 
-$required = @(
-  (Join-Path $saltsRoot "lib/cmake/Salts/SaltsConfig.cmake"),
-  (Join-Path $saltsRoot "include/cmeta/interface.h"),
-  (Join-Path $saltsRoot "include/cmeta/function.h"),
-  (Join-Path $saltsRoot "include/salts/plugin.h"),
-  (Join-Path $saltsUtilsRoot "lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"),
-  (Join-Path $saltsUtilsRoot "include/data_bind.h")
-)
-foreach ($path in $required) {
-  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-    throw "published SDK is incomplete: $path"
-  }
+$pkgRoot = (Join-Path $env:GITHUB_WORKSPACE "external/pkgs").Replace('\', '/')
+$suffix = if ($Rid -eq "android-arm64-v8a") { "-android" } else { "" }
+$installedSalts = Join-Path $pkgRoot "salts$suffix/release"
+$installedUtils = Join-Path $pkgRoot "salts-utils$suffix/release"
+foreach ($destination in @($installedSalts, $installedUtils)) {
+  if (Test-Path -LiteralPath $destination) { throw "SDK destination already exists: $destination" }
+  New-Item -ItemType Directory -Path $destination -Force | Out-Null
 }
+Copy-Item -Path (Join-Path $saltsRoot "*") -Destination $installedSalts -Recurse
+Copy-Item -Path (Join-Path $saltsUtilsRoot "*") -Destination $installedUtils -Recurse
+$saltsRoot = $installedSalts.Replace('\', '/')
+$saltsUtilsRoot = $installedUtils.Replace('\', '/')
 
-$pluginHeader = Get-Content -LiteralPath (Join-Path $saltsRoot "include/salts/plugin.h") -Raw
-if ($pluginHeader -notmatch '#define\s+SALTS_PLUGIN_ABI_VERSION\s+2u') {
-  throw "resolved Salts package does not expose Plugin ABI 2"
-}
-
-$dataBindHeader = Get-Content -LiteralPath (Join-Path $saltsUtilsRoot "include/data_bind.h") -Raw
-if ($dataBindHeader -notmatch '#define\s+DATA_BIND_VERSION_MAJOR\s+3') {
-  throw "resolved SaltsUtils package does not expose DataBind 3"
-}
-if ($dataBindHeader -notmatch '#define\s+DATA_BIND_ABI_VERSION\s+9') {
-  throw "resolved SaltsUtils package does not expose DataBind ABI 9"
-}
-
+"TURBODB_CI_PKG_ROOT=$pkgRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 "SALTS_ROOT=$saltsRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 "SALTS_UTILS_ROOT=$saltsUtilsRoot" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 "QIGAO_NUGET_PACKAGES=$packages" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8

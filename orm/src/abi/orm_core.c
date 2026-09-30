@@ -940,6 +940,7 @@ static orm_status_t orm_open_rows(
     orm_transaction_t *transaction,
     const orm_flow_config_t *config,
     const struct DataBindMessagePlan *message_plan,
+    const orm_async_config_t *async_config,
     cflow_publisher *out_publisher,
     orm_error_t *error) {
   orm_row_cursor cursor = {0};
@@ -999,7 +1000,16 @@ static orm_status_t orm_open_rows(
   publisher_config.message_plan = message_plan;
   status = orm_row_publisher_prepare(&publisher_config, &prepared, error);
   if (status != ORM_STATUS_OK) goto release_query;
-  status = database != NULL
+  if (async_config != NULL &&
+      database->ops->open_async_cursor == NULL) {
+    status = ORM_STATUS_UNSUPPORTED;
+    orm_error_set(error, status, "driver has no async query support");
+    goto release_query;
+  }
+  status = async_config != NULL
+               ? database->ops->open_async_cursor(database->context, &query->plan,
+                     &query->connection->limits, async_config, &cursor, error)
+               : database != NULL
                ? database->ops->open_cursor(
                      database->context, &query->plan,
                      &query->connection->limits, &cursor, error)
@@ -1670,7 +1680,25 @@ orm_status_t ORM_C_CALL orm_query_open_flow(
     cflow_publisher *out_publisher, orm_error_t *error) {
   return orm_open_rows(query,
                        query != NULL ? &query->connection->backend : NULL,
-                       NULL, config, NULL, out_publisher, error);
+                       NULL, config, NULL, NULL, out_publisher, error);
+}
+
+orm_status_t ORM_C_CALL orm_query_open_async_flow(
+    orm_query_t *query, const orm_flow_config_t *config,
+    const orm_async_config_t *async_config,
+    cflow_publisher *out_publisher, orm_error_t *error) {
+  if (query == NULL || query->connection == NULL || async_config == NULL ||
+      async_config->struct_size != sizeof(*async_config) ||
+      !cflow_scheduler_valid(async_config->scheduler) ||
+      !cflow_scheduler_has(async_config->scheduler, CMETA_SCHED_CAP_DELAYED) ||
+      cflow_scheduler_has(async_config->scheduler, CMETA_SCHED_CAP_CONCURRENT) ||
+      async_config->poll_interval_ticks == 0u || async_config->timeout_ticks == 0u) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "invalid single-owner async scheduler or bounds");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  orm_backend *backend = &query->connection->backend;
+  return orm_open_rows(query, backend, NULL, config, NULL, async_config,
+                       out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
@@ -1686,7 +1714,7 @@ orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_rows(query, NULL, transaction, config, NULL,
+  return orm_open_rows(query, NULL, transaction, config, NULL, NULL,
                        out_publisher, error);
 }
 
@@ -1701,7 +1729,7 @@ orm_status_t ORM_C_CALL orm_query_open_validated_flow(
   }
   return orm_open_rows(
       query, query != NULL ? &query->connection->backend : NULL,
-      NULL, config, message_plan, out_publisher, error);
+      NULL, config, message_plan, NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
@@ -1724,7 +1752,7 @@ orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
     return ORM_STATUS_INVALID_STATE;
   }
   return orm_open_rows(
-      query, NULL, transaction, config, message_plan,
+      query, NULL, transaction, config, message_plan, NULL,
       out_publisher, error);
 }
 

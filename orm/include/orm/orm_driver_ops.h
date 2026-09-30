@@ -68,6 +68,9 @@ typedef void (ORM_DRIVER_CALL *orm_driver_destroy_fn)(void *);
 typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_open_cursor_fn)(
     void *, const orm_driver_plan_view_v1 *, const orm_driver_limits_v1 *,
     orm_driver_cursor_v1 *, orm_error_t *);
+typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_open_async_cursor_fn)(void *,
+    const orm_driver_plan_view_v1 *, const orm_driver_limits_v1 *,
+    const orm_async_config_t *, orm_driver_cursor_v1 *, orm_error_t *);
 typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_command_fn)(
     void *, const orm_driver_plan_view_v1 *, const orm_driver_limits_v1 *,
     uint64_t *, orm_error_t *);
@@ -95,13 +98,15 @@ typedef orm_status_t (ORM_DRIVER_CALL *orm_driver_create_fn)(
     void *, const orm_config_t *, const orm_driver_limits_v1 *,
     orm_driver_connection_v1 *, orm_error_t *);
 
-typedef struct orm_driver_connection_ops_v1 {
+typedef struct orm_driver_connection_ops_v2 {
   orm_driver_header_v1 header;
   orm_driver_destroy_fn destroy;
   orm_driver_open_cursor_fn open_cursor;
   orm_driver_command_fn execute_command;
   orm_driver_begin_fn begin_transaction;
-} orm_driver_connection_ops_v1;
+  /* ABI 2 requires this field's storage. NULL means no async support. */
+  orm_driver_open_async_cursor_fn open_async_cursor;
+} orm_driver_connection_ops_v2;
 typedef struct orm_driver_transaction_ops_v1 {
   orm_driver_header_v1 header;
   orm_driver_destroy_fn destroy;

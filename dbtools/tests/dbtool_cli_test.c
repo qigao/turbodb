@@ -129,6 +129,18 @@ spec("standalone database tool CLI") {
     check_contains(error.message, "duplicate option");
   }
 
+  it("rejects duplicate plugin options before opening a driver") {
+    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database",
+                         ":memory:", "--file", "x.sql", "--plugin", "a",
+                         "--plugin", "b"};
+    dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+    dbtool_error error = DBTOOL_ERROR_INIT;
+    check_equal(dbtool_cli_execute(11, argv, DBTOOL_DRIVER_SQLITE, NULL, &result, &error),
+                DBTOOL_STATUS_INVALID_ARGUMENT);
+    check_contains(error.message, "duplicate option: --plugin");
+    check_equal(fake_state.open_calls, 0);
+  }
+
   it("rejects an overflowing decimal limit") {
     const char *argv[] = {"turbodb-sqlite", "schema", "apply",
                           "--database",      ":memory:", "--file",
@@ -142,6 +154,109 @@ spec("standalone database tool CLI") {
                 DBTOOL_STATUS_INVALID_ARGUMENT);
     check_equal(fake_state.open_calls, 0);
     check_contains(error.message, "invalid decimal");
+  }
+
+  it("preserves literal option-like and response-file-like values and caller argv") {
+    const char *databases[] = {"@not-a-response-file", "--help", "a=b c"};
+    char *path = tt_make_temp_file("dbtool-literal", ".sql");
+    check_not_null(path);
+    check_equal(tt_write_file(path, "select 1;", 9u), 0);
+    for (size_t i = 0u; i < sizeof(databases) / sizeof(databases[0]); ++i) {
+      const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--file", path,
+                           "--database", databases[i]};
+      dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+      dbtool_error error = DBTOOL_ERROR_INIT;
+      fake_reset();
+      check_equal(dbtool_cli_execute(7, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+                                     &result, &error), DBTOOL_STATUS_OK);
+      check_equal(fake_state.config.database, databases[i]);
+      check_equal((const void *)fake_state.config.database, (const void *)databases[i]);
+      check_equal(argv[3], "--file");
+      check_equal(argv[5], "--database");
+    }
+    check_equal(tt_remove_file(path), 0);
+    free(path);
+  }
+
+  it("keeps positive size_t limits beyond the CmdParser Windows integer range") {
+    char *path = tt_make_temp_file("dbtool-size", ".sql");
+    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database", ":memory:",
+                         "--file", path, "--max-script-bytes", "4294967295"};
+    dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+    dbtool_error error = DBTOOL_ERROR_INIT;
+    check_not_null(path);
+    check_equal(tt_write_file(path, "select 1;", 9u), 0);
+    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+                                   &result, &error), DBTOOL_STATUS_OK);
+    check_equal(fake_state.apply_calls, 1);
+    check_equal(tt_remove_file(path), 0);
+    free(path);
+  }
+
+  it("returns missing-value and empty-value failures without terminating the caller") {
+    const char *missing[] = {"turbodb-sqlite", "schema", "apply", "--file"};
+    const char *empty[] = {"turbodb-sqlite", "schema", "apply", "--file", ""};
+    dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+    dbtool_error error = DBTOOL_ERROR_INIT;
+    check_equal(dbtool_cli_execute(4, missing, DBTOOL_DRIVER_SQLITE, &fake_ops,
+                                   &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
+    check_contains(error.message, "requires one value");
+    check_equal(dbtool_cli_execute(5, empty, DBTOOL_DRIVER_SQLITE, &fake_ops,
+                                   &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
+    check_contains(error.message, "cannot be empty");
+    check_equal(fake_state.open_calls, 0);
+  }
+
+  it("rejects non-positive non-decimal and overflowing SQLite timeouts") {
+    const char *values[] = {"0", "-1", "+1", "1.5", " 1", "2147483648"};
+    for (size_t i = 0u; i < sizeof(values) / sizeof(values[0]); ++i) {
+      const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--file", "missing.sql",
+                           "--database", ":memory:", "--busy-timeout-ms", values[i]};
+      dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+      dbtool_error error = DBTOOL_ERROR_INIT;
+      check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+                                     &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
+      check_contains(error.message, "invalid decimal");
+    }
+    check_equal(fake_state.open_calls, 0);
+  }
+
+  it("requires explicit MySQL connection environment before reading the script") {
+    const char *argv[] = {"turbodb-mysql", "schema", "apply", "--file", "missing.sql"};
+    dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+    dbtool_error error = DBTOOL_ERROR_INIT;
+    check_equal(dbtool_cli_execute(5, argv, DBTOOL_DRIVER_MYSQL, &fake_ops,
+                                   &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
+    check_contains(error.message, "--conninfo-env");
+    check_equal(fake_state.open_calls, 0);
+  }
+
+  it("forwards MySQL connection environment and script through the shared CLI") {
+    char *path = tt_make_temp_file("dbtool-mysql-cli", ".sql");
+    const char *argv[] = {"turbodb-mysql", "schema", "apply", "--file", path,
+                         "--conninfo-env", "PATH"};
+    dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+    dbtool_error error = DBTOOL_ERROR_INIT;
+    check_not_null(path);
+    check_not_null(getenv("PATH"));
+    check_equal(tt_write_file(path, "select 1;", 9u), 0);
+    check_equal(dbtool_cli_execute(7, argv, DBTOOL_DRIVER_MYSQL, &fake_ops,
+                                   &result, &error), DBTOOL_STATUS_OK);
+    check_equal(fake_state.config.conninfo, getenv("PATH"));
+    check_equal(fake_state.open_calls, 1);
+    check_equal(fake_state.close_calls, 1);
+    check_equal(tt_remove_file(path), 0);
+    free(path);
+  }
+
+  it("rejects SQLite-only options for MySQL") {
+    const char *argv[] = {"turbodb-mysql", "schema", "apply", "--file", "missing.sql",
+                         "--conninfo-env", "PATH", "--busy-timeout-ms", "5"};
+    dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+    dbtool_error error = DBTOOL_ERROR_INIT;
+    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_MYSQL, &fake_ops,
+                                   &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
+    check_equal(fake_state.open_calls, 0);
   }
 
   it("does not close a driver whose open failed") {

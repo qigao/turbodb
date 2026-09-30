@@ -1,0 +1,29 @@
+name: Native build dependencies
+description: Restore shared vcpkg binaries and reusable NuGet payloads while resolving SDK versions afresh.
+inputs:
+  platform:
+    description: Separate cache writers for cross-compilation matrix entries.
+    default: host
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "8.0.x"
+    - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      id: vcpkg
+      with:
+        mode: read
+    - uses: actions/cache@v4
+      with:
+        path: ${{ env.VCPKG_BINARY_CACHE }}
+        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ github.run_id }}-${{ github.job }}-${{ inputs.platform }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.cache_revision }}-
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/qigao-nuget
+        key: native-nuget-${{ runner.os }}-${{ github.run_id }}-${{ github.job }}-${{ inputs.platform }}
+        restore-keys: |
+          native-nuget-${{ runner.os }}-
+    - uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master

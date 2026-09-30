@@ -1,0 +1,32 @@
+find_program(redis_cli redis-cli REQUIRED)
+set(port "$ENV{ORM_REDIS_PORT}")
+if(port STREQUAL "")
+  set(port 6379)
+endif()
+if(ACTION STREQUAL "create")
+  if(EXISTS "${STAMP}")
+    message(FATAL_ERROR "Previous Redis index fixture still owns the index")
+  endif()
+  set(command FT.CREATE liveidx:people ON HASH PREFIX 1 "live:{people}:"
+    SCHEMA id NUMERIC score NUMERIC)
+elseif(ACTION STREQUAL "drop")
+  # CTest also invokes cleanup when setup failed; never drop a pre-existing index.
+  if(NOT EXISTS "${STAMP}")
+    return()
+  endif()
+  # Drop only this test's index; DD would also delete the stored hashes.
+  set(command FT.DROPINDEX liveidx:people)
+else()
+  message(FATAL_ERROR "Unknown fixture action: ${ACTION}")
+endif()
+execute_process(COMMAND "${redis_cli}" --raw -h 127.0.0.1 -p "${port}" ${command}
+  OUTPUT_VARIABLE reply ERROR_VARIABLE error RESULT_VARIABLE result
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT result STREQUAL "0" OR NOT reply STREQUAL "OK")
+  message(FATAL_ERROR "Redis index ${ACTION} failed: ${reply} ${error}")
+endif()
+if(ACTION STREQUAL "create")
+  file(WRITE "${STAMP}" "liveidx:people\n")
+else()
+  file(REMOVE "${STAMP}")
+endif()
