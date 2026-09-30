@@ -1,0 +1,15 @@
+{
+  "name": "lexilla",
+  "version": "5.4.6",
+  "description": "Lexilla language lexers for the Scintilla editing component",
+  "homepage": "https://www.scintilla.org/Lexilla.html",
+  "supports": "windows & !uwp & !mingw",
+  "dependencies": [
+    "scintilla",
+    {
+      "name": "vcpkg-msbuild",
+      "host": true,
+      "platform": "windows"
+    }
+  ]
+}
