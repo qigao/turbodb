@@ -112,19 +112,19 @@ std::wstring ResultWorkspaceView::CellText(const QueryCell& cell) {
 
 void ResultWorkspaceView::SetRunning(std::uint64_t request_id) {
   ShowGrid(false);
-  message_.SetWindowTextW(
+  message_.SetWindowText(
       L"Executing SQL on a background worker.\r\n"
       L"Materialized execution does not expose active cancellation; "
       L"TurboDB will not imply rollback or retry.");
   const std::wstring text = L"Running request " + std::to_wstring(request_id);
-  status_.SetWindowTextW(text.c_str());
+  status_.SetWindowText(text.c_str());
 }
 
 void ResultWorkspaceView::ShowError(std::string message) {
   ShowGrid(false);
   const std::wstring wide = Utf8(message);
-  message_.SetWindowTextW(wide.c_str());
-  status_.SetWindowTextW(L"Not executed");
+  message_.SetWindowText(wide.c_str());
+  status_.SetWindowText(L"Not executed");
 }
 
 void ResultWorkspaceView::Render(const QueryResultSnapshot& result) {
@@ -159,18 +159,18 @@ void ResultWorkspaceView::Render(const QueryResultSnapshot& result) {
     const std::wstring body =
         L"Command completed.\r\nAffected rows: " +
         std::to_wstring(result.affected_rows);
-    message_.SetWindowTextW(body.c_str());
+    message_.SetWindowText(body.c_str());
     status_text << L"Command complete | " << elapsed_ms << L" ms";
   } else {
     ShowGrid(false);
     std::wstring body = L"TurboDB status " + std::to_wstring(result.status);
     if (!result.message.empty()) body += L": " + Utf8(result.message);
-    message_.SetWindowTextW(body.c_str());
+    message_.SetWindowText(body.c_str());
     status_text << L"Failed | " << elapsed_ms << L" ms";
   }
 
   const std::wstring status = status_text.str();
-  status_.SetWindowTextW(status.c_str());
+  status_.SetWindowText(status.c_str());
 }
 
 }  // namespace turbodb::app
