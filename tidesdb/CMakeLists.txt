@@ -543,8 +543,10 @@ else()
     # FetchContent / add_subdirectory provides the lib only as a target, never as a system -l.
     _tidesdb_link_enabled_compression()
 
+    # Android provides pthread symbols in libc, without a separate libpthread.
+    find_package(Threads REQUIRED)
+    target_link_libraries(tidesdb PRIVATE Threads::Threads)
     target_link_libraries(tidesdb PUBLIC
-            pthread
             m           # math library
             atomic      # atomic operations library (required for 32-bit architectures like PowerPC)
     )

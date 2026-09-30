@@ -154,7 +154,7 @@ jobs:
           cmake --preset ci-linux-e2e
           cmake --build --preset ci-linux-e2e --target orm_mysql_driver_live_test orm_mysql_live_test dbtool_mysql_live_test --parallel 4
           export TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO
-          TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO="$(python3 -c 'import json,os; print(json.dumps({"host":os.environ["ORM_MYSQL_HOST"],"port":int(os.environ["ORM_MYSQL_PORT"]),"user":os.environ["ORM_MYSQL_USER"],"password":os.environ["ORM_MYSQL_PASSWORD"],"database":os.environ["ORM_MYSQL_DATABASE"],"ca_file":os.environ["ORM_MYSQL_CA_FILE"],"server_name":os.environ["ORM_MYSQL_SERVER_NAME"]}))')"
+          TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO="$(python3 -c 'import json,os; print(json.dumps({"host":os.environ["ORM_MYSQL_HOST"],"port":int(os.environ["ORM_MYSQL_PORT"]),"username":os.environ["ORM_MYSQL_USER"],"password":os.environ["ORM_MYSQL_PASSWORD"],"database":os.environ["ORM_MYSQL_DATABASE"],"ca_file":os.environ["ORM_MYSQL_CA_FILE"],"server_name":os.environ["ORM_MYSQL_SERVER_NAME"]}))')"
           ctest --preset ci-linux-e2e -R '^(orm_mysql_(driver_live|live)|dbtool_mysql_live_test)$' --output-on-failure \
             --output-junit "$GITHUB_WORKSPACE/evidence/mysql/tests.xml"
 
