@@ -25,12 +25,12 @@ class SqlEditor final : public CWindowImpl<SqlEditor, CWindow> {
   DECLARE_WND_SUPERCLASS(L"TurboDBStudioSqlEditor", L"Scintilla")
 
   BEGIN_MSG_MAP(SqlEditor)
-    MESSAGE_HANDLER(WM_CREATE, OnCreate)
     MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
   END_MSG_MAP()
 
   void Bind(ScintillaRuntime* runtime, SqlWorkspaceSession* session,
             const SqlLanguageService* language_service) noexcept;
+  bool Initialize();
 
   std::string Text() const;
   std::string SelectedText() const;
@@ -51,7 +51,6 @@ class SqlEditor final : public CWindowImpl<SqlEditor, CWindow> {
   void MarkDiagnosticLine(std::size_t zero_based_line);
 
  private:
-  LRESULT OnCreate(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnKeyDown(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
 
   void ConfigureBaseEditor();
