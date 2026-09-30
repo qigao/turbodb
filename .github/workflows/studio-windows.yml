@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   studio:
-    name: Studio (windows-x64)
+    name: Studio editor (windows-x64)
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -59,12 +59,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
 
-      - name: Configure and build Studio
+      - name: Configure and build Studio editor
         shell: cmd
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
           cmake --preset ci-windows-release -DTURBODB_BUILD_APP=ON -DTURBODB_BUILD_DBTOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_E2E_TESTS=OFF
           if errorlevel 1 exit /b 1
-          cmake --build --preset ci-windows-release --target turbodb-studio --parallel 4
+          cmake --build --preset ci-windows-release --target turbodb-studio turbodb-app-language-test --parallel 4
+          if errorlevel 1 exit /b 1
+          build\ci-windows-release\bin\turbodb-app-language-test.exe
           if errorlevel 1 exit /b 1

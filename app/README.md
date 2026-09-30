@@ -41,5 +41,27 @@ TurboDB Studio
     └── result host
 ~~~
 
-The editor, schema explorer, query execution, and execution-plan behavior are
-tracked separately by #167-#171.
+## SQL editor boundary
+
+The SQL workspace uses Scintilla as a UTF-8 editor and Lexilla for SQL lexing.
+Editor state is separated from database ownership:
+
+```text
+SqlEditor (WTL/Scintilla)
+    ↓
+SqlLanguageService
+    ↓
+SqlWorkspaceSession
+    ├── provider/capabilities
+    ├── catalog/schema
+    └── relation/column metadata
+```
+
+`SqlWorkspaceSession` stores only stable application identity and metadata.
+Database/native handles remain outside the editor and will be owned by the
+connection/query controller slices.
+
+The editor already exposes selected/full SQL, caret state, find/replace,
+undo/redo, Ctrl+Space completion, provider-aware lexer refresh, and diagnostic
+marker hooks. Schema discovery, query execution, result rendering, and
+execution plans remain tracked by #168-#171.
