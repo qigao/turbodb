@@ -166,10 +166,14 @@ LRESULT MainWindow::OnSqlExplainRequested(UINT, WPARAM wparam, LPARAM,
     return 0;
   }
 
-  const orm_explain_mode_t mode =
-      static_cast<orm_explain_mode_t>(wparam);
-  if (mode != ORM_EXPLAIN_PLAN && mode != ORM_EXPLAIN_ANALYZE) {
-    result_view_.ShowError("Invalid execution-plan mode.");
+  const auto action = static_cast<SqlExplainAction>(wparam);
+  orm_explain_mode_t mode = ORM_EXPLAIN_PLAN;
+  if (action == SqlExplainAction::plan) {
+    mode = ORM_EXPLAIN_PLAN;
+  } else if (action == SqlExplainAction::analyze) {
+    mode = ORM_EXPLAIN_ANALYZE;
+  } else {
+    result_view_.ShowError("Invalid execution-plan action.");
     return 0;
   }
 
