@@ -1,5 +1,7 @@
 #include <windows.h>
 
+#include <string_view>
+
 #include <atlbase.h>
 #include <atlapp.h>
 
@@ -10,7 +12,12 @@ CAppModule _Module;
 #include "editor/scintilla_runtime.h"
 #include "main_window.h"
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line,
+                    int show_command) {
+  const bool self_test =
+      command_line != nullptr &&
+      std::wstring_view(command_line).find(L"--self-test") !=
+          std::wstring_view::npos;
   const HRESULT com_result =
       ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   if (FAILED(com_result)) {
@@ -53,6 +60,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     _Module.Term();
     ::CoUninitialize();
     return 1;
+  }
+
+  if (self_test) {
+    main_window.DestroyWindow();
+    _Module.RemoveMessageLoop();
+    _Module.Term();
+    ::CoUninitialize();
+    return 0;
   }
 
   main_window.ShowWindow(show_command);
