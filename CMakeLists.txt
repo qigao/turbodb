@@ -95,6 +95,10 @@ if(TURBODB_BUILD_ORM)
   add_subdirectory(drivers)
 endif()
 
+if(TURBODB_BUILD_APP)
+  add_subdirectory(app)
+endif()
+
 if(TURBODB_BUILD_DBTOOLS)
   add_subdirectory(dbtools)
 endif()
