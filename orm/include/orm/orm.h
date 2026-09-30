@@ -11,6 +11,7 @@
 #endif
 
 #include <cmeta/data.h>
+#include <cmeta/object.h>
 #include <cflow/cflow.h>
 #include <tstr.h>
 
@@ -190,6 +191,38 @@ typedef struct orm_flow_config {
   size_t max_buffer_bytes;
 } orm_flow_config_t;
 
+typedef struct DataBindMessagePlan DataBindMessagePlan;
+typedef struct DataBindMessageObjectStateProvider DataBindMessageObjectStateProvider;
+
+typedef orm_status_t (*orm_object_row_create_fn)(
+    void *context, void *out_value, cmeta_object_ref *out_object,
+    orm_error_t *error);
+typedef void (*orm_object_row_destroy_fn)(
+    void *context, void *value);
+
+typedef struct orm_object_row_factory {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  const cmeta_type_desc *output_type;
+  void *context;
+  orm_object_row_create_fn create;
+  orm_object_row_destroy_fn destroy;
+} orm_object_row_factory_t;
+
+typedef struct orm_object_flow_config {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  const cmeta_data_desc *row_shape;
+  const DataBindMessagePlan *message_plan;
+  const DataBindMessageObjectStateProvider *state_provider;
+  orm_object_row_factory_t factory;
+  size_t scratch_bytes;
+  size_t max_depth;
+  size_t max_container_items;
+  size_t max_buffer_bytes;
+} orm_object_flow_config_t;
+
+
 /* Borrowed single-owner scheduler. Poll and timeout use its clock ticks.
  * A delayed, non-concurrent scheduler is required; no worker is created. */
 typedef struct orm_async_config {
@@ -214,6 +247,11 @@ ORM_C_API void ORM_C_CALL orm_error_init(orm_error_t *error);
 ORM_C_API void ORM_C_CALL orm_config(orm_config_t *config);
 ORM_C_API void ORM_C_CALL orm_flow_config(orm_flow_config_t *config,
                                          const cmeta_data_desc *row_shape);
+ORM_C_API void ORM_C_CALL orm_object_flow_config(
+    orm_object_flow_config_t *config,
+    const cmeta_data_desc *row_shape,
+    const DataBindMessagePlan *message_plan,
+    const orm_object_row_factory_t *factory);
 
 ORM_C_API orm_status_t ORM_C_CALL orm_connect(
     const orm_config_t *config, orm_connection_t **out_connection,
@@ -390,6 +428,26 @@ ORM_C_API orm_status_t ORM_C_CALL orm_result_get_boolean(
  */
 ORM_C_API orm_status_t ORM_C_CALL orm_query_open_flow(
     orm_query_t *query, const orm_flow_config_t *config,
+    cflow_publisher *out_publisher, orm_error_t *error);
+
+/*
+ * Provider-backed object row flow.
+ *
+ * message_plan must be an object MessagePlan compiled against row_shape.
+ * factory.create constructs one fresh caller-defined output carrier in
+ * out_value and returns a live cmeta_object_ref to its logical row object.
+ * TurboDB decodes the row with data_bind_message_plan_decode_object().
+ *
+ * On decode failure TurboDB calls factory.destroy() on the staging output.
+ * On success ownership of the output value transfers to the Publisher caller;
+ * TurboDB releases only the temporary cmeta_object_ref borrow. WAIT/DONE do
+ * not construct an output value.
+ *
+ * query/connection, row_shape, message_plan, state_provider, output_type and
+ * factory callbacks/context must outlive Publisher destruction.
+ */
+ORM_C_API orm_status_t ORM_C_CALL orm_query_open_object_flow(
+    orm_query_t *query, const orm_object_flow_config_t *config,
     cflow_publisher *out_publisher, orm_error_t *error);
 
 /* Opens a non-transactional row query with asynchronous progress: native

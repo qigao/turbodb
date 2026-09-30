@@ -8,6 +8,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ORM_TEST_DATA_PREFIX_SIZE \
@@ -253,7 +255,372 @@ static void orm_flow_test_sink_done(void *context) {
   ++state->done_count;
 }
 
+typedef struct orm_flow_dynamic_record {
+  int64_t id;
+  double score;
+} orm_flow_dynamic_record;
+
+typedef struct orm_flow_dynamic_carrier {
+  orm_flow_dynamic_record *record;
+  cmeta_object_field_provider field_provider;
+} orm_flow_dynamic_carrier;
+
+typedef struct orm_flow_dynamic_factory_state {
+  size_t create_count;
+  size_t destroy_count;
+} orm_flow_dynamic_factory_state;
+
+static const cmeta_type_identity orm_flow_dynamic_record_identity =
+    CMETA_TYPE_ID_ATOM_INIT("orm.test.DynamicRow");
+static const cmeta_type_desc orm_flow_dynamic_record_type = {
+    .name = "orm_flow_dynamic_record",
+    .size = sizeof(orm_flow_dynamic_record),
+    .align = _Alignof(orm_flow_dynamic_record),
+    .kind = CMETA_T_OBJECT,
+    .pointee = NULL,
+    .traits = NULL,
+    .identity = &orm_flow_dynamic_record_identity
+};
+static const cmeta_field_desc orm_flow_dynamic_layout_fields[] = {
+    {"id", "int64_t", CMETA_FIELD_DYNAMIC_OFFSET, sizeof(int64_t),
+     _Alignof(int64_t), &cmeta_type_int64, NULL},
+    {"score", "double", CMETA_FIELD_DYNAMIC_OFFSET, sizeof(double),
+     _Alignof(double), &cmeta_type_double, NULL}
+};
+static const cmeta_struct_desc orm_flow_dynamic_layout = {
+    "DynamicRow", sizeof(orm_flow_dynamic_record),
+    _Alignof(orm_flow_dynamic_record),
+    orm_flow_dynamic_layout_fields, 2u
+};
+static const cmeta_data_field_desc orm_flow_dynamic_fields[] = {
+    {"orm.test.DynamicRow.id", "id", CMETA_FIELD_DYNAMIC_OFFSET,
+     &cmeta_data_int64},
+    {"orm.test.DynamicRow.score", "score", CMETA_FIELD_DYNAMIC_OFFSET,
+     &cmeta_data_double}
+};
+static const cmeta_data_struct_shape orm_flow_dynamic_shape = {
+    &orm_flow_dynamic_layout, orm_flow_dynamic_fields, 2u
+};
+static const cmeta_data_desc orm_flow_dynamic_data = {
+    .struct_size = sizeof(cmeta_data_desc),
+    .abi_version = CMETA_DATA_DESC_ABI_VERSION,
+    .stable_id = "orm.test.DynamicRow.data",
+    .display_name = "DynamicRow",
+    .kind = CMETA_DATA_STRUCT,
+    .storage_type = &orm_flow_dynamic_record_type,
+    .shape = &orm_flow_dynamic_shape
+};
+
+static const cmeta_type_identity orm_flow_dynamic_carrier_identity =
+    CMETA_TYPE_ID_ATOM_INIT("orm.test.DynamicRowCarrier");
+static const cmeta_type_desc orm_flow_dynamic_carrier_type = {
+    .name = "orm_flow_dynamic_carrier",
+    .size = sizeof(orm_flow_dynamic_carrier),
+    .align = _Alignof(orm_flow_dynamic_carrier),
+    .kind = CMETA_T_OBJECT,
+    .pointee = NULL,
+    .traits = NULL,
+    .identity = &orm_flow_dynamic_carrier_identity
+};
+
+static cmeta_status orm_flow_dynamic_read(
+    void *context, const void *object, const cmeta_data_field_desc *field,
+    const void **out_value) {
+  const orm_flow_dynamic_record *record =
+      (const orm_flow_dynamic_record *)object;
+  (void)context;
+  if (!record || !field || !out_value) return CMETA_INVALID_ARGUMENT;
+  if (strcmp(field->name, "id") == 0)
+    *out_value = &record->id;
+  else if (strcmp(field->name, "score") == 0)
+    *out_value = &record->score;
+  else
+    return CMETA_TRAIT_MISSING;
+  return CMETA_OK;
+}
+
+static cmeta_status orm_flow_dynamic_assign(
+    void *context, void *object, const cmeta_data_field_desc *field,
+    const void *value) {
+  orm_flow_dynamic_record *record = (orm_flow_dynamic_record *)object;
+  (void)context;
+  if (!record || !field || !value) return CMETA_INVALID_ARGUMENT;
+  if (strcmp(field->name, "id") == 0)
+    record->id = *(const int64_t *)value;
+  else if (strcmp(field->name, "score") == 0)
+    record->score = *(const double *)value;
+  else
+    return CMETA_TRAIT_MISSING;
+  return CMETA_OK;
+}
+
+static orm_status_t orm_flow_dynamic_create(
+    void *context, void *out_value, cmeta_object_ref *out_object,
+    orm_error_t *error) {
+  orm_flow_dynamic_factory_state *state =
+      (orm_flow_dynamic_factory_state *)context;
+  orm_flow_dynamic_carrier *carrier =
+      (orm_flow_dynamic_carrier *)out_value;
+  cmeta_status status;
+
+  if (!state || !carrier || !out_object) return ORM_STATUS_INVALID_ARGUMENT;
+  memset(carrier, 0, sizeof(*carrier));
+  carrier->record =
+      (orm_flow_dynamic_record *)calloc(1u, sizeof(*carrier->record));
+  if (!carrier->record) {
+    if (error) {
+      orm_error_init(error);
+      error->status = ORM_STATUS_OUT_OF_MEMORY;
+      snprintf(error->message, sizeof(error->message),
+               "allocate dynamic row fixture");
+    }
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+
+  carrier->field_provider = (cmeta_object_field_provider){
+      .size = sizeof(cmeta_object_field_provider),
+      .data = &orm_flow_dynamic_data,
+      .context = NULL,
+      .assign = orm_flow_dynamic_assign,
+      .read = orm_flow_dynamic_read
+  };
+  status = cmeta_object_borrow_with_providers(
+      out_object, carrier->record, &orm_flow_dynamic_data,
+      &carrier->field_provider, NULL);
+  if (status != CMETA_OK) {
+    free(carrier->record);
+    carrier->record = NULL;
+    return ORM_STATUS_TYPE_ERROR;
+  }
+  ++state->create_count;
+  return ORM_STATUS_OK;
+}
+
+static void orm_flow_dynamic_destroy(void *context, void *value) {
+  orm_flow_dynamic_factory_state *state =
+      (orm_flow_dynamic_factory_state *)context;
+  orm_flow_dynamic_carrier *carrier =
+      (orm_flow_dynamic_carrier *)value;
+  if (!carrier) return;
+  free(carrier->record);
+  carrier->record = NULL;
+  memset(&carrier->field_provider, 0, sizeof(carrier->field_provider));
+  if (state) ++state->destroy_count;
+}
+
+static DataBindMessagePlan *orm_flow_dynamic_plan(
+    int validated, DataBind **out_codec) {
+  static const char plain_schema[] =
+      "message DynamicRow { int64 id; double score; }";
+  static const char validated_schema[] =
+      "message DynamicRow { @Min(10) int64 id; double score; }";
+  const char *schema = validated ? validated_schema : plain_schema;
+  const size_t schema_len =
+      validated ? sizeof(validated_schema) - 1u : sizeof(plain_schema) - 1u;
+  DataBind *codec = NULL;
+  DataBindMessagePlan *plan = NULL;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindMessagePlanDiagnostic diagnostic =
+      DATA_BIND_MESSAGE_PLAN_DIAGNOSTIC_INIT;
+
+  check_equal(
+      data_bind_create_from_text(schema, schema_len, &codec, &error),
+      DATA_BIND_OK);
+  if (!codec) return NULL;
+  check_equal(
+      data_bind_message_plan_compile_object(
+          codec, "DynamicRow", &orm_flow_dynamic_data, &plan, &diagnostic),
+      DATA_BIND_OK);
+  if (out_codec) *out_codec = codec;
+  else data_bind_free(codec);
+  return plan;
+}
+
 spec("ORM DataBind CFlow publisher") {
+  it("decodes one provider-backed object into a caller-defined carrier") {
+    static const unsigned char id_name[] = "id";
+    static const unsigned char score_name[] = "score";
+    const cserde_token tokens[] = {
+        {.kind = CSERDE_MAP_BEGIN},
+        {.kind = CSERDE_STRING,
+         .value.slice = {id_name, sizeof(id_name) - 1u, CSERDE_VIEW_STABLE}},
+        {.kind = CSERDE_SINT, .value.sint = 7},
+        {.kind = CSERDE_STRING,
+         .value.slice = {score_name, sizeof(score_name) - 1u,
+                         CSERDE_VIEW_STABLE}},
+        {.kind = CSERDE_FLOAT, .value.floating = 2.5},
+        {.kind = CSERDE_MAP_END}};
+    orm_flow_test_cursor_state cursor_state = {
+        .reader_state = {tokens, sizeof(tokens) / sizeof(tokens[0]), 0u},
+        .next_kind = ORM_ROW_CURSOR_ROW_AND_DONE};
+    orm_row_cursor cursor = {
+        .ops = &orm_flow_test_cursor_ops, .context = &cursor_state};
+    orm_flow_dynamic_factory_state factory_state = {0};
+    orm_object_row_factory_t factory = {
+        sizeof(orm_object_row_factory_t), ORM_C_ABI_VERSION,
+        &orm_flow_dynamic_carrier_type, &factory_state,
+        orm_flow_dynamic_create, orm_flow_dynamic_destroy};
+    DataBind *codec = NULL;
+    DataBindMessagePlan *plan = orm_flow_dynamic_plan(0, &codec);
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_dynamic_data, 2048u, 8u, 64u, 1024u);
+    cflow_publisher source = {0};
+    orm_flow_dynamic_carrier output = {0};
+    orm_error_t error;
+    cflow_step step;
+
+    check_not_null(plan);
+    if (!plan) {
+      data_bind_free(codec);
+      return;
+    }
+    config.message_plan = plan;
+    config.object_factory = &factory;
+
+    orm_error_init(&error);
+    check_equal(
+        orm_row_publisher_init(&source, &cursor, &config, &error),
+        ORM_STATUS_OK);
+    check_true(cmeta_type_equal(
+        cflow_publisher_output_type(&source),
+        &orm_flow_dynamic_carrier_type));
+
+    step = cflow_publisher_resume(&source, NULL, &output);
+    check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(factory_state.create_count, (size_t)1u);
+    check_equal(factory_state.destroy_count, (size_t)0u);
+    check_not_null(output.record);
+    if (output.record) {
+      check_equal(output.record->id, INT64_C(7));
+      check_true(output.record->score == 2.5);
+    }
+
+    orm_flow_dynamic_destroy(&factory_state, &output);
+    check_equal(factory_state.destroy_count, (size_t)1u);
+    cflow_publisher_destroy(&source);
+    check_equal(cursor_state.destroy_count, (size_t)1u);
+    data_bind_message_plan_free(plan);
+    data_bind_free(codec);
+  }
+
+  it("destroys object staging when DataBind validation rejects a row") {
+    static const unsigned char id_name[] = "id";
+    static const unsigned char score_name[] = "score";
+    const cserde_token tokens[] = {
+        {.kind = CSERDE_MAP_BEGIN},
+        {.kind = CSERDE_STRING,
+         .value.slice = {id_name, sizeof(id_name) - 1u, CSERDE_VIEW_STABLE}},
+        {.kind = CSERDE_SINT, .value.sint = 5},
+        {.kind = CSERDE_STRING,
+         .value.slice = {score_name, sizeof(score_name) - 1u,
+                         CSERDE_VIEW_STABLE}},
+        {.kind = CSERDE_FLOAT, .value.floating = 2.5},
+        {.kind = CSERDE_MAP_END}};
+    orm_flow_test_cursor_state cursor_state = {
+        .reader_state = {tokens, sizeof(tokens) / sizeof(tokens[0]), 0u},
+        .next_kind = ORM_ROW_CURSOR_ROW};
+    orm_row_cursor cursor = {
+        .ops = &orm_flow_test_cursor_ops, .context = &cursor_state};
+    orm_flow_dynamic_factory_state factory_state = {0};
+    orm_object_row_factory_t factory = {
+        sizeof(orm_object_row_factory_t), ORM_C_ABI_VERSION,
+        &orm_flow_dynamic_carrier_type, &factory_state,
+        orm_flow_dynamic_create, orm_flow_dynamic_destroy};
+    DataBind *codec = NULL;
+    DataBindMessagePlan *plan = orm_flow_dynamic_plan(1, &codec);
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_dynamic_data, 2048u, 8u, 64u, 1024u);
+    cflow_publisher source = {0};
+    orm_flow_dynamic_carrier output = {0};
+    orm_error_t error;
+    cflow_step step;
+
+    check_not_null(plan);
+    if (!plan) {
+      data_bind_free(codec);
+      return;
+    }
+    config.message_plan = plan;
+    config.object_factory = &factory;
+
+    orm_error_init(&error);
+    check_equal(
+        orm_row_publisher_init(&source, &cursor, &config, &error),
+        ORM_STATUS_OK);
+    step = cflow_publisher_resume(&source, NULL, &output);
+    check_equal(step.kind, CFLOW_STEP_ERROR);
+    check_not_null(step.error);
+    check_contains(step.error, "row validation failed");
+    check_contains(step.error, "id");
+    check_equal(factory_state.create_count, (size_t)1u);
+    check_equal(factory_state.destroy_count, (size_t)1u);
+    check_null(output.record);
+    check_equal(cursor_state.cancel_count, (size_t)1u);
+
+    cflow_publisher_destroy(&source);
+    data_bind_message_plan_free(plan);
+    data_bind_free(codec);
+  }
+
+  it("does not construct provider-backed outputs for WAIT or DONE") {
+    orm_flow_test_waitable_state wait_state = {0};
+    orm_flow_test_cursor_state wait_cursor_state = {
+        .next_kind = ORM_ROW_CURSOR_WAIT,
+        .waitable = orm_flow_test_waitable_as_cflow_waitable(&wait_state)};
+    orm_flow_test_cursor_state done_cursor_state = {
+        .next_kind = ORM_ROW_CURSOR_DONE};
+    orm_row_cursor wait_cursor = {
+        .ops = &orm_flow_test_cursor_ops, .context = &wait_cursor_state};
+    orm_row_cursor done_cursor = {
+        .ops = &orm_flow_test_cursor_ops, .context = &done_cursor_state};
+    orm_flow_dynamic_factory_state factory_state = {0};
+    orm_object_row_factory_t factory = {
+        sizeof(orm_object_row_factory_t), ORM_C_ABI_VERSION,
+        &orm_flow_dynamic_carrier_type, &factory_state,
+        orm_flow_dynamic_create, orm_flow_dynamic_destroy};
+    DataBind *codec = NULL;
+    DataBindMessagePlan *plan = orm_flow_dynamic_plan(0, &codec);
+    orm_row_publisher_config config = ORM_ROW_PUBLISHER_CONFIG_INIT(
+        &orm_flow_dynamic_data, 2048u, 8u, 64u, 1024u);
+    cflow_publisher wait_source = {0};
+    cflow_publisher done_source = {0};
+    orm_flow_dynamic_carrier output = {0};
+    orm_error_t error;
+    cflow_step step;
+
+    check_not_null(plan);
+    if (!plan) {
+      data_bind_free(codec);
+      return;
+    }
+    config.message_plan = plan;
+    config.object_factory = &factory;
+
+    orm_error_init(&error);
+    check_equal(
+        orm_row_publisher_init(
+            &wait_source, &wait_cursor, &config, &error),
+        ORM_STATUS_OK);
+    step = cflow_publisher_resume(&wait_source, NULL, &output);
+    check_equal(step.kind, CFLOW_STEP_WAIT);
+    check_equal(factory_state.create_count, (size_t)0u);
+    cflow_publisher_destroy(&wait_source);
+
+    orm_error_init(&error);
+    check_equal(
+        orm_row_publisher_init(
+            &done_source, &done_cursor, &config, &error),
+        ORM_STATUS_OK);
+    step = cflow_publisher_resume(&done_source, NULL, &output);
+    check_equal(step.kind, CFLOW_STEP_DONE);
+    check_equal(factory_state.create_count, (size_t)0u);
+    check_equal(factory_state.destroy_count, (size_t)0u);
+    cflow_publisher_destroy(&done_source);
+
+    data_bind_message_plan_free(plan);
+    data_bind_free(codec);
+  }
+
   it("executes one immutable DataBind ValidationPlan on row reads") {
     static const unsigned char id_name[] = "id";
     const cserde_token valid_tokens[] = {

@@ -113,13 +113,19 @@ typedef struct orm_row_publisher_config {
   size_t max_buffer_bytes;
   /* Optional borrowed immutable control-plane artifact. */
   const DataBindMessagePlan *message_plan;
+  /* Optional provider-backed object output mode. When non-NULL, message_plan
+   * must be an object plan compiled against row_shape. The factory is copied
+   * into Publisher state during prepare; its metadata/context remain borrowed
+   * through Publisher destruction. */
+  const orm_object_row_factory_t *object_factory;
+  const DataBindMessageObjectStateProvider *object_state_provider;
 } orm_row_publisher_config;
 
 #define ORM_ROW_PUBLISHER_CONFIG_INIT(row_shape_, scratch_bytes_, max_depth_, \
                                      max_container_items_, max_buffer_bytes_) \
   { sizeof(orm_row_publisher_config), ORM_ROW_PUBLISHER_CONFIG_ABI_VERSION,     \
     (row_shape_), (scratch_bytes_), (max_depth_), (max_container_items_),       \
-    (max_buffer_bytes_), NULL }
+    (max_buffer_bytes_), NULL, NULL, NULL }
 
 /*
  * On success, moves cursor into out_publisher and clears cursor. On failure,

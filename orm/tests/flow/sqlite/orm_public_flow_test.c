@@ -1,9 +1,12 @@
 #include <orm.h>
 
 #include <cmeta/struct.h>
+#include <data_bind.h>
+#include <data_bind_message_plan.h>
 #include "tinytest.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ORM_PUBLIC_FLOW_DATA_PREFIX_SIZE                                      \
@@ -101,7 +104,242 @@ static orm_connection_t *orm_public_flow_composite_fixture(
   return connection;
 }
 
+typedef struct orm_public_object_record {
+  int64_t id;
+  int64_t score;
+} orm_public_object_record;
+
+typedef struct orm_public_object_carrier {
+  orm_public_object_record *record;
+  cmeta_object_field_provider field_provider;
+} orm_public_object_carrier;
+
+typedef struct orm_public_object_factory_state {
+  size_t create_count;
+  size_t destroy_count;
+} orm_public_object_factory_state;
+
+static const cmeta_type_identity orm_public_object_record_identity =
+    CMETA_TYPE_ID_ATOM_INIT("orm.test.PublicObjectRow");
+static const cmeta_type_desc orm_public_object_record_type = {
+    .name = "orm_public_object_record",
+    .size = sizeof(orm_public_object_record),
+    .align = _Alignof(orm_public_object_record),
+    .kind = CMETA_T_OBJECT,
+    .pointee = NULL,
+    .traits = NULL,
+    .identity = &orm_public_object_record_identity
+};
+static const cmeta_field_desc orm_public_object_layout_fields[] = {
+    {"id", "int64_t", CMETA_FIELD_DYNAMIC_OFFSET, sizeof(int64_t),
+     _Alignof(int64_t), &cmeta_type_int64, NULL},
+    {"score", "int64_t", CMETA_FIELD_DYNAMIC_OFFSET, sizeof(int64_t),
+     _Alignof(int64_t), &cmeta_type_int64, NULL}
+};
+static const cmeta_struct_desc orm_public_object_layout = {
+    "PublicObjectRow", sizeof(orm_public_object_record),
+    _Alignof(orm_public_object_record),
+    orm_public_object_layout_fields, 2u
+};
+static const cmeta_data_field_desc orm_public_object_fields[] = {
+    {"orm.test.PublicObjectRow.id", "id", CMETA_FIELD_DYNAMIC_OFFSET,
+     &cmeta_data_int64},
+    {"orm.test.PublicObjectRow.score", "score", CMETA_FIELD_DYNAMIC_OFFSET,
+     &cmeta_data_int64}
+};
+static const cmeta_data_struct_shape orm_public_object_shape = {
+    &orm_public_object_layout, orm_public_object_fields, 2u
+};
+static const cmeta_data_desc orm_public_object_data = {
+    .struct_size = sizeof(cmeta_data_desc),
+    .abi_version = CMETA_DATA_DESC_ABI_VERSION,
+    .stable_id = "orm.test.PublicObjectRow.data",
+    .display_name = "PublicObjectRow",
+    .kind = CMETA_DATA_STRUCT,
+    .storage_type = &orm_public_object_record_type,
+    .shape = &orm_public_object_shape
+};
+
+static const cmeta_type_identity orm_public_object_carrier_identity =
+    CMETA_TYPE_ID_ATOM_INIT("orm.test.PublicObjectCarrier");
+static const cmeta_type_desc orm_public_object_carrier_type = {
+    .name = "orm_public_object_carrier",
+    .size = sizeof(orm_public_object_carrier),
+    .align = _Alignof(orm_public_object_carrier),
+    .kind = CMETA_T_OBJECT,
+    .pointee = NULL,
+    .traits = NULL,
+    .identity = &orm_public_object_carrier_identity
+};
+
+static cmeta_status orm_public_object_read(
+    void *context, const void *object, const cmeta_data_field_desc *field,
+    const void **out_value) {
+  const orm_public_object_record *record =
+      (const orm_public_object_record *)object;
+  (void)context;
+  if (!record || !field || !out_value) return CMETA_INVALID_ARGUMENT;
+  if (strcmp(field->name, "id") == 0) *out_value = &record->id;
+  else if (strcmp(field->name, "score") == 0) *out_value = &record->score;
+  else return CMETA_TRAIT_MISSING;
+  return CMETA_OK;
+}
+
+static cmeta_status orm_public_object_assign(
+    void *context, void *object, const cmeta_data_field_desc *field,
+    const void *value) {
+  orm_public_object_record *record = (orm_public_object_record *)object;
+  (void)context;
+  if (!record || !field || !value) return CMETA_INVALID_ARGUMENT;
+  if (strcmp(field->name, "id") == 0) record->id = *(const int64_t *)value;
+  else if (strcmp(field->name, "score") == 0)
+    record->score = *(const int64_t *)value;
+  else return CMETA_TRAIT_MISSING;
+  return CMETA_OK;
+}
+
+static orm_status_t orm_public_object_create(
+    void *context, void *out_value, cmeta_object_ref *out_object,
+    orm_error_t *error) {
+  orm_public_object_factory_state *state =
+      (orm_public_object_factory_state *)context;
+  orm_public_object_carrier *carrier =
+      (orm_public_object_carrier *)out_value;
+  cmeta_status cmeta_status_code;
+
+  if (!state || !carrier || !out_object) return ORM_STATUS_INVALID_ARGUMENT;
+  memset(carrier, 0, sizeof(*carrier));
+  carrier->record =
+      (orm_public_object_record *)calloc(1u, sizeof(*carrier->record));
+  if (!carrier->record) {
+    if (error) {
+      orm_error_init(error);
+      error->status = ORM_STATUS_OUT_OF_MEMORY;
+    }
+    return ORM_STATUS_OUT_OF_MEMORY;
+  }
+
+  carrier->field_provider = (cmeta_object_field_provider){
+      .size = sizeof(cmeta_object_field_provider),
+      .data = &orm_public_object_data,
+      .context = NULL,
+      .assign = orm_public_object_assign,
+      .read = orm_public_object_read
+  };
+  cmeta_status_code = cmeta_object_borrow_with_providers(
+      out_object, carrier->record, &orm_public_object_data,
+      &carrier->field_provider, NULL);
+  if (cmeta_status_code != CMETA_OK) {
+    free(carrier->record);
+    carrier->record = NULL;
+    return ORM_STATUS_TYPE_ERROR;
+  }
+  ++state->create_count;
+  return ORM_STATUS_OK;
+}
+
+static void orm_public_object_destroy(void *context, void *value) {
+  orm_public_object_factory_state *state =
+      (orm_public_object_factory_state *)context;
+  orm_public_object_carrier *carrier =
+      (orm_public_object_carrier *)value;
+  if (!carrier) return;
+  free(carrier->record);
+  carrier->record = NULL;
+  if (state) ++state->destroy_count;
+}
+
+static DataBindMessagePlan *orm_public_object_plan(DataBind **out_codec) {
+  static const char schema[] =
+      "message PublicObjectRow { int64 id; int64 score; }";
+  DataBind *codec = NULL;
+  DataBindMessagePlan *plan = NULL;
+  DataBindError error = DATA_BIND_ERROR_INIT;
+  DataBindMessagePlanDiagnostic diagnostic =
+      DATA_BIND_MESSAGE_PLAN_DIAGNOSTIC_INIT;
+
+  check_equal(
+      data_bind_create_from_text(
+          schema, sizeof(schema) - 1u, &codec, &error),
+      DATA_BIND_OK);
+  if (!codec) return NULL;
+  check_equal(
+      data_bind_message_plan_compile_object(
+          codec, "PublicObjectRow", &orm_public_object_data,
+          &plan, &diagnostic),
+      DATA_BIND_OK);
+  if (out_codec) *out_codec = codec;
+  else data_bind_free(codec);
+  return plan;
+}
+
 spec("ORM public reactive flow") {
+  it("opens a public provider-backed object Publisher") {
+    orm_error_t error;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    DataBind *codec = NULL;
+    DataBindMessagePlan *plan = NULL;
+    orm_public_object_factory_state factory_state = {0};
+    orm_object_row_factory_t factory = {
+        sizeof(orm_object_row_factory_t), ORM_C_ABI_VERSION,
+        &orm_public_object_carrier_type, &factory_state,
+        orm_public_object_create, orm_public_object_destroy};
+    orm_object_flow_config_t flow_config;
+    cflow_publisher source = {0};
+    orm_public_object_carrier row = {0};
+    cflow_step step;
+
+    orm_error_init(&error);
+    connection = orm_public_flow_open_sqlite(0u, 0u, &error);
+    check_equal(
+        orm_raw(
+            connection,
+            orm_view("select 7 as id, 19 as score"),
+            &query, &error),
+        ORM_STATUS_OK);
+
+    plan = orm_public_object_plan(&codec);
+    check_not_null(plan);
+    if (!plan) {
+      orm_query_destroy(query);
+      orm_disconnect(connection);
+      data_bind_free(codec);
+      return;
+    }
+
+    orm_object_flow_config(
+        &flow_config, &orm_public_object_data, plan, &factory);
+    check_equal(
+        orm_query_open_object_flow(
+            query, &flow_config, &source, &error),
+        ORM_STATUS_OK);
+    check_true(cmeta_type_equal(
+        cflow_publisher_output_type(&source),
+        &orm_public_object_carrier_type));
+
+    step = cflow_publisher_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_VALUE);
+    check_equal(factory_state.create_count, (size_t)1u);
+    check_not_null(row.record);
+    if (row.record) {
+      check_equal(row.record->id, INT64_C(7));
+      check_equal(row.record->score, INT64_C(19));
+    }
+    orm_public_object_destroy(&factory_state, &row);
+
+    step = cflow_publisher_resume(&source, NULL, &row);
+    check_equal(step.kind, CFLOW_STEP_DONE);
+    check_equal(factory_state.create_count, (size_t)1u);
+    check_equal(factory_state.destroy_count, (size_t)1u);
+
+    cflow_publisher_destroy(&source);
+    orm_query_destroy(query);
+    orm_disconnect(connection);
+    data_bind_message_plan_free(plan);
+    data_bind_free(codec);
+  }
+
   it("copies every composite key part before selecting one row") {
     orm_error_t error;
     orm_connection_t *connection;

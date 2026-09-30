@@ -16,9 +16,7 @@ CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 
 
 发布包将核心与五种驱动一起交付，客户端仍按需加载。当前仅支持 Driver ABI 2 / `TurboDb.Driver` 契约版本 4，旧 ABI 插件直接拒绝；升级时统一重编驱动 SDK 消费代码并成套替换核心与驱动。数据库格式不变。
 
-从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。Salts/SaltsUtils 始终使用最新稳定版本；更新后通过构建、插件 ABI 检查和安装包消费测试验证兼容性，失败时直接报错，不降级到旧依赖。
-
-完整的可构建示例见 [packaging/consumer](https://github.com/qigao/turbodb/tree/master/packaging/consumer)：它仅通过安装后的 TurboDB package 编译，加载五种驱动，并在 SQLite 内存数据库上执行 SQL。CI 在 Windows/Linux 运行该检查，Android 验证交叉编译和链接。
+从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。Salts/SaltsUtils 始终使用最新稳定版本。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
 
 包内容断言位于 `packaging/tests/native_package_test.py`，使用 Python 标准库 unittest，覆盖三个平台的核心、驱动、公开头文件、随包 TLS 文件及 NuGet 依赖。打包后在仓库根目录运行：
 
@@ -29,6 +27,6 @@ TURBODB_NUPKG="dist/TurboDB.Native.${version}.nupkg" \
 
 ORM 核心不得直接链接数据库客户端的约束由 `orm_core_dependencies` CTest 用例验证，随 Windows/Linux 的常规测试运行。
 
-普通 CI 和发布共用 `native-sdk.yml`：Windows/Linux 构建并运行 CTest、安装及消费测试，Android 交叉编译并链接消费示例。独立 E2E 仅覆盖 MySQL、PostgreSQL、Redis 真实服务行为，按相关路径触发。发布提交使用 `release: publish TurboDB package` 前缀，跳过重复的普通 SDK 构建；发布流程自身运行同一套测试。
+普通 CI 和发布共用 `native-sdk.yml`：各平台构建、测试并安装 SDK；不再运行额外的 installed-consumer 验证。独立 E2E 覆盖 MySQL、PostgreSQL、Redis 真实服务行为，按相关路径触发。发布提交使用 `release: publish TurboDB package` 前缀，跳过重复的普通 SDK 构建；发布流程自身运行同一套测试。
 
 依赖准备统一在 `.github/actions/setup-native`：读取共享 vcpkg NuGet 二进制缓存，并用 Actions cache 保留本仓库构建产生的本地二进制和 NuGet 包文件。缓存不含凭据配置或构建树，也不替代最新版本解析；vcpkg 仍按包 ABI 选择二进制。

@@ -940,6 +940,8 @@ static orm_status_t orm_open_rows(
     orm_transaction_t *transaction,
     const orm_flow_config_t *config,
     const struct DataBindMessagePlan *message_plan,
+    const orm_object_row_factory_t *object_factory,
+    const DataBindMessageObjectStateProvider *object_state_provider,
     const orm_async_config_t *async_config,
     cflow_publisher *out_publisher,
     orm_error_t *error) {
@@ -998,6 +1000,8 @@ static orm_status_t orm_open_rows(
       config->row_shape, config->scratch_bytes, config->max_depth,
       config->max_container_items, config->max_buffer_bytes);
   publisher_config.message_plan = message_plan;
+  publisher_config.object_factory = object_factory;
+  publisher_config.object_state_provider = object_state_provider;
   status = orm_row_publisher_prepare(&publisher_config, &prepared, error);
   if (status != ORM_STATUS_OK) goto release_query;
   if (async_config != NULL &&
@@ -1141,6 +1145,24 @@ void ORM_C_CALL orm_flow_config(orm_flow_config_t *config,
   config->struct_size = sizeof(*config);
   config->abi_version = ORM_C_ABI_VERSION;
   config->row_shape = row_shape;
+  config->scratch_bytes = ORM_C_DEFAULT_FLOW_SCRATCH_BYTES;
+  config->max_depth = ORM_C_DEFAULT_FLOW_MAX_DEPTH;
+  config->max_container_items = ORM_C_DEFAULT_FLOW_MAX_CONTAINER_ITEMS;
+  config->max_buffer_bytes = ORM_C_DEFAULT_FLOW_MAX_BUFFER_BYTES;
+}
+
+void ORM_C_CALL orm_object_flow_config(
+    orm_object_flow_config_t *config,
+    const cmeta_data_desc *row_shape,
+    const DataBindMessagePlan *message_plan,
+    const orm_object_row_factory_t *factory) {
+  if (config == NULL) return;
+  memset(config, 0, sizeof(*config));
+  config->struct_size = sizeof(*config);
+  config->abi_version = ORM_C_ABI_VERSION;
+  config->row_shape = row_shape;
+  config->message_plan = message_plan;
+  if (factory != NULL) config->factory = *factory;
   config->scratch_bytes = ORM_C_DEFAULT_FLOW_SCRATCH_BYTES;
   config->max_depth = ORM_C_DEFAULT_FLOW_MAX_DEPTH;
   config->max_container_items = ORM_C_DEFAULT_FLOW_MAX_CONTAINER_ITEMS;
@@ -1680,7 +1702,44 @@ orm_status_t ORM_C_CALL orm_query_open_flow(
     cflow_publisher *out_publisher, orm_error_t *error) {
   return orm_open_rows(query,
                        query != NULL ? &query->connection->backend : NULL,
-                       NULL, config, NULL, NULL, out_publisher, error);
+                       NULL, config, NULL, NULL, NULL, NULL,
+                       out_publisher, error);
+}
+
+orm_status_t ORM_C_CALL orm_query_open_object_flow(
+    orm_query_t *query, const orm_object_flow_config_t *config,
+    cflow_publisher *out_publisher, orm_error_t *error) {
+  orm_flow_config_t flow;
+
+  if (config == NULL ||
+      config->struct_size != sizeof(*config) ||
+      config->abi_version != ORM_C_ABI_VERSION ||
+      config->row_shape == NULL ||
+      config->message_plan == NULL ||
+      config->factory.struct_size < sizeof(config->factory) ||
+      config->factory.abi_version != ORM_C_ABI_VERSION ||
+      config->factory.output_type == NULL ||
+      config->factory.create == NULL ||
+      config->factory.destroy == NULL) {
+    orm_error_set(
+        error, ORM_STATUS_INVALID_ARGUMENT,
+        "invalid ORM object row Publisher open");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+
+  memset(&flow, 0, sizeof(flow));
+  flow.struct_size = sizeof(flow);
+  flow.abi_version = ORM_C_ABI_VERSION;
+  flow.row_shape = config->row_shape;
+  flow.scratch_bytes = config->scratch_bytes;
+  flow.max_depth = config->max_depth;
+  flow.max_container_items = config->max_container_items;
+  flow.max_buffer_bytes = config->max_buffer_bytes;
+
+  return orm_open_rows(
+      query, query != NULL ? &query->connection->backend : NULL,
+      NULL, &flow, config->message_plan, &config->factory,
+      config->state_provider, NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_async_flow(
@@ -1697,8 +1756,8 @@ orm_status_t ORM_C_CALL orm_query_open_async_flow(
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   orm_backend *backend = &query->connection->backend;
-  return orm_open_rows(query, backend, NULL, config, NULL, async_config,
-                       out_publisher, error);
+  return orm_open_rows(query, backend, NULL, config, NULL, NULL, NULL,
+                       async_config, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
@@ -1714,8 +1773,8 @@ orm_status_t ORM_C_CALL orm_query_open_flow_in_transaction(
                   "query and transaction do not share an active connection");
     return ORM_STATUS_INVALID_STATE;
   }
-  return orm_open_rows(query, NULL, transaction, config, NULL, NULL,
-                       out_publisher, error);
+  return orm_open_rows(query, NULL, transaction, config, NULL, NULL, NULL,
+                       NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_validated_flow(
@@ -1729,7 +1788,7 @@ orm_status_t ORM_C_CALL orm_query_open_validated_flow(
   }
   return orm_open_rows(
       query, query != NULL ? &query->connection->backend : NULL,
-      NULL, config, message_plan, NULL, out_publisher, error);
+      NULL, config, message_plan, NULL, NULL, NULL, out_publisher, error);
 }
 
 orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
@@ -1752,7 +1811,7 @@ orm_status_t ORM_C_CALL orm_query_open_validated_flow_in_transaction(
     return ORM_STATUS_INVALID_STATE;
   }
   return orm_open_rows(
-      query, NULL, transaction, config, message_plan, NULL,
+      query, NULL, transaction, config, message_plan, NULL, NULL, NULL,
       out_publisher, error);
 }
 
