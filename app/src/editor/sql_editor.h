@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include <orm.h>
+
 #include <atlbase.h>
 #include <atlapp.h>
 #include <atlwin.h>
