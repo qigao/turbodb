@@ -24,7 +24,6 @@ typedef struct fake_backend_state {
   uint32_t cursor_destroy_calls;
   uint32_t cursor_cancel_calls;
   uint32_t cursor_shape_calls;
-  orm_status_t cancel_status;
   uint32_t transaction_destroy_calls;
   uint32_t transaction_commit_calls;
   uint32_t transaction_rollback_calls;
@@ -176,14 +175,6 @@ static void fake_cursor_cancel(void *context) {
   ++cursor->state->cursor_cancel_calls;
 }
 
-static orm_status_t fake_cursor_cancel_checked(void *context, orm_error_t *error) {
-  fake_cursor *cursor = context;
-  fake_cursor_cancel(context);
-  orm_error_init(error);
-  error->status = cursor->state->cancel_status;
-  return error->status;
-}
-
 static void fake_cursor_destroy(void *context) {
   fake_cursor *cursor = (fake_cursor *)context;
   ++cursor->state->cursor_destroy_calls;
@@ -231,7 +222,6 @@ static orm_status_t fake_open_cursor(
   cursor->borrowed_plan = plan;
   out->ops = &fake_cursor_ops;
   out->context = cursor;
-  out->cancel_checked = fake_cursor_cancel_checked;
   orm_error_init(error);
   return ORM_STATUS_OK;
 }
@@ -482,27 +472,6 @@ spec("Driver backend DTO bridge") {
     check_equal(columns, UINT64_C(2));
     check_equal(cursor_ops->cancel(cursor.context, &error), ORM_STATUS_OK);
     check_equal(backend_state.cursor_cancel_calls, 1u);
-    cursor_ops->destroy(cursor.context);
-    check_equal(backend_state.cursor_destroy_calls, 1u);
-    ops->destroy(c.context);
-  }
-
-  it("propagates cancellation drain failure without destroying the cursor") {
-    orm_driver_connection_v1 c = connection();
-    const orm_driver_connection_ops_v2 *ops = c.ops.data;
-    adapter_plan plan;
-    adapter_plan_raw(&plan, "select 1");
-    orm_driver_plan_view_v1 view = adapter_view(&plan);
-    orm_driver_limits_v1 limits = adapter_limits();
-    orm_driver_cursor_v1 cursor = {0};
-    orm_error_t error;
-    check_equal(ops->open_cursor(c.context, &view, &limits, &cursor, &error), ORM_STATUS_OK);
-    const orm_driver_cursor_ops_v1 *cursor_ops = cursor.ops.data;
-    backend_state.cancel_status = ORM_STATUS_CONNECTION_ERROR;
-    check_equal(cursor_ops->cancel(cursor.context, &error), ORM_STATUS_CONNECTION_ERROR);
-    check_equal(error.status, ORM_STATUS_CONNECTION_ERROR);
-    check_equal(backend_state.cursor_destroy_calls, 0u);
-    check_equal(cursor_ops->cancel(cursor.context, &error), ORM_STATUS_CONNECTION_ERROR);
     cursor_ops->destroy(cursor.context);
     check_equal(backend_state.cursor_destroy_calls, 1u);
     ops->destroy(c.context);

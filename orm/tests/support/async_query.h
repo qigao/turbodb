@@ -16,10 +16,13 @@ static const cmeta_data_field_desc async_test_fields[] = {
 static const cmeta_data_struct_shape async_test_shape = {
     StructMeta(async_test_row), async_test_fields, 1u};
 static const cmeta_data_desc async_test_data = {
-    .struct_size = offsetof(cmeta_data_desc, shape) + sizeof(((cmeta_data_desc *)0)->shape),
+    .struct_size = offsetof(cmeta_data_desc, shape) +
+                   sizeof(((cmeta_data_desc *)0)->shape),
     .abi_version = CMETA_DATA_DESC_ABI_VERSION,
-    .stable_id = "orm.test.async", .display_name = "AsyncRow",
-    .kind = CMETA_DATA_STRUCT, .storage_type = &async_test_type,
+    .stable_id = "orm.test.async",
+    .display_name = "AsyncRow",
+    .kind = CMETA_DATA_STRUCT,
+    .storage_type = &async_test_type,
     .shape = &async_test_shape};
 typedef struct async_test_observer { int count; int sum; int done; int failed; } async_test_observer;
 static bool async_test_next(void *user, const cmeta_type_desc *type, const void *row) {

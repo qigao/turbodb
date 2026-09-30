@@ -707,7 +707,7 @@ cleanup:
 static const orm_backend_ops orm_mongo_backend_ops = {
     sizeof(orm_backend_ops), ORM_BACKEND_OPS_ABI_VERSION,
     orm_mongo_backend_destroy, orm_mongo_backend_open,
-    orm_mongo_backend_execute, orm_mongo_backend_begin};
+    orm_mongo_backend_execute, orm_mongo_backend_begin, NULL};
 
 orm_status_t orm_mongo_backend_create(const orm_config_t *config,
                                       const orm_limits *limits,

@@ -1223,7 +1223,7 @@ static void orm_tidesdb_backend_destroy(void *context) {
 static const orm_backend_ops orm_tidesdb_backend_ops = {
     sizeof(orm_backend_ops), ORM_BACKEND_OPS_ABI_VERSION,
     orm_tidesdb_backend_destroy, orm_tidesdb_backend_open,
-    orm_tidesdb_backend_execute, orm_tidesdb_backend_begin};
+    orm_tidesdb_backend_execute, orm_tidesdb_backend_begin, NULL};
 
 orm_status_t orm_tidesdb_backend_create(const orm_config_t *config,
                                         const orm_limits *limits,

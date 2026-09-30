@@ -33,10 +33,15 @@ static const cmeta_data_field_desc orm_cpp_flow_row_fields[] = {
 static const cmeta_data_struct_shape orm_cpp_flow_row_shape = {
     StructMeta(orm_cpp_flow_row), orm_cpp_flow_row_fields, 2u};
 static const cmeta_data_desc orm_cpp_flow_row_data = {
-    ORM_CPP_FLOW_DATA_PREFIX_SIZE, CMETA_DATA_DESC_ABI_VERSION,
-    "orm.test.CppFlowRow.data", "CppFlowRow", CMETA_DATA_STRUCT,
-    &orm_cpp_flow_row_type, &orm_cpp_flow_row_shape,
-    nullptr, nullptr, nullptr};
+    ORM_CPP_FLOW_DATA_PREFIX_SIZE,
+    CMETA_DATA_DESC_ABI_VERSION,
+    "orm.test.CppFlowRow.data",
+    "CppFlowRow",
+    CMETA_DATA_STRUCT,
+    &orm_cpp_flow_row_type,
+    &orm_cpp_flow_row_shape,
+    nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr};
 
 static const cmeta_type_desc row_pointer_type = {
     "orm_cpp_flow_row *", sizeof(orm_cpp_flow_row *), alignof(orm_cpp_flow_row *),
