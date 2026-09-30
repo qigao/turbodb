@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "explorer/schema_explorer_model.h"
 #include "language/sql_language_service.h"
 #include "workspace/sql_workspace_session.h"
 
@@ -77,6 +78,56 @@ int main() {
   if (session.connection().has_value() ||
       session.execution_state() != WorkspaceExecutionState::idle) {
     return Fail("clearing a connection must reset execution state");
+  }
+
+  SchemaExplorerModel explorer;
+  std::string explorer_error;
+  const WorkspaceConnectionIdentity identity{
+      101u, SqlProvider::postgresql, 0x11u, "local-postgresql"};
+  const std::vector<SchemaMetadataRecord> records = {
+      {ORM_METADATA_CATALOG, "", "", "", "appdb", 0u},
+      {ORM_METADATA_SCHEMA, "appdb", "", "", "public", 0u},
+      {ORM_METADATA_TABLE, "appdb", "public", "", "users", 0u},
+      {ORM_METADATA_COLUMN, "appdb", "public", "users", "id", 0u},
+      {ORM_METADATA_COLUMN, "appdb", "public", "users", "name", 1u},
+      {ORM_METADATA_VIEW, "appdb", "public", "", "user_summary", 0u},
+      {ORM_METADATA_COLUMN, "appdb", "public", "user_summary", "name", 0u},
+  };
+  if (!explorer.Replace(identity, records, &explorer_error)) {
+    return Fail("schema explorer model rejected valid metadata");
+  }
+  if (explorer.nodes().size() != 7u || explorer.relations().size() != 2u) {
+    return Fail("schema explorer model shape mismatch");
+  }
+
+  session.SetConnection(identity);
+  session.ReplaceRelations(explorer.relations());
+  std::size_t users_node = static_cast<std::size_t>(-1);
+  for (std::size_t i = 0; i < explorer.nodes().size(); ++i) {
+    const auto& node = explorer.nodes()[i];
+    if (node.kind == ExplorerNodeKind::table && node.relation == "users") {
+      users_node = i;
+      break;
+    }
+  }
+  if (users_node == static_cast<std::size_t>(-1) ||
+      !explorer.ApplySelection(users_node, session)) {
+    return Fail("schema explorer could not select users table");
+  }
+  if (session.catalog() != "appdb" || session.schema() != "public" ||
+      session.relation() != "users") {
+    return Fail("schema explorer selection did not update workspace context");
+  }
+
+  const auto explorer_completion = language.Complete(session, "users.");
+  if (!Contains(explorer_completion, "users.id") ||
+      !Contains(explorer_completion, "users.name")) {
+    return Fail("explorer metadata did not feed SQL completion");
+  }
+
+  session.SetCatalog("otherdb");
+  if (!session.schema().empty() || !session.relation().empty()) {
+    return Fail("catalog selection must clear deeper workspace context");
   }
 
   return 0;
