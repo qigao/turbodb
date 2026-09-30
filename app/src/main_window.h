@@ -12,6 +12,7 @@ extern CAppModule _Module;
 #include <atlctrls.h>
 #include <atlsplit.h>
 
+#include "connection/connection_manager.h"
 #include "editor/scintilla_runtime.h"
 #include "editor/sql_editor.h"
 #include "explorer/schema_explorer_model.h"
@@ -27,9 +28,8 @@ class MainWindow final : public CWindowImpl<MainWindow> {
       : editor_runtime_(editor_runtime),
         explorer_controller_(explorer_model_, workspace_session_) {}
 
-  bool AttachConnection(orm_connection_t* connection,
-                        WorkspaceConnectionIdentity identity,
-                        std::string* error);
+  bool OpenConnection(const ConnectionProfile& profile, std::string* error);
+  bool CloseActiveConnection(std::string* error);
 
   DECLARE_WND_CLASS_EX(L"TurboDBStudioMainWindow", CS_DBLCLKS,
                        COLOR_WINDOW)
@@ -51,6 +51,7 @@ class MainWindow final : public CWindowImpl<MainWindow> {
                     BOOL &handled);
 
   ScintillaRuntime& editor_runtime_;
+  ConnectionManager connections_;
   SqlWorkspaceSession workspace_session_;
   SqlLanguageService language_service_;
   SchemaExplorerModel explorer_model_;
