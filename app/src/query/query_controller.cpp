@@ -14,7 +14,10 @@ std::shared_ptr<QueryResultSnapshot> ErrorSnapshot(
   result->request_id = request_id;
   result->kind = QueryOutcomeKind::error;
   result->status = status;
-  result->message = message != nullptr ? message : orm_status_message(status);
+  result->message =
+      message != nullptr && message[0] != '\0'
+          ? message
+          : orm_status_message(status);
   result->elapsed_microseconds = elapsed_microseconds;
   result->cancel_supported = false;
   return result;
@@ -57,6 +60,12 @@ bool QueryController::Execute(std::uint64_t connection_id, std::string sql,
     if (busy_) {
       orm_connection_release(connection);
       if (error != nullptr) *error = "a SQL request is already running";
+      return false;
+    }
+    if (completed_ != nullptr) {
+      orm_connection_release(connection);
+      if (error != nullptr)
+        *error = "the previous SQL result is pending UI consumption";
       return false;
     }
   }
