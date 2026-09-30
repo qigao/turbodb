@@ -412,9 +412,8 @@ static int explain_text_indent(orm_string_view_t line) {
   return indent;
 }
 
-static int explain_is_text_node(orm_string_view_t line) {
-  if (line.data == NULL || line.len == 0u) return 0;
-  const char *text = (const char *)line.data;
+static int explain_is_text_node(const char *text) {
+  if (text == NULL || text[0] == '\0') return 0;
   if (strstr(text, "Planning Time:") != NULL ||
       strstr(text, "Execution Time:") != NULL ||
       strstr(text, "Planning:") != NULL ||
@@ -423,6 +422,52 @@ static int explain_is_text_node(orm_string_view_t line) {
   return strstr(text, "cost=") != NULL ||
          strstr(text, "actual time=") != NULL ||
          strstr(text, "->") != NULL;
+}
+
+static orm_status_t explain_process_text_line(
+    orm_execution_plan_t *plan, orm_string_view_t line,
+    int *indent_stack, uint64_t *index_stack, size_t *depth,
+    size_t stack_capacity, orm_error_t *error) {
+  orm_status_t status = explain_append_raw(plan, line, error);
+  if (status != ORM_STATUS_OK) return status;
+
+  if (line.len > SIZE_MAX - 1u)
+    return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
+                        "execution-plan line exceeds platform range");
+  char *owned = (char *)malloc(line.len + 1u);
+  if (owned == NULL)
+    return explain_fail(error, ORM_STATUS_OUT_OF_MEMORY,
+                        "copy execution-plan parser line");
+  if (line.len != 0u) memcpy(owned, line.data, line.len);
+  owned[line.len] = '\0';
+
+  if (!explain_is_text_node(owned)) {
+    free(owned);
+    return ORM_STATUS_OK;
+  }
+
+  const int indent = explain_text_indent(line);
+  while (*depth != 0u && indent <= indent_stack[*depth - 1u]) --(*depth);
+
+  orm_execution_plan_owned_node node;
+  memset(&node, 0, sizeof(node));
+  node.parent_index =
+      *depth == 0u ? ORM_EXECUTION_PLAN_ROOT_INDEX
+                   : index_stack[*depth - 1u];
+  node.ordinal = plan->count;
+  node.detail = (orm_string_view_t){owned, line.len};
+  explain_parse_text_fields(owned, &node);
+  status = explain_add_node(plan, &node, error);
+  free(owned);
+  if (status != ORM_STATUS_OK) return status;
+
+  if (*depth >= stack_capacity)
+    return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
+                        "execution-plan nesting exceeds parser limit");
+  indent_stack[*depth] = indent;
+  index_stack[*depth] = plan->count - 1u;
+  ++(*depth);
+  return ORM_STATUS_OK;
 }
 
 static orm_status_t explain_load_text_rows(
@@ -440,45 +485,28 @@ static orm_status_t explain_load_text_rows(
   uint64_t index_stack[128];
   size_t depth = 0u;
   for (uint64_t row = 0u; row < rows; ++row) {
-    orm_string_view_t line = {NULL, 0u};
-    status = explain_text_cell(result, row, 0u, &line, error);
+    orm_string_view_t value = {NULL, 0u};
+    status = explain_text_cell(result, row, 0u, &value, error);
     if (status != ORM_STATUS_OK) return status;
-    status = explain_append_raw(plan, line, error);
-    if (status != ORM_STATUS_OK) return status;
-    if (!explain_is_text_node(line)) continue;
+    if (value.data == NULL && value.len != 0u)
+      return explain_fail(error, ORM_STATUS_TYPE_ERROR,
+                          "text execution plan returned an invalid string");
 
-    if (line.len > SIZE_MAX - 1u)
-      return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
-                          "execution-plan line exceeds platform range");
-    char *owned = (char *)malloc(line.len + 1u);
-    if (owned == NULL)
-      return explain_fail(error, ORM_STATUS_OUT_OF_MEMORY,
-                          "copy execution-plan parser line");
-    memcpy(owned, line.data, line.len);
-    owned[line.len] = '\0';
-
-    const int indent = explain_text_indent(line);
-    while (depth != 0u && indent <= indent_stack[depth - 1u]) --depth;
-
-    orm_execution_plan_owned_node node;
-    memset(&node, 0, sizeof(node));
-    node.parent_index =
-        depth == 0u ? ORM_EXECUTION_PLAN_ROOT_INDEX
-                    : index_stack[depth - 1u];
-    node.ordinal = plan->count;
-    node.detail = (orm_string_view_t){owned, line.len};
-    explain_parse_text_fields(owned, &node);
-    status = explain_add_node(plan, &node, error);
-    free(owned);
-    if (status != ORM_STATUS_OK) return status;
-
-    if (depth < sizeof(indent_stack) / sizeof(indent_stack[0])) {
-      indent_stack[depth] = indent;
-      index_stack[depth] = plan->count - 1u;
-      ++depth;
-    } else {
-      return explain_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
-                          "execution-plan nesting exceeds parser limit");
+    const char *data = value.data != NULL ? (const char *)value.data : "";
+    size_t start = 0u;
+    while (start <= value.len) {
+      size_t end = start;
+      while (end < value.len && data[end] != '\n' && data[end] != '\r')
+        ++end;
+      const orm_string_view_t line = {data + start, end - start};
+      status = explain_process_text_line(
+          plan, line, indent_stack, index_stack, &depth,
+          sizeof(indent_stack) / sizeof(indent_stack[0]), error);
+      if (status != ORM_STATUS_OK) return status;
+      if (end == value.len) break;
+      while (end < value.len && (data[end] == '\n' || data[end] == '\r'))
+        ++end;
+      start = end;
     }
   }
   return ORM_STATUS_OK;
