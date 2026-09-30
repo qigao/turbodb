@@ -3,8 +3,7 @@
 #include <string>
 #include <vector>
 
-#include <orm_runtime.h>
-
+#include "connection/connection_manager.h"
 #include "explorer/schema_explorer_model.h"
 #include "language/sql_language_service.h"
 #include "workspace/sql_workspace_session.h"
@@ -34,40 +33,30 @@ bool ExecuteSql(orm_connection_t* connection, const char* sql,
 }
 
 bool SqliteMetadataSmoke() {
+  using namespace turbodb::app;
+
+  ConnectionManager manager;
+  ConnectionProfile profile;
+  profile.driver_id = "sqlite";
+  profile.module_path = TURBODB_APP_SQLITE_PLUGIN_PATH;
+  profile.display_name = "metadata-smoke";
+  profile.options.push_back({"filename", ":memory:"});
+
+  WorkspaceConnectionIdentity identity;
+  std::string manager_error;
+  if (!manager.Open(profile, &identity, &manager_error))
+    return false;
+
+  orm_connection_t* connection = manager.Get(identity.id);
+  if (connection == nullptr)
+    return false;
+
   orm_error_t error;
   orm_error_init(&error);
-
-  orm_runtime_config_t runtime_config;
-  orm_runtime_config_init(&runtime_config);
-  orm_runtime_t* runtime = nullptr;
-  if (orm_runtime_create(&runtime_config, &runtime, &error) != ORM_STATUS_OK)
-    return false;
-
-  orm_driver_load_config_t load{};
-  load.struct_size = static_cast<uint32_t>(sizeof(load));
-  load.abi_version = ORM_RUNTIME_ABI_VERSION;
-  load.module_path = orm_view(TURBODB_APP_SQLITE_PLUGIN_PATH);
-  load.expected_driver_id = orm_view("sqlite");
-  if (orm_runtime_load_driver(runtime, &load, &error) != ORM_STATUS_OK) {
-    orm_runtime_release(runtime);
-    return false;
-  }
-
-  orm_config_t config;
-  orm_config(&config);
-  orm_option_t filename{orm_view("filename"), orm_view(":memory:")};
-  config.driver = orm_view("sqlite");
-  config.options = &filename;
-  config.option_count = 1u;
-
-  orm_connection_t* connection = nullptr;
-  bool ok = orm_runtime_connect(runtime, &config, &connection, &error) ==
-            ORM_STATUS_OK;
-  if (ok)
-    ok = ExecuteSql(
-        connection,
-        "create table users(id integer primary key, name text not null)",
-        &error);
+  bool ok = ExecuteSql(
+      connection,
+      "create table users(id integer primary key, name text not null)",
+      &error);
   if (ok)
     ok = ExecuteSql(connection,
                     "create view user_names as select name from users",
@@ -125,9 +114,8 @@ bool SqliteMetadataSmoke() {
   }
 
   orm_metadata_snapshot_destroy(snapshot);
-  orm_disconnect(connection);
-  if (orm_runtime_close(runtime, &error) != ORM_STATUS_OK) ok = false;
-  orm_runtime_release(runtime);
+  if (!manager.Close(identity.id, &manager_error))
+    ok = false;
 
   return ok && saw_main && saw_table && saw_view && saw_id && saw_name;
 }
