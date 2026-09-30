@@ -36,13 +36,13 @@ void SqlEditor::Bind(ScintillaRuntime* runtime, SqlWorkspaceSession* session,
   language_service_ = language_service;
 }
 
-LRESULT SqlEditor::OnCreate(UINT, WPARAM, LPARAM, BOOL&) {
-  if (runtime_ == nullptr || session_ == nullptr ||
+bool SqlEditor::Initialize() {
+  if (!IsWindow() || runtime_ == nullptr || session_ == nullptr ||
       language_service_ == nullptr) {
-    return -1;
+    return false;
   }
   ConfigureBaseEditor();
-  return RefreshLanguage() ? 0 : -1;
+  return RefreshLanguage();
 }
 
 LRESULT SqlEditor::OnKeyDown(UINT, WPARAM wparam, LPARAM, BOOL& handled) {
