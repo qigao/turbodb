@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "connection/connection_manager.h"
+#include "plan/explain_controller.h"
 #include "query/query_controller.h"
 
 namespace {
@@ -16,6 +17,16 @@ int Fail(const char* message) {
 
 std::shared_ptr<const turbodb::app::QueryResultSnapshot> WaitFor(
     turbodb::app::QueryController& controller, std::uint64_t request_id) {
+  for (int attempt = 0; attempt < 5000; ++attempt) {
+    if (!controller.busy())
+      return controller.TakeCompleted(request_id);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return {};
+}
+
+std::shared_ptr<const turbodb::app::ExecutionPlanSnapshot> WaitForPlan(
+    turbodb::app::ExplainController& controller, std::uint64_t request_id) {
   for (int attempt = 0; attempt < 5000; ++attempt) {
     if (!controller.busy())
       return controller.TakeCompleted(request_id);
@@ -55,6 +66,7 @@ int main() {
     return Fail("open SQLite connection");
 
   QueryController controller(connections);
+  ExplainController explainer(connections);
   std::shared_ptr<const QueryResultSnapshot> result;
 
   if (!Execute(controller, identity.id,
@@ -126,6 +138,30 @@ int main() {
           ORM_STATUS_UNSUPPORTED ||
       plan != nullptr)
     return Fail("SQLite ANALYZE must be explicitly unsupported");
+
+  std::uint64_t explain_request = 0u;
+  if (!explainer.Execute(
+          identity.id, "select id, name from users order by id",
+          ORM_EXPLAIN_PLAN, nullptr, &explain_request, &error))
+    return Fail("background PLAN request did not start");
+  auto plan_snapshot = WaitForPlan(explainer, explain_request);
+  if (!plan_snapshot || plan_snapshot->status != ORM_STATUS_OK ||
+      plan_snapshot->mode != ORM_EXPLAIN_PLAN ||
+      plan_snapshot->provider != "sqlite" ||
+      plan_snapshot->nodes.empty() || plan_snapshot->raw_detail.empty())
+    return Fail("background PLAN snapshot mismatch");
+
+  explain_request = 0u;
+  if (!explainer.Execute(
+          identity.id, "select id from users", ORM_EXPLAIN_ANALYZE,
+          nullptr, &explain_request, &error))
+    return Fail("background ANALYZE request did not start");
+  plan_snapshot = WaitForPlan(explainer, explain_request);
+  if (!plan_snapshot ||
+      plan_snapshot->status != ORM_STATUS_UNSUPPORTED ||
+      plan_snapshot->mode != ORM_EXPLAIN_ANALYZE ||
+      plan_snapshot->message.empty())
+    return Fail("background ANALYZE unsupported state mismatch");
 
   if (!Execute(controller, identity.id, "select from", &result))
     return Fail("invalid SQL request did not complete");
