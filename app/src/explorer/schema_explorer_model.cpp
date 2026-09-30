@@ -28,11 +28,15 @@ std::string RelationKey(const std::string& catalog,
 
 }  // namespace
 
+void SchemaExplorerModel::Clear() noexcept {
+  nodes_.clear();
+  relations_.clear();
+}
+
 bool SchemaExplorerModel::Replace(
     const WorkspaceConnectionIdentity& connection,
     const std::vector<SchemaMetadataRecord>& records, std::string* error) {
-  nodes_.clear();
-  relations_.clear();
+  Clear();
 
   nodes_.push_back({ExplorerNodeKind::connection,
                     static_cast<std::size_t>(-1),
