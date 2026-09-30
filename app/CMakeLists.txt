@@ -10,8 +10,7 @@ endif()
 # package contract. Keep the adaptation local to the app so no GUI dependency
 # leaks into TurboDB libraries or dbtools.
 find_path(TURBODB_APP_WTL_INCLUDE_DIR
-          NAMES atlapp.h
-          PATH_SUFFIXES wtl)
+          NAMES atlapp.h)
 find_path(TURBODB_APP_SCINTILLA_INCLUDE_DIR
           NAMES Scintilla.h
           PATH_SUFFIXES scintilla)
