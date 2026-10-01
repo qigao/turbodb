@@ -193,5 +193,14 @@ int main(void) {
   invalid.max_batch_operations = 1u;
   REQUIRE(!orm_driver_storage_capabilities_valid(&invalid));
 
+  invalid = fixture_storage;
+  invalid.capabilities = ORM_DRIVER_STORAGE_CAP_STAGED_RESTORE;
+  REQUIRE(orm_driver_storage_capabilities_valid(&invalid));
+  invalid.max_restore_chunk_bytes = 1u;
+  REQUIRE(orm_driver_storage_capabilities_valid(&invalid));
+  invalid = fixture_storage;
+  invalid.max_restore_chunk_bytes = 1u;
+  REQUIRE(!orm_driver_storage_capabilities_valid(&invalid));
+
   return 0;
 }
