@@ -1020,6 +1020,9 @@ int redis_stream_group_receipt_release(
   if (receipt == NULL || receipt->owner == NULL)
     return SALTS_EINVAL;
   owner = receipt->owner;
+  if (owner->operation == REDIS_STREAM_GROUP_OPERATION_ACK &&
+      owner->ack_receipt == receipt)
+    return SALTS_EBUSY;
   if (owner->active_receipts == 0u) return SALTS_EPROTO;
   --owner->active_receipts;
   receipt->owner = NULL;
