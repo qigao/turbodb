@@ -76,3 +76,13 @@ cmake_add_test(
   LIBS tedis Salts::TinyTest
   INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/..
   FOLDER "redis/tests")
+
+cmake_add_test(
+  NAME test_redis_stream_group
+  SOURCES test_redis_stream_group.c
+  LIBS tedis Salts::TinyTest
+  INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/..
+  FOLDER "redis/tests")
+if(WIN32)
+  target_link_libraries(test_redis_stream_group PRIVATE ws2_32)
+endif()
