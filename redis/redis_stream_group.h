@@ -64,6 +64,20 @@ redis_stream_group_source_sentinel(redis_sentinel *sentinel) {
  * max_* fields are hard admission ceilings for per-operation budgets. V1 uses
  * Redis 7-compatible XREADGROUP COUNT, XAUTOCLAIM COUNT and XACK only.
  */
+typedef enum redis_stream_group_retention_policy {
+  /*
+   * Operational policy must keep every pending entry in the Stream until it
+   * is acknowledged. A later DATA_LOSS receipt is therefore a retention
+   * contract violation that the caller must surface.
+   */
+  REDIS_STREAM_GROUP_RETENTION_PRESERVE_PENDING = 1,
+  /*
+   * The deployment may trim/delete entries that are still pending. V1 never
+   * hides this: XAUTOCLAIM deleted IDs are returned as DATA_LOSS receipts.
+   */
+  REDIS_STREAM_GROUP_RETENTION_ALLOW_PENDING_LOSS = 2
+} redis_stream_group_retention_policy;
+
 typedef struct redis_stream_group_config {
   redis_stream_group_source source;
   const char *stream_key;
@@ -74,6 +88,7 @@ typedef struct redis_stream_group_config {
   size_t consumer_length;
   uint64_t min_idle_ms;
   uint32_t max_delivery_attempts;
+  redis_stream_group_retention_policy retention_policy;
   size_t max_records_per_fetch;
   size_t max_claim_batch;
   size_t max_reply_bytes;
@@ -84,7 +99,8 @@ typedef struct redis_stream_group_config {
 #define REDIS_STREAM_GROUP_CONFIG_INIT                                      \
   {                                                                         \
     { REDIS_STREAM_GROUP_SOURCE_CONNECTION, NULL }, NULL, 0u, NULL, 0u,    \
-        NULL, 0u, UINT64_C(60000), 16u, 64u, 32u,                          \
+        NULL, 0u, UINT64_C(60000), 16u,                                   \
+        REDIS_STREAM_GROUP_RETENTION_PRESERVE_PENDING, 64u, 32u,           \
         1024u * 1024u, 512u * 1024u, 32u                                  \
   }
 
