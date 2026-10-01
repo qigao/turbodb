@@ -264,6 +264,8 @@ spec("Redis Stream consumer-group typed receipts") {
      * contract, invalidates that transport. Repair it explicitly before
      * continuing; the logical Stream owner remains reusable. */
     check_equal(redis_stream_group_fetch_begin(&owner, &one), SALTS_OK);
+    step = redis_stream_group_next(&owner);
+    check_equal(step.kind, REDIS_STREAM_GROUP_WAIT);
     check_equal(redis_stream_group_cancel(&owner), SALTS_OK);
     check_equal(redis_cflow_connection_destroy(&first), SALTS_OK);
     redis_stream_group_test_connect(&runtime, &first, port);
