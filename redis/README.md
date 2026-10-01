@@ -135,3 +135,43 @@ all command streams, close the facade, then destroy it. `close()` returns
 Link `TurboDB::Redis`. Its public first-party dependencies are
 `Salts::Core` and `Salts::CFlow`; `find_package(TurboNet)` is not
 required.
+
+
+## Stream consumer-group receipts
+
+`redis_stream_group.h` owns the Redis Stream consumer side of the ordered
+outbox contract. It is intentionally typed: downstream code receives an owned
+receipt with a stable Stream ID and copied field/value views, never a
+`redis_reply_t`.
+
+V1 is compatible with the Redis 7.x baseline used by CI:
+
+- new delivery uses `XREADGROUP GROUP ... COUNT ... STREAMS <key> >`;
+- stale recovery uses bounded `XAUTOCLAIM ... COUNT ...`;
+- claimed delivery count is qualified with exact-ID `XPENDING`;
+- settlement uses `XACK <key> <group> <exact-id>`;
+- deleted/trimmed pending IDs reported by Redis 7+ `XAUTOCLAIM` become
+  `REDIS_STREAM_GROUP_RECEIPT_DATA_LOSS`.
+
+One owner consumes exactly one Stream key. This is also the Cluster contract:
+every command is routed by that same key, so V1 has no second Redis key that
+could form a cross-slot command. Multi-stream reads are deliberately outside
+this API rather than normalized with fallback behavior.
+
+The caller must declare a retention policy before the first command.
+`PRESERVE_PENDING` means operations must not trim/delete unacknowledged
+entries; a DATA_LOSS receipt is then an operational contract violation.
+`ALLOW_PENDING_LOSS` makes that loss an accepted deployment possibility, but
+it is still surfaced explicitly and is never treated as acknowledged.
+
+The owner can bind a direct connection, pool, Cluster, or Sentinel facade.
+Reconnect/failover is explicit: finish or cancel the in-flight command, repair
+or rediscover the transport, then call `redis_stream_group_rebind()`.
+Outstanding receipt identity and copied payload remain owned by the group and
+therefore survive that transport change. Retrying/releasing a receipt leaves
+it pending; only explicit ACK settles it.
+
+Per-operation record, RESP-reply, and copied-payload budgets are hard bounds.
+Zero budget performs no Redis command. A record whose copied fields exceed the
+payload/field budget is returned as an identity-only `PAYLOAD_LIMIT` receipt
+so the already-created pending entry is never hidden from the caller.
