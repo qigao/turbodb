@@ -66,6 +66,7 @@ struct redis_stream_group_impl {
   size_t consumer_length;
   uint64_t min_idle_ms;
   uint32_t max_delivery_attempts;
+  redis_stream_group_retention_policy retention_policy;
   size_t max_records_per_fetch;
   size_t max_claim_batch;
   size_t max_reply_bytes;
@@ -659,6 +660,10 @@ int redis_stream_group_init(
       config->consumer == NULL || config->consumer_length == 0u ||
       config->consumer_length > REDIS_STREAM_GROUP_TEXT_MAX_BYTES ||
       config->min_idle_ms == 0u || config->max_delivery_attempts == 0u ||
+      (config->retention_policy !=
+           REDIS_STREAM_GROUP_RETENTION_PRESERVE_PENDING &&
+       config->retention_policy !=
+           REDIS_STREAM_GROUP_RETENTION_ALLOW_PENDING_LOSS) ||
       config->max_records_per_fetch == 0u || config->max_claim_batch == 0u ||
       config->max_reply_bytes == 0u || config->max_payload_bytes == 0u ||
       config->max_fields_per_record == 0u)
@@ -687,6 +692,7 @@ int redis_stream_group_init(
   impl->consumer_length = config->consumer_length;
   impl->min_idle_ms = config->min_idle_ms;
   impl->max_delivery_attempts = config->max_delivery_attempts;
+  impl->retention_policy = config->retention_policy;
   impl->max_records_per_fetch = config->max_records_per_fetch;
   impl->max_claim_batch = config->max_claim_batch;
   impl->max_reply_bytes = config->max_reply_bytes;
