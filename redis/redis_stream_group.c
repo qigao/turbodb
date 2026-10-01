@@ -97,11 +97,6 @@ static redis_stream_group_impl *redis_stream_group_get(
   return owner != NULL ? (redis_stream_group_impl *)owner->impl : NULL;
 }
 
-static const redis_stream_group_impl *redis_stream_group_get_const(
-    const redis_stream_group *owner) {
-  return owner != NULL ? (const redis_stream_group_impl *)owner->impl : NULL;
-}
-
 static int redis_stream_group_source_valid(redis_stream_group_source source) {
   if (source.handle == NULL) return 0;
   switch (source.kind) {
