@@ -109,7 +109,7 @@ jobs:
           if errorlevel 1 exit /b 1
           cmake --build --preset ${{ matrix.preset }} --parallel 4 --target orm_driver_interface_test orm_tidesdb_public_flow_test orm_tidesdb_generation_maintenance_test
           if errorlevel 1 exit /b 1
-          ctest --preset ${{ matrix.preset }} -R "^(orm_driver_interface_test|orm_tidesdb_public_flow|orm_tidesdb_generation_maintenance)$" --output-on-failure
+          ctest --preset ${{ matrix.preset }} -R "^(orm_driver_interface|orm_tidesdb_public_flow|orm_tidesdb_generation_maintenance)$" --output-on-failure
           if errorlevel 1 exit /b 1
 
       - name: Keep Linux qualification evidence
