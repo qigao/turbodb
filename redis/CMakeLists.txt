@@ -3,7 +3,7 @@
 # Public headers are selected explicitly; private headers must not be installed.
 set(REDIS_HEADERS redis_export.h redis_reply.h redis_io.h redis_cflow.h redis_lua_apply.h
                   redis_lua_apply_batch.h redis_lua_apply_batch_compact.h redis_pool.h
-                  redis_cluster.h redis_sentinel.h)
+                  redis_cluster.h redis_sentinel.h redis_stream_group.h)
 file(GLOB REDIS_SOURCES CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
      "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 
