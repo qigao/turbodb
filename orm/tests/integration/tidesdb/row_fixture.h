@@ -14,7 +14,7 @@ Struct(orm_tides_public_row, (long, id), (long, score));
 static const cmeta_type_identity orm_tides_public_row_identity =
     CMETA_TYPE_ID_ATOM_INIT("orm.test.TidesPublicRow");
 static const cmeta_type_traits orm_tides_public_row_traits = {
-    CMETA_TRAIT_TRIVIAL_COPY | CMETA_TRAIT_TRIVIAL_DESTROY};
+    .flags = CMETA_TRAIT_TRIVIAL_COPY | CMETA_TRAIT_TRIVIAL_DESTROY};
 static const cmeta_type_desc orm_tides_public_row_type = {
     "orm_tides_public_row", sizeof(orm_tides_public_row),
     _Alignof(orm_tides_public_row), CMETA_T_OBJECT, NULL,
