@@ -285,7 +285,11 @@ spec("Redis Stream consumer-group typed receipts") {
     check_equal(redis_stream_group_receipt_find(
                     receipt, "payload", 7u, &value, &value_length), SALTS_OK);
     check_equal(value, "one", 3u);
-    redis_stream_group_test_ack(&owner, &runtime, receipt);
+    check_equal(redis_stream_group_ack_begin(&owner, receipt), SALTS_OK);
+    check_equal(redis_stream_group_receipt_release(receipt), SALTS_EBUSY);
+    step = redis_stream_group_test_drive(&owner, &runtime);
+    check_equal(step.kind, REDIS_STREAM_GROUP_DONE);
+    check_true(redis_stream_group_receipt_acknowledged(receipt));
 
     check_equal(redis_stream_group_ack_begin(&owner, receipt), SALTS_OK);
     step = redis_stream_group_next(&owner);
