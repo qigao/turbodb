@@ -1,0 +1,121 @@
+name: TidesDB staged generation contract
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "drivers/tidesdb/**"
+      - "orm/include/orm/orm_tidesdb.h"
+      - "orm/include/orm/orm_driver_storage.h"
+      - "orm/tests/driver/orm_driver_interface_test.c"
+      - "orm/tests/integration/tidesdb/**"
+      - "orm/CMakeLists.txt"
+      - ".github/actions/setup-native/**"
+      - ".github/workflows/tidesdb-generation-maintenance.yml"
+  push:
+    branches: [master]
+    paths:
+      - "drivers/tidesdb/**"
+      - "orm/include/orm/orm_tidesdb.h"
+      - "orm/include/orm/orm_driver_storage.h"
+      - "orm/tests/driver/orm_driver_interface_test.c"
+      - "orm/tests/integration/tidesdb/**"
+      - "orm/CMakeLists.txt"
+      - ".github/actions/setup-native/**"
+      - ".github/workflows/tidesdb-generation-maintenance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: tidesdb-generation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    name: TidesDB generation (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, rid: linux-x64, preset: ci-linux-release}
+          - {os: windows-2022, rid: windows-x64, preset: ci-windows-release}
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-native
+        with:
+          platform: ${{ matrix.rid }}
+
+      - name: Restore published native SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}'
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build lemon
+
+      - name: Locate MSVC and install Ninja
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
+          "VSINSTALL=$vs" >> $env:GITHUB_ENV
+          choco install ninja -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Ninja install failed' }
+
+      - name: Qualify TidesDB generation contract on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset '${{ matrix.preset }}' -DTURBODB_BUILD_DBTOOLS=OFF
+          cmake --build --preset '${{ matrix.preset }}' --parallel 4 \
+            --target orm_driver_interface_test \
+                     orm_tidesdb_public_flow_test \
+                     orm_tidesdb_generation_maintenance_test
+
+          mkdir -p evidence/tidesdb-generation
+          ctest --preset '${{ matrix.preset }}' \
+            -R '^(orm_driver_interface_test|orm_tidesdb_public_flow|orm_tidesdb_generation_maintenance)$' \
+            --output-on-failure --output-junit evidence/tidesdb-generation/tests.xml \
+            2>&1 | tee evidence/tidesdb-generation/ctest.log
+
+      - name: Qualify TidesDB generation contract on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          cmake --preset ${{ matrix.preset }} -DTURBODB_BUILD_DBTOOLS=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build --preset ${{ matrix.preset }} --parallel 4 --target orm_driver_interface_test orm_tidesdb_public_flow_test orm_tidesdb_generation_maintenance_test
+          if errorlevel 1 exit /b 1
+          ctest --preset ${{ matrix.preset }} -R "^(orm_driver_interface_test|orm_tidesdb_public_flow|orm_tidesdb_generation_maintenance)$" --output-on-failure
+          if errorlevel 1 exit /b 1
+
+      - name: Keep Linux qualification evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidesdb-generation-${{ matrix.rid }}-${{ github.sha }}
+          path: evidence/tidesdb-generation/
+          if-no-files-found: warn
