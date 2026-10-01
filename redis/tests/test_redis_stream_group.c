@@ -259,6 +259,11 @@ spec("Redis Stream consumer-group typed receipts") {
         &first, stream, group_name, consumer);
     check_equal(redis_stream_group_init(&owner, &config), SALTS_OK);
 
+    /* Open a real XREADGROUP and cancel it before delivery. The owner must
+     * remain reusable and cancellation must not synthesize an ACK. */
+    check_equal(redis_stream_group_fetch_begin(&owner, &one), SALTS_OK);
+    check_equal(redis_stream_group_cancel(&owner), SALTS_OK);
+
     redis_stream_group_test_xadd(&first, &runtime, stream, "1", "one");
     check_equal(redis_stream_group_fetch_begin(&owner, &one), SALTS_OK);
     receipt = redis_stream_group_test_one_value(&owner, &runtime);
@@ -342,6 +347,27 @@ spec("Redis Stream consumer-group typed receipts") {
         receipt, stable_id, sizeof(stable_id));
 
     redis_stream_group_test_connect(&runtime, &second, port);
+    {
+      /* Receipt identity is owner-managed, not transport-managed. Crossing a
+       * Sentinel rebind boundary cannot rewrite it; the actual rediscovery
+       * lifecycle remains owned by redis_sentinel. */
+      redis_sentinel sentinel_boundary = {(void *)(uintptr_t)1u};
+      const char *before = NULL;
+      const char *after = NULL;
+      size_t before_length = 0u;
+      size_t after_length = 0u;
+
+      check_equal(redis_stream_group_receipt_id(
+                      receipt, &before, &before_length), SALTS_OK);
+      check_equal(redis_stream_group_rebind(
+                      &owner,
+                      redis_stream_group_source_sentinel(&sentinel_boundary)),
+                  SALTS_OK);
+      check_equal(redis_stream_group_receipt_id(
+                      receipt, &after, &after_length), SALTS_OK);
+      check_equal(after_length, before_length);
+      check_equal(memcmp(after, before, before_length), 0);
+    }
     check_equal(redis_stream_group_rebind(
                     &owner,
                     redis_stream_group_source_connection(&second)),
