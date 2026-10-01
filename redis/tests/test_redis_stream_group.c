@@ -259,10 +259,18 @@ spec("Redis Stream consumer-group typed receipts") {
         &first, stream, group_name, consumer);
     check_equal(redis_stream_group_init(&owner, &config), SALTS_OK);
 
-    /* Open a real XREADGROUP and cancel it before delivery. The owner must
-     * remain reusable and cancellation must not synthesize an ACK. */
+    /* Open a real XREADGROUP and cancel it before delivery. Cancellation
+     * unarms the command without synthesizing an ACK and, by redis_cflow
+     * contract, invalidates that transport. Repair it explicitly before
+     * continuing; the logical Stream owner remains reusable. */
     check_equal(redis_stream_group_fetch_begin(&owner, &one), SALTS_OK);
     check_equal(redis_stream_group_cancel(&owner), SALTS_OK);
+    check_equal(redis_cflow_connection_destroy(&first), SALTS_OK);
+    redis_stream_group_test_connect(&runtime, &first, port);
+    check_equal(redis_stream_group_rebind(
+                    &owner,
+                    redis_stream_group_source_connection(&first)),
+                SALTS_OK);
 
     redis_stream_group_test_xadd(&first, &runtime, stream, "1", "one");
     check_equal(redis_stream_group_fetch_begin(&owner, &one), SALTS_OK);
