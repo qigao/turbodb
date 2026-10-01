@@ -204,6 +204,7 @@ REDIS_API int redis_stream_group_cancel(redis_stream_group *owner);
  * Release a receipt without sending XACK. For RECORD/PAYLOAD_LIMIT/
  * DELIVERY_LIMIT this intentionally leaves the PEL entry pending for retry.
  * DATA_LOSS was already removed from the PEL by Redis XAUTOCLAIM.
+ * Returns SALTS_EBUSY while this exact receipt has an active ack_begin().
  */
 REDIS_API int redis_stream_group_receipt_release(
     redis_stream_group_receipt *receipt);
