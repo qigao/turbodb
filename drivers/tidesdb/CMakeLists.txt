@@ -3,7 +3,7 @@ add_subdirectory(sql)
 add_library(
   orm_tidesdb_driver MODULE
   plugin.c ${ORM_SOURCE_DIR}/src/driver/orm_driver_backend_bridge.c
-  backend.c bridge.c row.c
+  backend.c bridge.c maintenance.c row.c
   orm_tidesdb_cursor.c ${ORM_SOURCE_DIR}/src/abi/orm_plan.c)
 target_compile_definitions(orm_tidesdb_driver
                            PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
