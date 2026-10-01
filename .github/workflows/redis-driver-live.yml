@@ -100,11 +100,20 @@ jobs:
           TURBODB_REDIS_TEST_PORT: "6379"
         run: |
           set -euo pipefail
-          cmake --preset ci-linux-e2e
-          cmake --build --preset ci-linux-e2e --target orm_redis_live_driver_test --parallel 4
+          cmake --preset ci-linux-e2e -DBUILD_TESTS=ON
+          cmake --build --preset ci-linux-e2e --target orm_redis_live_driver_test test_redis_stream_group --parallel 4
 
           mkdir -p evidence/redis-live
-          ctest --preset ci-linux-e2e -R '^orm_redis_live_driver$' --output-on-failure --output-junit evidence/redis-live/tests.xml 2>&1 | tee evidence/redis-live/orm-ctest.log
+          ctest --preset ci-linux-e2e -R '^(orm_redis_live_driver|test_redis_stream_group)
+
+      - name: Keep Redis test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redis-driver-live-${{ github.sha }}
+          path: evidence/redis-live/
+          if-no-files-found: warn
+ --output-on-failure --output-junit evidence/redis-live/tests.xml 2>&1 | tee evidence/redis-live/orm-ctest.log
 
       - name: Keep Redis test results
         if: always()
