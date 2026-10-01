@@ -12,7 +12,7 @@ include(CMakeOptions.cmake)
 
 project(
   TurboDB
-  VERSION 2.0.1
+  VERSION 2.1.0
   DESCRIPTION "C/C++ database libraries"
   HOMEPAGE_URL "https://github.com/qigao/turbodb"
   LANGUAGES C CXX)
