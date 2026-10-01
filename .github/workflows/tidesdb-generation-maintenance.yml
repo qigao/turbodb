@@ -95,7 +95,7 @@ jobs:
 
           mkdir -p evidence/tidesdb-generation
           ctest --preset '${{ matrix.preset }}' \
-            -R '^(orm_driver_interface_test|orm_tidesdb_public_flow|orm_tidesdb_generation_maintenance)$' \
+            -R '^(orm_driver_interface|orm_tidesdb_public_flow|orm_tidesdb_generation_maintenance)$' \
             --output-on-failure --output-junit evidence/tidesdb-generation/tests.xml \
             2>&1 | tee evidence/tidesdb-generation/ctest.log
 
