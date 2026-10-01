@@ -5,7 +5,7 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <PackageId>TurboDB.Native</PackageId>
-    <PackageVersion Condition="'$(PackageVersion)' == ''">2.0.1</PackageVersion>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">2.1.0</PackageVersion>
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <Authors>qigao</Authors>
     <Description>Prebuilt TurboDB ORM and SQLite/PostgreSQL/MySQL/Redis/TidesDB driver SDK install trees for Linux x64, Windows x64, and Android arm64-v8a native consumers.</Description>
