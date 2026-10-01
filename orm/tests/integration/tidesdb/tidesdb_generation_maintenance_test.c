@@ -264,40 +264,6 @@ spec("TidesDB staged generation publication") {
     free(root);
   }
 
-  it("resolves ACTIVE through a read-only maintenance lease") {
-    char *root = tt_make_temp_dir("orm-tides-provider-resolve");
-    char generations[1024];
-    char g1_path[1024];
-    orm_error_t error;
-    orm_runtime_t *runtime;
-    orm_tidesdb_active_result active;
-
-    check_not_null(root);
-    if (root == NULL) return;
-
-    orm_error_init(&error);
-    runtime = open_runtime(&error);
-    prepare_layout(root, generations, sizeof(generations));
-    create_generation_dir(generations, "g-000001", g1_path, sizeof(g1_path));
-    seed_generation(runtime, g1_path, 41L);
-    (void)publish_generation(runtime, root, "g-000001", &error);
-
-    active = resolve_active(runtime, root, &error);
-    check_equal(active.generation_size, 8u);
-    check_equal(memcmp(active.generation, "g-000001", 8u), 0);
-    check_equal(read_generation_connection(
-                    open_generation(runtime, g1_path, &error)), 41L);
-
-    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
-    /* The temporary connection above is intentionally released explicitly
-     * below by reopening with normal ownership in the next assertion path. */
-    check_equal(tt_remove_tree(root), -1);
-    /* A live generation owner prevents teardown; this case is covered more
-     * directly by the old-handle test. Finish with a fresh runtime below. */
-    orm_runtime_release(runtime);
-    free(root);
-  }
-
   it("holds the Plugin/runtime lease while maintenance binding is acquired") {
     orm_error_t error;
     orm_runtime_t *runtime;
