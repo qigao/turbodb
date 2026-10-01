@@ -194,6 +194,18 @@ static redis_stream_group_config redis_stream_group_test_config(
 }
 
 spec("Redis Stream consumer-group typed receipts") {
+  it("rejects an unspecified retention policy before any Redis command") {
+    redis_cflow_connection fake = {0};
+    redis_stream_group owner = {0};
+    redis_stream_group_config config =
+        redis_stream_group_test_config(
+            &fake, "raft:{retention}:outbox", "projection", "worker");
+
+    config.retention_policy = (redis_stream_group_retention_policy)0;
+    check_equal(redis_stream_group_init(&owner, &config), SALTS_EINVAL);
+    check_null(owner.impl);
+  }
+
   it("zero fetch/claim budgets perform no transport I/O") {
     redis_cflow_connection fake = {0};
     redis_stream_group owner = {0};
