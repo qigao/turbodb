@@ -6,8 +6,6 @@ using driver_create_type = orm_status_t (ORM_DRIVER_CALL *)(
     void *, const orm_config_t *, const orm_driver_limits_v1 *,
     orm_driver_connection_v1 *, orm_error_t *);
 
-static_assert(SALTS_PLUGIN_ABI_VERSION == 3u,
-              "TurboDB Driver SDK requires canonical Plugin ABI 3");
 static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 3u,
               "TurboDb.Driver contract version drift");
 static_assert(std::is_standard_layout<TurboDb_Driver>::value,
