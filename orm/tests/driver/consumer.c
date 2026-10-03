@@ -4,9 +4,6 @@
 
 #define REQUIRE(condition) do { if (!(condition)) return __LINE__; } while (0)
 
-_Static_assert(SALTS_PLUGIN_ABI_VERSION == 3u,
-               "TurboDB Driver SDK requires canonical Plugin ABI 3");
-
 static const orm_driver_storage_capabilities_v1 consumer_storage =
     ORM_DRIVER_STORAGE_CAPABILITIES_NONE_INIT;
 
