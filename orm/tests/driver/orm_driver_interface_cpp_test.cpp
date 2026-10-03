@@ -31,8 +31,8 @@ static_assert(
     "reflected storage-capability dispatch must preserve the Driver C ABI");
 static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 3u,
               "Driver contract version drift");
-static_assert(SALTS_PLUGIN_ABI_VERSION == 2u,
-              "TurboDB supports exactly Plugin ABI 2");
+static_assert(SALTS_PLUGIN_ABI_VERSION == 3u,
+              "TurboDB supports exactly Plugin ABI 3");
 
 int main() {
   const cmeta_interface_desc *desc = TurboDb_Driver_interface();
