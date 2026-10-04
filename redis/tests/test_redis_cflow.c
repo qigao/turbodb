@@ -51,6 +51,31 @@ static int redis_cflow_test_nonblocking(redis_cflow_test_socket socket_value) {
 #endif
 }
 
+static int redis_cflow_test_recv(redis_cflow_test_socket socket_value,
+                                 void *buffer, int capacity) {
+  fd_set readable;
+  struct timeval timeout;
+  int ready;
+
+  FD_ZERO(&readable);
+  FD_SET(socket_value, &readable);
+  timeout.tv_sec = 5;
+  timeout.tv_usec = 0;
+  do {
+#if defined(_WIN32)
+    ready = select(0, &readable, NULL, NULL, &timeout);
+#else
+    ready = select(socket_value + 1, &readable, NULL, NULL, &timeout);
+#endif
+  } while (ready < 0
+#if !defined(_WIN32)
+           && errno == EINTR
+#endif
+  );
+  if (ready <= 0) return ready;
+  return (int)recv(socket_value, (char *)buffer, capacity, 0);
+}
+
 static int redis_cflow_test_pair(redis_cflow_test_socket sockets[2]) {
   redis_cflow_test_socket listener = REDIS_CFLOW_TEST_INVALID;
   struct sockaddr_in address;
@@ -247,7 +272,7 @@ suite("redis CFlow RESP stream") {
     check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
     step = redis_cflow_stream_next(&stream);
     check_equal(step.kind, REDIS_CFLOW_STREAM_WAIT);
-    received = recv(sockets[1], command, (int)sizeof(command), 0);
+    received = redis_cflow_test_recv(sockets[1], command, (int)sizeof(command));
     check_equal(received, (int)(sizeof(expected_command) - 1u));
     check_equal(command, expected_command, sizeof(expected_command) - 1u);
 
@@ -284,7 +309,7 @@ suite("redis CFlow RESP stream") {
     step = redis_cflow_stream_next(&stream);
     check_equal(step.kind, REDIS_CFLOW_STREAM_WAIT);
     memset(command, 0, sizeof(command));
-    received = recv(sockets[1], command, (int)sizeof(command), 0);
+    received = redis_cflow_test_recv(sockets[1], command, (int)sizeof(command));
     check_equal(received, (int)(sizeof(expected_command) - 1u));
     check_equal(command, expected_command, sizeof(expected_command) - 1u);
     check_equal(send(sockets[1], "+PONG\r\n", 7, 0), 7);
@@ -328,7 +353,7 @@ suite("redis CFlow RESP stream") {
     check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
     step = redis_cflow_stream_next(&stream);
     check_equal(step.kind, REDIS_CFLOW_STREAM_WAIT);
-    check_true(recv(sockets[1], command, (int)sizeof(command), 0) > 0);
+    check_true(redis_cflow_test_recv(sockets[1], command, (int)sizeof(command)) > 0);
     check_equal(send(sockets[1], partial_reply, (int)(sizeof(partial_reply) - 1u), 0),
                 (int)(sizeof(partial_reply) - 1u));
     check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
@@ -433,7 +458,7 @@ suite("redis CFlow RESP stream") {
     check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
     step = redis_cflow_stream_next(&stream);
     check_equal(step.kind, REDIS_CFLOW_STREAM_WAIT);
-    check_true(recv(sockets[1], command, (int)sizeof(command), 0) > 0);
+    check_true(redis_cflow_test_recv(sockets[1], command, (int)sizeof(command)) > 0);
     check_equal(send(sockets[1], server_error, (int)(sizeof(server_error) - 1u), 0),
                 (int)(sizeof(server_error) - 1u));
     do {
