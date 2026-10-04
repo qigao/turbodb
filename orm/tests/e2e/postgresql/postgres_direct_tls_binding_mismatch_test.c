@@ -40,7 +40,7 @@ static int connect_with_mismatched_binding(
   char local_port[16];
   char *end = NULL;
   unsigned long parsed_port;
-  const uint64_t deadline = salts_monotonic_ms() + UINT64_C(5000);
+  uint64_t deadline = 0u;
   PostgresPollingStatusType poll_status = PGRES_POLLING_ACTIVE;
   int status = 1;
 
@@ -105,6 +105,7 @@ static int connect_with_mismatched_binding(
   if (orm_postgres_direct_tls_bridge_enable_forwarding(&bridge) != SALTS_OK)
     goto cleanup;
 
+  deadline = salts_monotonic_ms() + UINT64_C(5000);
   while (salts_monotonic_ms() < deadline) {
     poll_status = PQconnectPoll(connection);
     if (poll_status == PGRES_POLLING_FAILED) {
