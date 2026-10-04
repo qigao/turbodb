@@ -747,11 +747,11 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   status = orm_postgres_transport_policy_parse(config, &transport_policy, error);
   if (status != ORM_STATUS_OK)
     return status;
-  keywords = (tstr *)calloc((size_t)config->option_count + 3u, sizeof(*keywords));
-  values = (tstr *)calloc((size_t)config->option_count + 3u, sizeof(*values));
-  keyword_views = (const char **)calloc((size_t)config->option_count + 4u,
+  keywords = (tstr *)calloc((size_t)config->option_count + 4u, sizeof(*keywords));
+  values = (tstr *)calloc((size_t)config->option_count + 4u, sizeof(*values));
+  keyword_views = (const char **)calloc((size_t)config->option_count + 5u,
                                         sizeof(*keyword_views));
-  value_views = (const char **)calloc((size_t)config->option_count + 4u,
+  value_views = (const char **)calloc((size_t)config->option_count + 5u,
                                       sizeof(*value_views));
   if (keywords == NULL || values == NULL || keyword_views == NULL ||
       value_views == NULL) {
@@ -868,7 +868,21 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     value_views[native_index] = values[native_index];
     ++native_index;
 
-    if (keywords[native_index - 3u] == NULL ||
+    /*
+     * TLS terminates at the CNet bridge, so libpq cannot access the remote
+     * TLS exporter required for SCRAM-SHA-256-PLUS channel binding. Keep
+     * authentication on SCRAM-SHA-256 over the already-verified bridge TLS
+     * transport rather than letting libpq infer PLUS from the remote server.
+     */
+    keywords[native_index] = tstr_dup("channel_binding");
+    values[native_index] = tstr_dup("disable");
+    keyword_views[native_index] = keywords[native_index];
+    value_views[native_index] = values[native_index];
+    ++native_index;
+
+    if (keywords[native_index - 4u] == NULL ||
+        values[native_index - 4u] == NULL ||
+        keywords[native_index - 3u] == NULL ||
         values[native_index - 3u] == NULL ||
         keywords[native_index - 2u] == NULL ||
         values[native_index - 2u] == NULL ||
