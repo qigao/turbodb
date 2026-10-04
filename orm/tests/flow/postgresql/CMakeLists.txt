@@ -21,7 +21,8 @@ cmake_add_test(
   TEST_NAME orm_postgres_libpq
   SOURCES orm_postgres_libpq_test.c ../../abi/c_api_fake_libpq.cpp
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_libpq.c
-  LIBS orm_test_support Salts::Core Salts::CFlow Salts::TinyTest
+    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_direct_tls_bridge.c
+  LIBS orm_test_support Salts::Core Salts::CNet Salts::CFlow Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/../drivers/postgresql ${ORM_ABI_TEST_DIR}
