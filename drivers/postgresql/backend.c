@@ -967,12 +967,6 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
       goto cleanup;
     }
 
-    status = orm_postgres_wait_bridge_channel_binding(
-        &state->bridge, transport_policy.connect_timeout_ms,
-        external_channel_binding, sizeof(external_channel_binding),
-        &external_channel_binding_size, error);
-    if (status != ORM_STATUS_OK)
-      goto cleanup;
   }
 
   state->connection =
@@ -984,6 +978,18 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     goto cleanup;
   }
   if (state->bridge_active) {
+    /*
+     * PQconnectStartParams starts only the local nonblocking connection. Do
+     * not call PQconnectPoll until the remote TLS identity has been captured
+     * and copied into this PGconn. Progressing the bridge here admits the
+     * local leg while forwarding remains disabled.
+     */
+    status = orm_postgres_wait_bridge_channel_binding(
+        &state->bridge, transport_policy.connect_timeout_ms,
+        external_channel_binding, sizeof(external_channel_binding),
+        &external_channel_binding_size, error);
+    if (status != ORM_STATUS_OK)
+      goto cleanup;
     if (external_channel_binding_size == 0u) {
       status = ORM_STATUS_INTERNAL_ERROR;
       orm_error_set(error, status,
