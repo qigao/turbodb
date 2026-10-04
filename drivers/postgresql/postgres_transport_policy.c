@@ -1,11 +1,22 @@
 #include "postgres_transport_policy.h"
 
-#include "orm_internal.h"
-
 #include <errno.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void policy_error_set(orm_error_t *error, orm_status_t status,
+                             const char *message) {
+  if (error == NULL)
+    return;
+  error->status = status;
+  if (message == NULL) {
+    error->message[0] = '\0';
+    return;
+  }
+  (void)snprintf(error->message, sizeof(error->message), "%s", message);
+}
 
 static int view_equal(orm_string_view_t value, const char *literal) {
   const size_t size = strlen(literal);
@@ -17,7 +28,7 @@ static orm_status_t copy_text(orm_string_view_t value, char *out, size_t capacit
                               const char *message, orm_error_t *error) {
   if (value.data == NULL || value.len == 0u || value.len >= capacity ||
       memchr(value.data, '\0', value.len) != NULL) {
-    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, message);
+    policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT, message);
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   memcpy(out, value.data, value.len);
@@ -33,7 +44,7 @@ static orm_status_t parse_u32(orm_string_view_t value, uint32_t min_value,
   unsigned long parsed;
   if (value.data == NULL || value.len == 0u || value.len >= sizeof(buffer) ||
       memchr(value.data, '\0', value.len) != NULL) {
-    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, message);
+    policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT, message);
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   memcpy(buffer, value.data, value.len);
@@ -42,7 +53,7 @@ static orm_status_t parse_u32(orm_string_view_t value, uint32_t min_value,
   parsed = strtoul(buffer, &end, 10);
   if (errno != 0 || end == buffer || *end != '\0' ||
       parsed < min_value || parsed > max_value) {
-    orm_error_set(error, ORM_STATUS_OUT_OF_RANGE, message);
+    policy_error_set(error, ORM_STATUS_OUT_OF_RANGE, message);
     return ORM_STATUS_OUT_OF_RANGE;
   }
   *out = (uint32_t)parsed;
@@ -85,7 +96,7 @@ orm_status_t orm_postgres_transport_policy_parse(
       else if (view_equal(option->value, "direct_tls"))
         out->mode = ORM_POSTGRES_TRANSPORT_DIRECT_TLS;
       else {
-        orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+        policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                       "invalid PostgreSQL transport mode");
         return ORM_STATUS_INVALID_ARGUMENT;
       }
@@ -141,14 +152,14 @@ orm_status_t orm_postgres_transport_policy_parse(
                          &out->egress_buffer_bytes,
                          "invalid PostgreSQL secure egress buffer size", error);
     } else {
-      orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+      policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                     "unknown TurboDB PostgreSQL transport option");
       return ORM_STATUS_INVALID_ARGUMENT;
     }
 
     if (status != ORM_STATUS_OK) return status;
     if ((seen & bit) != 0u) {
-      orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+      policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                     "duplicate TurboDB PostgreSQL transport option");
       return ORM_STATUS_INVALID_ARGUMENT;
     }
@@ -156,28 +167,28 @@ orm_status_t orm_postgres_transport_policy_parse(
   }
 
   if (!has_transport) {
-    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+    policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                   "PostgreSQL requires explicit turbodb_pg_transport");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
 
   if (out->mode == ORM_POSTGRES_TRANSPORT_DISABLED) {
     if (seen != (UINT32_C(1) << 0)) {
-      orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+      policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                     "plaintext PostgreSQL transport cannot include secure transport options");
       return ORM_STATUS_INVALID_ARGUMENT;
     }
-    orm_error_set(error, ORM_STATUS_OK, NULL);
+    policy_error_set(error, ORM_STATUS_OK, NULL);
     return ORM_STATUS_OK;
   }
 
   if (!has_remote_host || !has_remote_port || !has_server_name ||
       (has_ca_file == has_ca_path)) {
-    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+    policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                   "direct TLS PostgreSQL transport requires host, port, server name and exactly one CA source");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
 
-  orm_error_set(error, ORM_STATUS_OK, NULL);
+  policy_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
 }
