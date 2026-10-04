@@ -47,7 +47,6 @@ enable_testing()
 include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
-find_package(OpenSSL CONFIG REQUIRED)
 find_package(
   Salts
   CONFIG
@@ -118,7 +117,6 @@ if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS OR TURBODB_BUILD_SQLPARSER)
     NAMESPACE TurboDB::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/TurboDB")
   if(TURBODB_BUILD_ORM)
-    include(cmake/InstallCrypto.cmake)
     install(
       EXPORT OrmTargets
       NAMESPACE Orm::
