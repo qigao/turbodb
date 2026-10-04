@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(
     Orm
-    VERSION 2.1.0
+    VERSION 2.2.0
     DESCRIPTION "Typed reactive ORM for C11 with C++17 ownership wrappers"
     LANGUAGES C)
 endif()
@@ -20,7 +20,7 @@ if(NOT TARGET Salts::Plugin OR NOT TARGET Salts::PluginABI)
   )
 endif()
 
-set(ORM_VERSION 2.1.0)
+set(ORM_VERSION 2.2.0)
 set(ORM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 include(GNUInstallDirs)
