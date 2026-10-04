@@ -7,6 +7,8 @@
 #include "orm_async_wait.h"
 
 #include <libpq-fe.h>
+#include <salts/clock.h>
+#include <salts/thread.h>
 
 #include <inttypes.h>
 #include <limits.h>
@@ -679,6 +681,46 @@ static const orm_backend_ops orm_postgres_backend_ops = {
     orm_postgres_backend_destroy, orm_postgres_backend_open,
     orm_postgres_backend_execute, orm_postgres_backend_begin,
     orm_postgres_backend_open_async};
+
+static orm_status_t orm_postgres_connect_poll(
+    PGconn *connection, orm_postgres_direct_tls_bridge *bridge,
+    int bridge_active, uint32_t timeout_ms, orm_error_t *error) {
+  const uint64_t started_ms = salts_monotonic_ms();
+  PostgresPollingStatusType poll_status;
+
+  if (connection == NULL)
+    return ORM_STATUS_CONNECTION_ERROR;
+
+  for (;;) {
+    poll_status = PQconnectPoll(connection);
+    if (poll_status == PGRES_POLLING_OK)
+      return ORM_STATUS_OK;
+    if (poll_status == PGRES_POLLING_FAILED) {
+      return orm_postgres_fail(error, ORM_STATUS_CONNECTION_ERROR,
+                               "connect PostgreSQL",
+                               PQerrorMessage(connection));
+    }
+
+    if (bridge_active) {
+      const int bridge_status =
+          orm_postgres_direct_tls_bridge_progress(bridge, 1u);
+      if (bridge_status != SALTS_OK) {
+        orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
+                      "PostgreSQL secure transport bridge failed");
+        return ORM_STATUS_CONNECTION_ERROR;
+      }
+    } else {
+      salts_sleep_ms(1u);
+    }
+
+    if (timeout_ms != 0u &&
+        salts_monotonic_ms() - started_ms >= timeout_ms) {
+      orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
+                    "PostgreSQL connection timed out");
+      return ORM_STATUS_CONNECTION_ERROR;
+    }
+  }
+}
 
 orm_status_t orm_postgres_backend_create(const orm_config_t *config,
                                          const orm_limits *limits,
