@@ -747,17 +747,11 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   status = orm_postgres_transport_policy_parse(config, &transport_policy, error);
   if (status != ORM_STATUS_OK)
     return status;
-  if (transport_policy.mode == ORM_POSTGRES_TRANSPORT_DIRECT_TLS) {
-    orm_error_set(error, ORM_STATUS_UNSUPPORTED,
-                  "PostgreSQL direct TLS transport requires bridge implementation");
-    return ORM_STATUS_UNSUPPORTED;
-  }
-
-  keywords = (tstr *)calloc(config->option_count, sizeof(*keywords));
-  values = (tstr *)calloc(config->option_count, sizeof(*values));
-  keyword_views = (const char **)calloc((size_t)config->option_count + 1u,
+  keywords = (tstr *)calloc((size_t)config->option_count + 3u, sizeof(*keywords));
+  values = (tstr *)calloc((size_t)config->option_count + 3u, sizeof(*values));
+  keyword_views = (const char **)calloc((size_t)config->option_count + 4u,
                                         sizeof(*keyword_views));
-  value_views = (const char **)calloc((size_t)config->option_count + 1u,
+  value_views = (const char **)calloc((size_t)config->option_count + 4u,
                                       sizeof(*value_views));
   if (keywords == NULL || values == NULL || keyword_views == NULL ||
       value_views == NULL) {
@@ -836,20 +830,70 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     orm_error_set(error, status, "allocate PostgreSQL backend");
     goto cleanup;
   }
-  state->connection = PQconnectdbParams(keyword_views, value_views,
-                                        expand_dbname);
+
+  if (transport_policy.mode == ORM_POSTGRES_TRANSPORT_DIRECT_TLS) {
+    char port_text[16];
+    const int bridge_status =
+        orm_postgres_direct_tls_bridge_init(&state->bridge, &transport_policy);
+    if (bridge_status != SALTS_OK) {
+      status = ORM_STATUS_CONNECTION_ERROR;
+      orm_error_set(error, status,
+                    "initialize PostgreSQL secure transport bridge");
+      goto cleanup;
+    }
+    state->bridge_active = 1;
+    if (snprintf(port_text, sizeof(port_text), "%u",
+                 (unsigned)state->bridge.local_port) <= 0) {
+      status = ORM_STATUS_INTERNAL_ERROR;
+      orm_error_set(error, status,
+                    "format PostgreSQL secure bridge port");
+      goto cleanup;
+    }
+
+    keywords[native_index] = tstr_dup("host");
+    values[native_index] = tstr_dup("127.0.0.1");
+    keyword_views[native_index] = keywords[native_index];
+    value_views[native_index] = values[native_index];
+    ++native_index;
+
+    keywords[native_index] = tstr_dup("port");
+    values[native_index] = tstr_dup(port_text);
+    keyword_views[native_index] = keywords[native_index];
+    value_views[native_index] = values[native_index];
+    ++native_index;
+
+    keywords[native_index] = tstr_dup("sslmode");
+    values[native_index] = tstr_dup("disable");
+    keyword_views[native_index] = keywords[native_index];
+    value_views[native_index] = values[native_index];
+    ++native_index;
+
+    if (keywords[native_index - 3u] == NULL ||
+        values[native_index - 3u] == NULL ||
+        keywords[native_index - 2u] == NULL ||
+        values[native_index - 2u] == NULL ||
+        keywords[native_index - 1u] == NULL ||
+        values[native_index - 1u] == NULL) {
+      status = ORM_STATUS_OUT_OF_MEMORY;
+      orm_error_set(error, status,
+                    "allocate PostgreSQL secure bridge options");
+      goto cleanup;
+    }
+  }
+
+  state->connection =
+      PQconnectStartParams(keyword_views, value_views, expand_dbname);
   if (state->connection == NULL) {
     status = ORM_STATUS_CONNECTION_ERROR;
     orm_error_set(error, status,
                   "libpq failed to allocate a PostgreSQL connection");
     goto cleanup;
   }
-  if (PQstatus(state->connection) != CONNECTION_OK) {
-    status = orm_postgres_fail(error, ORM_STATUS_CONNECTION_ERROR,
-                               "connect PostgreSQL",
-                               PQerrorMessage(state->connection));
+  status = orm_postgres_connect_poll(
+      state->connection, &state->bridge, state->bridge_active,
+      transport_policy.connect_timeout_ms, error);
+  if (status != ORM_STATUS_OK)
     goto cleanup;
-  }
   out_backend->ops = &orm_postgres_backend_ops;
   out_backend->context = state;
   state = NULL;
