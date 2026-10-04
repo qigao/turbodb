@@ -35,7 +35,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ninja-build lemon
       - name: Install macOS host tools
         if: runner.os == 'macOS'
-        run: brew install ninja lemon
+        run: brew install autoconf ninja lemon
       - name: Locate MSVC and install Ninja
         if: runner.os == 'Windows'
         shell: pwsh
