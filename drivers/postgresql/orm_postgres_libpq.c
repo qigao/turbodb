@@ -1,25 +1,73 @@
 #include "orm_postgres_libpq.h"
+#include "postgres_direct_tls_bridge.h"
+
+#include <salts_error.h>
 
 #include <limits.h>
 
 _Static_assert(sizeof(Oid) == sizeof(uint32_t),
                "PostgreSQL Oid must match the ORM request type");
 
+static PGconn *orm_postgres_libpq_connection(void *context) {
+  orm_postgres_libpq_context *bridge_context =
+      (orm_postgres_libpq_context *)context;
+  return bridge_context != NULL && bridge_context->connection != NULL
+             ? bridge_context->connection
+             : (PGconn *)context;
+}
+
+static orm_postgres_direct_tls_bridge *orm_postgres_libpq_bridge(
+    void *context) {
+  orm_postgres_libpq_context *bridge_context =
+      (orm_postgres_libpq_context *)context;
+  if (bridge_context == NULL || bridge_context->connection == NULL)
+    return NULL;
+  return bridge_context->bridge;
+}
+
+static int orm_postgres_libpq_pump(void *context) {
+  orm_postgres_direct_tls_bridge *bridge = orm_postgres_libpq_bridge(context);
+  if (bridge == NULL)
+    return 1;
+  return orm_postgres_direct_tls_bridge_progress(bridge, 1u) == SALTS_OK;
+}
+
 static int orm_postgres_libpq_send(
     void *context, const orm_postgres_query_request *request) {
-  return PQsendQueryParams(
-      (PGconn *)context, request->sql, request->parameter_count,
+  PGconn *connection = orm_postgres_libpq_connection(context);
+  int flush_status;
+  if (!PQsendQueryParams(
+      connection, request->sql, request->parameter_count,
       (const Oid *)request->parameter_types, request->parameter_values,
       request->parameter_lengths, request->parameter_formats,
-      request->result_format);
+      request->result_format))
+    return 0;
+  if (orm_postgres_libpq_bridge(context) == NULL)
+    return 1;
+  do {
+    flush_status = PQflush(connection);
+    if (flush_status < 0)
+      return 0;
+    if (flush_status == 0)
+      return 1;
+    if (!orm_postgres_libpq_pump(context))
+      return 0;
+  } while (1);
 }
 
 static int orm_postgres_libpq_enable_single_row(void *context) {
-  return PQsetSingleRowMode((PGconn *)context);
+  return PQsetSingleRowMode(orm_postgres_libpq_connection(context));
 }
 
 static void *orm_postgres_libpq_next_result(void *context) {
-  return PQgetResult((PGconn *)context);
+  PGconn *connection = orm_postgres_libpq_connection(context);
+  if (orm_postgres_libpq_bridge(context) != NULL) {
+    while (PQisBusy(connection)) {
+      if (!orm_postgres_libpq_pump(context) || PQconsumeInput(connection) == 0)
+        return NULL;
+    }
+  }
+  return PQgetResult(connection);
 }
 
 static void orm_postgres_libpq_release_result(void *result) {
@@ -27,11 +75,11 @@ static void orm_postgres_libpq_release_result(void *result) {
 }
 
 static const char *orm_postgres_libpq_connection_error(void *context) {
-  return PQerrorMessage((const PGconn *)context);
+  return PQerrorMessage((const PGconn *)orm_postgres_libpq_connection(context));
 }
 
 static int orm_postgres_libpq_connection_ok(void *context) {
-  return PQstatus((const PGconn *)context) == CONNECTION_OK;
+  return PQstatus((const PGconn *)orm_postgres_libpq_connection(context)) == CONNECTION_OK;
 }
 
 static orm_postgres_result_status orm_postgres_libpq_status(
@@ -122,5 +170,20 @@ static const orm_postgres_result_ops orm_postgres_libpq_result_ops = {
 orm_postgres_driver orm_postgres_libpq_driver(PGconn *connection) {
   orm_postgres_driver driver = {&orm_postgres_libpq_command_ops,
                                 &orm_postgres_libpq_result_ops, connection};
+  return driver;
+}
+
+orm_postgres_driver orm_postgres_libpq_bridge_driver(
+    orm_postgres_libpq_context *context, PGconn *connection,
+    orm_postgres_direct_tls_bridge *bridge) {
+  orm_postgres_driver driver;
+  if (context == NULL) {
+    driver = (orm_postgres_driver){0};
+    return driver;
+  }
+  context->connection = connection;
+  context->bridge = bridge;
+  driver = (orm_postgres_driver){&orm_postgres_libpq_command_ops,
+                                 &orm_postgres_libpq_result_ops, context};
   return driver;
 }
