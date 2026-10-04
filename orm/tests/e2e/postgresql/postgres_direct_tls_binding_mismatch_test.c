@@ -69,13 +69,6 @@ static int connect_with_mismatched_binding(
 
   if (orm_postgres_direct_tls_bridge_init(&bridge, &policy) != SALTS_OK)
     goto cleanup;
-  if (wait_for_binding(&bridge, binding, sizeof(binding), &binding_size) !=
-          SALTS_OK ||
-      binding_size == 0u)
-    goto cleanup;
-
-  /* Keep the transport valid but bind SASL to the wrong certificate digest. */
-  binding[0] ^= UINT8_C(1);
 
   if (snprintf(local_port, sizeof(local_port), "%u",
                (unsigned)bridge.local_port) <= 0)
@@ -93,6 +86,18 @@ static int connect_with_mismatched_binding(
   }
   if (connection == NULL)
     goto cleanup;
+
+  /*
+   * Let the bridge accept the local socket and verify the remote TLS session,
+   * but do not call PQconnectPoll and do not enable forwarding yet.
+   */
+  if (wait_for_binding(&bridge, binding, sizeof(binding), &binding_size) !=
+          SALTS_OK ||
+      binding_size == 0u)
+    goto cleanup;
+
+  /* Keep the transport valid but bind SASL to the wrong certificate digest. */
+  binding[0] ^= UINT8_C(1);
 #ifndef LIBPQ_HAS_EXTERNAL_CHANNEL_BINDING
 #error "mismatch qualification requires libpq external channel-binding ABI"
 #endif
