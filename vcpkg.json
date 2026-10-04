@@ -6,8 +6,7 @@
       "name": "pkgconf",
       "host": true
     },
-    "zstd",
-    "boringssl"
+    "zstd"
   ],
   "features": {
     "sqlite": {
