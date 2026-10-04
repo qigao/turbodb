@@ -21,6 +21,7 @@ jobs:
         include:
           - {os: ubuntu-24.04, rid: linux-x64, preset: ci-linux-release}
           - {os: windows-2022, rid: windows-x64, preset: ci-windows-release}
+          - {os: macos-15, rid: macos-arm64, preset: ci-macos-release}
           - {os: ubuntu-24.04, rid: android-arm64-v8a, preset: ci-android-release}
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +33,9 @@ jobs:
       - name: Install Linux host tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build lemon
+      - name: Install macOS host tools
+        if: runner.os == 'macOS'
+        run: brew install ninja lemon
       - name: Locate MSVC and install Ninja
         if: runner.os == 'Windows'
         shell: pwsh
@@ -59,6 +63,15 @@ jobs:
             ctest --preset '${{ matrix.preset }}'
           fi
           cmake --build --preset 'install-${{ matrix.preset }}' --parallel 4
+      - name: Build test and install on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-macos-release
+          cmake --build --preset ci-macos-release --parallel 4
+          ctest --preset ci-macos-release
+          cmake --build --preset install-ci-macos-release --parallel 4
       - name: Build test and install on Windows
         if: runner.os == 'Windows'
         shell: cmd
