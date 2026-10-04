@@ -120,13 +120,14 @@ static void orm_postgres_bridge_on_state(
             binding_size <= sizeof(bridge->channel_binding)) {
           bridge->channel_binding_size = binding_size;
         } else if (bridge->policy.channel_binding ==
-                   ORM_POSTGRES_CHANNEL_BINDING_REQUIRE) {
+                       ORM_POSTGRES_CHANNEL_BINDING_PREFER &&
+                   (status == SALTS_ENOTSUP || status == SALTS_ENOENT)) {
+          memset(bridge->channel_binding, 0, sizeof(bridge->channel_binding));
+          bridge->channel_binding_size = 0u;
+        } else {
           orm_postgres_bridge_fail(
               bridge, status != SALTS_OK ? status : SALTS_EPROTO);
           return;
-        } else {
-          memset(bridge->channel_binding, 0, sizeof(bridge->channel_binding));
-          bridge->channel_binding_size = 0u;
         }
       }
       bridge->remote_tls_ready = 1;
