@@ -81,6 +81,43 @@ spec("PostgreSQL direct TLS bridge lifecycle") {
     check_equal(bridge.receive_started, 0);
   }
 
+  it("admits forwarding without a binding when verified TLS policy does not require one") {
+    orm_postgres_direct_tls_bridge bridge = ORM_POSTGRES_DIRECT_TLS_BRIDGE_INIT;
+    uint8_t copied[CNET_TLS_SERVER_END_POINT_MAX_BYTES] = {0};
+    size_t copied_size = 7u;
+
+    bridge.state = ORM_POSTGRES_BRIDGE_REMOTE_TLS_READY;
+    bridge.remote_tls_ready = 1;
+    bridge.policy.channel_binding = ORM_POSTGRES_CHANNEL_BINDING_PREFER;
+
+    check_equal(
+        orm_postgres_direct_tls_bridge_channel_binding(
+            &bridge, copied, sizeof(copied), &copied_size),
+        SALTS_ENOENT);
+    check_equal(copied_size, (size_t)0u);
+    check_equal(
+        orm_postgres_direct_tls_bridge_enable_forwarding(&bridge),
+        SALTS_OK);
+    check_equal(bridge.forwarding_enabled, 1);
+  }
+
+  it("clears copied binding material when the bridge closes") {
+    orm_postgres_direct_tls_bridge bridge = ORM_POSTGRES_DIRECT_TLS_BRIDGE_INIT;
+    size_t index;
+
+    bridge.state = ORM_POSTGRES_BRIDGE_REMOTE_TLS_READY;
+    bridge.remote_tls_ready = 1;
+    bridge.channel_binding_size = 32u;
+    for (index = 0u; index < bridge.channel_binding_size; ++index)
+      bridge.channel_binding[index] = (uint8_t)(0xa0u + index);
+
+    check_equal(orm_postgres_direct_tls_bridge_close(&bridge), SALTS_OK);
+    check_equal(bridge.channel_binding_size, (size_t)0u);
+    check_equal(bridge.remote_tls_ready, 0);
+    for (index = 0u; index < sizeof(bridge.channel_binding); ++index)
+      check_equal(bridge.channel_binding[index], (uint8_t)0u);
+  }
+
   it("destroys an empty bridge idempotently at the ownership boundary") {
     orm_postgres_direct_tls_bridge bridge = ORM_POSTGRES_DIRECT_TLS_BRIDGE_INIT;
 
