@@ -239,9 +239,18 @@ jobs:
           print("libpq external channel-binding ABI verified")
           PY
 
-          cmake --build --preset ci-linux-e2e --target orm_sql_validation_parity_test orm_postgres_live_test orm_postgres_direct_tls_live_test orm_owner_postgres_test orm_owner_postgres_loss_test dbtool_postgresql_live_test --parallel 4
+          cmake --build --preset ci-linux-e2e --target orm_sql_validation_parity_test orm_postgres_live_test orm_postgres_direct_tls_live_test orm_postgres_direct_tls_binding_mismatch_test orm_owner_postgres_test orm_owner_postgres_loss_test dbtool_postgresql_live_test --parallel 4
 
-          ctest --preset ci-linux-e2e -R '^(orm_sql_validation_parity|orm_postgres_live|orm_postgres_direct_tls_live|orm_owner_postgres|orm_owner_postgres_loss|dbtool_postgresql_live_test)$' \
+          ctest --preset ci-linux-e2e -R '^(orm_sql_validation_parity|orm_postgres_live|orm_postgres_direct_tls_live|orm_postgres_direct_tls_binding_mismatch|orm_owner_postgres|orm_owner_postgres_loss|dbtool_postgresql_live_test)            --output-on-failure --output-junit "$evidence/tests.xml" 2>&1 | tee "$evidence/ctest.log"
+
+      - name: Keep PostgreSQL test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-validation-parity-${{ github.sha }}
+          path: evidence/sql-validation-parity/
+          if-no-files-found: warn
+ \
             --output-on-failure --output-junit "$evidence/tests.xml" 2>&1 | tee "$evidence/ctest.log"
 
       - name: Keep PostgreSQL test results
