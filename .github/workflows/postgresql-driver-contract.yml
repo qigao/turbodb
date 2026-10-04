@@ -182,6 +182,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
 
+      - name: Verify published Salts RFC5929 capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          header="$SALTS_ROOT/include/cnet/cnet.h"
+          test -f "$header"
+          grep -F "CNET_TLS_SERVER_END_POINT_MAX_BYTES" "$header"
+          grep -F "cnet_tls_server_end_point_binding" "$header"
+
       - name: Build and run cross-Driver ValidationPlan parity
         shell: bash
         env:
