@@ -105,3 +105,16 @@ set_tests_properties(
     RUN_SERIAL TRUE
     TIMEOUT 60
     ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
+
+cmake_add_test(
+  NAME orm_postgres_direct_tls_binding_mismatch_test
+  FOLDER "orm/tests/e2e/postgresql"
+  TEST_NAME orm_postgres_direct_tls_binding_mismatch
+  SOURCES postgres_direct_tls_binding_mismatch_test.c
+    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_direct_tls_bridge.c
+  LIBS PostgreSQL::PostgreSQL Salts::CNet Salts::Platform Salts::TinyTest
+  INCLUDES ${ORM_SOURCE_DIR}/include/orm
+    ${ORM_SOURCE_DIR}/../drivers/postgresql)
+set_tests_properties(
+  orm_postgres_direct_tls_binding_mismatch
+  PROPERTIES LABELS e2e RUN_SERIAL TRUE TIMEOUT 60)

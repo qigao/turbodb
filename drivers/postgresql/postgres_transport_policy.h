@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define ORM_POSTGRES_TRANSPORT_POLICY_VERSION UINT32_C(1)
+#define ORM_POSTGRES_TRANSPORT_POLICY_VERSION UINT32_C(2)
 #define ORM_POSTGRES_TRANSPORT_HOST_CAPACITY UINT32_C(254)
 #define ORM_POSTGRES_TRANSPORT_PATH_CAPACITY UINT32_C(4096)
 #define ORM_POSTGRES_TRANSPORT_MIN_BUFFER_BYTES UINT32_C(4096)
@@ -22,10 +22,18 @@ enum {
   ORM_POSTGRES_TRANSPORT_DIRECT_TLS = 1
 };
 
+typedef int32_t orm_postgres_channel_binding_mode;
+enum {
+  ORM_POSTGRES_CHANNEL_BINDING_DISABLE = 0,
+  ORM_POSTGRES_CHANNEL_BINDING_PREFER = 1,
+  ORM_POSTGRES_CHANNEL_BINDING_REQUIRE = 2
+};
+
 typedef struct orm_postgres_transport_policy {
   uint32_t struct_size;
   uint32_t version;
   orm_postgres_transport_mode mode;
+  orm_postgres_channel_binding_mode channel_binding;
   uint16_t remote_port;
   uint16_t reserved;
   uint32_t connect_timeout_ms;
@@ -42,7 +50,8 @@ typedef struct orm_postgres_transport_policy {
 #define ORM_POSTGRES_TRANSPORT_POLICY_INIT                                      \
   {                                                                             \
     sizeof(orm_postgres_transport_policy), ORM_POSTGRES_TRANSPORT_POLICY_VERSION,\
-    ORM_POSTGRES_TRANSPORT_DISABLED, 0u, 0u, 0u, 0u, 0u,                       \
+    ORM_POSTGRES_TRANSPORT_DISABLED, ORM_POSTGRES_CHANNEL_BINDING_PREFER,       \
+    0u, 0u, 0u, 0u, 0u,                                                       \
     ORM_POSTGRES_TRANSPORT_DEFAULT_BUFFER_BYTES,                                \
     ORM_POSTGRES_TRANSPORT_DEFAULT_BUFFER_BYTES, {0}, {0}, {0}, {0}             \
   }

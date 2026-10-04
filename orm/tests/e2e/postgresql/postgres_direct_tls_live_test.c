@@ -8,10 +8,10 @@
 
 static orm_status_t secure_connect_port(
     const char *port, const char *server_name, const char *ca_file,
-    orm_error_t *error) {
+    const char *channel_binding, orm_error_t *error) {
   orm_runtime_t *runtime = NULL;
   orm_config_t config;
-  orm_option_t options[10];
+  orm_option_t options[11];
   orm_connection_t *connection = NULL;
   orm_query_t *query = NULL;
   orm_result_t *result = NULL;
@@ -19,7 +19,8 @@ static orm_status_t secure_connect_port(
   orm_status_t status;
 
   if (port == NULL || port[0] == '\0' ||
-      server_name == NULL || ca_file == NULL)
+      server_name == NULL || ca_file == NULL ||
+      channel_binding == NULL || channel_binding[0] == '\0')
     return ORM_STATUS_INVALID_ARGUMENT;
 
   status = pg_runtime_create(&runtime, error);
@@ -45,11 +46,13 @@ static orm_status_t secure_connect_port(
                               orm_view("5000")};
   options[8] = (orm_option_t){orm_view("turbodb_pg_ingress_bytes"),
                               orm_view("65536")};
-  options[9] = (orm_option_t){orm_view("conninfo"),
-                              orm_view("dbname=turbodb user=turbodb password=turbodb")};
+  options[9] = (orm_option_t){orm_view("turbodb_pg_channel_binding"),
+                              orm_view(channel_binding)};
+  options[10] = (orm_option_t){orm_view("conninfo"),
+                               orm_view("dbname=turbodb user=turbodb password=turbodb")};
   config.driver = orm_view("postgresql");
   config.options = options;
-  config.option_count = 10u;
+  config.option_count = 11u;
 
   status = orm_runtime_connect(runtime, &config, &connection, error);
   if (status != ORM_STATUS_OK) {
@@ -88,7 +91,7 @@ static orm_status_t secure_connect_port(
 }
 
 spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
-  it("connects and executes through verified direct TLS") {
+  it("connects with SCRAM-SHA-256-PLUS when channel binding is required") {
     const char *ca = getenv("TURBODB_PG_TLS_CA");
     orm_error_t error;
     orm_error_init(&error);
@@ -99,9 +102,28 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     {
       const orm_status_t status =
           secure_connect_port(getenv("TURBODB_PG_TLS_PORT"),
-                              "localhost", ca, &error);
+                              "localhost", ca, "require", &error);
       if (status != ORM_STATUS_OK)
         (void)fprintf(stderr, "direct TLS connect failed: status=%d message=%s\n",
+                      (int)status, error.message);
+      check_equal(status, ORM_STATUS_OK);
+    }
+  }
+
+  it("connects with ordinary SCRAM when channel binding is disabled") {
+    const char *ca = getenv("TURBODB_PG_TLS_CA");
+    orm_error_t error;
+    orm_error_init(&error);
+
+    check_not_null(ca);
+    if (ca == NULL)
+      return;
+    {
+      const orm_status_t status =
+          secure_connect_port(getenv("TURBODB_PG_TLS_PORT"),
+                              "localhost", ca, "disable", &error);
+      if (status != ORM_STATUS_OK)
+        (void)fprintf(stderr, "direct TLS disabled-binding connect failed: status=%d message=%s\n",
                       (int)status, error.message);
       check_equal(status, ORM_STATUS_OK);
     }
@@ -115,7 +137,7 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     check_not_null(wrong_ca);
     if (wrong_ca == NULL)
       return;
-    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "localhost", wrong_ca, &error),
+    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "localhost", wrong_ca, "require", &error),
                 ORM_STATUS_CONNECTION_ERROR);
   }
 
@@ -129,7 +151,7 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     check_not_null(port);
     if (ca == NULL || port == NULL)
       return;
-    check_equal(secure_connect_port(port, "localhost", ca, &error),
+    check_equal(secure_connect_port(port, "localhost", ca, "require", &error),
                 ORM_STATUS_CONNECTION_ERROR);
   }
 
@@ -141,7 +163,7 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     check_not_null(ca);
     if (ca == NULL)
       return;
-    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "wrong.invalid", ca, &error),
+    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "wrong.invalid", ca, "require", &error),
                 ORM_STATUS_CONNECTION_ERROR);
   }
 }

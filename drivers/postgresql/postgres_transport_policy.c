@@ -151,6 +151,19 @@ orm_status_t orm_postgres_transport_policy_parse(
                          ORM_POSTGRES_TRANSPORT_MAX_BUFFER_BYTES,
                          &out->egress_buffer_bytes,
                          "invalid PostgreSQL secure egress buffer size", error);
+    } else if (view_equal(option->keyword, "turbodb_pg_channel_binding")) {
+      bit = UINT32_C(1) << 11;
+      if (view_equal(option->value, "disable"))
+        out->channel_binding = ORM_POSTGRES_CHANNEL_BINDING_DISABLE;
+      else if (view_equal(option->value, "prefer"))
+        out->channel_binding = ORM_POSTGRES_CHANNEL_BINDING_PREFER;
+      else if (view_equal(option->value, "require"))
+        out->channel_binding = ORM_POSTGRES_CHANNEL_BINDING_REQUIRE;
+      else {
+        policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
+                         "invalid PostgreSQL channel-binding policy");
+        return ORM_STATUS_INVALID_ARGUMENT;
+      }
     } else {
       policy_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                     "unknown TurboDB PostgreSQL transport option");

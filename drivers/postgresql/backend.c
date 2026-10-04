@@ -8,6 +8,10 @@
 
 #include <libpq-fe.h>
 #include <salts/clock.h>
+
+#ifndef LIBPQ_HAS_EXTERNAL_CHANNEL_BINDING
+#error "TurboDB PostgreSQL driver requires libpq external channel-binding ABI"
+#endif
 #include <salts/thread.h>
 
 #include <inttypes.h>
@@ -700,6 +704,47 @@ static const orm_backend_ops orm_postgres_backend_ops = {
     orm_postgres_backend_execute, orm_postgres_backend_begin,
     orm_postgres_backend_open_async};
 
+static orm_status_t orm_postgres_wait_bridge_channel_binding(
+    orm_postgres_direct_tls_bridge *bridge, uint32_t timeout_ms,
+    uint8_t *output, size_t capacity, size_t *out_size,
+    orm_error_t *error) {
+  const uint64_t started_ms = salts_monotonic_ms();
+
+  if (out_size == NULL)
+    return ORM_STATUS_INVALID_ARGUMENT;
+  *out_size = 0u;
+
+  for (;;) {
+    const int binding_status =
+        orm_postgres_direct_tls_bridge_channel_binding(
+            bridge, output, capacity, out_size);
+    if (binding_status == SALTS_OK)
+      return ORM_STATUS_OK;
+    if (binding_status != SALTS_ENOTCONN) {
+      orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
+                    "PostgreSQL TLS channel binding unavailable");
+      return ORM_STATUS_CONNECTION_ERROR;
+    }
+
+    {
+      const int bridge_status =
+          orm_postgres_direct_tls_bridge_progress(bridge, 1u);
+      if (bridge_status != SALTS_OK) {
+        orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
+                      "PostgreSQL secure transport bridge failed before authentication");
+        return ORM_STATUS_CONNECTION_ERROR;
+      }
+    }
+
+    if (timeout_ms != 0u &&
+        salts_monotonic_ms() - started_ms >= timeout_ms) {
+      orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
+                    "PostgreSQL TLS channel-binding wait timed out");
+      return ORM_STATUS_CONNECTION_ERROR;
+    }
+  }
+}
+
 static orm_status_t orm_postgres_connect_poll(
     PGconn *connection, orm_postgres_direct_tls_bridge *bridge,
     int bridge_active, uint32_t timeout_ms, orm_error_t *error) {
@@ -750,6 +795,8 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   const char **keyword_views = NULL;
   const char **value_views = NULL;
   size_t total_bytes = 0u;
+  uint8_t external_channel_binding[CNET_TLS_SERVER_END_POINT_MAX_BYTES] = {0};
+  size_t external_channel_binding_size = 0u;
   int expand_dbname = 0;
   uint32_t index;
   uint32_t native_index = 0u;
@@ -765,11 +812,11 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   status = orm_postgres_transport_policy_parse(config, &transport_policy, error);
   if (status != ORM_STATUS_OK)
     return status;
-  keywords = (tstr *)calloc((size_t)config->option_count + 3u, sizeof(*keywords));
-  values = (tstr *)calloc((size_t)config->option_count + 3u, sizeof(*values));
-  keyword_views = (const char **)calloc((size_t)config->option_count + 4u,
+  keywords = (tstr *)calloc((size_t)config->option_count + 4u, sizeof(*keywords));
+  values = (tstr *)calloc((size_t)config->option_count + 4u, sizeof(*values));
+  keyword_views = (const char **)calloc((size_t)config->option_count + 5u,
                                         sizeof(*keyword_views));
-  value_views = (const char **)calloc((size_t)config->option_count + 4u,
+  value_views = (const char **)calloc((size_t)config->option_count + 5u,
                                       sizeof(*value_views));
   if (keywords == NULL || values == NULL || keyword_views == NULL ||
       value_views == NULL) {
@@ -784,6 +831,13 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     if (orm_postgres_transport_option_name(option->keyword))
       continue;
     conninfo_option = orm_view_equal_cstr(option->keyword, "conninfo");
+    if (transport_policy.mode == ORM_POSTGRES_TRANSPORT_DIRECT_TLS &&
+        orm_view_equal_cstr(option->keyword, "channel_binding")) {
+      status = ORM_STATUS_INVALID_ARGUMENT;
+      orm_error_set(error, status,
+                    "PostgreSQL direct TLS channel binding is owned by turbodb_pg_channel_binding");
+      goto cleanup;
+    }
     if (!orm_postgres_identifier(option->keyword) ||
         !orm_view_valid(option->value, true) ||
         option->value.len > ORM_POSTGRES_OPTION_VALUE_MAX ||
@@ -851,7 +905,14 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
 
   if (transport_policy.mode == ORM_POSTGRES_TRANSPORT_DIRECT_TLS) {
     char port_text[16];
-    const int bridge_status =
+    const char *channel_binding_text = "prefer";
+    int bridge_status;
+    if (transport_policy.channel_binding == ORM_POSTGRES_CHANNEL_BINDING_DISABLE)
+      channel_binding_text = "disable";
+    else if (transport_policy.channel_binding == ORM_POSTGRES_CHANNEL_BINDING_REQUIRE)
+      channel_binding_text = "require";
+
+    bridge_status =
         orm_postgres_direct_tls_bridge_init(&state->bridge, &transport_policy);
     if (bridge_status != SALTS_OK) {
       status = ORM_STATUS_CONNECTION_ERROR;
@@ -886,7 +947,15 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     value_views[native_index] = values[native_index];
     ++native_index;
 
-    if (keywords[native_index - 3u] == NULL ||
+    keywords[native_index] = tstr_dup("channel_binding");
+    values[native_index] = tstr_dup(channel_binding_text);
+    keyword_views[native_index] = keywords[native_index];
+    value_views[native_index] = values[native_index];
+    ++native_index;
+
+    if (keywords[native_index - 4u] == NULL ||
+        values[native_index - 4u] == NULL ||
+        keywords[native_index - 3u] == NULL ||
         values[native_index - 3u] == NULL ||
         keywords[native_index - 2u] == NULL ||
         values[native_index - 2u] == NULL ||
@@ -897,6 +966,7 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
                     "allocate PostgreSQL secure bridge options");
       goto cleanup;
     }
+
   }
 
   state->connection =
@@ -906,6 +976,47 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     orm_error_set(error, status,
                   "libpq failed to allocate a PostgreSQL connection");
     goto cleanup;
+  }
+  if (state->bridge_active) {
+    /*
+     * PQconnectStartParams starts only the local nonblocking connection. Do
+     * not call PQconnectPoll until the remote TLS identity has been captured
+     * and copied into this PGconn. Progressing the bridge here admits the
+     * local leg while forwarding remains disabled.
+     */
+    status = orm_postgres_wait_bridge_channel_binding(
+        &state->bridge, transport_policy.connect_timeout_ms,
+        external_channel_binding, sizeof(external_channel_binding),
+        &external_channel_binding_size, error);
+    if (status != ORM_STATUS_OK)
+      goto cleanup;
+    if (external_channel_binding_size == 0u) {
+      status = ORM_STATUS_INTERNAL_ERROR;
+      orm_error_set(error, status,
+                    "PostgreSQL TLS channel binding was not captured");
+      goto cleanup;
+    }
+    if (PQsetExternalChannelBinding(
+            state->connection, "tls-server-end-point",
+            external_channel_binding, external_channel_binding_size) != 1) {
+      status = orm_postgres_fail(
+          error, ORM_STATUS_CONNECTION_ERROR,
+          "install PostgreSQL TLS channel binding",
+          PQerrorMessage(state->connection));
+      goto cleanup;
+    }
+    memset(external_channel_binding, 0, sizeof(external_channel_binding));
+    external_channel_binding_size = 0u;
+    {
+      const int bridge_status =
+          orm_postgres_direct_tls_bridge_enable_forwarding(&state->bridge);
+      if (bridge_status != SALTS_OK) {
+        status = ORM_STATUS_CONNECTION_ERROR;
+        orm_error_set(error, status,
+                      "enable PostgreSQL secure transport forwarding");
+        goto cleanup;
+      }
+    }
   }
   status = orm_postgres_connect_poll(
       state->connection, &state->bridge, state->bridge_active,
@@ -934,5 +1045,6 @@ cleanup:
   free(values);
   free(keyword_views);
   free(value_views);
+  memset(external_channel_binding, 0, sizeof(external_channel_binding));
   return status;
 }

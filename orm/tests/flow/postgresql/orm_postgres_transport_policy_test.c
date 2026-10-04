@@ -75,11 +75,61 @@ spec("ORM PostgreSQL secure transport policy") {
     check_equal(orm_postgres_transport_policy_parse(&config, &policy, &error),
                 ORM_STATUS_OK);
     check_equal(policy.mode, ORM_POSTGRES_TRANSPORT_DIRECT_TLS);
+    check_equal(policy.channel_binding, ORM_POSTGRES_CHANNEL_BINDING_PREFER);
     check_equal(policy.remote_port, (uint16_t)5432u);
     check_equal(policy.connect_timeout_ms, (uint32_t)5000u);
     check_equal(policy.ingress_buffer_bytes, (uint32_t)32768u);
     check_equal(policy.egress_buffer_bytes, (uint32_t)65536u);
     check_equal(strcmp(policy.server_name, "db.example.test"), 0);
+  }
+
+  it("accepts explicit require and disable channel-binding policies") {
+    orm_option_t required[] = {
+        {orm_view("turbodb_pg_transport"), orm_view("direct_tls")},
+        {orm_view("turbodb_pg_remote_host"), orm_view("db.example.test")},
+        {orm_view("turbodb_pg_remote_port"), orm_view("5432")},
+        {orm_view("turbodb_pg_server_name"), orm_view("db.example.test")},
+        {orm_view("turbodb_pg_ca_file"), orm_view("/tmp/ca.pem")},
+        {orm_view("turbodb_pg_channel_binding"), orm_view("require")}};
+    orm_option_t disabled[] = {
+        {orm_view("turbodb_pg_transport"), orm_view("direct_tls")},
+        {orm_view("turbodb_pg_remote_host"), orm_view("db.example.test")},
+        {orm_view("turbodb_pg_remote_port"), orm_view("5432")},
+        {orm_view("turbodb_pg_server_name"), orm_view("db.example.test")},
+        {orm_view("turbodb_pg_ca_file"), orm_view("/tmp/ca.pem")},
+        {orm_view("turbodb_pg_channel_binding"), orm_view("disable")}};
+    orm_config_t config;
+    orm_postgres_transport_policy policy = ORM_POSTGRES_TRANSPORT_POLICY_INIT;
+    orm_error_t error;
+
+    orm_error_init(&error);
+    config = config_with(required, 6u);
+    check_equal(orm_postgres_transport_policy_parse(&config, &policy, &error),
+                ORM_STATUS_OK);
+    check_equal(policy.channel_binding, ORM_POSTGRES_CHANNEL_BINDING_REQUIRE);
+
+    orm_error_init(&error);
+    config = config_with(disabled, 6u);
+    check_equal(orm_postgres_transport_policy_parse(&config, &policy, &error),
+                ORM_STATUS_OK);
+    check_equal(policy.channel_binding, ORM_POSTGRES_CHANNEL_BINDING_DISABLE);
+  }
+
+  it("rejects an unknown channel-binding policy") {
+    orm_option_t options[] = {
+        {orm_view("turbodb_pg_transport"), orm_view("direct_tls")},
+        {orm_view("turbodb_pg_remote_host"), orm_view("db.example.test")},
+        {orm_view("turbodb_pg_remote_port"), orm_view("5432")},
+        {orm_view("turbodb_pg_server_name"), orm_view("db.example.test")},
+        {orm_view("turbodb_pg_ca_file"), orm_view("/tmp/ca.pem")},
+        {orm_view("turbodb_pg_channel_binding"), orm_view("auto")}};
+    orm_config_t config = config_with(options, 6u);
+    orm_postgres_transport_policy policy = ORM_POSTGRES_TRANSPORT_POLICY_INIT;
+    orm_error_t error;
+    orm_error_init(&error);
+
+    check_equal(orm_postgres_transport_policy_parse(&config, &policy, &error),
+                ORM_STATUS_INVALID_ARGUMENT);
   }
 
   it("requires exactly one CA source for direct TLS") {
