@@ -7,8 +7,7 @@
 #include <string.h>
 
 static orm_status_t secure_connect(
-    const char *server_name, const char *ca_file,
-    orm_connection_t **out, orm_error_t *error) {
+    const char *server_name, const char *ca_file, orm_error_t *error) {
   const char *port = getenv("TURBODB_PG_TLS_PORT");
   orm_runtime_t *runtime = NULL;
   orm_config_t config;
@@ -19,7 +18,6 @@ static orm_status_t secure_connect(
   int64_t value = 0;
   orm_status_t status;
 
-  *out = NULL;
   if (port == NULL || port[0] == '\0' ||
       server_name == NULL || ca_file == NULL)
     return ORM_STATUS_INVALID_ARGUMENT;
@@ -81,59 +79,45 @@ static orm_status_t secure_connect(
     return status;
   }
 
-  /*
-   * The runtime owns the loaded Driver module, so this focused live test keeps
-   * runtime+connection together and tears them down immediately after proving
-   * the secure query path. The out parameter is used only as a success marker.
-   */
-  *out = connection;
   orm_disconnect(connection);
-  *out = (orm_connection_t *)(uintptr_t)1u;
-  check_equal(orm_runtime_close(runtime, error), ORM_STATUS_OK);
+  status = orm_runtime_close(runtime, error);
   orm_runtime_release(runtime);
-  return ORM_STATUS_OK;
+  return status;
 }
 
 spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
   it("connects and executes through verified direct TLS") {
     const char *ca = getenv("TURBODB_PG_TLS_CA");
-    orm_connection_t *connection = NULL;
     orm_error_t error;
     orm_error_init(&error);
 
     check_not_null(ca);
     if (ca == NULL)
       return;
-    check_equal(secure_connect("localhost", ca, &connection, &error),
-                ORM_STATUS_OK);
-    check_not_null(connection);
+    check_equal(secure_connect("localhost", ca, &error), ORM_STATUS_OK);
   }
 
   it("fails closed for an untrusted CA") {
     const char *wrong_ca = getenv("TURBODB_PG_TLS_WRONG_CA");
-    orm_connection_t *connection = NULL;
     orm_error_t error;
     orm_error_init(&error);
 
     check_not_null(wrong_ca);
     if (wrong_ca == NULL)
       return;
-    check_equal(secure_connect("localhost", wrong_ca, &connection, &error),
+    check_equal(secure_connect("localhost", wrong_ca, &error),
                 ORM_STATUS_CONNECTION_ERROR);
-    check_null(connection);
   }
 
   it("fails closed for a wrong verified server name") {
     const char *ca = getenv("TURBODB_PG_TLS_CA");
-    orm_connection_t *connection = NULL;
     orm_error_t error;
     orm_error_init(&error);
 
     check_not_null(ca);
     if (ca == NULL)
       return;
-    check_equal(secure_connect("wrong.invalid", ca, &connection, &error),
+    check_equal(secure_connect("wrong.invalid", ca, &error),
                 ORM_STATUS_CONNECTION_ERROR);
-    check_null(connection);
   }
 }
