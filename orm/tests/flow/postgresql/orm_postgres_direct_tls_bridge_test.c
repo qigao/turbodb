@@ -81,24 +81,23 @@ spec("PostgreSQL direct TLS bridge lifecycle") {
     check_equal(bridge.receive_started, 0);
   }
 
-  it("admits forwarding without a binding when verified TLS policy does not require one") {
+  it("withholds forwarding when TLS identity has not been captured") {
     orm_postgres_direct_tls_bridge bridge = ORM_POSTGRES_DIRECT_TLS_BRIDGE_INIT;
     uint8_t copied[CNET_TLS_SERVER_END_POINT_MAX_BYTES] = {0};
     size_t copied_size = 7u;
 
     bridge.state = ORM_POSTGRES_BRIDGE_REMOTE_TLS_READY;
     bridge.remote_tls_ready = 1;
-    bridge.policy.channel_binding = ORM_POSTGRES_CHANNEL_BINDING_PREFER;
 
     check_equal(
         orm_postgres_direct_tls_bridge_channel_binding(
             &bridge, copied, sizeof(copied), &copied_size),
-        SALTS_ENOENT);
+        SALTS_ENOTCONN);
     check_equal(copied_size, (size_t)0u);
     check_equal(
         orm_postgres_direct_tls_bridge_enable_forwarding(&bridge),
-        SALTS_OK);
-    check_equal(bridge.forwarding_enabled, 1);
+        SALTS_ENOTCONN);
+    check_equal(bridge.forwarding_enabled, 0);
   }
 
   it("clears copied binding material when the bridge closes") {
