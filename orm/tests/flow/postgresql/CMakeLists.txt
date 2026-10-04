@@ -3,6 +3,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/postgresql"
   TEST_NAME orm_postgres_async
   SOURCES orm_postgres_async_test.c
+    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_transport_policy.c
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_cursor.c
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_libpq.c
   LIBS orm_c_test_static PostgreSQL::PostgreSQL Salts::CFlow Salts::TinyTest Salts::TinyMock
