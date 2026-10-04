@@ -145,12 +145,15 @@ jobs:
           if "ssl" in features:
               raise SystemExit(f"libpq unexpectedly enabled ssl feature: {sorted(features)}")
 
-          wrappers = list(root.glob("*/share/libpq/vcpkg-cmake-wrapper.cmake"))
+          wrappers = list(root.glob("*/share/postgresql/vcpkg-cmake-wrapper.cmake"))
           if not wrappers:
-              raise SystemExit("installed libpq CMake wrapper was not found")
-          wrapper = wrappers[0].read_text(encoding="utf-8").lower()
-          if "openssl" in wrapper or "boringssl" in wrapper:
-              raise SystemExit("libpq no-SSL wrapper leaked a TLS provider dependency")
+              raise SystemExit("installed PostgreSQL CMake wrapper was not found")
+          wrapper = wrappers[0].read_text(encoding="utf-8")
+          openssl_gate = 'if("OFF")\n        find_package(OpenSSL REQUIRED)'
+          if openssl_gate not in wrapper:
+              raise SystemExit("libpq wrapper did not encode the no-SSL provider gate as OFF")
+          if "BoringSSL" in wrapper or "boringssl" in wrapper:
+              raise SystemExit("libpq wrapper unexpectedly references BoringSSL")
 
           print("libpq no-SSL contract verified:", ", ".join(sorted(features)))
           PY
