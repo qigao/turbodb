@@ -5,6 +5,10 @@
 
 #include <cnet/cnet.h>
 
+#ifndef CNET_TLS_SERVER_END_POINT_MAX_BYTES
+#error "TurboDB PostgreSQL direct TLS requires Salts CNet RFC5929 binding API"
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 
