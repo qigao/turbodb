@@ -8,6 +8,10 @@
 
 #include <libpq-fe.h>
 #include <salts/clock.h>
+
+#ifndef LIBPQ_HAS_EXTERNAL_CHANNEL_BINDING
+#error "TurboDB PostgreSQL driver requires libpq external channel-binding ABI"
+#endif
 #include <salts/thread.h>
 
 #include <inttypes.h>
@@ -987,12 +991,6 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     goto cleanup;
   }
   if (state->bridge_active) {
-#if !defined(LIBPQ_HAS_EXTERNAL_CHANNEL_BINDING)
-    status = ORM_STATUS_INTERNAL_ERROR;
-    orm_error_set(error, status,
-                  "libpq lacks the required external channel-binding ABI");
-    goto cleanup;
-#else
     if (external_channel_binding_size > 0u &&
         PQsetExternalChannelBinding(
             state->connection, "tls-server-end-point",
@@ -1015,7 +1013,6 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
         goto cleanup;
       }
     }
-#endif
   }
   status = orm_postgres_connect_poll(
       state->connection, &state->bridge, state->bridge_active,
