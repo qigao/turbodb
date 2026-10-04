@@ -103,6 +103,79 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ninja-build
 
+      - name: Configure PostgreSQL 17 direct TLS fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          tls="$RUNNER_TEMP/postgres-tls"
+          mkdir -p "$tls"
+
+          openssl genrsa -out "$tls/ca.key" 2048
+          openssl req -x509 -new -key "$tls/ca.key" -sha256 -days 1 \
+            -subj "/CN=TurboDB PostgreSQL Test CA" -out "$tls/ca.pem"
+
+          openssl genrsa -out "$tls/server.key" 2048
+          openssl req -new -key "$tls/server.key" -subj "/CN=localhost" \
+            -out "$tls/server.csr"
+          cat > "$tls/server.ext" <<'EOF'
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth
+          subjectAltName=DNS:localhost
+          authorityKeyIdentifier=keyid,issuer
+          subjectKeyIdentifier=hash
+          EOF
+          openssl x509 -req -in "$tls/server.csr" \
+            -CA "$tls/ca.pem" -CAkey "$tls/ca.key" -CAcreateserial \
+            -days 1 -sha256 -extfile "$tls/server.ext" -out "$tls/server.crt"
+
+          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
+            -subj "/CN=TurboDB Wrong CA" \
+            -keyout "$tls/wrong-ca.key" -out "$tls/wrong-ca.pem"
+
+          container="$(docker ps --filter ancestor=postgres:17.6-alpine3.22 \
+            --format '{{.ID}}' | head -n1)"
+          test -n "$container"
+          pgdata="$(docker exec "$container" sh -c 'printf %s "$PGDATA"')"
+          test -n "$pgdata"
+
+          docker cp "$tls/server.crt" "$container:$pgdata/server.crt"
+          docker cp "$tls/server.key" "$container:$pgdata/server.key"
+          docker exec "$container" chown postgres:postgres \
+            "$pgdata/server.crt" "$pgdata/server.key"
+          docker exec "$container" chmod 600 "$pgdata/server.key"
+          docker exec -u postgres "$container" sh -ceu '
+            {
+              echo "ssl = on"
+              echo "ssl_cert_file = '\''server.crt'\''"
+              echo "ssl_key_file = '\''server.key'\''"
+            } >> "$PGDATA/postgresql.conf"
+            {
+              echo "hostssl all turbodb 0.0.0.0/0 password"
+              echo "hostssl all turbodb ::/0 password"
+              cat "$PGDATA/pg_hba.conf"
+            } > "$PGDATA/pg_hba.conf.new"
+            mv "$PGDATA/pg_hba.conf.new" "$PGDATA/pg_hba.conf"
+          '
+          docker restart "$container" >/dev/null
+          for _ in $(seq 1 30); do
+            if docker exec "$container" pg_isready -U turbodb -d turbodb >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec "$container" pg_isready -U turbodb -d turbodb
+
+          nohup openssl s_server -accept 55432 \
+            -cert "$tls/server.crt" -key "$tls/server.key" \
+            -alpn h2 -www >"$tls/wrong-alpn.log" 2>&1 &
+          echo $! > "$tls/wrong-alpn.pid"
+
+          echo "TURBODB_PG_TLS_PORT=5432" >> "$GITHUB_ENV"
+          echo "TURBODB_PG_TLS_WRONG_ALPN_PORT=55432" >> "$GITHUB_ENV"
+          echo "TURBODB_PG_TLS_CA=$tls/ca.pem" >> "$GITHUB_ENV"
+          echo "TURBODB_PG_TLS_WRONG_CA=$tls/wrong-ca.pem" >> "$GITHUB_ENV"
+
       - name: Restore published Salts SDK pair
         shell: pwsh
         env:
@@ -158,9 +231,9 @@ jobs:
           print("libpq no-SSL contract verified:", ", ".join(sorted(features)))
           PY
 
-          cmake --build --preset ci-linux-e2e --target orm_sql_validation_parity_test orm_postgres_live_test orm_owner_postgres_test orm_owner_postgres_loss_test dbtool_postgresql_live_test --parallel 4
+          cmake --build --preset ci-linux-e2e --target orm_sql_validation_parity_test orm_postgres_live_test orm_postgres_direct_tls_live_test orm_owner_postgres_test orm_owner_postgres_loss_test dbtool_postgresql_live_test --parallel 4
 
-          ctest --preset ci-linux-e2e -R '^(orm_sql_validation_parity|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|dbtool_postgresql_live_test)$' \
+          ctest --preset ci-linux-e2e -R '^(orm_sql_validation_parity|orm_postgres_live|orm_postgres_direct_tls_live|orm_owner_postgres|orm_owner_postgres_loss|dbtool_postgresql_live_test)$' \
             --output-on-failure --output-junit "$evidence/tests.xml" 2>&1 | tee "$evidence/ctest.log"
 
       - name: Keep PostgreSQL test results

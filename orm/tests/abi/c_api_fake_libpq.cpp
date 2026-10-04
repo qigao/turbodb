@@ -222,6 +222,21 @@ int PQsendQueryParams(PGconn* connection,
     return pending_full_result != nullptr ? 1 : 0;
 }
 
+int PQflush(PGconn*)
+{
+    return 0;
+}
+
+int PQconsumeInput(PGconn*)
+{
+    return 1;
+}
+
+int PQisBusy(PGconn*)
+{
+    return 0;
+}
+
 int PQsetSingleRowMode(PGconn*)
 {
     ++single_row_count;

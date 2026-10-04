@@ -55,6 +55,31 @@ static int redis_lua_apply_test_nonblocking(redis_lua_apply_test_socket socket_v
 #endif
 }
 
+static int redis_lua_apply_test_recv(redis_lua_apply_test_socket socket_value,
+                                     void *buffer, int capacity) {
+  fd_set readable;
+  struct timeval timeout;
+  int ready;
+
+  FD_ZERO(&readable);
+  FD_SET(socket_value, &readable);
+  timeout.tv_sec = 5;
+  timeout.tv_usec = 0;
+  do {
+#if defined(_WIN32)
+    ready = select(0, &readable, NULL, NULL, &timeout);
+#else
+    ready = select(socket_value + 1, &readable, NULL, NULL, &timeout);
+#endif
+  } while (ready < 0
+#if !defined(_WIN32)
+           && errno == EINTR
+#endif
+  );
+  if (ready <= 0) return ready;
+  return (int)recv(socket_value, (char *)buffer, capacity, 0);
+}
+
 static int redis_lua_apply_test_pair(redis_lua_apply_test_socket sockets[2]) {
   redis_lua_apply_test_socket listener = REDIS_LUA_APPLY_TEST_INVALID;
   struct sockaddr_in address;
@@ -202,7 +227,8 @@ suite("redis Lua indexed apply") {
     check_equal(redis_io_runtime_wait_idle(&runtime, UINT64_C(5000000000)), SALTS_OK);
     step = redis_lua_apply_next(&operation);
     check_equal(step.kind, REDIS_LUA_APPLY_WAIT);
-    received = recv(sockets[1], command, (int)(sizeof(command) - 1u), 0);
+    received = redis_lua_apply_test_recv(
+        sockets[1], command, (int)(sizeof(command) - 1u));
     check_true(received > 0);
     command[received] = '\0';
     check_not_null(strstr(command, "EVAL"));

@@ -1,4 +1,7 @@
 #include "orm_postgres_libpq.h"
+#include "postgres_direct_tls_bridge.h"
+
+#include <salts_error.h>
 
 #include <limits.h>
 
@@ -32,6 +35,74 @@ static const char *orm_postgres_libpq_connection_error(void *context) {
 
 static int orm_postgres_libpq_connection_ok(void *context) {
   return PQstatus((const PGconn *)context) == CONNECTION_OK;
+}
+
+static int orm_postgres_libpq_bridge_pump(
+    orm_postgres_libpq_context *context) {
+  return context != NULL && context->bridge != NULL &&
+         orm_postgres_direct_tls_bridge_progress(context->bridge, 1u) == SALTS_OK;
+}
+
+static int orm_postgres_libpq_bridge_send(
+    void *context, const orm_postgres_query_request *request) {
+  orm_postgres_libpq_context *bridge_context =
+      (orm_postgres_libpq_context *)context;
+  int flush_status;
+  if (bridge_context == NULL || bridge_context->connection == NULL ||
+      bridge_context->bridge == NULL)
+    return 0;
+  if (!PQsendQueryParams(
+          bridge_context->connection, request->sql, request->parameter_count,
+          (const Oid *)request->parameter_types, request->parameter_values,
+          request->parameter_lengths, request->parameter_formats,
+          request->result_format))
+    return 0;
+  do {
+    flush_status = PQflush(bridge_context->connection);
+    if (flush_status < 0)
+      return 0;
+    if (flush_status == 0)
+      return 1;
+    if (!orm_postgres_libpq_bridge_pump(bridge_context))
+      return 0;
+  } while (1);
+}
+
+static int orm_postgres_libpq_bridge_enable_single_row(void *context) {
+  orm_postgres_libpq_context *bridge_context =
+      (orm_postgres_libpq_context *)context;
+  return bridge_context != NULL && bridge_context->connection != NULL
+             ? PQsetSingleRowMode(bridge_context->connection)
+             : 0;
+}
+
+static void *orm_postgres_libpq_bridge_next_result(void *context) {
+  orm_postgres_libpq_context *bridge_context =
+      (orm_postgres_libpq_context *)context;
+  if (bridge_context == NULL || bridge_context->connection == NULL ||
+      bridge_context->bridge == NULL)
+    return NULL;
+  while (PQisBusy(bridge_context->connection)) {
+    if (!orm_postgres_libpq_bridge_pump(bridge_context) ||
+        PQconsumeInput(bridge_context->connection) == 0)
+      return NULL;
+  }
+  return PQgetResult(bridge_context->connection);
+}
+
+static const char *orm_postgres_libpq_bridge_connection_error(void *context) {
+  orm_postgres_libpq_context *bridge_context =
+      (orm_postgres_libpq_context *)context;
+  return bridge_context != NULL && bridge_context->connection != NULL
+             ? PQerrorMessage(bridge_context->connection)
+             : "invalid PostgreSQL bridge context";
+}
+
+static int orm_postgres_libpq_bridge_connection_ok(void *context) {
+  orm_postgres_libpq_context *bridge_context =
+      (orm_postgres_libpq_context *)context;
+  return bridge_context != NULL && bridge_context->connection != NULL &&
+         PQstatus(bridge_context->connection) == CONNECTION_OK;
 }
 
 static orm_postgres_result_status orm_postgres_libpq_status(
@@ -110,6 +181,15 @@ static const orm_postgres_command_ops orm_postgres_libpq_command_ops = {
     orm_postgres_libpq_next_result, orm_postgres_libpq_release_result,
     orm_postgres_libpq_connection_error, orm_postgres_libpq_connection_ok};
 
+static const orm_postgres_command_ops orm_postgres_libpq_bridge_command_ops = {
+    sizeof(orm_postgres_command_ops), ORM_POSTGRES_COMMAND_OPS_ABI_VERSION,
+    orm_postgres_libpq_bridge_send,
+    orm_postgres_libpq_bridge_enable_single_row,
+    orm_postgres_libpq_bridge_next_result,
+    orm_postgres_libpq_release_result,
+    orm_postgres_libpq_bridge_connection_error,
+    orm_postgres_libpq_bridge_connection_ok};
+
 static const orm_postgres_result_ops orm_postgres_libpq_result_ops = {
     sizeof(orm_postgres_result_ops), ORM_POSTGRES_RESULT_OPS_ABI_VERSION,
     orm_postgres_libpq_status, orm_postgres_libpq_rows,
@@ -122,5 +202,19 @@ static const orm_postgres_result_ops orm_postgres_libpq_result_ops = {
 orm_postgres_driver orm_postgres_libpq_driver(PGconn *connection) {
   orm_postgres_driver driver = {&orm_postgres_libpq_command_ops,
                                 &orm_postgres_libpq_result_ops, connection};
+  return driver;
+}
+
+orm_postgres_driver orm_postgres_libpq_bridge_driver(
+    orm_postgres_libpq_context *context, PGconn *connection,
+    orm_postgres_direct_tls_bridge *bridge) {
+  orm_postgres_driver driver = {0};
+  if (context == NULL || connection == NULL || bridge == NULL)
+    return driver;
+  context->connection = connection;
+  context->bridge = bridge;
+  driver.command = &orm_postgres_libpq_bridge_command_ops;
+  driver.result = &orm_postgres_libpq_result_ops;
+  driver.context = context;
   return driver;
 }

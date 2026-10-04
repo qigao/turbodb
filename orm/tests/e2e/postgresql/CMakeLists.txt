@@ -88,3 +88,20 @@ endif()
 set_tests_properties(orm_owner_postgres orm_owner_postgres_loss
                      PROPERTIES TIMEOUT 60
                        ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")
+
+cmake_add_test(
+  NAME orm_postgres_direct_tls_live_test
+  FOLDER "orm/tests/e2e/postgresql"
+  TEST_NAME orm_postgres_direct_tls_live
+  SOURCES postgres_direct_tls_live_test.c
+  LIBS turbo_orm Salts::TinyTest Salts::Platform
+  DEFS ORM_C_STATIC
+  INCLUDES ${ORM_SOURCE_DIR}/include/orm)
+add_dependencies(orm_postgres_direct_tls_live_test orm_postgresql_driver)
+set_tests_properties(
+  orm_postgres_direct_tls_live
+  PROPERTIES
+    LABELS e2e
+    RUN_SERIAL TRUE
+    TIMEOUT 60
+    ENVIRONMENT "ORM_POSTGRESQL_PLUGIN=$<TARGET_FILE:orm_postgresql_driver>")

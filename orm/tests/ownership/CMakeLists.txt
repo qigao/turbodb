@@ -178,9 +178,10 @@ cmake_add_test(
   TEST_NAME orm_postgres_connection
   SOURCES ../flow/postgresql/orm_postgres_connection_test.c
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_libpq.c
+    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_direct_tls_bridge.c
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_cursor.c
   LIBS orm_owner_test_core PostgreSQL::PostgreSQL Salts::CSerde Salts::DataBind
-    Salts::CFlow Salts::TinyTest
+    Salts::CNet Salts::CFlow Salts::TinyTest
   INCLUDES ../../src/abi ../../src/flow ${ORM_SOURCE_DIR}/../drivers/postgresql)
 
 set_target_properties(
