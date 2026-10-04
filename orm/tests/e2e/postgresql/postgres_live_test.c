@@ -106,7 +106,9 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
                                           orm_error_t *error) {
   static const unsigned char expected_payload[] = {0x00u, 0x01u, 0xffu,
                                                     0x7fu};
-  const orm_option_t option = {orm_view("conninfo"), orm_view(conninfo)};
+  const orm_option_t options[] = {
+      {orm_view("turbodb_pg_transport"), orm_view("disabled")},
+      {orm_view("conninfo"), orm_view(conninfo)}};
   const orm_key_part_t key[] = {
       {orm_view("domain_id"), orm_text("domain-a")},
       {orm_view("user_id"), orm_text("user-a")},
@@ -142,8 +144,8 @@ static orm_status_t orm_postgres_live_run(const char *conninfo,
 
   orm_config(&config);
   config.driver = orm_view("postgresql");
-  config.options = &option;
-  config.option_count = 1u;
+  config.options = options;
+  config.option_count = 2u;
   status = orm_runtime_connect(runtime, &config, &connection, error);
   if (status != ORM_STATUS_OK)
     goto cleanup;
