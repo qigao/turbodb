@@ -71,7 +71,7 @@
       "inherits": [
         "ci-native-base",
         "Clang",
-        "flags-gnu",
+        "flags-appleclang",
         "ISMac"
       ],
       "binaryDir": "${sourceDir}/build/ci-macos-release",
