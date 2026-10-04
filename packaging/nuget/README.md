@@ -10,7 +10,7 @@ CI 和发布流程始终以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Nat
 
 SDK 恢复和暂存步骤只负责下载、复制及导出路径。依赖是否可用由构建和测试验证，不检查 Salts/SaltsUtils 的版本或 ABI 数值。实际解析的包版本仅用于定位安装目录和记录构建信息。
 
-CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 `OrmConfig.cmake`。设置 `SALTS_ROOT`、`SALTS_UTILS_ROOT` 和 `TURBODB_ROOT` 指向匹配的平台安装树，以 `PATHS "$ENV{TURBODB_ROOT}" NO_DEFAULT_PATH` 查找 TurboDB。SDK 随包提供构建时匹配的 BoringSSL 库、头文件、CMake 配置和许可证；消费项目无需安装 OpenSSL/BoringSSL，consumer 的 vcpkg manifest 不包含 SSL 依赖。SaltsUtils 保留为运行时依赖，只有直接使用其 API 的客户端才需要查找它的 CMake package。
+CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 `OrmConfig.cmake`。设置 `SALTS_ROOT`、`SALTS_UTILS_ROOT` 和 `TURBODB_ROOT` 指向匹配的平台安装树，以 `PATHS "$ENV{TURBODB_ROOT}" NO_DEFAULT_PATH` 查找 TurboDB。MySQL TLS 由 Salts::CNet 管理，认证摘要使用 Salts 的 provider-neutral crypto API；TurboDB SDK 不再随包携带 OpenSSL/BoringSSL。SaltsUtils 保留为运行时依赖，只有直接使用其 API 的客户端才需要查找它的 CMake package.
 
 客户端按需链接 `Orm::C`、`Orm::Cpp`、`Orm::DriverABI`、`TurboDB::MySQL`、`TurboDB::Redis` 或 `TurboDB::SchemaABI`。驱动不通过链接自动加载：从 `TurboDB_DRIVER_DIR` 选择模块并调用 `orm_runtime_load_driver`。ORM 核心不直接依赖数据库客户端。
 
@@ -18,7 +18,7 @@ CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 
 
 从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。Salts/SaltsUtils 始终使用最新稳定版本。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
 
-包内容断言位于 `packaging/tests/native_package_test.py`，使用 Python 标准库 unittest，覆盖三个平台的核心、驱动、公开头文件、随包 TLS 文件及 NuGet 依赖。打包后在仓库根目录运行：
+包内容断言位于 `packaging/tests/native_package_test.py`，使用 Python 标准库 unittest，覆盖三个平台的核心、驱动、公开头文件及 NuGet 依赖。打包后在仓库根目录运行：
 
 ```bash
 TURBODB_NUPKG="dist/TurboDB.Native.${version}.nupkg" \
