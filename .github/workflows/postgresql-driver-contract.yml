@@ -121,6 +121,43 @@ jobs:
 
           cmake --preset ci-linux-e2e
 
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["GITHUB_WORKSPACE"]) / "vcpkg_installed"
+          status = root / "vcpkg" / "status"
+          text = status.read_text(encoding="utf-8")
+          libpq = []
+          for paragraph in text.split("\n\n"):
+              fields = {}
+              for line in paragraph.splitlines():
+                  if ": " in line:
+                      key, value = line.split(": ", 1)
+                      fields[key] = value
+              if fields.get("Package") == "libpq":
+                  libpq.append(fields)
+
+          if not libpq:
+              raise SystemExit("libpq is missing from the installed PostgreSQL closure")
+
+          features = {entry.get("Feature", "core") for entry in libpq}
+          if "ssl" in features:
+              raise SystemExit(f"libpq unexpectedly enabled ssl feature: {sorted(features)}")
+
+          wrappers = list(root.glob("*/share/postgresql/vcpkg-cmake-wrapper.cmake"))
+          if not wrappers:
+              raise SystemExit("installed PostgreSQL CMake wrapper was not found")
+          wrapper = wrappers[0].read_text(encoding="utf-8")
+          openssl_gate = 'if("OFF")\n        find_package(OpenSSL REQUIRED)'
+          if openssl_gate not in wrapper:
+              raise SystemExit("libpq wrapper did not encode the no-SSL provider gate as OFF")
+          if "BoringSSL" in wrapper or "boringssl" in wrapper:
+              raise SystemExit("libpq wrapper unexpectedly references BoringSSL")
+
+          print("libpq no-SSL contract verified:", ", ".join(sorted(features)))
+          PY
+
           cmake --build --preset ci-linux-e2e --target orm_sql_validation_parity_test orm_postgres_live_test orm_owner_postgres_test orm_owner_postgres_loss_test dbtool_postgresql_live_test --parallel 4
 
           ctest --preset ci-linux-e2e -R '^(orm_sql_validation_parity|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|dbtool_postgresql_live_test)$' \
