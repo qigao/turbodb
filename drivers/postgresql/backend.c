@@ -26,6 +26,7 @@ enum {
 typedef struct orm_postgres_backend_state {
   PGconn *connection;
   orm_postgres_direct_tls_bridge bridge;
+  orm_postgres_libpq_context libpq_context;
   int bridge_active;
   int transaction_active;
   int async_active;
@@ -311,7 +312,10 @@ static orm_status_t orm_postgres_open_impl(
     orm_sql_query_destroy(&rendered);
     return status;
   }
-  driver = orm_postgres_libpq_driver(state->connection);
+  driver = state->bridge_active
+               ? orm_postgres_libpq_bridge_driver(
+                     &state->libpq_context, state->connection, &state->bridge)
+               : orm_postgres_libpq_driver(state->connection);
   request.sql = rendered.text;
   request.parameter_count = (int)parameters.count;
   request.parameter_types = NULL;
@@ -409,7 +413,10 @@ static orm_status_t orm_postgres_control(orm_postgres_backend_state *state,
                   "invalid PostgreSQL control request");
     return ORM_STATUS_INVALID_ARGUMENT;
   }
-  driver = orm_postgres_libpq_driver(state->connection);
+  driver = state->bridge_active
+               ? orm_postgres_libpq_bridge_driver(
+                     &state->libpq_context, state->connection, &state->bridge)
+               : orm_postgres_libpq_driver(state->connection);
   memset(&request, 0, sizeof(request));
   request.sql = sql;
   cursor_config = (orm_postgres_cursor_config)
@@ -894,6 +901,12 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
       transport_policy.connect_timeout_ms, error);
   if (status != ORM_STATUS_OK)
     goto cleanup;
+  if (state->bridge_active && PQsetnonblocking(state->connection, 1) != 0) {
+    status = orm_postgres_fail(error, ORM_STATUS_CONNECTION_ERROR,
+                               "enable PostgreSQL bridge nonblocking mode",
+                               PQerrorMessage(state->connection));
+    goto cleanup;
+  }
   out_backend->ops = &orm_postgres_backend_ops;
   out_backend->context = state;
   state = NULL;
