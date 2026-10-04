@@ -118,10 +118,12 @@ jobs:
           openssl req -new -key "$tls/server.key" -subj "/CN=localhost" \
             -out "$tls/server.csr"
           cat > "$tls/server.ext" <<'EOF'
-          basicConstraints=CA:FALSE
-          keyUsage=digitalSignature,keyEncipherment
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
           extendedKeyUsage=serverAuth
           subjectAltName=DNS:localhost
+          authorityKeyIdentifier=keyid,issuer
+          subjectKeyIdentifier=hash
           EOF
           openssl x509 -req -in "$tls/server.csr" \
             -CA "$tls/ca.pem" -CAkey "$tls/ca.key" -CAcreateserial \
