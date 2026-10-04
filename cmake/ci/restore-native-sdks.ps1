@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("linux-x64", "windows-x64", "android-arm64-v8a")]
+  [ValidateSet("linux-x64", "windows-x64", "macos-arm64", "android-arm64-v8a")]
   [string]$Rid
 )
 
@@ -100,6 +100,14 @@ if ($Rid -eq "linux-x64") {
     $entries += $env:LD_LIBRARY_PATH
   }
   "LD_LIBRARY_PATH=$($entries -join ':')" |
+    Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+}
+if ($Rid -eq "macos-arm64") {
+  $entries = @((Join-Path $saltsRoot "lib"), (Join-Path $saltsUtilsRoot "lib"))
+  if (-not [string]::IsNullOrWhiteSpace($env:DYLD_LIBRARY_PATH)) {
+    $entries += $env:DYLD_LIBRARY_PATH
+  }
+  "DYLD_LIBRARY_PATH=$($entries -join ':')" |
     Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 }
 
