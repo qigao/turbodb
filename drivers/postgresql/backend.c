@@ -43,6 +43,16 @@ static orm_row_cursor_step orm_postgres_async_poll(void *context) {
   orm_row_cursor_step step = ORM_ROW_CURSOR_STEP_INIT;
   PGconn *connection = async->owner->connection;
   if (orm_async_wait_expired(&async->wait)) return orm_async_wait_step(&async->wait);
+  if (async->owner->bridge_active) {
+    const int bridge_status =
+        orm_postgres_direct_tls_bridge_progress(&async->owner->bridge, 0u);
+    if (bridge_status != SALTS_OK) {
+      step.kind = ORM_ROW_CURSOR_ERROR;
+      step.status = ORM_STATUS_CONNECTION_ERROR;
+      step.message = "PostgreSQL secure bridge progress failed";
+      return step;
+    }
+  }
   if (connection == NULL || PQconsumeInput(connection) == 0) {
     step.kind = ORM_ROW_CURSOR_ERROR;
     step.status = ORM_STATUS_CONNECTION_ERROR;
@@ -71,7 +81,8 @@ static void orm_postgres_async_abort(void *context) {
 static void orm_postgres_async_release(void *context) {
   orm_postgres_async_state *async = context;
   orm_async_wait_destroy(&async->wait);
-  if (async->owner->connection != NULL && PQsetnonblocking(async->owner->connection, 0) != 0)
+  if (async->owner->connection != NULL && !async->owner->bridge_active &&
+      PQsetnonblocking(async->owner->connection, 0) != 0)
     orm_postgres_async_abort(async);
   async->owner->async_active = 0;
   free(async);
