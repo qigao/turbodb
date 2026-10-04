@@ -228,7 +228,15 @@ jobs:
           if "BoringSSL" in wrapper or "boringssl" in wrapper:
               raise SystemExit("libpq wrapper unexpectedly references BoringSSL")
 
+          headers = list(root.glob("*/include/libpq-fe.h"))
+          if not headers:
+              raise SystemExit("installed libpq-fe.h was not found")
+          public_header = headers[0].read_text(encoding="utf-8")
+          if "LIBPQ_HAS_EXTERNAL_CHANNEL_BINDING" not in public_header:
+              raise SystemExit("libpq external channel-binding ABI is missing")
+
           print("libpq no-SSL contract verified:", ", ".join(sorted(features)))
+          print("libpq external channel-binding ABI verified")
           PY
 
           cmake --build --preset ci-linux-e2e --target orm_sql_validation_parity_test orm_postgres_live_test orm_postgres_direct_tls_live_test orm_owner_postgres_test orm_owner_postgres_loss_test dbtool_postgresql_live_test --parallel 4
