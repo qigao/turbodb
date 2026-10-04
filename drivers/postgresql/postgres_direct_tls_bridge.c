@@ -32,14 +32,13 @@ static void orm_postgres_bridge_fail(
 
 static int orm_postgres_bridge_send(
     orm_postgres_direct_tls_bridge *bridge,
-    cnet_connection target, const cnet_receive_view *view) {
+    cnet_connection target, const cnet_receive_view *view, size_t limit) {
   mem_buffer_t *buffer;
   int status;
   if (bridge == NULL || view == NULL || view->kind != CNET_MESSAGE_BYTES ||
       view->data == NULL || view->size == 0u)
     return SALTS_EINVAL;
-  if (view->size > bridge->policy.ingress_buffer_bytes &&
-      view->size > bridge->policy.egress_buffer_bytes)
+  if (view->size > limit)
     return SALTS_ENOBUFS;
   buffer = mem_get_buffer(mem_global(), view->size);
   if (buffer == NULL)
@@ -70,6 +69,17 @@ static void orm_postgres_bridge_on_state(
       return;
     }
     if (state == CNET_CONNECTION_CONNECTED) {
+      char negotiated[CNET_TLS_ALPN_NAME_MAX_BYTES + 1u] = {0};
+      size_t negotiated_size = 0u;
+      const int alpn_status = cnet_tls_negotiated_alpn(
+          &bridge->client, bridge->remote, negotiated, sizeof(negotiated),
+          &negotiated_size);
+      if (alpn_status != SALTS_OK || negotiated_size != 10u ||
+          memcmp(negotiated, "postgresql", 10u) != 0) {
+        orm_postgres_bridge_fail(
+            bridge, alpn_status != SALTS_OK ? alpn_status : SALTS_EPROTO);
+        return;
+      }
       bridge->remote_tls_ready = 1;
       if (bridge->local_live) {
         const int local_status = cnet_receive(&bridge->client, bridge->local, 1u);
@@ -123,21 +133,25 @@ static void orm_postgres_bridge_on_receive(
   orm_postgres_direct_tls_bridge *bridge =
       (orm_postgres_direct_tls_bridge *)user;
   cnet_connection target;
+  size_t limit;
   int status;
   if (bridge == NULL || bridge->state != ORM_POSTGRES_BRIDGE_FORWARDING ||
       !bridge->remote_tls_ready) {
     orm_postgres_bridge_fail(bridge, SALTS_EPROTO);
     return;
   }
-  if (orm_postgres_bridge_connection_equal(connection, bridge->local))
+  if (orm_postgres_bridge_connection_equal(connection, bridge->local)) {
     target = bridge->remote;
-  else if (orm_postgres_bridge_connection_equal(connection, bridge->remote))
+    limit = bridge->policy.egress_buffer_bytes;
+  } else if (orm_postgres_bridge_connection_equal(connection, bridge->remote)) {
     target = bridge->local;
+    limit = bridge->policy.ingress_buffer_bytes;
+  }
   else {
     orm_postgres_bridge_fail(bridge, SALTS_EPROTO);
     return;
   }
-  status = orm_postgres_bridge_send(bridge, target, view);
+  status = orm_postgres_bridge_send(bridge, target, view, limit);
   if (status != SALTS_OK) {
     orm_postgres_bridge_fail(bridge, status);
     return;
