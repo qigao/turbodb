@@ -137,9 +137,11 @@ spec("real PostgreSQL established-session loss") {
     check_not_null(controller);
     check_equal((int)PQstatus(controller), (int)CONNECTION_OK);
     orm_config_t config;
-    const orm_option_t option = {orm_view("conninfo"), orm_view(conninfo)};
+    const orm_option_t options[] = {
+        {orm_view("turbodb_pg_transport"), orm_view("disabled")},
+        {orm_view("conninfo"), orm_view(conninfo)}};
     orm_config(&config); config.driver = orm_view("postgresql");
-    config.options = &option; config.option_count = 1u;
+    config.options = options; config.option_count = 2u;
     check_equal(orm_runtime_connect(runtime, &config, &connection, &error), ORM_STATUS_OK);
     orm_query_t *pid_query = NULL;
     orm_result_t *pid_result = NULL;

@@ -3,6 +3,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/postgresql"
   TEST_NAME orm_postgres_async
   SOURCES orm_postgres_async_test.c
+    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_transport_policy.c
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_cursor.c
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_libpq.c
   LIBS orm_c_test_static PostgreSQL::PostgreSQL Salts::CFlow Salts::TinyTest Salts::TinyMock
@@ -53,3 +54,15 @@ if(WIN32)
   set_tests_properties(orm_postgres_flow PROPERTIES ENVIRONMENT_MODIFICATION
                                                     "${ORM_TEST_RUNTIME_PATH}")
 endif()
+
+cmake_add_test(
+  NAME orm_postgres_transport_policy_test
+  FOLDER "orm/tests/flow/postgresql"
+  TEST_NAME orm_postgres_transport_policy
+  SOURCES orm_postgres_transport_policy_test.c
+    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_transport_policy.c
+  LIBS orm_c_test_static Salts::TinyTest
+  DEFS ORM_C_STATIC
+  INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
+    ${ORM_SOURCE_DIR}/../drivers/postgresql)
+set_property(TARGET orm_postgres_transport_policy_test PROPERTY LINKER_LANGUAGE CXX)

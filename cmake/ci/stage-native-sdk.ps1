@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("linux-x64", "windows-x64", "android-arm64-v8a")]
+  [ValidateSet("linux-x64", "windows-x64", "macos-arm64", "android-arm64-v8a")]
   [string]$Rid,
   [Parameter(Mandatory = $true)]
   [string]$Version
@@ -22,6 +22,7 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 $platform = switch ($Rid) {
   "windows-x64" { "windows" }
   "linux-x64" { "linux" }
+  "macos-arm64" { "macos" }
   "android-arm64-v8a" { "android" }
 }
 $manifest = Join-Path $env:GITHUB_WORKSPACE "build/ci-$platform-release/install_manifest.txt"
