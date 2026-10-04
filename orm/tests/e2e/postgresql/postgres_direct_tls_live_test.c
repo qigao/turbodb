@@ -6,9 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-static orm_status_t secure_connect(
-    const char *server_name, const char *ca_file, orm_error_t *error) {
-  const char *port = getenv("TURBODB_PG_TLS_PORT");
+static orm_status_t secure_connect_port(
+    const char *port, const char *server_name, const char *ca_file,
+    orm_error_t *error) {
   orm_runtime_t *runtime = NULL;
   orm_config_t config;
   orm_option_t options[10];
@@ -94,7 +94,7 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     check_not_null(ca);
     if (ca == NULL)
       return;
-    check_equal(secure_connect("localhost", ca, &error), ORM_STATUS_OK);
+    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "localhost", ca, &error), ORM_STATUS_OK);
   }
 
   it("fails closed for an untrusted CA") {
@@ -105,7 +105,21 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     check_not_null(wrong_ca);
     if (wrong_ca == NULL)
       return;
-    check_equal(secure_connect("localhost", wrong_ca, &error),
+    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "localhost", wrong_ca, &error),
+                ORM_STATUS_CONNECTION_ERROR);
+  }
+
+  it("fails closed when negotiated ALPN is not postgresql") {
+    const char *ca = getenv("TURBODB_PG_TLS_CA");
+    const char *port = getenv("TURBODB_PG_TLS_WRONG_ALPN_PORT");
+    orm_error_t error;
+    orm_error_init(&error);
+
+    check_not_null(ca);
+    check_not_null(port);
+    if (ca == NULL || port == NULL)
+      return;
+    check_equal(secure_connect_port(port, "localhost", ca, &error),
                 ORM_STATUS_CONNECTION_ERROR);
   }
 
@@ -117,7 +131,7 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     check_not_null(ca);
     if (ca == NULL)
       return;
-    check_equal(secure_connect("wrong.invalid", ca, &error),
+    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "wrong.invalid", ca, &error),
                 ORM_STATUS_CONNECTION_ERROR);
   }
 }
