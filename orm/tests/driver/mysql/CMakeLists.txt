@@ -170,7 +170,7 @@ cmake_add_test(
   FOLDER "orm/tests/driver/mysql"
   TEST_NAME orm_mysql_handshake
   SOURCES orm_mysql_handshake_test.c
-  LIBS TurboDB::MySQL Salts::TinyTest OpenSSL::Crypto
+  LIBS TurboDB::MySQL Salts::TinyTest
   INCLUDES ${ORM_MYSQL_SOURCE_DIR}/wire ${ORM_MYSQL_SOURCE_DIR}/auth)
 
 if(MSVC)

@@ -1,6 +1,4 @@
 include(GNUInstallDirs)
-find_package(OpenSSL REQUIRED)
-
 add_library(turbodb_mysql STATIC
   session.c
   transaction_control.c
@@ -17,7 +15,7 @@ target_include_directories(turbodb_mysql PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mysql>)
 target_link_libraries(turbodb_mysql
   PUBLIC Salts::Core Salts::CSerde
-  PRIVATE Salts::CNet OpenSSL::Crypto)
+  PRIVATE Salts::CNet)
 set_target_properties(turbodb_mysql PROPERTIES
   EXPORT_NAME MySQL
   POSITION_INDEPENDENT_CODE ON

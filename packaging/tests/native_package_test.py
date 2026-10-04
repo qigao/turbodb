@@ -14,7 +14,6 @@ class NativePackageTest(unittest.TestCase):
         cls.files = {item.filename for item in cls.package.infolist() if not item.is_dir()}
 
     def test_sdk_contents(self):
-        # Bundled TLS is required for consumers that cannot install SSL themselves.
         common = (
             "lib/cmake/TurboDB/TurboDBConfig.cmake",
             "lib/cmake/TurboDB/OrmTargets.cmake",
@@ -24,10 +23,6 @@ class NativePackageTest(unittest.TestCase):
             "include/mysql/session_async.h",
             "include/mysql/session_script.h",
             "include/redis/redis_io.h",
-            "share/OpenSSL/OpenSSLConfig.cmake",
-            "share/OpenSSL/OpenSSLTargets-release.cmake",
-            "include/openssl/crypto.h",
-            "share/boringssl/copyright",
         )
         for rid in ("linux-x64", "windows-x64", "android-arm64-v8a"):
             windows = rid == "windows-x64"
