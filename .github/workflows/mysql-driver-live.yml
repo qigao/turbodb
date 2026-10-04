@@ -122,18 +122,49 @@ jobs:
             | tee "$GITHUB_WORKSPACE/evidence/mysql/server.txt"
 
           docker cp "$cid:/var/lib/mysql/ca.pem" "$RUNNER_TEMP/mysql-tls/ca.pem"
-          docker cp "$cid:/var/lib/mysql/server-cert.pem" "$RUNNER_TEMP/mysql-tls/server-cert.pem"
+          docker cp "$cid:/var/lib/mysql/ca-key.pem" "$RUNNER_TEMP/mysql-tls/ca-key.pem"
+
+          # MySQL's auto-generated server certificate has only a CN and no SAN.
+          # GmSSL intentionally requires DNS SubjectAltName for hostname verification,
+          # so issue a focused localhost server certificate from the container CA.
+          openssl genrsa -out "$RUNNER_TEMP/mysql-tls/server-key.pem" 2048
+          openssl req -new \
+            -key "$RUNNER_TEMP/mysql-tls/server-key.pem" \
+            -subj "/CN=localhost" \
+            -out "$RUNNER_TEMP/mysql-tls/server.csr"
+          cat > "$RUNNER_TEMP/mysql-tls/server-ext.cnf" <<'EOF'
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth
+          subjectAltName=DNS:localhost
+          authorityKeyIdentifier=keyid,issuer
+          subjectKeyIdentifier=hash
+          EOF
+          openssl x509 -req \
+            -in "$RUNNER_TEMP/mysql-tls/server.csr" \
+            -CA "$RUNNER_TEMP/mysql-tls/ca.pem" \
+            -CAkey "$RUNNER_TEMP/mysql-tls/ca-key.pem" \
+            -CAcreateserial \
+            -days 1 \
+            -sha256 \
+            -extfile "$RUNNER_TEMP/mysql-tls/server-ext.cnf" \
+            -out "$RUNNER_TEMP/mysql-tls/server-cert.pem"
+
+          docker cp "$RUNNER_TEMP/mysql-tls/server-key.pem" "$cid:/var/lib/mysql/server-key.pem"
+          docker cp "$RUNNER_TEMP/mysql-tls/server-cert.pem" "$cid:/var/lib/mysql/server-cert.pem"
+          docker exec "$cid" sh -lc \
+            "chown mysql:mysql /var/lib/mysql/server-key.pem /var/lib/mysql/server-cert.pem && chmod 600 /var/lib/mysql/server-key.pem && chmod 644 /var/lib/mysql/server-cert.pem"
+          docker exec "$cid" mysql -uroot -prootpw -e "ALTER INSTANCE RELOAD TLS;"
+
+          cp "$RUNNER_TEMP/mysql-tls/ca.pem" "$GITHUB_WORKSPACE/evidence/mysql/ca.pem"
+          cp "$RUNNER_TEMP/mysql-tls/server-cert.pem" "$GITHUB_WORKSPACE/evidence/mysql/server-cert.pem"
           subject="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
             -noout -subject -nameopt RFC2253)"
-          server_name="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
-            -noout -subject -nameopt sep_multiline \
-            | sed -n 's/^[[:space:]]*CN[[:space:]]*=[[:space:]]*//p' \
-            | head -n 1)"
-          if [[ -z "$server_name" ]]; then
-            printf 'unable to extract certificate CN from subject: %s\n' "$subject" >&2
-            exit 1
-          fi
-          printf 'certificate_subject=%s\nserver_name=%s\n' "$subject" "$server_name" \
+          san="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
+            -noout -ext subjectAltName)"
+          server_name="localhost"
+          grep -F "DNS:localhost" <<<"$san"
+          printf 'certificate_subject=%s\n%s\nserver_name=%s\n' "$subject" "$san" "$server_name" \
             | tee "$GITHUB_WORKSPACE/evidence/mysql/tls.txt"
 
           {
