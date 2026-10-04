@@ -112,16 +112,23 @@ static void orm_postgres_bridge_on_state(
         return;
       }
 
-      status = cnet_tls_server_end_point_binding(
-          &bridge->client, bridge->remote, bridge->channel_binding,
-          sizeof(bridge->channel_binding), &binding_size);
-      if (status != SALTS_OK || binding_size == 0u ||
-          binding_size > sizeof(bridge->channel_binding)) {
-        orm_postgres_bridge_fail(
-            bridge, status != SALTS_OK ? status : SALTS_EPROTO);
-        return;
+      if (bridge->policy.channel_binding != ORM_POSTGRES_CHANNEL_BINDING_DISABLE) {
+        status = cnet_tls_server_end_point_binding(
+            &bridge->client, bridge->remote, bridge->channel_binding,
+            sizeof(bridge->channel_binding), &binding_size);
+        if (status == SALTS_OK && binding_size > 0u &&
+            binding_size <= sizeof(bridge->channel_binding)) {
+          bridge->channel_binding_size = binding_size;
+        } else if (bridge->policy.channel_binding ==
+                   ORM_POSTGRES_CHANNEL_BINDING_REQUIRE) {
+          orm_postgres_bridge_fail(
+              bridge, status != SALTS_OK ? status : SALTS_EPROTO);
+          return;
+        } else {
+          memset(bridge->channel_binding, 0, sizeof(bridge->channel_binding));
+          bridge->channel_binding_size = 0u;
+        }
       }
-      bridge->channel_binding_size = binding_size;
       bridge->remote_tls_ready = 1;
       bridge->state = bridge->local_live
                           ? ORM_POSTGRES_BRIDGE_LOCAL_ACCEPTED
@@ -348,8 +355,10 @@ int orm_postgres_direct_tls_bridge_channel_binding(
   if (bridge->state == ORM_POSTGRES_BRIDGE_FAILED)
     return bridge->failure_status != SALTS_OK ? bridge->failure_status
                                               : SALTS_EIO;
-  if (!bridge->remote_tls_ready || bridge->channel_binding_size == 0u)
+  if (!bridge->remote_tls_ready)
     return SALTS_ENOTCONN;
+  if (bridge->channel_binding_size == 0u)
+    return SALTS_ENOENT;
 
   *out_size = bridge->channel_binding_size;
   if (capacity < bridge->channel_binding_size)
@@ -366,7 +375,7 @@ int orm_postgres_direct_tls_bridge_enable_forwarding(
   if (bridge->state == ORM_POSTGRES_BRIDGE_FAILED)
     return bridge->failure_status != SALTS_OK ? bridge->failure_status
                                               : SALTS_EIO;
-  if (!bridge->remote_tls_ready || bridge->channel_binding_size == 0u)
+  if (!bridge->remote_tls_ready)
     return SALTS_ENOTCONN;
   bridge->forwarding_enabled = 1;
   status = orm_postgres_bridge_start_forwarding(bridge);
