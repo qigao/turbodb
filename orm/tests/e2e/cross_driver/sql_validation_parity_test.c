@@ -114,15 +114,17 @@ static orm_connection_t *connect_sqlite(
 static orm_connection_t *connect_postgresql(
     orm_runtime_t *runtime, const char *conninfo, orm_error_t *error) {
   orm_config_t config;
-  orm_option_t option;
+  orm_option_t options[2];
   orm_connection_t *connection = NULL;
 
   orm_config(&config);
-  option.keyword = orm_view("conninfo");
-  option.value = orm_view(conninfo);
+  options[0].keyword = orm_view("turbodb_pg_transport");
+  options[0].value = orm_view("disabled");
+  options[1].keyword = orm_view("conninfo");
+  options[1].value = orm_view(conninfo);
   config.driver = orm_view("postgresql");
-  config.options = &option;
-  config.option_count = 1u;
+  config.options = options;
+  config.option_count = 2u;
   if (orm_runtime_connect(runtime, &config, &connection, error) !=
       ORM_STATUS_OK)
     return NULL;
