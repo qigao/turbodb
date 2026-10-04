@@ -5,10 +5,12 @@
 
 #include <salts/plugin.h>
 
-#if SALTS_PLUGIN_ABI_VERSION != 2u
-#error "TurboDB Driver plugins require Salts Plugin ABI 2"
-#endif
-
+/*
+ * Driver plugins follow the exact Salts Plugin ABI epoch used to build this
+ * TurboDB source tree.  Binary compatibility is still exact at load time:
+ * every manifest/query uses SALTS_PLUGIN_ABI_VERSION and Salts rejects a
+ * different host epoch.  Do not freeze the source SDK to one dependency epoch.
+ */
 #define ORM_DRIVER_PLUGIN_EXPORT_ID "driver"
 
 /*
