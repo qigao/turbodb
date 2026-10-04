@@ -53,7 +53,9 @@ static orm_status_t secure_connect_port(
 
   status = orm_runtime_connect(runtime, &config, &connection, error);
   if (status != ORM_STATUS_OK) {
-    orm_runtime_close(runtime, error);
+    orm_error_t ignored;
+    orm_error_init(&ignored);
+    (void)orm_runtime_close(runtime, &ignored);
     orm_runtime_release(runtime);
     return status;
   }
@@ -94,7 +96,15 @@ spec("PostgreSQL 17 direct TLS over CNet/GmSSL") {
     check_not_null(ca);
     if (ca == NULL)
       return;
-    check_equal(secure_connect_port(getenv("TURBODB_PG_TLS_PORT"), "localhost", ca, &error), ORM_STATUS_OK);
+    {
+      const orm_status_t status =
+          secure_connect_port(getenv("TURBODB_PG_TLS_PORT"),
+                              "localhost", ca, &error);
+      if (status != ORM_STATUS_OK)
+        (void)fprintf(stderr, "direct TLS connect failed: status=%d message=%s\n",
+                      (int)status, error.message);
+      check_equal(status, ORM_STATUS_OK);
+    }
   }
 
   it("fails closed for an untrusted CA") {
