@@ -1,6 +1,8 @@
 {
   "version": 6,
-  "include": ["BasePresets.json"],
+  "include": [
+    "BasePresets.json"
+  ],
   "configurePresets": [
     {
       "name": "ci-native-base",
@@ -61,6 +63,24 @@
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-linux",
         "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux"
+      }
+    },
+    {
+      "name": "ci-macos-base",
+      "hidden": true,
+      "inherits": [
+        "ci-native-base",
+        "Clang",
+        "flags-gnu",
+        "ISMac"
+      ],
+      "binaryDir": "${sourceDir}/build/ci-macos-release",
+      "environment": {
+        "DYLD_LIBRARY_PATH": "${sourceDir}/build/ci-macos-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/arm64-osx/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{DYLD_LIBRARY_PATH}"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-osx"
       }
     },
     {
