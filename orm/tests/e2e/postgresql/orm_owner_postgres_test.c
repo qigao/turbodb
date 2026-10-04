@@ -72,11 +72,13 @@ static void drop_transaction(void) {
 }
 static orm_status_t connect_postgres(orm_connection_t **out) {
   orm_config_t config;
-  const orm_option_t option = {orm_view("conninfo"), orm_view(conninfo)};
+  const orm_option_t options[] = {
+      {orm_view("turbodb_pg_transport"), orm_view("disabled")},
+      {orm_view("conninfo"), orm_view(conninfo)}};
   orm_config(&config);
   config.driver = orm_view("postgresql");
-  config.options = &option;
-  config.option_count = 1u;
+  config.options = options;
+  config.option_count = 2u;
   return orm_runtime_connect(runtime, &config, out, &error);
 }
 static orm_status_t execute_sql(const char *sql) {
