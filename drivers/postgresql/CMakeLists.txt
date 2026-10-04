@@ -3,7 +3,7 @@ find_package(PostgreSQL REQUIRED)
 add_library(
   orm_postgresql_driver MODULE
   plugin.c ${ORM_SOURCE_DIR}/src/driver/orm_driver_backend_bridge.c
-  backend.c schema.c postgres_transport_policy.c orm_postgres_cursor.c orm_postgres_libpq.c
+  backend.c schema.c postgres_transport_policy.c postgres_direct_tls_bridge.c orm_postgres_cursor.c orm_postgres_libpq.c
   ${ORM_SOURCE_DIR}/src/flow/orm_text_token.c ${ORM_SOURCE_DIR}/src/sql/orm_sql_render.c)
 target_compile_definitions(orm_postgresql_driver
                            PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
@@ -19,6 +19,7 @@ target_link_libraries(
           PostgreSQL::PostgreSQL
           Orm::DriverABI
           Salts::Core
+          Salts::CNet
           Salts::CSerde
           Salts::CFlow
           Salts::CSTL)

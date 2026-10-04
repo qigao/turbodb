@@ -66,3 +66,15 @@ cmake_add_test(
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/../drivers/postgresql)
 set_property(TARGET orm_postgres_transport_policy_test PROPERTY LINKER_LANGUAGE CXX)
+
+cmake_add_test(
+  NAME orm_postgres_direct_tls_bridge_test
+  FOLDER "orm/tests/flow/postgresql"
+  TEST_NAME orm_postgres_direct_tls_bridge
+  SOURCES orm_postgres_direct_tls_bridge_test.c
+    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_direct_tls_bridge.c
+  LIBS orm_c_test_static Salts::CNet Salts::TinyTest
+  DEFS ORM_C_STATIC
+  INCLUDES ${ORM_SOURCE_DIR}/include/orm
+    ${ORM_SOURCE_DIR}/../drivers/postgresql)
+set_property(TARGET orm_postgres_direct_tls_bridge_test PROPERTY LINKER_LANGUAGE CXX)
