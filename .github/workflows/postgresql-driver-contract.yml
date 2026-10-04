@@ -150,6 +150,12 @@ jobs:
               echo "ssl_cert_file = '\''server.crt'\''"
               echo "ssl_key_file = '\''server.key'\''"
             } >> "$PGDATA/postgresql.conf"
+            {
+              echo "hostssl all turbodb 0.0.0.0/0 password"
+              echo "hostssl all turbodb ::/0 password"
+              cat "$PGDATA/pg_hba.conf"
+            } > "$PGDATA/pg_hba.conf.new"
+            mv "$PGDATA/pg_hba.conf.new" "$PGDATA/pg_hba.conf"
           '
           docker restart "$container" >/dev/null
           for _ in $(seq 1 30); do
