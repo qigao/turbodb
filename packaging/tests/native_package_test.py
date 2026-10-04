@@ -24,12 +24,15 @@ class NativePackageTest(unittest.TestCase):
             "include/mysql/session_script.h",
             "include/redis/redis_io.h",
         )
-        for rid in ("linux-x64", "windows-x64", "android-arm64-v8a"):
+        for rid in ("linux-x64", "windows-x64", "macos-arm64", "android-arm64-v8a"):
             windows = rid == "windows-x64"
-            core = "bin/turbo_orm.dll" if windows else "lib/libturbo_orm.so"
-            suffix = "dll" if windows else "so"
+            macos = rid == "macos-arm64"
+            core = "bin/turbo_orm.dll" if windows else (
+                "lib/libturbo_orm.dylib" if macos else "lib/libturbo_orm.so"
+            )
+            module_suffix = "dll" if windows else "so"
             drivers = tuple(
-                f"lib/turbodb/drivers/turbodb_driver_{driver}.{suffix}"
+                f"lib/turbodb/drivers/turbodb_driver_{driver}.{module_suffix}"
                 for driver in ("sqlite", "postgresql", "mysql", "redis", "tidesdb")
             )
             for relative in (*common, core, *drivers):

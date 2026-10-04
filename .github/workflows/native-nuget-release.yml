@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for rid in linux-x64 windows-x64 android-arm64-v8a; do
+          for rid in linux-x64 windows-x64 macos-arm64 android-arm64-v8a; do
             mv "package/sdk/turbodb-sdk-$rid" "package/sdk/$rid"
           done
 

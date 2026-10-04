@@ -8,8 +8,8 @@
     <PackageVersion Condition="'$(PackageVersion)' == ''">2.1.0</PackageVersion>
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <Authors>qigao</Authors>
-    <Description>Prebuilt TurboDB ORM and SQLite/PostgreSQL/MySQL/Redis/TidesDB driver SDK install trees for Linux x64, Windows x64, and Android arm64-v8a native consumers.</Description>
-    <PackageTags>turbodb;orm;database;native;c;cpp;cmake;android</PackageTags>
+    <Description>Prebuilt TurboDB ORM and SQLite/PostgreSQL/MySQL/Redis/TidesDB driver SDK install trees for Linux x64, Windows x64, macOS arm64, and Android arm64-v8a native consumers.</Description>
+    <PackageTags>turbodb;orm;database;native;c;cpp;cmake;macos;android</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/qigao/turbodb</RepositoryUrl>

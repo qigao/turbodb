@@ -2,7 +2,7 @@
 
 预编译 Release SDK，包含 ORM 核心、SQLite/PostgreSQL/MySQL/Redis/TidesDB 驱动，以及 MySQL 和 Redis 通用客户端。MongoDB 暂不发布。
 
-每个平台的安装树位于 `sdk/linux-x64`、`sdk/windows-x64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux 另含 dbtools；Android 只发布库。
+每个平台的安装树位于 `sdk/linux-x64`、`sdk/windows-x64`、`sdk/macos-arm64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 另含 dbtools；Android 只发布库。
 
 CI 和发布流程始终以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新稳定版本，通过 `--no-cache --force-evaluate` 重新解析，不锁定版本、不生成依赖锁文件。每个安装树的 `turbodb-sdk-manifest.txt` 仅记录实际构建版本供诊断，不参与后续版本选择。Windows 安装树包含 vcpkg DLL，Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux）加入库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
 

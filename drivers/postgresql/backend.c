@@ -1,6 +1,7 @@
 #include "orm_internal.h"
 #include "orm_postgres_cursor.h"
 #include "orm_postgres_libpq.h"
+#include "postgres_transport_policy.h"
 #include "orm_sql_render.h"
 #include "orm_async_wait.h"
 
@@ -686,6 +687,8 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   size_t total_bytes = 0u;
   int expand_dbname = 0;
   uint32_t index;
+  uint32_t native_index = 0u;
+  orm_postgres_transport_policy transport_policy = ORM_POSTGRES_TRANSPORT_POLICY_INIT;
   orm_status_t status = ORM_STATUS_OK;
   (void)limits;
   if (config == NULL || out_backend == NULL || config->option_count == 0u) {
@@ -694,6 +697,15 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     return ORM_STATUS_INVALID_ARGUMENT;
   }
   memset(out_backend, 0, sizeof(*out_backend));
+  status = orm_postgres_transport_policy_parse(config, &transport_policy, error);
+  if (status != ORM_STATUS_OK)
+    return status;
+  if (transport_policy.mode == ORM_POSTGRES_TRANSPORT_DIRECT_TLS) {
+    orm_error_set(error, ORM_STATUS_UNSUPPORTED,
+                  "PostgreSQL direct TLS transport requires bridge implementation");
+    return ORM_STATUS_UNSUPPORTED;
+  }
+
   keywords = (tstr *)calloc(config->option_count, sizeof(*keywords));
   values = (tstr *)calloc(config->option_count, sizeof(*values));
   keyword_views = (const char **)calloc((size_t)config->option_count + 1u,
@@ -709,8 +721,10 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
   for (index = 0u; index < config->option_count; ++index) {
     uint32_t previous;
     const orm_option_t *option = &config->options[index];
-    const int conninfo_option =
-        orm_view_equal_cstr(option->keyword, "conninfo");
+    int conninfo_option;
+    if (orm_postgres_transport_option_name(option->keyword))
+      continue;
+    conninfo_option = orm_view_equal_cstr(option->keyword, "conninfo");
     if (!orm_postgres_identifier(option->keyword) ||
         !orm_view_valid(option->value, true) ||
         option->value.len > ORM_POSTGRES_OPTION_VALUE_MAX ||
@@ -724,10 +738,10 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
       orm_error_set(error, status, "invalid PostgreSQL connection option");
       goto cleanup;
     }
-    if (conninfo_option && index != 0u) {
+    if (conninfo_option && native_index != 0u) {
       status = ORM_STATUS_INVALID_ARGUMENT;
       orm_error_set(error, status,
-                    "PostgreSQL conninfo must be the first connection option");
+                    "PostgreSQL conninfo must be the first native connection option");
       goto cleanup;
     }
     if (orm_view_equal_cstr(option->keyword, "dbname") && expand_dbname) {
@@ -737,7 +751,10 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
       goto cleanup;
     }
     for (previous = 0u; previous < index; ++previous) {
-      const vstr prior = config->options[previous].keyword;
+      const orm_option_t *prior_option = &config->options[previous];
+      const vstr prior = prior_option->keyword;
+      if (orm_postgres_transport_option_name(prior))
+        continue;
       if (option->keyword.len == prior.len &&
           (prior.len == 0u ||
            memcmp(option->keyword.data, prior.data, prior.len) == 0)) {
@@ -748,17 +765,23 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
       }
     }
     total_bytes += option->keyword.len + option->value.len;
-    keywords[index] = conninfo_option ? tstr_dup("dbname")
-                                     : tstr_from_v(option->keyword);
-    values[index] = tstr_from_v(option->value);
-    if (keywords[index] == NULL || values[index] == NULL) {
+    keywords[native_index] = conninfo_option ? tstr_dup("dbname")
+                                            : tstr_from_v(option->keyword);
+    values[native_index] = tstr_from_v(option->value);
+    if (keywords[native_index] == NULL || values[native_index] == NULL) {
       status = ORM_STATUS_OUT_OF_MEMORY;
       orm_error_set(error, status, "copy PostgreSQL connection option");
       goto cleanup;
     }
-    keyword_views[index] = keywords[index];
-    value_views[index] = values[index];
+    keyword_views[native_index] = keywords[native_index];
+    value_views[native_index] = values[native_index];
+    ++native_index;
     if (conninfo_option) expand_dbname = 1;
+  }
+  if (native_index == 0u) {
+    status = ORM_STATUS_INVALID_ARGUMENT;
+    orm_error_set(error, status, "PostgreSQL requires native connection options");
+    goto cleanup;
   }
   state = (orm_postgres_backend_state *)calloc(1u, sizeof(*state));
   if (state == NULL) {
@@ -788,7 +811,7 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
 cleanup:
   if (state != NULL)
     orm_postgres_backend_destroy(state);
-  for (index = 0u; index < config->option_count; ++index) {
+  for (index = 0u; index < native_index; ++index) {
     tstr_free(keywords != NULL ? keywords[index] : NULL);
     tstr_free(values != NULL ? values[index] : NULL);
   }
