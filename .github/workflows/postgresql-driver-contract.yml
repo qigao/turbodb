@@ -151,8 +151,8 @@ jobs:
               echo "ssl_key_file = '\''server.key'\''"
             } >> "$PGDATA/postgresql.conf"
             {
-              echo "hostssl all turbodb 0.0.0.0/0 password"
-              echo "hostssl all turbodb ::/0 password"
+              echo "hostssl all turbodb 0.0.0.0/0 scram-sha-256"
+              echo "hostssl all turbodb ::/0 scram-sha-256"
               cat "$PGDATA/pg_hba.conf"
             } > "$PGDATA/pg_hba.conf.new"
             mv "$PGDATA/pg_hba.conf.new" "$PGDATA/pg_hba.conf"
