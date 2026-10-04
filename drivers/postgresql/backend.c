@@ -705,10 +705,9 @@ static const orm_backend_ops orm_postgres_backend_ops = {
     orm_postgres_backend_open_async};
 
 static orm_status_t orm_postgres_wait_bridge_channel_binding(
-    orm_postgres_direct_tls_bridge *bridge,
-    orm_postgres_channel_binding_mode channel_binding,
-    uint32_t timeout_ms, uint8_t *output, size_t capacity,
-    size_t *out_size, orm_error_t *error) {
+    orm_postgres_direct_tls_bridge *bridge, uint32_t timeout_ms,
+    uint8_t *output, size_t capacity, size_t *out_size,
+    orm_error_t *error) {
   const uint64_t started_ms = salts_monotonic_ms();
 
   if (out_size == NULL)
@@ -721,11 +720,6 @@ static orm_status_t orm_postgres_wait_bridge_channel_binding(
             bridge, output, capacity, out_size);
     if (binding_status == SALTS_OK)
       return ORM_STATUS_OK;
-    if (binding_status == SALTS_ENOENT &&
-        channel_binding != ORM_POSTGRES_CHANNEL_BINDING_REQUIRE) {
-      *out_size = 0u;
-      return ORM_STATUS_OK;
-    }
     if (binding_status != SALTS_ENOTCONN) {
       orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
                     "PostgreSQL TLS channel binding unavailable");
@@ -974,10 +968,9 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     }
 
     status = orm_postgres_wait_bridge_channel_binding(
-        &state->bridge, transport_policy.channel_binding,
-        transport_policy.connect_timeout_ms, external_channel_binding,
-        sizeof(external_channel_binding), &external_channel_binding_size,
-        error);
+        &state->bridge, transport_policy.connect_timeout_ms,
+        external_channel_binding, sizeof(external_channel_binding),
+        &external_channel_binding_size, error);
     if (status != ORM_STATUS_OK)
       goto cleanup;
   }
@@ -991,8 +984,13 @@ orm_status_t orm_postgres_backend_create(const orm_config_t *config,
     goto cleanup;
   }
   if (state->bridge_active) {
-    if (external_channel_binding_size > 0u &&
-        PQsetExternalChannelBinding(
+    if (external_channel_binding_size == 0u) {
+      status = ORM_STATUS_INTERNAL_ERROR;
+      orm_error_set(error, status,
+                    "PostgreSQL TLS channel binding was not captured");
+      goto cleanup;
+    }
+    if (PQsetExternalChannelBinding(
             state->connection, "tls-server-end-point",
             external_channel_binding, external_channel_binding_size) != 1) {
       status = orm_postgres_fail(
