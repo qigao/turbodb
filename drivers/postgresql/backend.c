@@ -2,6 +2,7 @@
 #include "orm_postgres_cursor.h"
 #include "orm_postgres_libpq.h"
 #include "postgres_transport_policy.h"
+#include "postgres_direct_tls_bridge.h"
 #include "orm_sql_render.h"
 #include "orm_async_wait.h"
 
@@ -22,6 +23,8 @@ enum {
 
 typedef struct orm_postgres_backend_state {
   PGconn *connection;
+  orm_postgres_direct_tls_bridge bridge;
+  int bridge_active;
   int transaction_active;
   int async_active;
   int cursor_active;
@@ -423,6 +426,8 @@ static void orm_postgres_backend_destroy(void *context) {
     return;
   if (state->connection != NULL)
     PQfinish(state->connection);
+  if (state->bridge_active)
+    (void)orm_postgres_direct_tls_bridge_destroy(&state->bridge);
   free(state);
 }
 
