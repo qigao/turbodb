@@ -125,7 +125,7 @@ jobs:
           import os
           from pathlib import Path
 
-          root = Path(os.environ["VCPKG_INSTALLED_DIR"])
+          root = Path(os.environ["GITHUB_WORKSPACE"]) / "vcpkg_installed"
           status = root / "vcpkg" / "status"
           text = status.read_text(encoding="utf-8")
           libpq = []
