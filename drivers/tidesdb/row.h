@@ -18,6 +18,15 @@ typedef struct orm_tidesdb_row {
   vec_t fields;
 } orm_tidesdb_row;
 
+typedef struct orm_tidesdb_field_view { vstr name; orm_value_t value; } orm_tidesdb_field_view;
+/* Private, allocation-free ORMTDB v1 decoder. fields has capacity entries;
+ * names/TEXT/BLOB borrow data until that buffer changes or is released. Single
+ * synchronous owner; max_bytes/capacity bound input. On failure fields are
+ * cleared and count is unchanged. Rejects corrupt/duplicate/trailing fields. */
+orm_status_t orm_tidesdb_row_decode_view(const unsigned char *data, size_t size,
+    size_t max_bytes, orm_tidesdb_field_view *fields, size_t capacity,
+    size_t *count, orm_error_t *error);
+
 orm_status_t orm_tidesdb_row_init(orm_tidesdb_row *row, size_t max_fields,
                                   orm_error_t *error);
 void orm_tidesdb_row_destroy(orm_tidesdb_row *row);

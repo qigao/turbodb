@@ -55,12 +55,27 @@ The build no longer generates an `OrmConfig.cmake` package; `Orm::C` and
 
 ### Plugin architecture and ownership
 
-The runtime uses the installed `Salts::Plugin` implementation and its ABI 2
+The runtime uses the installed `Salts::Plugin` implementation and its ABI 3
 contract. `SALTS_ROOT` and `SALTS_UTILS_ROOT` in the selected user preset select
 the SDKs. The build requires both `Salts::Plugin` and `Salts::PluginABI`; it does
 not compile a private copy of the loader. `Orm::DriverABI` publishes the ORM
 driver headers and their `Salts::PluginABI`, Core, CFlow and CSerde dependencies.
 It does not link the host loader or a native database library.
+
+Plugin ABI 3 is an exact admission epoch, including the CMeta reflection layouts
+exposed by exports. The SDK rejects other Plugin epochs at compile time; the
+host rejects old modules before consuming their descriptors. There is no ABI 2
+negotiation, retry or compatibility path. Rebuild the host and all modules with
+the same current Salts SDK, then deploy them together after active leases drain.
+Clean compiled objects when upgrading the SDK epoch; an incremental relink can
+retain descriptors compiled with the previous CMeta layout.
+An admission failure leaves the runtime registration unchanged. Rollback requires
+reverting and rebuilding the whole host/module deployment; do not mix epochs.
+This cutover uses the existing loader and ownership architecture, avoiding a
+second layout adapter or an alternate SDK lookup. Validate it with the C/C++
+interface, real-module admission, registry race and database plugin tests.
+The separate ORM Driver DTO ABI and database contract versions below retain
+their own meanings; Plugin epoch numbers do not renumber those DTOs.
 
 The ORM driver boundary accepts only Driver ABI 2 and `TurboDb.Driver` contract
 version 4. Rebuild and deploy the core and all drivers together; older plugins
@@ -318,7 +333,7 @@ must outlive that Publisher.
 - MongoDB: native row cursor and direct insert/update/delete commands;
   transactions require a deployment that supports MongoDB sessions.
 - TidesDB: iterator-backed row Publisher, direct commands, and a
-  [bounded SQL frontend](../drivers/tidesdb/sql/readme.md) for parameterized
+  [bounded SQL frontend](../tidessql/readme.md) for parameterized
   SELECT/INSERT/UPDATE/DELETE. Stateful ordering,
   grouping and aggregation are not executed eagerly by the backend; express
   them as bounded CFlow operators when pushdown cannot preserve semantics.

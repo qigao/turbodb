@@ -51,11 +51,11 @@ cmake_add_test(
   NAME orm_mysql_dialect_test
   FOLDER "orm/tests/driver/mysql"
   TEST_NAME orm_mysql_dialect
-  SOURCES orm_mysql_dialect_test.c ${ORM_SOURCE_DIR}/../drivers/mysql/dialect.c
+  SOURCES orm_mysql_dialect_test.c ${ORM_SOURCE_DIR}/src/sql/orm_mysql_render.c
   LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
-    ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/../drivers/mysql
+    ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/sql ${ORM_SOURCE_DIR}/../drivers/mysql
     ${ORM_MYSQL_SOURCE_DIR})
 
 set_property(TARGET orm_mysql_dialect_test PROPERTY LINKER_LANGUAGE CXX)

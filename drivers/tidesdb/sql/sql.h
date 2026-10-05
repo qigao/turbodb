@@ -3,20 +3,9 @@
 
 #include "orm_internal.h"
 
-enum {
-  TDB_SQL_END = 0, TDB_SQL_INVALID = 256, TDB_SQL_WORD,
-  TDB_SQL_INTEGER, TDB_SQL_STRING, TDB_SQL_LE, TDB_SQL_GE, TDB_SQL_NE
-};
-
-typedef struct orm_tidesdb_sql_token {
-  int kind;
-  vstr text;
-} orm_tidesdb_sql_token;
-
-/* Input is a bounded, NUL-terminated tstr. Tokens borrow it until parsing ends. */
-orm_tidesdb_sql_token orm_tidesdb_sql_next(const char **cursor, const char *end);
-
-/* Single-threaded conversion with no database side effects. The destination
+/* MySQL syntax with NO_BACKSLASH_ESCAPES, lowered to the executable CRUD subset.
+ * The temporary AST never escapes this single-threaded, side-effect-free call.
+ * The destination
  * must be empty; success owns every identifier/value until orm_plan_destroy.
  * Failure destroys the partial plan and leaves a zeroed destination. */
 orm_status_t orm_tidesdb_sql_parse(const orm_query_plan *raw,

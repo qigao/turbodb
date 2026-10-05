@@ -939,14 +939,19 @@ static bool mysql_session_decode_server_error(
     return false;
   if (mysql_wire_decode_err_packet(
           payload, payload_size, session->client_capabilities,
-          &server_error) == MYSQL_WIRE_STATUS_OK &&
-      session->error != NULL) {
+          &server_error) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            stage, "invalid prepared statement error packet");
+    return true;
+  }
+  if (session->error != NULL) {
     session->error->server_error = server_error.error_code;
     if (server_error.has_sql_state)
       memcpy(session->error->sql_state, server_error.sql_state,
              sizeof(server_error.sql_state));
   }
-  mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+  /* Server text can contain SQL or credentials; expose only structured fields. */
+  mysql_session_set_error(session, MYSQL_SESSION_SQL_ERROR,
                           stage, "server rejected prepared statement operation");
   return true;
 }

@@ -280,6 +280,49 @@ spec("native cursor construction shares the connection reservation") {
     for (unsigned i = 0; i < OPEN_CONNECTIONS; ++i) release_external(&connections[i]);
   }
   it("blocks same-connection commands inside cursor open") { scenario(OPEN_CURSOR, OPEN_NEST_COMMAND, 0u); }
+  it("reserves materialized row execution through open and cursor disposal") {
+    const open_stage stages[] = {OPEN_CURSOR, OPEN_DISPOSE};
+    for (size_t i = 0; i < sizeof(stages)/sizeof(stages[0]); ++i) {
+      orm_error_t error; orm_error_init(&error); orm_result_t *result = NULL;
+      armed = stages[i]; nested_operation = OPEN_NEST_BEGIN; nested_target = 0;
+      check_equal(orm_query_execute(connections[0].row, &result, &error), ORM_STATUS_OK);
+      check_equal(nested_status, ORM_STATUS_BUSY); check_equal(nested_entries, 0u); check_null(nested_transaction);
+      check_false(connections[0].handle->native_active);
+      int64_t value = 0; check_equal(orm_result_get_int64(result,0,0,&value,&error),ORM_STATUS_OK); check_equal(value,7);
+      orm_result_destroy(result);
+    }
+    check_equal(probe_calls,2u);
+  }
+  it("allows an independent connection during materialized row execution") {
+    orm_error_t error; orm_error_init(&error); orm_result_t *result = NULL;
+    armed = OPEN_CURSOR; nested_operation = OPEN_NEST_BEGIN; nested_target = 1;
+    check_equal(orm_query_execute(connections[0].row,&result,&error),ORM_STATUS_OK);
+    check_equal(nested_status,ORM_STATUS_OK); check_equal(nested_entries,1u);
+    orm_result_destroy(result);
+  }
+  it("retains materialized row ownership when callbacks release every external handle") {
+    orm_error_t error; orm_error_init(&error); orm_result_t *result = NULL;
+    release_stage = OPEN_CURSOR;
+    check_equal(orm_query_execute(connections[0].row,&result,&error),ORM_STATUS_OK);
+    check_equal(closes_inside_callback,0u); check_equal(connections[0].close_calls,1u);
+    int64_t value = 0; check_equal(orm_result_get_int64(result,0,0,&value,&error),ORM_STATUS_OK); check_equal(value,7);
+    orm_result_destroy(result);
+  }
+  it("retains materialized command ownership through callback-triggered handle release") {
+    orm_error_t error; orm_error_init(&error); orm_result_t *result = NULL;
+    release_stage = OPEN_COMMAND;
+    check_equal(orm_query_execute(connections[0].command,&result,&error),ORM_STATUS_OK);
+    check_equal(closes_inside_callback,0u); check_equal(connections[0].close_calls,1u);
+    check_not_null(result); orm_result_destroy(result);
+  }
+  it("reserves materialized explicit transaction rows against nested native operations") {
+    orm_error_t error; orm_error_init(&error); orm_result_t *result = NULL;
+    begin_outer(); armed = OPEN_CURSOR; nested_operation = OPEN_NEST_BEGIN;
+    check_equal(orm_query_execute_in_transaction(connections[0].row,outer_transaction,&result,&error),ORM_STATUS_OK);
+    check_equal(nested_status,ORM_STATUS_BUSY); check_equal(nested_entries,0u);
+    check_equal(outer_transaction->owner.dependents,0u); check_false(connections[0].handle->native_active);
+    orm_result_destroy(result); check_equal(orm_transaction_rollback(outer_transaction,&error),ORM_STATUS_OK);
+  }
   it("allows independent commands inside cursor open") { scenario(OPEN_CURSOR, OPEN_NEST_COMMAND, 1u); }
   it("blocks same-connection BEGIN inside cursor open") { scenario(OPEN_CURSOR, OPEN_NEST_BEGIN, 0u); }
   it("allows independent BEGIN inside cursor open") { scenario(OPEN_CURSOR, OPEN_NEST_BEGIN, 1u); }

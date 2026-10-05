@@ -1,5 +1,5 @@
 #include "orm_internal.h"
-#include "dialect.h"
+#include "orm_mysql_render.h"
 
 #include <tinytest.h>
 
@@ -19,6 +19,23 @@ static orm_limits mysql_dialect_limits(void) {
 }
 
 spec("MySQL local structured dialect") {
+  it("quotes keyword names and each qualified identifier component") {
+    orm_limits limits = mysql_dialect_limits();
+    orm_query_plan plan; orm_mysql_rendered_query rendered; orm_error_t error;
+    orm_error_init(&error);
+    check_equal(orm_plan_init(&plan,ORM_QUERY_SELECT,vstr_from_cstr("app.select"),&limits,&error),ORM_STATUS_OK);
+    check_equal(orm_plan_add_column(&plan,vstr_from_cstr("select.true"),&limits,&error),ORM_STATUS_OK);
+    check_equal(orm_plan_add_predicate(&plan,vstr_from_cstr("null"),ORM_COMPARE_EQUAL,orm_i64(42),&limits,&error),ORM_STATUS_OK);
+    check_equal(orm_mysql_render_plan(&plan,&limits,&rendered,&error),ORM_STATUS_OK);
+    check_equal(strcmp(rendered.text,"select `select`.`true` from `app`.`select` where `null` = ?"),0);
+    check_equal(rendered.parameter_count,1u);
+    check_equal(rendered.parameters[0]->data.int64_value,42);
+    orm_mysql_rendered_query_destroy(&rendered);
+    limits.max_query_bytes=1;
+    check_equal(orm_mysql_render_plan(&plan,&limits,&rendered,&error),ORM_STATUS_LIMIT_EXCEEDED);
+    check_null(rendered.text); check_null(rendered.parameters); check_equal(rendered.parameter_count,0u);
+    orm_plan_destroy(&plan);
+  }
   it("renders SELECT with native positional markers and MySQL offset syntax") {
     orm_limits limits = mysql_dialect_limits();
     orm_query_plan plan;
@@ -67,8 +84,8 @@ spec("MySQL local structured dialect") {
     check_equal(
         strcmp(
             rendered.text,
-            "select id, score from people where score >= ? and "
-            "deleted is null order by id desc "
+            "select `id`, `score` from `people` where `score` >= ? and "
+            "`deleted` is null order by `id` desc "
             "limit 18446744073709551615 offset 3"),
         0);
     check_equal(rendered.parameter_count, (size_t)1u);
@@ -119,7 +136,7 @@ spec("MySQL local structured dialect") {
     check_equal(
         strcmp(
             rendered.text,
-            "insert into people (id, name, deleted) "
+            "insert into `people` (`id`, `name`, `deleted`) "
             "values (?, ?, null)"),
         0);
     check_equal(rendered.parameter_count, (size_t)2u);
@@ -171,7 +188,7 @@ spec("MySQL local structured dialect") {
     check_equal(
         strcmp(
             rendered.text,
-            "update people set score = ?, name = ? where id = ?"),
+            "update `people` set `score` = ?, `name` = ? where `id` = ?"),
         0);
     check_equal(rendered.parameter_count, (size_t)3u);
     check_equal(
@@ -213,7 +230,7 @@ spec("MySQL local structured dialect") {
             &plan, &limits, &rendered, &error),
         ORM_STATUS_OK);
     check_equal(
-        strcmp(rendered.text, "delete from people where id = ?"),
+        strcmp(rendered.text, "delete from `people` where `id` = ?"),
         0);
     check_equal(rendered.parameter_count, (size_t)1u);
     check_equal(

@@ -1,15 +1,12 @@
-if(NOT RE2C_EXECUTABLE)
-  message(FATAL_ERROR "TidesDB SQL lexer requires re2c")
-endif()
-add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lexer.c
-  COMMAND "${RE2C_EXECUTABLE}" -o ${CMAKE_CURRENT_BINARY_DIR}/lexer.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/lexer.re
-  DEPENDS lexer.re sql.h VERBATIM)
-add_library(orm_tidesdb_sql STATIC parser.c ${CMAKE_CURRENT_BINARY_DIR}/lexer.c)
+# ORM plan conversion and the legacy ORMTDB row adapter belong to the driver.
+add_library(orm_tidesdb_sql STATIC parser.c table.c
+  ${ORM_SOURCE_DIR}/src/sql/orm_mysql_render.c)
 target_compile_definitions(orm_tidesdb_sql PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(orm_tidesdb_sql PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-  ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi ${ORM_SOURCE_DIR}/src/flow)
-target_link_libraries(orm_tidesdb_sql PRIVATE Salts::CSTL Salts::CFlow)
+  ${ORM_SOURCE_DIR}/src/abi ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/include/orm)
+target_include_directories(orm_tidesdb_sql PUBLIC ${PROJECT_SOURCE_DIR}/tidessql/src
+  INTERFACE ${ORM_SOURCE_DIR}/src/sql)
+target_link_libraries(orm_tidesdb_sql PUBLIC TurboDB::TidesSQL TurboDB::SqlParser
+  Salts::CSTL Salts::CFlow)
 set_target_properties(orm_tidesdb_sql PROPERTIES
-  POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden FOLDER "drivers/tidesdb/sql")
+  C_VISIBILITY_PRESET hidden FOLDER "drivers/tidesdb/sql")

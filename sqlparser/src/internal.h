@@ -6,7 +6,7 @@
 #include <tstr.h>
 
 struct sqlparser_document {
-  sqlparser_dialect dialect;
+  sqlparser_options options;
   tstr sql;
   size_t length;
   vec_t nodes;
@@ -26,11 +26,14 @@ typedef struct sqlp_lexer {
   sqlparser_dialect dialect;
   /* Local token context, retained across whitespace/comments only. */
   bool mysql_after_name, mysql_qualified;
+  bool mysql_no_backslash_escapes;
 } sqlp_lexer;
 typedef struct sqlp_show_filter { sqlparser_id pattern, where; } sqlp_show_filter;
 typedef struct sqlp_show_options { bool full, extended; } sqlp_show_options;
 typedef struct sqlp_type_flags { bool is_unsigned, zerofill; } sqlp_type_flags;
 typedef struct sqlp_select_options { bool distinct, all, calc_found_rows; } sqlp_select_options;
+typedef struct sqlp_frame_extent { sqlparser_id start, end; } sqlp_frame_extent;
+typedef struct sqlp_frame_units { sqlparser_frame_unit unit; sqlparser_span span; } sqlp_frame_units;
 typedef struct sqlp_transaction_options {
   sqlparser_transaction_access access;
   sqlparser_isolation isolation;
@@ -39,6 +42,8 @@ typedef struct sqlp_transaction_options {
 typedef struct sqlp_transaction_head { sqlparser_span span; sqlparser_transaction_kind kind; } sqlp_transaction_head;
 typedef struct sqlp_join_condition { sqlparser_id on; sqlparser_list using_columns; } sqlp_join_condition;
 typedef struct sqlp_insert_head { sqlparser_span span; bool replace; sqlparser_conflict conflict; bool low_priority; } sqlp_insert_head;
+typedef struct sqlp_insert_columns { sqlparser_list list; bool specified; } sqlp_insert_columns;
+typedef struct sqlp_insert_alias { sqlparser_id row; sqlparser_list columns; } sqlp_insert_alias;
 typedef struct sqlp_write_head { sqlparser_span span; bool low_priority; } sqlp_write_head;
 typedef struct sqlp_index_hint { sqlparser_id name; bool not_indexed; } sqlp_index_hint;
 typedef struct sqlp_trigger_event { sqlparser_trigger_event kind; sqlparser_list columns; } sqlp_trigger_event;
@@ -72,6 +77,7 @@ sqlparser_id sqlp_query_tail(sqlp_context *ctx, sqlparser_id id, sqlparser_list 
 int sqlp_lex(sqlp_lexer *lexer, sqlparser_span *token);
 sqlparser_scope sqlp_variable_scope(sqlp_context *ctx, sqlparser_span span);
 void sqlp_check_window_call(sqlp_context *ctx, sqlparser_id call);
+void sqlp_check_interval_unit(sqlp_context *ctx, sqlparser_span unit);
 
 void *SqlParserAlloc(void *(*allocate)(size_t), sqlp_context *ctx);
 void SqlParser(void *parser, int token, sqlparser_span span);

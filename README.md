@@ -34,6 +34,8 @@ TurboDB is the **storage/data infrastructure layer**. It owns database-specific 
 | ORM | Optional database-facing object/record mapping |
 | Redis | Redis-native primitives and durable/ordered adapter support |
 | TidesDB | TidesDB integration |
+| sqlparser | MySQL/SQLite syntax parsing and AST |
+| TidesSQL | Static C SDK v1 for SQL execution, transactions, Catalog and indexes over local TidesDB; [SDK and module boundary](tidessql/readme.md) |
 | SQLite | Native driver support and standalone schema application |
 | PostgreSQL | Native driver support and standalone schema application |
 | dbtools | Explicit standalone database tools |
@@ -179,7 +181,7 @@ TurboDB consumes the latest published stable **Salts.Native** and **SaltsUtils.N
 
 The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient SDK; package selection happens before CMake and compatibility is enforced by exported targets and ABI/capability checks.
 
-Salts owns canonical CMeta reflection plus Plugin ABI 2 publication, loading, lifecycle, and leases. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
+Salts owns canonical CMeta reflection plus Plugin ABI 3 publication, loading, lifecycle, and leases. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
 
 The `TURBODB_BUILD_ORM` and `TURBODB_BUILD_DBTOOLS` switches select modules. ORM builds SQLite, PostgreSQL, MySQL, Redis and TidesDB drivers together; consumers choose which plugins to load at runtime. MongoDB is not included. The generic `Orm::C` target does not link database clients.
 

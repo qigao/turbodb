@@ -8,6 +8,12 @@
         "libpq",
         "zstd"
       ]
+    },
+    {
+      "kind": "git",
+      "repository": "https://github.com/qigao/vcpkg-cache",
+      "baseline": "1da9c439a2380a8752e88046ca0c5ae159991e03",
+      "packages": ["gmssl"]
     }
   ]
 }

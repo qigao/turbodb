@@ -181,6 +181,8 @@ int main(void) {
       .exports = &entry,
       .export_count = 1u};
   REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_OK);
+  manifest.abi_version = SALTS_PLUGIN_ABI_VERSION - 1u;
+  REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_UNSUPPORTED_ABI);
   manifest.abi_version = SALTS_PLUGIN_ABI_VERSION + 1u;
   REQUIRE(salts_plugin_manifest_validate(&manifest) ==
          SALTS_PLUGIN_UNSUPPORTED_ABI);

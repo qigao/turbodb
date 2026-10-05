@@ -1,5 +1,3 @@
-add_subdirectory(sql)
-
 cmake_add_test(
   NAME orm_tidesdb_row_test
   FOLDER "orm/tests/flow/tidesdb"

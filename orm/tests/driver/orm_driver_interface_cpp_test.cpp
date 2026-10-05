@@ -29,7 +29,7 @@ static_assert(
         decltype(static_cast<TurboDb_Driver_vtable *>(nullptr)->storage_capabilities),
         driver_storage_capabilities_type>::value,
     "reflected storage-capability dispatch must preserve the Driver C ABI");
-static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 3u,
+static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 4u,
               "Driver contract version drift");
 
 int main() {

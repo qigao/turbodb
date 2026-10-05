@@ -156,7 +156,7 @@ spec("standalone re2c and Lemon SQL parser") {
   }
 
   it("retains basic CREATE and DROP TABLE definitions") {
-    const sqlparser_node *s = parse("CREATE TEMPORARY TABLE IF NOT EXISTS db.t (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL DEFAULT 'x', n INT DEFAULT -1, UNIQUE KEY uq(name), CHECK(n>=-1)); DROP TEMPORARY TABLE IF EXISTS db.t,u;");
+    const sqlparser_node *s = parse("CREATE TEMPORARY TABLE IF NOT EXISTS db.t (id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT, name VARCHAR(40) NOT NULL DEFAULT 'x', n INT DEFAULT -1, UNIQUE KEY uq(name), CHECK(n>=-1)); DROP TEMPORARY TABLE IF EXISTS db.t,u CASCADE;");
     check_true(s->as.create_table.temporary); check_true(s->as.create_table.if_not_exists);
     check_equal(s->as.create_table.elements.count, 5u);
     const sqlparser_node *column = node(s->as.create_table.elements.first);
@@ -165,6 +165,7 @@ spec("standalone re2c and Lemon SQL parser") {
     check_equal(column->as.column.constraints.count, 2u);
     s = node(s->next); check_equal(s->kind, SQLPARSER_DROP_TABLE);
     check_true(s->as.drop_table.if_exists); check_equal(s->as.drop_table.tables.count, 2u);
+    text_is(sqlparser_statements(document).last, "DROP TEMPORARY TABLE IF EXISTS db.t,u CASCADE");
   }
 
   it("handles quoted identifiers string escapes comments and empty rows") {
@@ -172,16 +173,19 @@ spec("standalone re2c and Lemon SQL parser") {
     check_equal(s->as.select.columns.count, 3u);
     text_is(node(s->as.select.columns.first)->as.projection.expression, "`a``b`");
     s = node(s->next); check_equal(node(s->as.insert.rows.first)->as.row.values.count, 0u);
+    check_true(s->as.insert.columns_specified);
   }
 
   it("retains foreign keys and table options without executing DDL") {
-    const sqlparser_node *s = parse("CREATE TABLE t(id INT, created TIMESTAMP DEFAULT CURRENT_TIMESTAMP(), CONSTRAINT fk FOREIGN KEY(id) REFERENCES u(id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+    const sqlparser_node *s = parse("CREATE TABLE t(id INT, created TIMESTAMP DEFAULT CURRENT_TIMESTAMP(), CONSTRAINT fk FOREIGN KEY child_index(id) REFERENCES u(id) ON DELETE CASCADE ON UPDATE RESTRICT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
     check_equal(s->as.create_table.options.count, 3u);
     const sqlparser_node *fk = node(s->as.create_table.elements.last);
     check_equal(fk->as.constraint.kind, SQLPARSER_FOREIGN_KEY);
     text_is(fk->as.constraint.table, "u");
     check_equal(fk->as.constraint.columns.count, 1u);
     check_equal(fk->as.constraint.referenced_columns.count, 1u);
+    check_equal(fk->as.constraint.reference.on_delete, SQLPARSER_REFERENCE_CASCADE);
+    check_equal(fk->as.constraint.reference.on_update, SQLPARSER_REFERENCE_RESTRICT);
   }
 
   it("ends newline comments before the following SQL line") {
@@ -246,20 +250,25 @@ spec("standalone re2c and Lemon SQL parser") {
   }
 
   it("rejects every truncated prefix without publishing invalid node spans") {
-    const char *sql = "SELECT CASE WHEN x BETWEEN 1 AND 3 THEN 'a\\\'b' ELSE 'z' END FROM `t``x` WHERE x IN (1,2)";
-    for (size_t length = 0; length <= strlen(sql); ++length) {
-      sqlparser_status status = sqlparser_parse(sql, length, NULL, &document, &error);
-      if (status == SQLPARSER_OK) {
-        for (sqlparser_id i = 1; i <= sqlparser_node_count(document); ++i) {
-          const sqlparser_node *n = node(i);
-          check_true(n->span.offset <= length);
-          check_true(n->span.length <= length - n->span.offset);
-          check_not_null(sqlparser_text(document, n->span));
+    const char *inputs[] = {"SELECT CASE WHEN x BETWEEN 1 AND 3 THEN 'a\\\'b' ELSE 'z' END FROM `t``x` WHERE x IN (1,2)",
+      "SELECT CAST(CAST(? AS unsigned /* target */ integer) AS SIGNED INTEGER),CAST('12.9e3' AS DOUBLE)",
+      "SELECT CAST(CAST(? AS FLOAT(00024)) AS DOUBLE /* target */ PRECISION),CAST(NULL AS FLOAT(53))"};
+    for(size_t sample=0;sample<sizeof(inputs)/sizeof(inputs[0]);++sample) {
+      const char *sql=inputs[sample];
+      for (size_t length = 0; length <= strlen(sql); ++length) {
+        sqlparser_status status = sqlparser_parse(sql, length, NULL, &document, &error);
+        if (status == SQLPARSER_OK) {
+          for (sqlparser_id i = 1; i <= sqlparser_node_count(document); ++i) {
+            const sqlparser_node *n = node(i);
+            check_true(n->span.offset <= length);
+            check_true(n->span.length <= length - n->span.offset);
+            check_not_null(sqlparser_text(document, n->span));
+          }
+          sqlparser_document_destroy(document); document = NULL;
+        } else {
+          check_equal(status, SQLPARSER_SYNTAX_ERROR);
+          check_null(document); check_true(error.offset <= length);
         }
-        sqlparser_document_destroy(document); document = NULL;
-      } else {
-        check_equal(status, SQLPARSER_SYNTAX_ERROR);
-        check_null(document); check_true(error.offset <= length);
       }
     }
   }

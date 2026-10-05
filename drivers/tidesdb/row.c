@@ -171,38 +171,38 @@ static int orm_tidesdb_parse_double(const unsigned char *data, size_t size,
   return isfinite(*out) != 0;
 }
 
-static int orm_tidesdb_cell_valid(const orm_tidesdb_cell *cell) {
-  const unsigned char *bytes;
-  const size_t size = cell != NULL ? tstr_len(cell->bytes) : 0u;
-  int64_t sint_value;
-  uint64_t uint_value;
-  double double_value;
-  if (cell == NULL || cell->kind < ORM_VALUE_NULL ||
-      cell->kind > ORM_VALUE_BLOB)
-    return 0;
-  if (cell->is_null)
-    return cell->kind == ORM_VALUE_NULL && size == 0u;
-  if (cell->kind == ORM_VALUE_NULL || cell->bytes == NULL)
-    return 0;
-  bytes = (const unsigned char *)cell->bytes;
-  if (cell->kind != ORM_VALUE_BLOB && memchr(bytes, 0, size) != NULL)
-    return 0;
-  switch (cell->kind) {
+static int orm_tidesdb_read_value(orm_value_kind_t kind, bool is_null,
+    const unsigned char *bytes, size_t size, orm_value_t *out) {
+  if (kind < ORM_VALUE_NULL || kind > ORM_VALUE_BLOB) return 0;
+  if (is_null) { *out = orm_null(); return kind == ORM_VALUE_NULL && size == 0; }
+  if (kind == ORM_VALUE_NULL || !bytes ||
+      (kind != ORM_VALUE_BLOB && memchr(bytes, 0, size))) return 0;
+  orm_value_t value = {.kind = kind};
+  switch (kind) {
     case ORM_VALUE_INT64:
-      return orm_tidesdb_parse_sint64(bytes, size, &sint_value);
+      if (!orm_tidesdb_parse_sint64(bytes, size, &value.data.int64_value)) return 0;
+      break;
     case ORM_VALUE_UINT64:
-      return orm_tidesdb_parse_uint64(bytes, size, UINT64_MAX, &uint_value);
+      if (!orm_tidesdb_parse_uint64(bytes, size, UINT64_MAX, &value.data.uint64_value)) return 0;
+      break;
     case ORM_VALUE_DOUBLE:
-      return orm_tidesdb_parse_double(bytes, size, &double_value);
+      if (!orm_tidesdb_parse_double(bytes, size, &value.data.double_value)) return 0;
+      break;
     case ORM_VALUE_BOOLEAN:
-      return size == 1u && (bytes[0] == (unsigned char)'0' ||
-                            bytes[0] == (unsigned char)'1');
-    case ORM_VALUE_TEXT:
-    case ORM_VALUE_BLOB:
-      return 1;
-    default:
-      return 0;
+      if (size != 1 || (bytes[0] != '0' && bytes[0] != '1')) return 0;
+      value.data.boolean_value = bytes[0] == '1'; break;
+    case ORM_VALUE_TEXT: value = orm_text_v((vstr){(const char *)bytes, size}); break;
+    case ORM_VALUE_BLOB: value = orm_blob(bytes, size); break;
+    default: return 0;
   }
+  *out = value;
+  return 1;
+}
+
+static int orm_tidesdb_cell_valid(const orm_tidesdb_cell *cell) {
+  orm_value_t ignored;
+  return cell && orm_tidesdb_read_value(cell->kind, cell->is_null,
+      (const unsigned char *)cell->bytes, tstr_len(cell->bytes), &ignored);
 }
 
 static void orm_tidesdb_cell_destroy(orm_tidesdb_cell *cell) {
@@ -471,97 +471,100 @@ orm_status_t orm_tidesdb_row_encode(const orm_tidesdb_row *row,
   return ORM_STATUS_OK;
 }
 
-orm_status_t orm_tidesdb_row_decode(const unsigned char *data, size_t size,
-                                    size_t max_bytes, size_t max_fields,
-                                    orm_tidesdb_row *out_row,
-                                    orm_error_t *error) {
-  orm_tidesdb_row decoded = {0};
-  size_t offset = ORM_TIDESDB_ROW_HEADER_SIZE;
-  uint32_t field_count;
-  uint32_t index;
-  orm_status_t status;
-  if (out_row == NULL || out_row->fields.initialized ||
-      (data == NULL && size != 0u) || size > max_bytes)
-    return orm_tidesdb_fail(error,
-                            size > max_bytes ? ORM_STATUS_LIMIT_EXCEEDED
-                                             : ORM_STATUS_INVALID_ARGUMENT,
-                            "invalid TidesDB row decoding request");
-  if (size < ORM_TIDESDB_ROW_HEADER_SIZE ||
-      memcmp(data, orm_tidesdb_magic, ORM_TIDESDB_MAGIC_SIZE) != 0)
-    return orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                            "TidesDB row has an unknown format or version");
-  field_count = orm_tidesdb_read_u32(data + ORM_TIDESDB_MAGIC_SIZE);
-  if ((size_t)field_count > max_fields)
-    return orm_tidesdb_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
-                            "stored TidesDB row field count exceeds its limit");
-  status = orm_tidesdb_row_init(&decoded, max_fields, error);
-  if (status != ORM_STATUS_OK)
-    return status;
-  for (index = 0u; index < field_count; ++index) {
-    uint16_t name_size;
-    uint32_t value_size;
-    unsigned flags;
-    orm_tidesdb_cell cell = {0};
-    vstr name;
-    if (offset > size || ORM_TIDESDB_FIELD_HEADER_SIZE > size - offset) {
-      status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                                "truncated TidesDB row field header");
-      goto fail;
-    }
-    name_size = orm_tidesdb_read_u16(data + offset);
-    cell.kind = (orm_value_kind_t)data[offset + 2u];
-    flags = data[offset + 3u];
-    value_size = orm_tidesdb_read_u32(data + offset + 4u);
-    offset += ORM_TIDESDB_FIELD_HEADER_SIZE;
-    if (name_size == 0u || (size_t)name_size > size - offset ||
-        memchr(data + offset, 0, name_size) != NULL) {
-      status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                                "invalid TidesDB row field name");
-      goto fail;
-    }
-    name.data = (const char *)(data + offset);
-    name.len = name_size;
-    if (orm_tidesdb_row_find(&decoded, name) != NULL) {
-      status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                                "TidesDB row contains a duplicate field");
-      goto fail;
-    }
-    offset += name_size;
-    if ((size_t)value_size > size - offset ||
-        (flags & ~ORM_TIDESDB_NULL_FLAG) != 0u) {
-      status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                                "truncated or invalid TidesDB row value");
-      goto fail;
-    }
-    cell.is_null = (flags & ORM_TIDESDB_NULL_FLAG) != 0u;
-    cell.bytes = tstr_new_len(data + offset, value_size);
-    if (cell.bytes == NULL) {
-      status = orm_tidesdb_fail(error, ORM_STATUS_OUT_OF_MEMORY,
-                                "copy TidesDB row value");
-      goto fail;
-    }
-    if (!orm_tidesdb_cell_valid(&cell)) {
-      orm_tidesdb_cell_destroy(&cell);
-      status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                                "invalid TidesDB row value");
-      goto fail;
-    }
-    status = orm_tidesdb_row_set(&decoded, name, &cell, error);
-    orm_tidesdb_cell_destroy(&cell);
-    if (status != ORM_STATUS_OK)
-      goto fail;
-    offset += value_size;
-  }
-  if (offset != size) {
-    status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR,
-                              "TidesDB row has trailing bytes");
-    goto fail;
-  }
-  *out_row = decoded;
-  return ORM_STATUS_OK;
+typedef struct orm_tidesdb_field_reader {
+  const unsigned char *data;
+  size_t size, offset, count;
+} orm_tidesdb_field_reader;
 
-fail:
-  orm_tidesdb_row_destroy(&decoded);
+static orm_status_t orm_tidesdb_read_header(const unsigned char *data, size_t size,
+    size_t max_bytes, size_t capacity, orm_tidesdb_field_reader *out, orm_error_t *error) {
+  if ((!data && size) || size > max_bytes)
+    return orm_tidesdb_fail(error, size > max_bytes ? ORM_STATUS_LIMIT_EXCEEDED : ORM_STATUS_INVALID_ARGUMENT,
+        "invalid TidesDB row decoding request");
+  if (size < ORM_TIDESDB_ROW_HEADER_SIZE || memcmp(data, orm_tidesdb_magic, ORM_TIDESDB_MAGIC_SIZE))
+    return orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "TidesDB row has an unknown format or version");
+  const size_t count = orm_tidesdb_read_u32(data + ORM_TIDESDB_MAGIC_SIZE);
+  if (count > capacity)
+    return orm_tidesdb_fail(error, ORM_STATUS_LIMIT_EXCEEDED, "stored TidesDB row field count exceeds its limit");
+  *out = (orm_tidesdb_field_reader){data, size, ORM_TIDESDB_ROW_HEADER_SIZE, count};
+  return ORM_STATUS_OK;
+}
+
+static orm_status_t orm_tidesdb_read_field(orm_tidesdb_field_reader *reader,
+    orm_tidesdb_field_view *out, vstr *raw, orm_error_t *error) {
+  const unsigned char *data = reader->data;
+  size_t offset = reader->offset;
+  if (ORM_TIDESDB_FIELD_HEADER_SIZE > reader->size - offset)
+    return orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "truncated TidesDB row field header");
+  const size_t name_size = orm_tidesdb_read_u16(data + offset);
+  const orm_value_kind_t kind = (orm_value_kind_t)data[offset + 2u];
+  const unsigned flags = data[offset + 3u];
+  const size_t value_size = orm_tidesdb_read_u32(data + offset + 4u);
+  offset += ORM_TIDESDB_FIELD_HEADER_SIZE;
+  if (!name_size || name_size > reader->size - offset || memchr(data + offset, 0, name_size))
+    return orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "invalid TidesDB row field name");
+  const vstr name = {(const char *)data + offset, name_size};
+  offset += name_size;
+  if (value_size > reader->size - offset || (flags & ~ORM_TIDESDB_NULL_FLAG))
+    return orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "truncated or invalid TidesDB row value");
+  orm_value_t value;
+  if (!orm_tidesdb_read_value(kind, (flags & ORM_TIDESDB_NULL_FLAG) != 0, data + offset, value_size, &value))
+    return orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "invalid TidesDB row value");
+  *out = (orm_tidesdb_field_view){name, value};
+  *raw = (vstr){(const char *)data + offset, value_size};
+  reader->offset = offset + value_size;
+  return ORM_STATUS_OK;
+}
+
+orm_status_t orm_tidesdb_row_decode_view(const unsigned char *data, size_t size,
+    size_t max_bytes, orm_tidesdb_field_view *fields, size_t capacity,
+    size_t *count, orm_error_t *error) {
+  if (!fields || !capacity || capacity > SIZE_MAX / sizeof(*fields) || !count)
+    return orm_tidesdb_fail(error, ORM_STATUS_INVALID_ARGUMENT, "invalid TidesDB field view output");
+  orm_tidesdb_field_reader reader = {0};
+  orm_status_t status = orm_tidesdb_read_header(data, size, max_bytes, capacity, &reader, error);
+  for (size_t i = 0; status == ORM_STATUS_OK && i < reader.count; ++i) {
+    vstr raw;
+    status = orm_tidesdb_read_field(&reader, &fields[i], &raw, error);
+    for (size_t j = 0; status == ORM_STATUS_OK && j < i; ++j)
+      if (fields[j].name.len == fields[i].name.len &&
+          !memcmp(fields[j].name.data, fields[i].name.data, fields[i].name.len))
+        status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "TidesDB row contains a duplicate field");
+  }
+  if (status == ORM_STATUS_OK && reader.offset != size)
+    status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "TidesDB row has trailing bytes");
+  if (status != ORM_STATUS_OK) memset(fields, 0, capacity * sizeof(*fields));
+  else *count = reader.count;
+  return status;
+}
+
+orm_status_t orm_tidesdb_row_decode(const unsigned char *data, size_t size,
+    size_t max_bytes, size_t max_fields, orm_tidesdb_row *out_row, orm_error_t *error) {
+  if (!out_row || out_row->fields.initialized)
+    return orm_tidesdb_fail(error, ORM_STATUS_INVALID_ARGUMENT, "invalid TidesDB row decoding request");
+  orm_tidesdb_field_reader reader = {0};
+  orm_status_t status = orm_tidesdb_read_header(data, size, max_bytes, max_fields, &reader, error);
+  orm_tidesdb_row decoded = {0};
+  if (status == ORM_STATUS_OK) status = orm_tidesdb_row_init(&decoded, max_fields, error);
+  for (size_t i = 0; status == ORM_STATUS_OK && i < reader.count; ++i) {
+    orm_tidesdb_field_view field; vstr raw;
+    status = orm_tidesdb_read_field(&reader, &field, &raw, error);
+    if (status != ORM_STATUS_OK) break;
+    if (orm_tidesdb_row_find(&decoded, field.name)) {
+      status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "TidesDB row contains a duplicate field");
+      break;
+    }
+    orm_tidesdb_cell cell = {.kind = field.value.kind, .is_null = field.value.kind == ORM_VALUE_NULL,
+        .bytes = tstr_new_len(raw.data, raw.len)};
+    if (!cell.bytes)
+      status = orm_tidesdb_fail(error, ORM_STATUS_OUT_OF_MEMORY, "copy TidesDB row value");
+    else status = orm_tidesdb_row_set(&decoded, field.name, &cell, error);
+    orm_tidesdb_cell_destroy(&cell);
+  }
+  if (status == ORM_STATUS_OK && reader.offset != size)
+    status = orm_tidesdb_fail(error, ORM_STATUS_DATASTORE_ERROR, "TidesDB row has trailing bytes");
+  if (status != ORM_STATUS_OK) orm_tidesdb_row_destroy(&decoded);
+  else *out_row = decoded;
   return status;
 }
 

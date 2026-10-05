@@ -1,8 +1,10 @@
 #include "backend.h"
+#include "relational_backend.h"
 #include "orm_tidesdb_cursor.h"
 #include "bridge.h"
 #include "row.h"
 #include "sql/sql.h"
+#include "catalog_store.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -236,7 +238,11 @@ static orm_status_t orm_tidesdb_settings_parse(
                                 "duplicate TidesDB connection option");
       }
     }
-    if (orm_view_equal_cstr(option->keyword, "path")) {
+    if (orm_view_equal_cstr(option->keyword, "sql_profile")) {
+      if (!orm_view_equal_cstr(option->value, "legacy"))
+        status = orm_tidesdb_fail(error, ORM_STATUS_INVALID_ARGUMENT,
+                                  "invalid TidesDB SQL profile");
+    } else if (orm_view_equal_cstr(option->keyword, "path")) {
       status = orm_tidesdb_option_copy(&settings->path, option->value,
                                        limits->max_query_bytes, error,
                                        "invalid TidesDB path option");
@@ -470,16 +476,24 @@ static const orm_predicate *orm_tidesdb_require_id(
   return id;
 }
 
-static orm_status_t orm_tidesdb_commit_owned(
-    orm_tidesdb_transaction_t *transaction, orm_error_t *error) {
+static orm_status_t orm_tidesdb_commit_native(
+    orm_tidesdb_transaction_t *transaction, orm_error_t *error,
+    const char *operation) {
   const int native_status = orm_tidesdb_txn_commit(transaction);
-  if (native_status != ORM_TDB_SUCCESS) {
-    (void)orm_tidesdb_txn_rollback(transaction);
+  if (native_status == ORM_TDB_SUCCESS)
+    return ORM_STATUS_OK;
+  /* Native conflict checks and reservations precede WAL writes. Other errors
+   * carry no commit phase: even allocation failure may follow a complete WAL.
+   * Native rollback cannot retract a frame that recovery will replay. */
+  if (native_status == ORM_TDB_ERR_CONFLICT)
     return orm_tidesdb_native_error(error, native_status,
                                     ORM_STATUS_DATASTORE_ERROR,
-                                    "commit TidesDB command");
-  }
-  return ORM_STATUS_OK;
+                                    operation);
+  char message[ORM_C_ERROR_MESSAGE_CAPACITY];
+  (void)snprintf(message, sizeof(message),
+      "%s: outcome unknown; %s (%d); do not retry automatically", operation,
+      orm_tidesdb_error_name(native_status), native_status);
+  return orm_tidesdb_fail(error, ORM_STATUS_COMMIT_UNKNOWN, message);
 }
 
 static orm_status_t orm_tidesdb_insert(
@@ -564,7 +578,7 @@ static orm_status_t orm_tidesdb_insert(
     goto cleanup;
   }
   if (owned != NULL) {
-    status = orm_tidesdb_commit_owned(owned, error);
+    status = orm_tidesdb_commit_native(owned, error, "commit TidesDB command");
     if (status != ORM_STATUS_OK)
       goto cleanup;
   }
@@ -572,7 +586,7 @@ static orm_status_t orm_tidesdb_insert(
   status = ORM_STATUS_OK;
 
 cleanup:
-  if (status != ORM_STATUS_OK && owned != NULL)
+  if (status != ORM_STATUS_OK && status != ORM_STATUS_COMMIT_UNKNOWN && owned != NULL)
     (void)orm_tidesdb_txn_rollback(owned);
   orm_tidesdb_txn_free(owned);
   tstr_freep(&encoded);
@@ -634,7 +648,9 @@ static orm_status_t orm_tidesdb_update_or_delete(
   if (status != ORM_STATUS_OK)
     goto cleanup;
   status = orm_tidesdb_row_matches(&row, plan, &matches, error);
-  if (status != ORM_STATUS_OK || !matches)
+  if (status != ORM_STATUS_OK)
+    goto cleanup;
+  if (!matches)
     goto commit_empty;
   if (remove) {
     native_status = orm_tidesdb_txn_delete(
@@ -687,11 +703,12 @@ static orm_status_t orm_tidesdb_update_or_delete(
 
 commit_empty:
   if (owned != NULL)
-    status = orm_tidesdb_commit_owned(owned, error);
+    status = orm_tidesdb_commit_native(owned, error, "commit TidesDB command");
 
 cleanup:
   orm_tidesdb_free(raw);
-  if (status != ORM_STATUS_OK && owned != NULL)
+  if (status != ORM_STATUS_OK) *affected = 0u;
+  if (status != ORM_STATUS_OK && status != ORM_STATUS_COMMIT_UNKNOWN && owned != NULL)
     (void)orm_tidesdb_txn_rollback(owned);
   orm_tidesdb_txn_free(owned);
   tstr_freep(&encoded);
@@ -1092,22 +1109,29 @@ static orm_status_t orm_tidesdb_transaction_execute(
 static orm_status_t orm_tidesdb_transaction_finish(
     orm_tidesdb_transaction_state *transaction, int commit,
     orm_error_t *error) {
-  int native_status;
+  orm_status_t status;
   if (transaction == NULL || !transaction->active)
     return orm_tidesdb_fail(error, ORM_STATUS_INVALID_STATE,
                             "TidesDB transaction is not active");
   if (transaction->cursors != 0u)
     return orm_tidesdb_fail(error, ORM_STATUS_BUSY,
                             "close TidesDB row Publishers before transaction finish");
-  native_status = commit ? orm_tidesdb_txn_commit(transaction->native)
-                         : orm_tidesdb_txn_rollback(transaction->native);
-  if (native_status != ORM_TDB_SUCCESS)
-    return orm_tidesdb_native_error(
-        error, native_status, ORM_STATUS_DATASTORE_ERROR,
-        commit ? "commit TidesDB transaction" : "roll back TidesDB transaction");
+  if (commit) {
+    status = orm_tidesdb_commit_native(transaction->native, error,
+                                      "commit TidesDB transaction");
+  } else {
+    const int native_status = orm_tidesdb_txn_rollback(transaction->native);
+    status = native_status == ORM_TDB_SUCCESS ? ORM_STATUS_OK :
+        orm_tidesdb_native_error(error, native_status, ORM_STATUS_DATASTORE_ERROR,
+                                 "roll back TidesDB transaction");
+  }
+  if (status != ORM_STATUS_OK && status != ORM_STATUS_COMMIT_UNKNOWN)
+    return status;
+  /* Unknown is terminal. The ORM owner quarantines the connection; destroy
+   * frees the native handle without retrying commit or pretending to undo WAL. */
   transaction->active = 0;
   transaction->owner->transaction_active = 0;
-  return ORM_STATUS_OK;
+  return status;
 }
 
 static orm_status_t orm_tidesdb_transaction_commit(void *context,
@@ -1238,6 +1262,13 @@ orm_status_t orm_tidesdb_backend_create(const orm_config_t *config,
     return orm_tidesdb_fail(error, ORM_STATUS_INVALID_ARGUMENT,
                             "invalid TidesDB backend request");
   memset(out_backend, 0, sizeof(*out_backend));
+  if (config->option_count && !config->options)
+    return orm_tidesdb_fail(error, ORM_STATUS_INVALID_ARGUMENT,
+                            "invalid TidesDB options");
+  for (uint32_t i = 0; i < config->option_count; ++i)
+    if (orm_view_equal_cstr(config->options[i].keyword, "sql_profile") &&
+        orm_view_equal_cstr(config->options[i].value, "relational"))
+      return orm_tidesdb_relational_create(config, limits, out_backend, error);
   state = (orm_tidesdb_backend_state *)calloc(1u, sizeof(*state));
   if (state == NULL)
     return orm_tidesdb_fail(error, ORM_STATUS_OUT_OF_MEMORY,
@@ -1278,6 +1309,8 @@ orm_status_t orm_tidesdb_backend_create(const orm_config_t *config,
         "TidesDB column family does not exist and creation is disabled");
     goto fail;
   }
+  status = orm_tidesdb_sql_catalog_require_legacy(state->database, state->column_family, error);
+  if (status != ORM_STATUS_OK) goto fail;
   out_backend->ops = &orm_tidesdb_backend_ops;
   out_backend->context = state;
   orm_error_set(error, ORM_STATUS_OK, NULL);

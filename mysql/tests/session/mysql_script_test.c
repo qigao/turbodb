@@ -133,6 +133,30 @@ spec("MySQL native schema script protocol") {
     check_null(strstr(error.message, "secret"));
   }
 
+  it("classifies valid prepared operation errors as SQL errors") {
+    const uint8_t failure[] = {
+        0xff, 0x28, 0x04, '#', '4', '2', '0', '0', '0',
+        's', 'e', 'c', 'r', 'e', 't'};
+    check_true(mysql_session_decode_server_error(
+        &session, failure, sizeof(failure), "prepare-server"));
+    check_equal(session.phase, MYSQL_PHASE_FAILED);
+    check_equal(error.status, MYSQL_SESSION_SQL_ERROR);
+    check_equal(error.server_error, (uint16_t)1064u);
+    check_equal(error.sql_state, "42000");
+    check_equal(error.stage, "prepare-server");
+    check_null(strstr(error.message, "secret"));
+  }
+
+  it("rejects malformed prepared operation errors as protocol failures") {
+    const uint8_t failure[] = {0xff, 0x28, 0x04, '#', '4', '2'};
+    check_true(mysql_session_decode_server_error(
+        &session, failure, sizeof(failure), "command-server"));
+    check_equal(session.phase, MYSQL_PHASE_FAILED);
+    check_equal(error.status, MYSQL_SESSION_PROTOCOL);
+    check_equal(error.server_error, (uint16_t)0u);
+    check_equal(error.stage, "command-server");
+  }
+
   it("rejects row results and local file requests") {
     const uint8_t rows[] = {1u};
     const uint8_t local_file[] = {0xfb,'f'};

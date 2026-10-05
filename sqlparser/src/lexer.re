@@ -44,6 +44,19 @@ int sqlp_lex(sqlp_lexer *lexer, sqlparser_span *token) {
         * { YYCURSOR = start; goto common_token; }
       */
     } else {
+      if (lexer->mysql_no_backslash_escapes) {
+        /*!re2c
+          re2c:define:YYCTYPE = "unsigned char";
+          re2c:yyfill:enable = 0;
+          re2c:eof = 0;
+          "'" ([^'\x00] | "''")* "'" |
+          '"' ([^"\x00] | '""')* '"' { kind = SQLTK_STRING; break; }
+          "'" | '"' { kind = -1; break; }
+          $ { kind = 0; break; }
+          * { YYCURSOR = start; goto mysql_name; }
+        */
+      }
+mysql_name:
       // A qualifier's dot is a separator, never the start of a decimal literal.
       if (lexer->mysql_after_name && *YYCURSOR == '.') {
         ++YYCURSOR; kind = SQLTK_DOT; break;
@@ -114,6 +127,7 @@ common_token:
       'offset' { kind = SQLTK_OFFSET; break; }
       'as' { kind = SQLTK_AS; break; }
       'join' { kind = SQLTK_JOIN; break; }
+      'lateral' { kind = sqlite ? SQLTK_ID : SQLTK_LATERAL; break; }
       'inner' { kind = SQLTK_INNER; break; }
       'left' { kind = SQLTK_LEFT; break; }
       'right' { kind = SQLTK_RIGHT; break; }
@@ -129,6 +143,7 @@ common_token:
       'values' { kind = SQLTK_VALUES; break; }
       'update' { kind = SQLTK_UPDATE; break; }
       'delete' { kind = SQLTK_DELETE; break; }
+      'duplicate' { kind = sqlite ? SQLTK_ID : SQLTK_DUPLICATE; break; }
       'set' { kind = SQLTK_SET; break; }
       'and' | "&&" { kind = SQLTK_AND; break; }
       'or' | "||" { kind = SQLTK_OR; break; }
@@ -162,6 +177,7 @@ common_token:
       'tables' { kind = sqlite ? SQLTK_ID : SQLTK_TABLES; break; }
       'table' { kind = SQLTK_TABLE; break; }
       'status' { kind = SQLTK_STATUS; break; }
+      'warnings' { kind = sqlite ? SQLTK_ID : SQLTK_WARNINGS; break; }
       'variables' { kind = SQLTK_VARIABLES; break; }
       'collation' { kind = sqlite ? SQLTK_ID : SQLTK_COLLATION; break; }
       'full' { kind = SQLTK_FULL; break; }
@@ -187,7 +203,8 @@ common_token:
       /* MySQL 8.4's special function names are keywords only immediately
        * before '('. ADDDATE/SUBDATE/SESSION_USER/SYSTEM_USER remain identifiers
        * even there, as documented by the upstream parser.test cases. */
-      'bit_and' | 'bit_or' | 'bit_xor' | 'count' | 'curdate' | 'curtime' |
+      'count' { kind = !sqlite && *YYCURSOR == '(' ? SQLTK_COUNT : SQLTK_ID; break; }
+      'bit_and' | 'bit_or' | 'bit_xor' | 'curdate' | 'curtime' |
       'date_add' | 'date_sub' | 'extract' | 'group_concat' | 'max' | 'mid' |
       'min' | 'position' | 'std' | 'stddev' | 'stddev_pop' |
       'stddev_samp' | 'substr' | 'substring' | 'sum' | 'sysdate' | 'trim' |
@@ -226,6 +243,14 @@ common_token:
       'json' { kind = sqlite ? SQLTK_ID : SQLTK_JSON; break; }
       'tree' { kind = sqlite ? SQLTK_ID : SQLTK_TREE; break; }
       'over' { kind = sqlite ? SQLTK_ID : SQLTK_OVER; break; }
+      'window' { kind = sqlite ? SQLTK_ID : SQLTK_WINDOW; break; }
+      'rows' { kind = sqlite ? SQLTK_ID : SQLTK_ROWS; break; }
+      'range' { kind = sqlite ? SQLTK_ID : SQLTK_RANGE; break; }
+      'current' { kind = sqlite ? SQLTK_ID : SQLTK_CURRENT; break; }
+      'unbounded' { kind = sqlite ? SQLTK_ID : SQLTK_UNBOUNDED; break; }
+      'preceding' { kind = sqlite ? SQLTK_ID : SQLTK_PRECEDING; break; }
+      'following' { kind = sqlite ? SQLTK_ID : SQLTK_FOLLOWING; break; }
+      'interval' { kind = sqlite ? SQLTK_ID : SQLTK_INTERVAL; break; }
       'partition' { kind = sqlite ? SQLTK_ID : SQLTK_PARTITION; break; }
       'prepare' { kind = sqlite ? SQLTK_ID : SQLTK_PREPARE; break; }
       'xor' { kind = sqlite ? SQLTK_ID : SQLTK_XOR; break; }
@@ -249,32 +274,33 @@ common_token:
       'attach' { kind = sqlite ? SQLTK_ATTACH : SQLTK_ID; break; }
       'detach' { kind = sqlite ? SQLTK_DETACH : SQLTK_ID; break; }
       'database' { kind = sqlite ? SQLTK_DATABASE : SQLTK_ID; break; }
-      'intersect' { kind = sqlite ? SQLTK_INTERSECT : SQLTK_ID; break; }
-      'except' { kind = sqlite ? SQLTK_EXCEPT : SQLTK_ID; break; }
+      'intersect' { kind = SQLTK_INTERSECT; break; }
+      'except' { kind = SQLTK_EXCEPT; break; }
       'with' { kind = SQLTK_WITH; break; }
       'recursive' { kind = SQLTK_RECURSIVE; break; }
       'glob' { kind = sqlite ? SQLTK_GLOB : SQLTK_ID; break; }
       'regexp' { kind = sqlite ? SQLTK_REGEXP : SQLTK_ID; break; }
-      'match' { kind = sqlite ? SQLTK_MATCH : SQLTK_ID; break; }
+      'match' { kind = SQLTK_MATCH; break; }
       'isnull' { kind = sqlite ? SQLTK_ISNULL : SQLTK_ID; break; }
       'notnull' { kind = sqlite ? SQLTK_NOTNULL : SQLTK_ID; break; }
       'autoincrement' { kind = sqlite ? SQLTK_AUTOINCREMENT : SQLTK_ID; break; }
       'conflict' { kind = sqlite ? SQLTK_CONFLICT : SQLTK_ID; break; }
       'abort' { kind = sqlite ? SQLTK_ABORT : SQLTK_ID; break; }
       'fail' { kind = sqlite ? SQLTK_FAIL : SQLTK_ID; break; }
-      'ignore' { kind = sqlite ? SQLTK_IGNORE : SQLTK_ID; break; }
+      'ignore' { kind = SQLTK_IGNORE; break; }
       'without' { kind = sqlite ? SQLTK_WITHOUT : SQLTK_ID; break; }
       'rowid' { kind = sqlite ? SQLTK_ROWID : SQLTK_ID; break; }
       'strict' { kind = sqlite ? SQLTK_STRICT : SQLTK_ID; break; }
       'virtual' { kind = sqlite ? SQLTK_VIRTUAL : SQLTK_ID; break; }
       'trigger' { kind = sqlite ? SQLTK_TRIGGER : SQLTK_ID; break; }
       'before' { kind = sqlite ? SQLTK_BEFORE : SQLTK_ID; break; }
-      'after' { kind = sqlite ? SQLTK_AFTER : SQLTK_ID; break; }
+      'after' { kind = SQLTK_AFTER; break; }
+      'first' { kind = sqlite ? SQLTK_ID : SQLTK_FIRST; break; }
       'instead' { kind = sqlite ? SQLTK_INSTEAD : SQLTK_ID; break; }
       'of' { kind = sqlite ? SQLTK_OF : SQLTK_ID; break; }
       'for' { kind = sqlite ? SQLTK_FOR : SQLTK_ID; break; }
       'each' { kind = sqlite ? SQLTK_EACH : SQLTK_ID; break; }
-      'row' { kind = sqlite ? SQLTK_ROW : SQLTK_ID; break; }
+      'row' { kind = SQLTK_ROW; break; }
       'raise' { kind = sqlite ? SQLTK_RAISE : SQLTK_ID; break; }
       'explain' { kind = SQLTK_EXPLAIN; break; }
       'describe' { kind = sqlite ? SQLTK_ID : SQLTK_EXPLAIN; break; }
@@ -284,13 +310,15 @@ common_token:
       'reindex' { kind = sqlite ? SQLTK_REINDEX : SQLTK_ID; break; }
       'vacuum' { kind = sqlite ? SQLTK_VACUUM : SQLTK_ID; break; }
       'alter' { kind = SQLTK_ALTER; break; }
-      'rename' { kind = sqlite ? SQLTK_RENAME : SQLTK_ID; break; }
+      'rename' { kind = SQLTK_RENAME; break; }
       'column' { kind = SQLTK_COLUMN; break; }
-      'add' { kind = sqlite ? SQLTK_ADD : SQLTK_ID; break; }
-      'cascade' { kind = sqlite ? SQLTK_CASCADE : SQLTK_ID; break; }
-      'restrict' { kind = sqlite ? SQLTK_RESTRICT : SQLTK_ID; break; }
+      'add' { kind = SQLTK_ADD; break; }
+      'cascade' { kind = SQLTK_CASCADE; break; }
+      'restrict' { kind = SQLTK_RESTRICT; break; }
       'no' { kind = SQLTK_NO; break; }
-      'action' { kind = sqlite ? SQLTK_ACTION : SQLTK_ID; break; }
+      'action' { kind = SQLTK_ACTION; break; }
+      'partial' { kind = SQLTK_PARTIAL; break; }
+      'simple' { kind = SQLTK_SIMPLE; break; }
       'deferrable' { kind = sqlite ? SQLTK_DEFERRABLE : SQLTK_ID; break; }
       'initially' { kind = sqlite ? SQLTK_INITIALLY : SQLTK_ID; break; }
       'indexed' { kind = sqlite ? SQLTK_INDEXED : SQLTK_ID; break; }
@@ -313,7 +341,8 @@ common_token:
       "*" { kind = SQLTK_STAR; break; }
       "/" { kind = SQLTK_SLASH; break; }
       "%" { kind = SQLTK_MOD; break; }
-      'mod' { kind = sqlite ? SQLTK_ID : SQLTK_MOD; break; }
+      'mod' { kind = sqlite ? SQLTK_ID : SQLTK_MYSQL_MOD; break; }
+      'div' { kind = sqlite ? SQLTK_ID : SQLTK_DIV; break; }
       "&" { kind = SQLTK_BITAND; break; }
       "|" { kind = SQLTK_BITOR; break; }
       "~" { kind = SQLTK_BITNOT; break; }

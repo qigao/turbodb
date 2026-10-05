@@ -3,13 +3,14 @@ add_library(
   plugin.c
   schema.c
   backend.c
-  dialect.c
+  ${ORM_SOURCE_DIR}/src/sql/orm_mysql_render.c
   cursor.c
   ${ORM_SOURCE_DIR}/src/driver/orm_driver_backend_bridge.c)
 
 target_compile_definitions(orm_mysql_driver
   PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(orm_mysql_driver PRIVATE
+  ${ORM_SOURCE_DIR}/src/sql
   ${ORM_SOURCE_DIR}/src/abi
   ${ORM_SOURCE_DIR}/src/flow
   ${ORM_SOURCE_DIR}/src/driver)

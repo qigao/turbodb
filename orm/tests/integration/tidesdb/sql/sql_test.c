@@ -147,7 +147,10 @@ spec("TidesDB SQL through the installed driver contract") {
     const char *invalid[] = {
       "INSERT INTO people (id, score) VALUES (1,10); DELETE FROM people",
       "INSERT INTO people (id, score) VALUES (2,?)",
-      "INSERT INTO people (id, score) VALUES (3,10),(4,20)"
+      "INSERT INTO people (id, score) VALUES (3,10),(4,20)",
+      "INSERT LOW_PRIORITY INTO people (id, score) VALUES (5,10)",
+      "INSERT INTO people (id, score, note) VALUES (6,10,'C:\\'); DELETE FROM people WHERE id=6",
+      "INSERT INTO people (id, score) VALUES (7,DEFAULT)"
     };
     for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
       raw_query(invalid[i]);
@@ -162,12 +165,61 @@ spec("TidesDB SQL through the installed driver contract") {
     raw_query("SELECT id, score FROM people"); open_rows(); end_rows();
     raw_query("INSERT INTO people (id, score) VALUES (5,50)"); command(1);
   }
+  it("executes MySQL syntax while retaining literal bytes and binding order") {
+    raw_query("INSERT INTO `people` (`id`, score, note) VALUES (1, 10, 'C:\\')"); command(1);
+    raw_query("SELECT `id`, score FROM `people` /* AST */ WHERE (note=? AND (id=?)) LIMIT ?, ?");
+    parameter(orm_text("C:\\")); parameter(orm_i64(1)); parameter(orm_i64(0)); parameter(orm_i64(1));
+    open_rows(); row(1, 10); end_rows();
+    raw_query("UPDATE people SET score=?, note=? WHERE id=?");
+    parameter(orm_i64(20)); parameter(orm_text("updated")); parameter(orm_i64(1)); command(1);
+    raw_query("SELECT id, score FROM people WHERE note='updated' -- ordinary comment\n");
+    open_rows(); row(1, 20); end_rows();
+  }
+  it("rejects unsupported write semantics without changing an existing row") {
+    raw_query("INSERT INTO people (id, score) VALUES(1, 10)"); command(1);
+    const char *unsupported[] = {
+      "UPDATE people SET score=99 WHERE id=1 LIMIT 0",
+      "UPDATE people SET score=99 WHERE id=1 OR id=2",
+      "UPDATE people SET score=99 WHERE score=10",
+      "UPDATE people SET score=99 WHERE id=1 AND score>0",
+      "DELETE FROM people WHERE id=1 ORDER BY id",
+      "REPLACE INTO people (id, score) VALUES(1, 99)"
+    };
+    for (size_t i=0; i<sizeof(unsupported)/sizeof(unsupported[0]); ++i) {
+      raw_query(unsupported[i]);
+      check_equal(open_command(), ORM_STATUS_OK);
+      orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+      check_equal(cflow_publisher_resume(&publisher, NULL, &result).kind, CFLOW_STEP_ERROR);
+      cflow_publisher_destroy(&publisher);
+      publisher = (cflow_publisher){0};
+    }
+    raw_query("SELECT id, score FROM people WHERE id=1"); open_rows(); row(1, 10); end_rows();
+  }
   it("applies IS NULL and zero LIMIT without changing structured NULL semantics") {
     raw_query("INSERT INTO people (id, score, note) VALUES (1,10,NULL)"); command(1);
     raw_query("INSERT INTO people (id, score, note) VALUES (2,20,'x')"); command(1);
     raw_query("SELECT id, score FROM people WHERE note IS NULL"); open_rows(); row(1, 10); end_rows();
     raw_query("SELECT id, score FROM people WHERE note IS NOT NULL"); open_rows(); row(2, 20); end_rows();
     raw_query("SELECT id, score FROM people LIMIT 0"); open_rows(); end_rows();
+  }
+  it("reports UPDATE and DELETE predicate type errors instead of successful no-ops") {
+    raw_query("INSERT INTO people (id, score) VALUES (1,10)"); command(1);
+    const char *invalid[] = {
+      "UPDATE people SET score=99 WHERE id=1 AND score='text'",
+      "DELETE FROM people WHERE id=1 AND score='text'"
+    };
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+      raw_query(invalid[i]);
+      check_equal(open_command(), ORM_STATUS_OK);
+      orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+      const cflow_step step = cflow_publisher_resume(&publisher, NULL, &result);
+      check_equal(step.kind, CFLOW_STEP_ERROR);
+      check_not_null(step.error);
+      check_contains(step.error, "compatible value types");
+      check_equal(result.affected_rows, UINT64_C(0));
+      cflow_publisher_destroy(&publisher); publisher = (cflow_publisher){0};
+    }
+    raw_query("SELECT id, score FROM people WHERE id=1"); open_rows(); row(1, 10); end_rows();
   }
   it("cancels a SQL cursor without retaining its parsed plan or runtime lease") {
     raw_query("INSERT INTO people (id, score) VALUES (1,10)"); command(1);

@@ -1,5 +1,14 @@
 # 第三方材料说明
 
+## GmSSL 密码库
+
+MySQL client 认证和私有 TidesSQL server 密码边界通过 vcpkg 的 `GmSSL::GmSSL`
+接入 GmSSL 3.2.0，不复制上游源码。来源：[guanzhi/GmSSL](https://github.com/guanzhi/GmSSL/tree/v3.2.0)，
+许可 Apache-2.0；安装包保留上游 `share/gmssl/copyright`。项目依赖固定在
+qigao/vcpkg-cache commit `1da9c439a2380a8752e88046ca0c5ae159991e03` 的 gmssl port，
+该 port 包含 Salts CNet 所需 TLS 适配补丁与 SHA1/SHA2/AES/P256 构建选项；
+补丁和版本元数据由 registry 管理。其他 registry 包的原 baseline 不变。
+
 ## MySQL 8.4.0 测试语料
 
 `sqlparser/mysql-spec/upstream/` 保存 MySQL 官方测试输入及原始许可证；

@@ -43,7 +43,7 @@ target_include_directories(
           ${ORM_SOURCE_DIR}/src/runtime)
 target_link_libraries(
   turbo_orm
-  PUBLIC Salts::Core Salts::CFlow
+  PUBLIC TurboDB::Types Salts::Core Salts::CFlow
   PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin Salts::CSTL
           Salts::Platform ${CMAKE_DL_LIBS})
 

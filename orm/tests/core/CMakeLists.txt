@@ -16,7 +16,7 @@ target_include_directories(
           ${ORM_SOURCE_DIR}/src/driver ${ORM_SOURCE_DIR}/src/runtime)
 target_link_libraries(
   orm_c_test_static
-  PUBLIC Salts::Core
+  PUBLIC TurboDB::Types Salts::Core
   PRIVATE Salts::CSerde
           Salts::DataBind
           Salts::Plugin

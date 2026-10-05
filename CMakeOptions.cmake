@@ -21,6 +21,9 @@ if(TURBODB_BUILD_APP)
   endif()
 endif()
 
+option(TURBODB_BUILD_TIDESSQL "Build the TidesSQL execution engine" ${TURBODB_BUILD_ORM})
+option(TURBODB_BUILD_TIDESSQL_SERVER "Build the standalone tidessqld MySQL/TLS server" OFF)
+
 # The toolchain reads manifest features during project().
 set(VCPKG_MANIFEST_FEATURES "")
 if(TURBODB_BUILD_ORM OR

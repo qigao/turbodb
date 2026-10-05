@@ -6,7 +6,8 @@
       "name": "pkgconf",
       "host": true
     },
-    "zstd"
+    "zstd",
+    "gmssl"
   ],
   "features": {
     "sqlite": {

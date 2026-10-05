@@ -14,6 +14,7 @@
 #include <cmeta/object.h>
 #include <cflow/cflow.h>
 #include <tstr.h>
+#include <turbodb/types.h>
 
 #if defined(ORM_C_STATIC)
 #define ORM_C_API
@@ -38,44 +39,44 @@ extern "C" {
 #endif
 
 #define ORM_C_ABI_VERSION UINT32_C(4)
-#define ORM_C_ERROR_MESSAGE_CAPACITY UINT32_C(512)
-#define ORM_C_DEFAULT_MAX_PARAMETERS UINT32_C(256)
-#define ORM_C_DEFAULT_MAX_COLUMNS UINT32_C(256)
+#define ORM_C_ERROR_MESSAGE_CAPACITY TURBODB_ERROR_MESSAGE_CAPACITY
+#define ORM_C_DEFAULT_MAX_PARAMETERS TURBODB_DEFAULT_MAX_PARAMETERS
+#define ORM_C_DEFAULT_MAX_COLUMNS TURBODB_DEFAULT_MAX_COLUMNS
 #define ORM_C_DEFAULT_MAX_PREDICATES UINT32_C(256)
-#define ORM_C_DEFAULT_MAX_QUERY_BYTES UINT64_C(65536)
-#define ORM_C_DEFAULT_MAX_PARAMETER_BYTES UINT64_C(1048576)
-#define ORM_C_DEFAULT_MAX_RESULT_ROWS UINT64_C(10000)
-#define ORM_C_DEFAULT_MAX_RESULT_BYTES UINT64_C(16777216)
+#define ORM_C_DEFAULT_MAX_QUERY_BYTES TURBODB_DEFAULT_MAX_QUERY_BYTES
+#define ORM_C_DEFAULT_MAX_PARAMETER_BYTES TURBODB_DEFAULT_MAX_PARAMETER_BYTES
+#define ORM_C_DEFAULT_MAX_RESULT_ROWS TURBODB_DEFAULT_MAX_RESULT_ROWS
+#define ORM_C_DEFAULT_MAX_RESULT_BYTES TURBODB_DEFAULT_MAX_RESULT_BYTES
 #define ORM_C_DEFAULT_MAX_ASSIGNMENTS UINT32_C(256)
 #define ORM_C_DEFAULT_FLOW_SCRATCH_BYTES UINT64_C(4096)
 #define ORM_C_DEFAULT_FLOW_MAX_DEPTH UINT64_C(64)
 #define ORM_C_DEFAULT_FLOW_MAX_CONTAINER_ITEMS UINT64_C(10000)
 #define ORM_C_DEFAULT_FLOW_MAX_BUFFER_BYTES UINT64_C(1048576)
 
-typedef int32_t orm_status_t;
+typedef turbodb_status_t orm_status_t;
 enum {
-  ORM_STATUS_OK = 0,
-  ORM_STATUS_INVALID_ARGUMENT = 1,
-  ORM_STATUS_ABI_MISMATCH = 2,
-  ORM_STATUS_OUT_OF_MEMORY = 3,
-  ORM_STATUS_CONNECTION_ERROR = 4,
-  ORM_STATUS_SQL_ERROR = 5,
-  ORM_STATUS_TYPE_ERROR = 6,
-  ORM_STATUS_OUT_OF_RANGE = 7,
-  ORM_STATUS_LIMIT_EXCEEDED = 8,
-  ORM_STATUS_INVALID_STATE = 9,
-  ORM_STATUS_NULL_VALUE = 10,
-  ORM_STATUS_INTERNAL_ERROR = 11,
-  ORM_STATUS_BUSY = 12,
-  ORM_STATUS_UNSUPPORTED = 13,
-  ORM_STATUS_DATASTORE_ERROR = 14,
-  ORM_STATUS_CONSTRAINT = 15,
+  ORM_STATUS_OK = TURBODB_STATUS_OK,
+  ORM_STATUS_INVALID_ARGUMENT = TURBODB_STATUS_INVALID_ARGUMENT,
+  ORM_STATUS_ABI_MISMATCH = TURBODB_STATUS_ABI_MISMATCH,
+  ORM_STATUS_OUT_OF_MEMORY = TURBODB_STATUS_OUT_OF_MEMORY,
+  ORM_STATUS_CONNECTION_ERROR = TURBODB_STATUS_CONNECTION_ERROR,
+  ORM_STATUS_SQL_ERROR = TURBODB_STATUS_SQL_ERROR,
+  ORM_STATUS_TYPE_ERROR = TURBODB_STATUS_TYPE_ERROR,
+  ORM_STATUS_OUT_OF_RANGE = TURBODB_STATUS_OUT_OF_RANGE,
+  ORM_STATUS_LIMIT_EXCEEDED = TURBODB_STATUS_LIMIT_EXCEEDED,
+  ORM_STATUS_INVALID_STATE = TURBODB_STATUS_INVALID_STATE,
+  ORM_STATUS_NULL_VALUE = TURBODB_STATUS_NULL_VALUE,
+  ORM_STATUS_INTERNAL_ERROR = TURBODB_STATUS_INTERNAL_ERROR,
+  ORM_STATUS_BUSY = TURBODB_STATUS_BUSY,
+  ORM_STATUS_UNSUPPORTED = TURBODB_STATUS_UNSUPPORTED,
+  ORM_STATUS_DATASTORE_ERROR = TURBODB_STATUS_DATASTORE_ERROR,
+  ORM_STATUS_CONSTRAINT = TURBODB_STATUS_CONSTRAINT,
   /* A dispatched commit may have reached the datastore, but acknowledgement
    * was lost. The transaction/connection is quarantined and must not replay. */
-  ORM_STATUS_COMMIT_UNKNOWN = 16,
+  ORM_STATUS_COMMIT_UNKNOWN = TURBODB_STATUS_COMMIT_UNKNOWN,
   /* Final native cleanup failed. The owner is quarantined; this is not a
    * retryable close result and resources may remain pinned until process exit. */
-  ORM_STATUS_CLEANUP_FAILED = 17,
+  ORM_STATUS_CLEANUP_FAILED = TURBODB_STATUS_CLEANUP_FAILED,
   ORM_STATUS_DRIVER_NOT_REGISTERED = 18,
   ORM_STATUS_DRIVER_ALREADY_REGISTERED = 19,
   ORM_STATUS_DRIVER_MODULE_NOT_FOUND = 20,
@@ -89,15 +90,15 @@ enum {
   ORM_STATUS_VALIDATION_ERROR = 24
 };
 
-typedef int32_t orm_value_kind_t;
+typedef turbodb_value_kind_t orm_value_kind_t;
 enum {
-  ORM_VALUE_NULL = 0,
-  ORM_VALUE_INT64 = 1,
-  ORM_VALUE_UINT64 = 2,
-  ORM_VALUE_DOUBLE = 3,
-  ORM_VALUE_BOOLEAN = 4,
-  ORM_VALUE_TEXT = 5,
-  ORM_VALUE_BLOB = 6
+  ORM_VALUE_NULL = TURBODB_VALUE_NULL,
+  ORM_VALUE_INT64 = TURBODB_VALUE_INT64,
+  ORM_VALUE_UINT64 = TURBODB_VALUE_UINT64,
+  ORM_VALUE_DOUBLE = TURBODB_VALUE_DOUBLE,
+  ORM_VALUE_BOOLEAN = TURBODB_VALUE_BOOLEAN,
+  ORM_VALUE_TEXT = TURBODB_VALUE_TEXT,
+  ORM_VALUE_BLOB = TURBODB_VALUE_BLOB,
 };
 
 typedef int32_t orm_compare_t;
@@ -129,17 +130,10 @@ typedef struct orm_result orm_result_t;
 typedef struct orm_transaction orm_transaction_t;
 typedef struct orm_metadata_snapshot orm_metadata_snapshot_t;
 typedef struct orm_execution_plan orm_execution_plan_t;
-typedef vstr orm_string_view_t;
+typedef turbodb_string_view_t orm_string_view_t;
 
-typedef struct orm_blob {
-  const void *data;
-  size_t size;
-} orm_blob_t;
-
-typedef struct orm_option {
-  orm_string_view_t keyword;
-  orm_string_view_t value;
-} orm_option_t;
+typedef turbodb_blob_t orm_blob_t;
+typedef turbodb_option_t orm_option_t;
 
 typedef struct orm_config {
   uint32_t struct_size;
@@ -157,26 +151,9 @@ typedef struct orm_config {
   uint64_t max_result_bytes;
 } orm_config_t;
 
-typedef struct orm_error {
-  uint32_t struct_size;
-  orm_status_t status;
-  char message[ORM_C_ERROR_MESSAGE_CAPACITY];
-} orm_error_t;
-
-typedef union orm_value_data {
-  int64_t int64_value;
-  uint64_t uint64_value;
-  double double_value;
-  uint8_t boolean_value;
-  orm_string_view_t text_value;
-  orm_blob_t blob_value;
-} orm_value_data_t;
-
-typedef struct orm_value {
-  orm_value_kind_t kind;
-  uint32_t reserved;
-  orm_value_data_t data;
-} orm_value_t;
+typedef turbodb_error_t orm_error_t;
+typedef turbodb_value_data_t orm_value_data_t;
+typedef turbodb_value_t orm_value_t;
 
 typedef struct orm_key_part {
   orm_string_view_t column;
@@ -623,54 +600,40 @@ ORM_C_API orm_status_t ORM_C_CALL orm_query_open_command_flow_in_transaction(
     cflow_publisher *out_publisher, orm_error_t *error);
 
 static inline orm_string_view_t orm_view(const char *text) {
-  return vstr_from_cstr(text);
+  return turbodb_view(text);
 }
 static inline orm_string_view_t orm_view_tstr(tstr text) {
-  return tstr_to_v(text);
+  return turbodb_view_tstr(text);
 }
 static inline orm_value_t orm_null(void) {
-  orm_value_t value = {ORM_VALUE_NULL, 0u, {0}};
-  return value;
+  return turbodb_null();
 }
 static inline orm_value_t orm_i64(int64_t input) {
-  orm_value_t value = {ORM_VALUE_INT64, 0u, {0}};
-  value.data.int64_value = input;
-  return value;
+  return turbodb_i64(input);
 }
 static inline orm_value_t orm_u64(uint64_t input) {
-  orm_value_t value = {ORM_VALUE_UINT64, 0u, {0}};
-  value.data.uint64_value = input;
-  return value;
+  return turbodb_u64(input);
 }
 static inline orm_value_t orm_f64(double input) {
-  orm_value_t value = {ORM_VALUE_DOUBLE, 0u, {0}};
-  value.data.double_value = input;
-  return value;
+  return turbodb_f64(input);
 }
 static inline orm_value_t orm_bool(int input) {
-  orm_value_t value = {ORM_VALUE_BOOLEAN, 0u, {0}};
-  value.data.boolean_value = (uint8_t)(input != 0);
-  return value;
+  return turbodb_bool(input);
 }
 static inline orm_value_t orm_text_v(vstr input) {
-  orm_value_t value = {ORM_VALUE_TEXT, 0u, {0}};
-  value.data.text_value = input;
-  return value;
+  return turbodb_text_v(input);
 }
 static inline orm_value_t orm_text(const char *input) {
-  return orm_text_v(orm_view(input));
+  return turbodb_text(input);
 }
 static inline orm_value_t orm_text_tstr(tstr input) {
-  return orm_text_v(tstr_to_v(input));
+  return turbodb_text_tstr(input);
 }
 static inline orm_value_t orm_blob_v(orm_blob_t input) {
-  orm_value_t value = {ORM_VALUE_BLOB, 0u, {0}};
-  value.data.blob_value = input;
-  return value;
+  return turbodb_blob_v(input);
 }
 static inline orm_value_t orm_blob(const void *data, size_t size) {
-  const orm_blob_t blob = {data, size};
-  return orm_blob_v(blob);
+  return turbodb_blob(data, size);
 }
 static inline orm_key_part_t orm_key_part(orm_string_view_t column,
                                           orm_value_t value) {

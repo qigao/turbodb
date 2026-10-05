@@ -1,7 +1,7 @@
 #include "backend.h"
 
 #include "cursor.h"
-#include "dialect.h"
+#include "orm_mysql_render.h"
 #include "parameters.h"
 #include "session.h"
 #include "session_cursor.h"

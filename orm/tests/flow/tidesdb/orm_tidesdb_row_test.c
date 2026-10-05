@@ -60,6 +60,43 @@ static orm_limits test_limits(void) {
 }
 
 spec("ORM pure C TidesDB row") {
+  it("decodes borrowed field views for every stored scalar kind and clears truncated results") {
+    enum { FIELD_COUNT = 7, COUNT_SENTINEL = 99 };
+    const unsigned char payload[] = {'a', 0, 'b'};
+    orm_owned_value values[] = {
+      {.kind = ORM_VALUE_NULL}, {.kind = ORM_VALUE_INT64, .data.int64_value = INT64_MIN},
+      {.kind = ORM_VALUE_UINT64, .data.uint64_value = UINT64_MAX},
+      {.kind = ORM_VALUE_DOUBLE, .data.double_value = 1.5},
+      {.kind = ORM_VALUE_BOOLEAN, .data.boolean_value = 1}, test_text("hello"), test_blob(payload, sizeof(payload))};
+    const char *names[] = {"nil", "signed", "unsigned", "floating", "boolean", "text", "blob"};
+    orm_error_t error; orm_error_init(&error);
+    orm_tidesdb_row row = {0}; check_equal(orm_tidesdb_row_init(&row, FIELD_COUNT, &error), ORM_STATUS_OK);
+    for (size_t i = 0; i < FIELD_COUNT; ++i) {
+      check_equal(test_set(&row, names[i], &values[i], &error), ORM_STATUS_OK); test_value_destroy(&values[i]);
+    }
+    tstr encoded = NULL; check_equal(orm_tidesdb_row_encode(&row, TEST_MAX_BYTES, &encoded, &error), ORM_STATUS_OK);
+    orm_tidesdb_row_destroy(&row);
+    orm_tidesdb_field_view fields[FIELD_COUNT] = {0}; size_t count = COUNT_SENTINEL;
+    const unsigned char *data = (const unsigned char *)encoded; const size_t size = tstr_len(encoded);
+    check_equal(orm_tidesdb_row_decode_view(data, size, TEST_MAX_BYTES, fields, FIELD_COUNT, &count, &error), ORM_STATUS_OK);
+    check_equal(count, FIELD_COUNT); check_equal(fields[0].value.kind, ORM_VALUE_NULL);
+    check_equal(fields[1].value.data.int64_value, INT64_MIN); check_equal(fields[2].value.data.uint64_value, UINT64_MAX);
+    check_equal(fields[3].value.data.double_value, 1.5); check_equal(fields[4].value.data.boolean_value, 1);
+    check_equal(memcmp(fields[5].value.data.text_value.data, "hello", 5), 0);
+    check_equal(memcmp(fields[6].value.data.blob_value.data, payload, sizeof(payload)), 0);
+    check_equal(fields[5].value.data.text_value.data >= encoded, true);
+    check_equal(fields[5].value.data.text_value.data < encoded + size, true);
+    for (size_t truncated = 0; truncated < size; ++truncated) {
+      count = COUNT_SENTINEL;
+      check_equal(orm_tidesdb_row_decode_view(data, truncated, TEST_MAX_BYTES, fields, FIELD_COUNT, &count, &error), ORM_STATUS_DATASTORE_ERROR);
+      check_equal(count, COUNT_SENTINEL);
+      for (size_t i = 0; i < FIELD_COUNT; ++i) { check_null(fields[i].name.data); check_equal(fields[i].value.kind, ORM_VALUE_NULL); }
+    }
+    check_equal(orm_tidesdb_row_decode_view(data, size, size - 1, fields, FIELD_COUNT, &count, &error), ORM_STATUS_LIMIT_EXCEEDED);
+    check_equal(orm_tidesdb_row_decode_view(data, size, TEST_MAX_BYTES, fields, FIELD_COUNT - 1, &count, &error), ORM_STATUS_LIMIT_EXCEEDED);
+    tstr_free(encoded);
+  }
+
   it("round-trips typed fields including null and embedded blob bytes") {
     static const unsigned char blob_bytes[] = {'A', 0u, 'B', 0u, 'C'};
     orm_tidesdb_row source = {0};

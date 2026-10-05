@@ -42,12 +42,22 @@ static void feed(void *engine, sqlp_context *ctx, int token) {
 sqlparser_status sqlparser_parse_dialect(const char *sql, size_t length,
     sqlparser_dialect dialect, const sqlparser_limits *limits,
     sqlparser_document **out, sqlparser_error *error) {
+  const sqlparser_options options = {dialect, false};
+  return sqlparser_parse_with_options(sql, length, &options, limits, out, error);
+}
+
+sqlparser_status sqlparser_parse_with_options(const char *sql, size_t length,
+    const sqlparser_options *options, const sqlparser_limits *limits,
+    sqlparser_document **out, sqlparser_error *error) {
+  const sqlparser_options config = options ? *options : (sqlparser_options){SQLPARSER_MYSQL, false};
+  const sqlparser_dialect dialect = config.dialect;
   sqlp_context ctx = {0};
   ctx.dialect = dialect;
   ctx.limits = limits ? *limits : sqlparser_default_limits();
   void *engine = NULL;
   if (out == NULL || *out != NULL || (sql == NULL && length != 0) ||
-      !valid_limits(ctx.limits) || (dialect != SQLPARSER_MYSQL && dialect != SQLPARSER_SQLITE)) {
+      !valid_limits(ctx.limits) || (dialect != SQLPARSER_MYSQL && dialect != SQLPARSER_SQLITE) ||
+      (dialect != SQLPARSER_MYSQL && config.mysql_no_backslash_escapes)) {
     sqlp_error(&ctx, SQLPARSER_INVALID_ARGUMENT, "invalid SQL parser arguments or limits");
     goto done;
   }
@@ -67,7 +77,7 @@ sqlparser_status sqlparser_parse_dialect(const char *sql, size_t length,
     goto done;
   }
   ctx.document->length = length;
-  ctx.document->dialect = dialect;
+  ctx.document->options = config;
   ctx.document->sql = tstr_new_len(sql, length);
   if (ctx.document->sql == NULL ||
       vec_init_bytes(&ctx.document->nodes, sizeof(sqlparser_node),
@@ -81,6 +91,7 @@ sqlparser_status sqlparser_parse_dialect(const char *sql, size_t length,
     goto done;
   }
   sqlp_lexer lexer = {ctx.document->sql, ctx.document->sql, ctx.document->sql + length, dialect};
+  lexer.mysql_no_backslash_escapes = config.mysql_no_backslash_escapes;
   int last = SQLTK_SEMI;
   while (ctx.error.status == SQLPARSER_OK) {
     int token = sqlp_lex(&lexer, &ctx.token);
