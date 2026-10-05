@@ -376,15 +376,16 @@ DDL、参数化 DML、SERIALIZABLE BEGIN/COMMIT/ROLLBACK、SAVEPOINT/ROLLBACK TO
 另一个真实 prepared result 覆盖 NULL、两类整数边界、DOUBLE、BOOL、TEXT、BLOB、
 列类型/unsigned flag、二进制行值和 affected rows。
 
-事实｜`tidessql_mysql_server_transaction_e2e` 4 个用例/161 条断言通过；其中断连用例在
+事实｜`tidessql_mysql_server_transaction_e2e` 5 个用例/192 条断言通过；其中断连用例在
 远程未提交更新后停止服务，并由本地 SDK 验证 server cleanup 已回滚该更新。TidesSQL
 MySQL client 的测试私有 fault hook 另在 COMMIT 完成 CNet 发送后丢弃确认：返回
 `MYSQL_SESSION_COMMIT_UNKNOWN`、发送计数为 1，server 清理后本地 SDK 观察存储值只能是
-提交前值或一次提交后的值。生产 client target 不包含该 hook。MySQL protocol 与 client
-相邻回归 18/18 通过（38.98 秒）。复验日志为
-`build/Msvc-Release/Testing/mysql-server-e2e-final.log` 与
-`mysql-commit-unknown-regression.log`。该结果尚未覆盖远程 `SET autocommit`、ORM plugin
-进程级远程链路或通用 Connector 初始化 SQL。
+提交前值或一次提交后的值。新增真实会话先以 COM_QUERY 执行 `SET autocommit=OFF`，
+再以 PREPARE/EXECUTE 写入：直接断开回滚该行，切回 ON 则提交并可由新连接读取。
+生产 client target 不包含这些测试 hook。MySQL protocol、client 与 daemon 相邻回归
+20/20 通过（41.98 秒），复验日志为
+`build/Msvc-Release/Testing/tidessql-autocommit-regression.log`。剩余远程缺口是 ORM plugin
+进程级链路、Linux/sanitizer 和通用 Connector 初始化 SQL。
 
 ```powershell
 cmake --build --preset win-release-user --target tidessql_mysql_password_test tidessql_mysql_tls_test mysql_auth_boundary_test -j 4

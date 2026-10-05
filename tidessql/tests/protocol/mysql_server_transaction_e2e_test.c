@@ -48,6 +48,16 @@ static turbodb_error_t error;
 #if defined(MYSQL_ENABLE_FAULT_INJECTION)
 /* Live qualification only. The production TurboDB::MySQL target omits these
  * symbols and the state they control. */
+mysql_session_status_t mysql_transaction_session_test_open(
+    const mysql_session_config_t *config, size_t max_command_bytes,
+    mysql_transaction_session_t **out_transaction,
+    mysql_session_error_t *error);
+void mysql_transaction_session_test_disconnect(
+    mysql_transaction_session_t *transaction);
+mysql_session_status_t mysql_transaction_session_test_execute_control(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *sql, size_t sql_size,
+    mysql_session_error_t *error);
 void mysql_transaction_session_test_drop_commit_ack(
     mysql_transaction_session_t *transaction, int enabled);
 unsigned mysql_transaction_session_test_commit_send_count(
@@ -435,6 +445,72 @@ spec("TidesSQL MySQL server remote transaction end to end") {
     mysql_transaction_session_destroy(transaction);
     transaction = NULL;
     check_true(read_score(1, &score, &client_error));
+    check_equal(score, INT64_C(20));
+  }
+
+  it("persists SET autocommit in one remote session and applies its boundaries") {
+    mysql_session_error_t client_error = {0};
+    mysql_session_command_result_t command = {0};
+    mysql_transaction_session_t *session = NULL;
+    const mysql_stmt_value_t first[] = {
+        {.kind = MYSQL_STMT_VALUE_SINT64, .data.sint64_value = 1},
+        {.kind = MYSQL_STMT_VALUE_SINT64, .data.sint64_value = 10}};
+    const mysql_stmt_value_t second[] = {
+        {.kind = MYSQL_STMT_VALUE_SINT64, .data.sint64_value = 2},
+        {.kind = MYSQL_STMT_VALUE_SINT64, .data.sint64_value = 20}};
+
+    check_equal(
+        execute("CREATE TABLE items(id BIGINT PRIMARY KEY,score BIGINT)",
+                NULL, 0, &command, &client_error),
+        MYSQL_SESSION_OK);
+    check_equal(
+        mysql_transaction_session_test_open(
+            &client, TEST_BUFFER_BYTES, &session, &client_error),
+        MYSQL_SESSION_OK);
+    check_not_null(session);
+    check_equal(
+        mysql_transaction_session_test_execute_control(
+            session, (const uint8_t *)"SET autocommit=OFF",
+            strlen("SET autocommit=OFF"), &client_error),
+        MYSQL_SESSION_OK);
+    check_equal(
+        mysql_transaction_session_execute_prepared(
+            session, (const uint8_t *)"INSERT INTO items VALUES(?,?)",
+            strlen("INSERT INTO items VALUES(?,?)"), first, 2, &command,
+            &client_error),
+        MYSQL_SESSION_OK);
+    check_equal(command.affected_rows, UINT64_C(1));
+    mysql_transaction_session_test_disconnect(session);
+    session = NULL;
+
+    int64_t score = 0;
+    check_false(read_score(1, &score, &client_error));
+
+    check_equal(
+        mysql_transaction_session_test_open(
+            &client, TEST_BUFFER_BYTES, &session, &client_error),
+        MYSQL_SESSION_OK);
+    check_not_null(session);
+    check_equal(
+        mysql_transaction_session_test_execute_control(
+            session, (const uint8_t *)"SET autocommit=OFF",
+            strlen("SET autocommit=OFF"), &client_error),
+        MYSQL_SESSION_OK);
+    check_equal(
+        mysql_transaction_session_execute_prepared(
+            session, (const uint8_t *)"INSERT INTO items VALUES(?,?)",
+            strlen("INSERT INTO items VALUES(?,?)"), second, 2, &command,
+            &client_error),
+        MYSQL_SESSION_OK);
+    check_equal(
+        mysql_transaction_session_test_execute_control(
+            session, (const uint8_t *)"SET autocommit=ON",
+            strlen("SET autocommit=ON"), &client_error),
+        MYSQL_SESSION_OK);
+    mysql_transaction_session_destroy(session);
+    session = NULL;
+
+    check_true(read_score(2, &score, &client_error));
     check_equal(score, INT64_C(20));
   }
 

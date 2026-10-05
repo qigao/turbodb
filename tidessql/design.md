@@ -482,17 +482,20 @@ INSERT/UPDATE affected_rows 为 1；类型矩阵不依赖当前数值表列 prof
 或凭据的服务端文本。此改动不修改 wire、公开结构布局或枚举值，ORM 可按已有状态映射
 区分 SQL 拒绝与协议损坏。
 
-事实｜2026-10-05 `tidessql_mysql_server_transaction_e2e` 4 个用例/161 条断言通过，
+事实｜2026-10-05 `tidessql_mysql_server_transaction_e2e` 5 个用例/192 条断言通过，
 `mysql_script` 新增的有效/损坏 prepared ERR 分类用例通过。TidesSQL MySQL protocol 与
-MySQL client 相邻回归 18/18 通过（38.98 秒），日志为
-`build/Msvc-Release/Testing/mysql-commit-unknown-regression.log`。第三个用例在远程事务
-写入但未提交后停止服务，等待 server owner 完成连接清理，再由本地 SDK 验证更新已回滚；
-它验证普通断连回滚。第四个用例使用只编入该测试目标的现有 MySQL client fault hook，
+MySQL client/daemon 相邻回归 20/20 通过（41.98 秒），日志为
+`build/Msvc-Release/Testing/tidessql-autocommit-regression.log`。新增用例在同一真实 TLS
+session 依次执行 `SET autocommit=OFF` 与参数化 INSERT：直接断开时新 session 看不到该行；
+再次写入后执行 `SET autocommit=ON`，新 session 可读取已提交值。控制语句按 MySQL 客户端
+语义走 COM_QUERY，DML 仍走 PREPARE/EXECUTE。另一个用例在远程事务写入但未提交后停止
+服务，等待 server owner 完成连接清理，再由本地 SDK 验证更新已回滚；它验证普通断连
+回滚。COMMIT_UNKNOWN 用例使用只编入该测试目标的现有 MySQL client fault hook，
 在 COMMIT 完成 CNet 发送后关闭连接；客户端返回 `MYSQL_SESSION_COMMIT_UNKNOWN`，发送
 计数严格为 1。server 完成清理后，本地 SDK 读取实际存储，值只能是提交前 10 或单次提交
 后的 11，不把未知结果解释为失败，也不重放事务。生产 `TurboDB::MySQL` 目标不编译该 hook。
-尚未覆盖远程 `SET autocommit`、ORM plugin 进程级远程链路、daemon 配置/安装、Linux、
-sanitizer 或通用 Connector 初始化 SQL，因此 #209 保持开放。
+尚未覆盖 ORM plugin 进程级远程链路、Linux、sanitizer 或通用 Connector 初始化 SQL，
+因此 #209 保持开放。
 
 ### #204/#208 `tidessqld` 部署入口
 
