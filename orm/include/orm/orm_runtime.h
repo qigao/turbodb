@@ -81,7 +81,7 @@ orm_runtime_create(const orm_runtime_config_t *config,
 /* Loads exactly the caller-supplied absolute module path through Salts::Plugin.
  * No directory scan, fallback, download, ABI retry, alias inference, or
  * implicit connect occurs. expected_driver_id must exactly equal the Plugin
- * manifest plugin_id. Admission requires one Plugin ABI 3 "driver" export
+ * manifest plugin_id. Admission requires one Plugin ABI 4 "driver" export
  * implementing the reflected TurboDb.Driver Interface. */
 ORM_C_API orm_status_t ORM_C_CALL
 orm_runtime_load_driver(orm_runtime_t *runtime,

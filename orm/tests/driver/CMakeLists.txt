@@ -114,7 +114,7 @@ if(WIN32)
 endif()
 
 # Qualify canonical Plugin loading/admission with real DSOs. These fixtures
-# publish only Plugin ABI 3 contracts; no TurboDB-private loader entry exists.
+# publish only Plugin ABI 4 contracts; no TurboDB-private loader entry exists.
 add_library(orm_plugin_no_query_fixture MODULE orm_module_no_entry_fixture.c)
 set_target_properties(
   orm_plugin_no_query_fixture

@@ -494,8 +494,8 @@ session 依次执行 `SET autocommit=OFF` 与参数化 INSERT：直接断开时�
 在 COMMIT 完成 CNet 发送后关闭连接；客户端返回 `MYSQL_SESSION_COMMIT_UNKNOWN`，发送
 计数严格为 1。server 完成清理后，本地 SDK 读取实际存储，值只能是提交前 10 或单次提交
 后的 11，不把未知结果解释为失败，也不重放事务。生产 `TurboDB::MySQL` 目标不编译该 hook。
-尚未覆盖 ORM plugin 进程级远程链路、Linux、sanitizer 或通用 Connector 初始化 SQL，
-因此 #209 保持开放。
+后续已覆盖 ORM plugin 到独立 `tidessqld` 的进程级远程链路；Linux、sanitizer 与
+通用 Connector 初始化 SQL 仍未覆盖，因此 #209 保持开放。
 
 ### #204/#208 `tidessqld` 部署入口
 
@@ -682,9 +682,10 @@ runtime 283 用例/647352 断言。新用例覆盖 schema ID/列/默认值变化
 元数据和结果分配退款、单表七种实际值、begin 主读失败叠加同码 rollback 失败、
 COMMIT_UNKNOWN 无重放、失败结果清理后的 statement 最终释放。源码和公共 header
 及 CMake package 为 1.3.0 / ABI v1，旧 DTO 布局保持。
-MED｜ORM 相关目标因本机 Salts Plugin ABI 4 与仓库要求 ABI 3 不匹配而编译拒绝，
-本轮没有完整 ORM 回归，也未执行正常 install preset；SDK 1.3.0 尚未安装。
-Linux/sanitizer 未执行，未提交/推送。最小复验见 readme 的 SDK 1.3 段落；全引擎
+后续已将 ORM Driver SDK 与全部插件统一升级到本机 Salts Plugin ABI 4，并运行
+Driver SDK、真实插件 admission、runtime registry/race 与独立 daemon 链路回归。
+旧 ABI 3 插件须协调重编译；没有 TidesSQL SDK、MySQL wire 或磁盘格式迁移。
+Linux/sanitizer 未执行。最小复验见 readme 的 SDK 1.3 段落；全引擎
 日志 `build/Msvc-Release/Testing/prepared-engine-regression.log`。一次中间最小回归的
 临时目录 fixture 创建失败发生在 SQL 调用之前，随后完整重跑通过。
 该次 PREPARE 验证限常用单表子集，DDL 在下节接入；SHOW/EXPLAIN、复杂自动参数推导和递归准备
@@ -7189,13 +7190,13 @@ autocommit 自赋值、回滚/重连、SHOW 元数据/过滤/关闭及原有表�
 [事务系统变量](https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html#sysvar_transaction_read_only)、
 [SHOW VARIABLES](https://dev.mysql.com/doc/refman/8.4/en/show-variables.html)。
 
-### 当前 SDK 的 Plugin ABI 3 接入
+### 当前 SDK 的 Plugin ABI 4 接入
 
-背景｜安装 SDK 的 `salts/plugin.h` 使用精确 epoch 3，涵盖 export 暴露的 CMeta
+背景｜安装 SDK 的 `salts/plugin.h` 使用精确 epoch 4，涵盖 export 暴露的 CMeta
 Reflection 不兼容布局。ORM SDK 的编译约束、消费者和实际发布模块必须统一到
 同一 epoch，避免旧描述符进入新 runtime。
 
-决策｜采用安装的 Salts::Plugin ABI 3，移除 SDK/消费者/文档中的 ABI 2 准入要求。
+决策｜采用安装的 Salts::Plugin ABI 4，移除 SDK/消费者/文档中的 ABI 3 准入要求。
 不采用旧 SDK 回退或双布局适配器。影响全部 ORM driver 发布、runtime 加载与 SDK
 消费者；现有 query/manifest exact-version 路径负责拒绝旧 epoch，不读取旧 CMeta
 描述符。Driver DTO ABI 与 TurboDb.Driver domain contract 是独立版本，不因
@@ -7205,7 +7206,7 @@ Plugin epoch 改名。单一 registry、lease、停止/卸载 ownership 保持�
 HIGH 兼容性｜core、driver 和反射使用同一 SDK 清理旧产物并协调重建后部署；旧插件
 需重编译，不允许混部署。更换二进制前须关闭连接/cursor/transaction 并排空 lease。加载失败
 按现有 cleanup 路径撤销 admission，不能发布部分 driver 注册。回滚只能成套回滚
-core/模块/SDK，不在当前版本增加 ABI 2 恢复分支。
+core/模块/SDK，不在当前版本增加 ABI 3 恢复分支。
 
 验证｜正式 C/C++ reflection/SDK contract 测试、拒绝旧 epoch 的 manifest 与真实
 DSO fixture、runtime registry/race、各驱动插件与 SQL 新增回归。C++ 原有测试文件
@@ -7213,19 +7214,21 @@ DSO fixture、runtime registry/race、各驱动插件与 SQL 新增回归。C++ 
 这是测试陈旧断言修复，不是新增 domain 方法。架构边界详见
 [ORM ownership](../orm/readme.md#plugin-architecture-and-ownership)。
 
-复验｜在 VS x64 开发环境中使用 `win-release-user`。升级 SDK 后采用 `--clean-first`
-移除前一 epoch 编译的对象，避免增量链接混用旧 CMeta 描述符。本轮五个实际配置的
-driver（MySQL、PostgreSQL、SQLite、Redis、TidesDB）完成清理重建；MongoDB 仍为
-既有 source-only 范围。30/30 个正式 CTest 目标通过，耗时 163.94 秒；TidesDB
-插件 282 个用例、私有 runtime 223 个用例通过。覆盖会话快照/资源失败和既有查询、
-SHOW、事务、owner 生命周期；新增非法 SHOW WARNINGS LIMIT 的原始错误保留与
-构造退款检查。查询 owner 的完整 union 存储在入场时清零，确保扩大的 SHOW 分支
-也从空的嵌入 owner 开始。真实模块 fixture 的旧 epoch 加载返回 ABI_MISMATCH，
-并验证没有残留注册。Redis 本轮仅验证构建；MySQL/PostgreSQL 没有运行服务端差分。
+复验｜在 VS x64 开发环境中使用 `win-release-user`。升级 SDK 后清理并重编译所有
+host 与 driver 目标，避免增量链接混用旧 CMeta 描述符。14/14 个相关 CTest 通过，
+包括 C/C++ SDK contract、旧 epoch 拒绝、runtime registry/race、五个实际 driver
+插件、跨 SQL driver 矩阵，以及 ORM MySQL 通过独立 `tidessqld` 进程的 TLS、
+prepared DML、结构化查询/更新与事务回滚链路。日志为
+`build/Msvc-Release/Testing/plugin-abi4-process-regression.log`。
+
+MED｜当前安装的 `Salts::TinyMock` target 未传播 `tinymock.h`，因此无关的 Redis IO
+mock 与 `orm_runtime_coexistence` 目标不能编译，完整 all-target 构建在该处停止；
+本轮未修改外部 SDK。MongoDB 仍为既有 source-only 范围，Linux/sanitizer 及外部
+MySQL/PostgreSQL 服务端差分测试由其独立环境执行。
 
 ```powershell
-cmake --build --preset win-release-user --clean-first --target orm_driver_interface_test orm_driver_interface_cpp_test orm_runtime_registry_test orm_runtime_race_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_value_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_relational_test orm_mysql_plugin_test orm_postgresql_plugin_test orm_sqlite_plugin_test orm_runtime_coexistence_test orm_sql_plugin_matrix_test orm_redis_driver orm_tidesdb_sql_test orm_tidesdb_sql_resource_test orm_tidesdb_sql_commit_fault_test orm_tidesdb_row_test orm_mysql_dialect_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test sqlparser_test sqlparser_failure_test sqlparser_dialect_test sqlparser_sqlite_extension_test sqlparser_corpus_test sqlparser_mysql_corpus_test -j 4
-ctest --preset win-release-user -R '^(sqlparser_(test|failure_test|dialect_test|sqlite_extension_test|corpus_test|mysql_corpus_test)|orm_driver_interface(_cpp)?|orm_runtime_(registry|race|coexistence)|orm_(mysql|postgresql|sqlite)_plugin|orm_sql_plugin_matrix_(sqlite|postgresql|both)|orm_owner_(checked|public_flow|cpp_flow)|orm_mysql_dialect|orm_tidesdb_row|orm_tidesdb_sql($|_(expr|value|runtime|relational_owner|relational|resource|commit_fault)))$' --output-on-failure
+cmake --build --preset win-release-user --target tidessqld_process_e2e_test orm_mysql_tidessqld_e2e_test orm_driver_interface_test orm_driver_interface_cpp_test orm_runtime_registry_test orm_runtime_race_test orm_mysql_plugin_test orm_postgresql_plugin_test orm_sqlite_plugin_test orm_redis_backend_contract_test orm_tidesdb_public_flow_test orm_sql_plugin_matrix_test -j 4
+ctest --preset win-release-user -R '^(tidessqld_process_e2e|orm_mysql_tidessqld_e2e|orm_driver_interface|orm_driver_interface_cpp|orm_runtime_registry|orm_runtime_race|orm_mysql_plugin|orm_postgresql_plugin|orm_sqlite_plugin|orm_redis_backend_contract|orm_tidesdb_public_flow|orm_sql_plugin_matrix_(sqlite|postgresql|both))$' --output-on-failure
 ```
 
 ### SHOW 过滤的执行归属与生命周期

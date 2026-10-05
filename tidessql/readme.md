@@ -221,11 +221,10 @@ DDL 增量新增 12 个用例，覆盖全部现有分支、默认值检查阶段
 回滚/只读、逐点 WORK 分配失败及 native 读写/提交/回滚观察；业务命名空间
 读取探针开启拒绝时仍能准备，physical row/index 的 get/seek 均为 0。
 
-MED｜本轮 ORM 全量构建被依赖 ABI 阻塞：本机安装的 Salts Plugin ABI 为 4，
-仓库 `orm_driver_plugin.h` 要求 ABI 3；没有修改该契约或替换 SDK。
-因此本轮未运行 ORM 全量回归，正常 install preset 也尚未更新 SDK 1.3.0；
-不能沿用旧版本的安装/全量通过结论。Linux/sanitizer 未执行。代码未提交/推送，
-#206 保持开放；网络/TLS/认证和真实 MySQL driver E2E 仍未实现。
+后续已将 ORM Driver SDK 与全部插件统一升级至当前 Salts Plugin ABI 4，并完成
+真实 MySQL Driver 到独立 `tidessqld` 的 TLS/认证/事务链路验证。ABI 3 插件必须与
+宿主协调重编译，不能混部署；该升级不改变 TidesSQL SDK ABI、MySQL wire 或磁盘格式。
+Linux/sanitizer 与外部 MySQL 服务端差分仍由独立环境验证。
 最小复验（VS x64 开发环境）：
 
 ```powershell
@@ -384,8 +383,8 @@ MySQL client 的测试私有 fault hook 另在 COMMIT 完成 CNet 发送后丢�
 再以 PREPARE/EXECUTE 写入：直接断开回滚该行，切回 ON 则提交并可由新连接读取。
 生产 client target 不包含这些测试 hook。MySQL protocol、client 与 daemon 相邻回归
 20/20 通过（41.98 秒），复验日志为
-`build/Msvc-Release/Testing/tidessql-autocommit-regression.log`。剩余远程缺口是 ORM plugin
-进程级链路、Linux/sanitizer 和通用 Connector 初始化 SQL。
+`build/Msvc-Release/Testing/tidessql-autocommit-regression.log`。剩余远程缺口是
+Linux/sanitizer 和通用 Connector 初始化 SQL。
 
 ```powershell
 cmake --build --preset win-release-user --target tidessql_mysql_password_test tidessql_mysql_tls_test mysql_auth_boundary_test -j 4
@@ -409,8 +408,12 @@ tidessqld serve --config C:/etc/tidessql/tidessqld.toml
 SAVEPOINT、COMMIT 与 prepared SELECT。Windows install component 同时安装 executable、
 `cnet.dll` 与 `salts.dll`；仅系统 PATH 下 `tidessqld --version` 退出码为 0。
 
-MED｜登录速率/CPU 配额、ORM plugin 进程级远程 E2E、Linux/sanitizer/benchmark 仍待继续。
-没有 SDK ABI、MySQL wire 或磁盘格式改变；既有 Salts/ORM ABI 阻塞未修改。
+`orm_mysql_tidessqld_e2e` 另以动态加载的 MySQL ORM plugin 连接该独立 daemon，覆盖
+TLS/full-auth、raw prepared INSERT、结构化 SELECT/UPDATE、SERIALIZABLE 事务与回滚
+可见性。进程 fixture 由两条测试共享，仍只属于测试代码。
+
+MED｜登录速率/CPU 配额、Linux/sanitizer/benchmark 和通用 Connector 初始化 SQL 仍待继续。
+ORM Driver Plugin ABI 已从 3 升至 4，旧插件二进制必须重编译；MySQL wire 与磁盘格式未变。
 
 `tdsql_transaction_release_checked()` 和 `tdsql_result_destroy_checked()`
 返回清理结果并消费 handle，失败会隔离连接；无论返回值如何都不得再使用
@@ -664,7 +667,7 @@ INSERT/UPDATE/DELETE 及受支持 SET 的 RHS。`SHOW [SESSION|LOCAL] VARIABLES`
 不区分大小写匹配，WHERE 可使用实际结果列和类型化参数；GLOBAL/其他变量明确拒绝。
 普通表达式 LIKE 的既有大小写敏感规则保持不变。缺少连接快照的私有执行入口
 不允许变量实际求值。
-Salts Plugin 已切换为 ABI 3，旧 epoch 在加载时拒绝；升级 SDK 时须清理旧编译
+Salts Plugin 已切换为 ABI 4，旧 epoch 在加载时拒绝；升级 SDK 时须清理旧编译
 产物，协调重建 core 与全部驱动。ABI 接入时清理重建后 30/30 个相关 CTest 目标通过，
 包括真实插件 282 个用例、私有执行器 223 个用例、旧 epoch 拒绝、跨驱动和 C/C++ flow。
 后续 SHOW 过滤增量的插件 287 个用例、私有执行器 229 个用例通过。

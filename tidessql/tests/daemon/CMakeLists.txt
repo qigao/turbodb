@@ -16,7 +16,7 @@ endif()
 cmake_add_test(
   NAME tidessqld_process_e2e_test TEST_NAME tidessqld_process_e2e
   FOLDER "tidessql/tests/daemon"
-  SOURCES process_e2e_test.c
+  SOURCES process_e2e_test.c process_fixture.c
   LIBS TurboDB::MySQL Salts::Core Salts::TinyTest)
 target_compile_definitions(tidessqld_process_e2e_test PRIVATE
   "TEST_TIDESSQLD=\"$<TARGET_FILE:tidessqld>\""
