@@ -117,7 +117,7 @@ static inline turbodb_value_t turbodb_f64(double input) {
 }
 static inline turbodb_value_t turbodb_bool(int input) {
   turbodb_value_t value = {TURBODB_VALUE_BOOLEAN, 0u, {0}};
-  value.data.boolean_value = (uint8_t)(input != 0);
+  value.data.boolean_value = input != 0;
   return value;
 }
 static inline turbodb_value_t turbodb_text_v(vstr input) {

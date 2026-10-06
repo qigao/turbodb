@@ -33,7 +33,18 @@ jobs:
           platform: ${{ matrix.rid }}
       - name: Install Linux host tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build lemon
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Build bundled Lemon host tool
+        if: matrix.rid == 'android-arm64-v8a'
+        shell: bash
+        run: |
+          set -euo pipefail
+          host_tools="$RUNNER_TEMP/turbodb-host-tools"
+          mkdir -p "$host_tools"
+          cc -std=c11 -O2 "$GITHUB_WORKSPACE/tools/lemon/lemon.c" \
+            -o "$host_tools/lemon"
+          test -x "$host_tools/lemon"
+          echo "TURBODB_HOST_LEMON=$host_tools/lemon" >> "$GITHUB_ENV"
       - name: Install macOS host tools
         if: runner.os == 'macOS'
         run: brew install autoconf ninja lemon
@@ -81,7 +92,8 @@ jobs:
           if [[ '${{ matrix.rid }}' == linux-x64 ]]; then
             cmake --preset '${{ matrix.preset }}' -DTURBODB_MYSQL_CONNECTOR_J_JAR="$CONNECTOR_J_JAR"
           else
-            cmake --preset '${{ matrix.preset }}'
+            cmake --preset '${{ matrix.preset }}' \
+              -DLEMON_EXECUTABLE="$TURBODB_HOST_LEMON"
           fi
           cmake --build --preset '${{ matrix.preset }}' --parallel 4
           if [[ '${{ matrix.rid }}' == linux-x64 ]]; then

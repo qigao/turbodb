@@ -54,7 +54,10 @@ if(MSVC)
   target_compile_options(orm_driver_interface_cpp_test PRIVATE /WX)
 else()
   target_compile_options(orm_driver_interface_test PRIVATE -Werror)
-  target_compile_options(orm_driver_interface_cpp_test PRIVATE -Werror)
+  # C keeps struct tags and functions in separate namespaces. The public ABI
+  # deliberately preserves historical pairs such as orm_config/struct
+  # orm_config, which are legal in C++ but trigger GCC's C++-specific warning.
+  target_compile_options(orm_driver_interface_cpp_test PRIVATE -Werror -Wno-shadow)
 endif()
 
 cmake_add_test(
