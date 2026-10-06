@@ -8,7 +8,7 @@
     <PackageVersion Condition="'$(PackageVersion)' == ''">2.2.0</PackageVersion>
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <Authors>qigao</Authors>
-    <Description>Prebuilt TurboDB ORM, SQLite/PostgreSQL/MySQL/TidesDB drivers, MySQL/Redis clients, and the Windows/Linux tidessqld server for native consumers.</Description>
+    <Description>Prebuilt TurboDB ORM, SQLite/PostgreSQL/MySQL/TidesDB drivers, MySQL/Redis clients, and the Windows/Linux/macOS tidessqld server for native consumers.</Description>
     <PackageTags>turbodb;orm;database;native;c;cpp;cmake;macos;android</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

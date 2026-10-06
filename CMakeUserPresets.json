@@ -1,475 +1,228 @@
 {
-  "version": 6,
-  "include": [
-    "CMakePresets.json"
-  ],
-  "configurePresets": [
-    {
-      "name": "ci-environment",
-      "hidden": true,
-      "environment": {
-        "PKG_ROOT": "$penv{TURBODB_CI_PKG_ROOT}",
-        "VCPKG_ROOT": "$penv{VCPKG_ROOT}",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release"
-      },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
-      }
-    },
-    {
-      "name": "ci-windows-release",
-      "inherits": [
-        "ci-windows-base",
-        "ci-environment"
-      ]
-    },
-    {
-      "name": "ci-linux-release",
-      "inherits": [
-        "ci-linux-base",
-        "ci-environment"
-      ]
-    },
-    {
-      "name": "ci-linux-e2e",
-      "inherits": [
-        "ci-linux-e2e-base",
-        "ci-environment"
-      ]
-    },
-    {
-      "name": "ci-macos-release",
-      "inherits": [
-        "ci-macos-base",
-        "ci-environment"
-      ]
-    },
-    {
-      "name": "ci-android-release",
-      "inherits": [
-        "ci-android-base",
-        "ci-environment"
-      ],
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"
-      },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release"
-      }
-    },
-    {
-      "name": "win-toolchain",
-      "hidden": true,
-      "environment": {
-        "PROJECT_ROOT": "C:/projects/cpp",
-        "PKG_ROOT": "$env{PROJECT_ROOT}/external/pkgs",
-        "VCPKG_ROOT": "C:/tools/vcpkg",
-        "USER_ROOT": "C:/Users/lockg",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
-      }
-    },
-    {
-      "name": "win-paths",
-      "hidden": true,
-      "inherits": "win-toolchain",
-      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-      "cacheVariables": {
-        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
-        "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
-        "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "VCPKG_MANIFEST_MODE": "ON",
-        "TIDESDB_BUILD_TESTS": "OFF",
-        "TIDESDB_WITH_SNAPPY": "OFF",
-        "TIDESDB_WITH_LZ4": "OFF"
-      },
-      "architecture": {
-        "value": "x64",
-        "strategy": "external"
-      },
-      "toolset": {
-        "value": "host=x64",
-        "strategy": "external"
-      }
-    },
-    {
-      "name": "linux-paths",
-      "hidden": true,
-      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-      "cacheVariables": {
-        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
-        "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "VCPKG_MANIFEST_MODE": "ON",
-        "TIDESDB_BUILD_TESTS": "OFF",
-        "TIDESDB_WITH_SNAPPY": "OFF",
-        "TIDESDB_WITH_LZ4": "OFF"
-      },
-      "environment": {
-        "PKG_ROOT": "/opt",
-        "VCPKG_ROOT": "/opt/vcpkg",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
-      }
-    },
-    {
-      "name": "android-win-environment",
-      "hidden": true,
-      "inherits": "win-toolchain",
-      "environment": {
-        "ANDROID_SDK_ROOT": "$env{USER_ROOT}/AppData/Local/Android/Sdk",
-        "ANDROID_NDK_VERSION": "28.2.13676358",
-        "ANDROID_NDK_HOME": "$env{ANDROID_SDK_ROOT}/ndk/$env{ANDROID_NDK_VERSION}"
-      }
-    },
-    {
-      "name": "android-win-paths",
-      "hidden": true,
-      "inherits": "ISWindows",
-      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-      "cacheVariables": {
-        "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
-        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
-        "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}"
-      }
-    },
-    {
-      "name": "win-dev-user",
-      "cacheVariables": {
-        "ENABLE_SANITIZER_ADDRESS": "ON",
-        "TURBODB_BUILD_DBTOOLS": "ON",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug",
-        "TURBODB_BUILD_TIDESSQL_SERVER": "ON"
-      },
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-        "PATH": "${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
-      },
-      "inherits": [
-        "base-win-dev-user",
-        "win-paths"
-      ]
-    },
-    {
-      "name": "win-release-user",
-      "cacheVariables": {
-        "TURBODB_BUILD_DBTOOLS": "ON",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release",
-        "TURBODB_BUILD_TIDESSQL_SERVER": "ON"
-      },
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-        "PATH": "${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
-      },
-      "inherits": [
-        "base-win-release-user",
-        "win-paths"
-      ]
-    },
-    {
-      "name": "linux-dev-user",
-      "cacheVariables": {
-        "ENABLE_SANITIZER_ADDRESS": "ON",
-        "TURBODB_BUILD_DBTOOLS": "ON",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug",
-        "TURBODB_BUILD_TIDESSQL_SERVER": "ON"
-      },
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
-        "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
-      },
-      "inherits": [
-        "base-linux-dev-user",
-        "linux-paths"
-      ]
-    },
-    {
-      "name": "linux-release-user",
-      "cacheVariables": {
-        "TURBODB_BUILD_DBTOOLS": "ON",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release",
-        "TURBODB_BUILD_TIDESSQL_SERVER": "ON"
-      },
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
-        "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
-      },
-      "inherits": [
-        "release-linux-ninja",
-        "linux-paths"
-      ]
-    },
-    {
-      "name": "linux-release-pg-e2e-user",
-      "displayName": "Release + PostgreSQL E2E tests (Linux)",
-      "inherits": "linux-release-user",
-      "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
-      "cacheVariables": {
-        "BUILD_TESTS": "OFF",
-        "BUILD_E2E_TESTS": "ON",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-        "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux",
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg",
-        "TURBODB_BUILD_TIDESSQL_SERVER": "OFF"
-      },
-      "environment": {
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-        "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
-      }
-    },
-    {
-      "name": "android-dependencies-debug",
-      "hidden": true,
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug"
-      },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/debug",
-        "TURBODB_BUILD_DBTOOLS": "OFF"
-      }
-    },
-    {
-      "name": "android-dependencies-release",
-      "hidden": true,
-      "environment": {
-        "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release",
-        "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"
-      },
-      "cacheVariables": {
-        "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release",
-        "TURBODB_BUILD_DBTOOLS": "OFF"
-      }
-    },
-    {
-      "name": "android-arm64-v8a-debug-win",
-      "inherits": [
-        "android-arm64-v8a-debug",
-        "android-dependencies-debug",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    },
-    {
-      "name": "android-arm64-v8a-release-win",
-      "inherits": [
-        "android-arm64-v8a-release",
-        "android-dependencies-release",
-        "android-win-paths",
-        "android-win-environment"
-      ]
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "ci-windows-release",
-      "configurePreset": "ci-windows-release"
-    },
-    {
-      "name": "install-ci-windows-release",
-      "configurePreset": "ci-windows-release",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-linux-release",
-      "configurePreset": "ci-linux-release"
-    },
-    {
-      "name": "install-ci-linux-release",
-      "configurePreset": "ci-linux-release",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-linux-e2e",
-      "configurePreset": "ci-linux-e2e"
-    },
-    {
-      "name": "install-ci-linux-e2e",
-      "configurePreset": "ci-linux-e2e",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-macos-release",
-      "configurePreset": "ci-macos-release"
-    },
-    {
-      "name": "install-ci-macos-release",
-      "configurePreset": "ci-macos-release",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "ci-android-release",
-      "configurePreset": "ci-android-release"
-    },
-    {
-      "name": "install-ci-android-release",
-      "configurePreset": "ci-android-release",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "win-dev-user",
-      "configurePreset": "win-dev-user"
-    },
-    {
-      "name": "win-release-user",
-      "configurePreset": "win-release-user"
-    },
-    {
-      "name": "linux-dev-user",
-      "configurePreset": "linux-dev-user"
-    },
-    {
-      "name": "linux-release-user",
-      "configurePreset": "linux-release-user"
-    },
-    {
-      "name": "linux-release-pg-e2e-user",
-      "configurePreset": "linux-release-pg-e2e-user"
-    },
-    {
-      "name": "install-win-dev-user",
-      "configurePreset": "win-dev-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-win-release-user",
-      "configurePreset": "win-release-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-linux-dev-user",
-      "configurePreset": "linux-dev-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-linux-release-user",
-      "configurePreset": "linux-release-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-linux-release-pg-e2e-user",
-      "configurePreset": "linux-release-pg-e2e-user",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "android-arm64-v8a-debug-win",
-      "configurePreset": "android-arm64-v8a-debug-win"
-    },
-    {
-      "name": "android-arm64-v8a-release-win",
-      "configurePreset": "android-arm64-v8a-release-win"
-    },
-    {
-      "name": "install-android-arm64-v8a-debug-win",
-      "configurePreset": "android-arm64-v8a-debug-win",
-      "targets": [
-        "install"
-      ]
-    },
-    {
-      "name": "install-android-arm64-v8a-release-win",
-      "configurePreset": "android-arm64-v8a-release-win",
-      "targets": [
-        "install"
-      ]
-    }
-  ],
-  "testPresets": [
-    {
-      "name": "ci-windows-release",
-      "inherits": "base-test",
-      "configurePreset": "ci-windows-release",
-      "execution": {
-        "noTestsAction": "error"
-      }
-    },
-    {
-      "name": "ci-linux-release",
-      "inherits": "base-test",
-      "configurePreset": "ci-linux-release",
-      "execution": {
-        "noTestsAction": "error"
-      }
-    },
-    {
-      "name": "ci-macos-release",
-      "inherits": "base-test",
-      "configurePreset": "ci-macos-release",
-      "execution": {
-        "noTestsAction": "error"
-      }
-    },
-    {
-      "name": "ci-linux-e2e",
-      "inherits": "base-test",
-      "configurePreset": "ci-linux-e2e",
-      "execution": {
-        "noTestsAction": "error"
-      },
-      "filter": {
-        "include": {
-          "label": "e2e"
-        }
-      }
-    },
-    {
-      "name": "win-dev-user",
-      "inherits": "base-test",
-      "configurePreset": "win-dev-user"
-    },
-    {
-      "name": "win-release-user",
-      "inherits": "base-test",
-      "configurePreset": "win-release-user"
-    },
-    {
-      "name": "linux-dev-user",
-      "inherits": "base-test",
-      "configurePreset": "linux-dev-user"
-    },
-    {
-      "name": "linux-release-user",
-      "inherits": "base-test",
-      "configurePreset": "linux-release-user"
-    },
-    {
-      "name": "linux-release-pg-e2e-user",
-      "inherits": "base-test",
-      "configurePreset": "linux-release-pg-e2e-user",
-      "filter": {
-        "include": {
-          "label": "e2e",
-          "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|orm_sql_validation_parity)$"
-        }
-      }
-    }
-  ]
+    "version": 6,
+    "include": [
+        "CMakePresets.json"
+    ],
+    "configurePresets": [
+        {"name": "ci-environment", "hidden": true, "environment": {"PKG_ROOT": "$penv{TURBODB_CI_PKG_ROOT}", "VCPKG_ROOT": "$penv{VCPKG_ROOT}", "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed", "SALTS_ROOT": "$env{PKG_ROOT}/salts/release", "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release"}, "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"}},
+        {"name": "ci-windows-release", "inherits": ["ci-windows-base", "ci-environment"]},
+        {"name": "ci-linux-release", "inherits": ["ci-linux-base", "ci-environment"]},
+        {"name": "ci-linux-arm64-release", "inherits": ["ci-linux-arm64-base", "ci-environment"]},
+        {"name": "ci-macos-arm64-release", "inherits": ["ci-macos-arm64-base", "ci-environment"]},
+        {"name": "ci-linux-e2e", "inherits": ["ci-linux-e2e-base", "ci-environment"]},
+        {"name": "ci-android-release", "inherits": ["ci-android-base", "ci-environment"], "environment": {"SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release", "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"}, "cacheVariables": {"CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release"}},
+        {
+            "name": "win-toolchain",
+            "hidden": true,
+            "environment": {
+                "PROJECT_ROOT": "C:/projects/cpp",
+                "PKG_ROOT": "$env{PROJECT_ROOT}/external/pkgs",
+                "VCPKG_ROOT": "C:/tools/vcpkg",
+                "USER_ROOT": "C:/Users/lockg",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
+            }
+        },
+        {
+            "name": "win-paths",
+            "hidden": true,
+            "inherits": "win-toolchain",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "VCPKG_MANIFEST_MODE": "ON",
+                "TIDESDB_BUILD_TESTS": "OFF",
+                "TIDESDB_WITH_SNAPPY": "OFF",
+                "TIDESDB_WITH_LZ4": "OFF"
+            },
+            "architecture": { "value": "x64", "strategy": "external" },
+            "toolset": { "value": "host=x64", "strategy": "external" }
+        },
+        {
+            "name": "linux-paths",
+            "hidden": true,
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "VCPKG_TARGET_TRIPLET": "x64-linux",
+                "VCPKG_MANIFEST_MODE": "ON",
+                "TIDESDB_BUILD_TESTS": "OFF",
+                "TIDESDB_WITH_SNAPPY": "OFF",
+                "TIDESDB_WITH_LZ4": "OFF"
+            },
+            "environment": {
+                "PKG_ROOT": "/opt",
+                "VCPKG_ROOT": "/opt/vcpkg",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed"
+            }
+        },
+        {
+            "name": "android-win-environment",
+            "hidden": true,
+            "inherits": "win-toolchain",
+            "environment": {
+                "ANDROID_SDK_ROOT": "$env{USER_ROOT}/AppData/Local/Android/Sdk",
+                "ANDROID_NDK_VERSION": "28.2.13676358",
+                "ANDROID_NDK_HOME": "$env{ANDROID_SDK_ROOT}/ndk/$env{ANDROID_NDK_VERSION}"
+            }
+        },
+        {
+            "name": "android-win-paths",
+            "hidden": true,
+            "inherits": "ISWindows",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
+                "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}"
+            }
+        },
+        {
+            "name": "win-dev-user",
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "ON",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_BUILD_TIDESSQL_SERVER": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows/debug",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
+            },
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
+                "PATH": "${sourceDir}/build/Msvc/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "inherits": ["base-win-dev-user", "win-paths"]
+        },
+        {
+            "name": "win-release-user",
+            "cacheVariables": {
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_BUILD_TIDESSQL_SERVER": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
+            },
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "PATH": "${sourceDir}/build/Msvc-Release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-windows/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "inherits": ["base-win-release-user", "win-paths"]
+        },
+        {
+            "name": "linux-dev-user",
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "ON",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_BUILD_TIDESSQL_SERVER": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux/debug",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/debug"
+            },
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/debug",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/debug",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-debug/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/debug/lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            },
+            "inherits": ["base-linux-dev-user", "linux-paths"]
+        },
+        {
+            "name": "linux-release-user",
+            "cacheVariables": {
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_BUILD_TIDESSQL_SERVER": "ON",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
+            },
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils/release",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            },
+            "inherits": ["release-linux-ninja", "linux-paths"]
+        },
+        {
+            "name": "linux-release-pg-e2e-user",
+            "displayName": "Release + PostgreSQL E2E tests (Linux)",
+            "inherits": "linux-release-user",
+            "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
+            "cacheVariables": {
+                "BUILD_TESTS": "OFF",
+                "BUILD_E2E_TESTS": "ON",
+                "TURBODB_BUILD_TIDESSQL_SERVER": "OFF",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux",
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg"
+            },
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
+                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            }
+        },
+        {
+            "name": "android-dependencies-debug",
+            "hidden": true,
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/debug",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/debug"
+            },
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/debug",
+                "TURBODB_BUILD_DBTOOLS": "OFF"
+            }
+        },
+        {
+            "name": "android-dependencies-release",
+            "hidden": true,
+            "environment": {
+                "SALTS_ROOT": "$env{PKG_ROOT}/salts-android/release",
+                "SALTS_UTILS_ROOT": "$env{PKG_ROOT}/salts-utils-android/release"
+            },
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release",
+                "TURBODB_BUILD_DBTOOLS": "OFF"
+            }
+        },
+        { "name": "android-arm64-v8a-debug-win", "inherits": ["android-arm64-v8a-debug", "android-dependencies-debug", "android-win-paths", "android-win-environment"] },
+        { "name": "android-arm64-v8a-release-win", "inherits": ["android-arm64-v8a-release", "android-dependencies-release", "android-win-paths", "android-win-environment"] }
+    ],
+    "buildPresets": [
+        {"name": "ci-windows-release", "configurePreset": "ci-windows-release"},
+        {"name": "install-ci-windows-release", "configurePreset": "ci-windows-release", "targets": ["install"]},
+        {"name": "ci-linux-release", "configurePreset": "ci-linux-release"},
+        {"name": "install-ci-linux-release", "configurePreset": "ci-linux-release", "targets": ["install"]},
+        {"name": "ci-linux-arm64-release", "configurePreset": "ci-linux-arm64-release"},
+        {"name": "install-ci-linux-arm64-release", "configurePreset": "ci-linux-arm64-release", "targets": ["install"]},
+        {"name": "ci-macos-arm64-release", "configurePreset": "ci-macos-arm64-release"},
+        {"name": "install-ci-macos-arm64-release", "configurePreset": "ci-macos-arm64-release", "targets": ["install"]},
+        {"name": "ci-linux-e2e", "configurePreset": "ci-linux-e2e"},
+        {"name": "install-ci-linux-e2e", "configurePreset": "ci-linux-e2e", "targets": ["install"]},
+        {"name": "ci-android-release", "configurePreset": "ci-android-release"},
+        {"name": "install-ci-android-release", "configurePreset": "ci-android-release", "targets": ["install"]},
+        { "name": "win-dev-user", "configurePreset": "win-dev-user" },
+        { "name": "win-release-user", "configurePreset": "win-release-user" },
+        { "name": "linux-dev-user", "configurePreset": "linux-dev-user" },
+        { "name": "linux-release-user", "configurePreset": "linux-release-user" },
+        { "name": "linux-release-pg-e2e-user", "configurePreset": "linux-release-pg-e2e-user" },
+        { "name": "install-win-dev-user", "configurePreset": "win-dev-user", "targets": ["install"] },
+        { "name": "install-win-release-user", "configurePreset": "win-release-user", "targets": ["install"] },
+        { "name": "install-linux-dev-user", "configurePreset": "linux-dev-user", "targets": ["install"] },
+        { "name": "install-linux-release-user", "configurePreset": "linux-release-user", "targets": ["install"] },
+        { "name": "install-linux-release-pg-e2e-user", "configurePreset": "linux-release-pg-e2e-user", "targets": ["install"] },
+        { "name": "android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win" },
+        { "name": "android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win" },
+        { "name": "install-android-arm64-v8a-debug-win", "configurePreset": "android-arm64-v8a-debug-win", "targets": ["install"] },
+        { "name": "install-android-arm64-v8a-release-win", "configurePreset": "android-arm64-v8a-release-win", "targets": ["install"] }
+    ],
+    "testPresets": [
+        {"name": "ci-windows-release", "inherits": "base-test", "configurePreset": "ci-windows-release", "execution": {"noTestsAction": "error"}},
+        {"name": "ci-linux-release", "inherits": "base-test", "configurePreset": "ci-linux-release", "execution": {"noTestsAction": "error"}},
+        {"name": "ci-linux-arm64-release", "inherits": "base-test", "configurePreset": "ci-linux-arm64-release", "execution": {"noTestsAction": "error"}},
+        {"name": "ci-macos-arm64-release", "inherits": "base-test", "configurePreset": "ci-macos-arm64-release", "execution": {"noTestsAction": "error"}},
+        {"name": "ci-linux-e2e", "inherits": "base-test", "configurePreset": "ci-linux-e2e", "execution": {"noTestsAction": "error"}, "filter": {"include": {"label": "e2e"}}},
+        { "name": "win-dev-user", "inherits": "base-test", "configurePreset": "win-dev-user" },
+        { "name": "win-release-user", "inherits": "base-test", "configurePreset": "win-release-user" },
+        { "name": "linux-dev-user", "inherits": "base-test", "configurePreset": "linux-dev-user" },
+        { "name": "linux-release-user", "inherits": "base-test", "configurePreset": "linux-release-user" },
+        { "name": "linux-release-pg-e2e-user", "inherits": "base-test", "configurePreset": "linux-release-pg-e2e-user", "filter": { "include": { "label": "e2e", "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|orm_sql_validation_parity)$" } } }
+    ]
 }

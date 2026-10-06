@@ -68,21 +68,31 @@
       }
     },
     {
-      "name": "ci-macos-base",
+      "name": "ci-linux-arm64-base",
       "hidden": true,
-      "inherits": [
-        "ci-native-base",
-        "Clang",
-        "flags-appleclang",
-        "ISMac"
-      ],
-      "binaryDir": "${sourceDir}/build/ci-macos-release",
+      "inherits": ["flags-gnu-arm64", "ci-linux-base"],
+      "binaryDir": "${sourceDir}/build/ci-linux-arm64-release",
       "environment": {
-        "DYLD_LIBRARY_PATH": "${sourceDir}/build/ci-macos-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/arm64-osx/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{DYLD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH": "${sourceDir}/build/ci-linux-arm64-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/arm64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-linux",
+        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-linux"
+      }
+    },
+    {
+      "name": "ci-macos-arm64-base",
+      "hidden": true,
+      "inherits": ["ci-native-base", "Clang", "flags-appleclang", "ISMac"],
+      "binaryDir": "${sourceDir}/build/ci-macos-arm64-release",
+      "environment": {
+        "DYLD_LIBRARY_PATH": "${sourceDir}/build/ci-macos-arm64-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/arm64-osx/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{DYLD_LIBRARY_PATH}"
       },
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "arm64-osx",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-osx"
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-osx",
+        "TURBODB_BUILD_TIDESSQL_SERVER": true
       }
     },
     {

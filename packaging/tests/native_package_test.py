@@ -66,19 +66,23 @@ class NativePackageTest(unittest.TestCase):
             "include/mysql/session_async.h",
             "include/mysql/session_script.h",
             "include/redis/redis_io.h",
+            "share/tidesdb/zstd/copyright",
         )
-        for rid in ("linux-x64", "windows-x64", "macos-arm64", "android-arm64-v8a"):
+        for rid in ("linux-x64", "linux-arm64", "macos-arm64", "windows-x64", "android-arm64-v8a"):
             windows = rid == "windows-x64"
-            host = rid != "android-arm64-v8a"
             macos = rid == "macos-arm64"
-            core = "bin/turbo_orm.dll" if windows else (
-                "lib/libturbo_orm.dylib" if macos else "lib/libturbo_orm.so"
-            )
+            host = rid != "android-arm64-v8a"
+            shared_suffix = "dylib" if macos else "so"
+            core = "bin/turbo_orm.dll" if windows else f"lib/libturbo_orm.{shared_suffix}"
             tidessql = (
                 "lib/turbodb_tidessql.lib"
                 if windows else "lib/libturbodb_tidessql.a"
             )
             suffix = "dll" if windows else "so"
+            private_compression = (
+                ("lib/tidesdb/zstd.lib",)
+                if windows else ()
+            )
             daemon = (
                 ("bin/tidessqld.exe" if windows else "bin/tidessqld",)
                 if host else ()
@@ -87,7 +91,7 @@ class NativePackageTest(unittest.TestCase):
                 f"lib/turbodb/drivers/turbodb_driver_{driver}.{suffix}"
                 for driver in ("sqlite", "postgresql", "mysql", "tidesdb")
             )
-            for relative in (*common, core, tidessql, *daemon, *drivers):
+            for relative in (*common, core, tidessql, *private_compression, *daemon, *drivers):
                 path = f"sdk/{rid}/{relative}"
                 with self.subTest(path=path):
                     self.assertTrue(path in self.files, f"Missing SDK file: {path}")

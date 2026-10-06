@@ -75,7 +75,6 @@ unset(_TURBODB_SALTS_UTILS_ROOT)
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(zstd CONFIG REQUIRED)
 
 add_library(turbodb_types INTERFACE)
 target_include_directories(turbodb_types INTERFACE

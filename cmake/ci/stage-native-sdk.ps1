@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("linux-x64", "windows-x64", "macos-arm64", "android-arm64-v8a")]
+  [ValidateSet("linux-x64", "linux-arm64", "macos-arm64", "windows-x64", "android-arm64-v8a")]
   [string]$Rid,
   [Parameter(Mandatory = $true)]
   [string]$Version
@@ -22,7 +22,8 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 $platform = switch ($Rid) {
   "windows-x64" { "windows" }
   "linux-x64" { "linux" }
-  "macos-arm64" { "macos" }
+  "linux-arm64" { "linux-arm64" }
+  "macos-arm64" { "macos-arm64" }
   "android-arm64-v8a" { "android" }
 }
 $manifest = Join-Path $env:GITHUB_WORKSPACE "build/ci-$platform-release/install_manifest.txt"
@@ -41,6 +42,8 @@ foreach ($file in Get-Content -LiteralPath $manifest | Sort-Object -Unique) {
 $tidessqld = switch ($Rid) {
   "windows-x64" { Join-Path $stage "bin/tidessqld.exe" }
   "linux-x64" { Join-Path $stage "bin/tidessqld" }
+  "linux-arm64" { Join-Path $stage "bin/tidessqld" }
+  "macos-arm64" { Join-Path $stage "bin/tidessqld" }
   default { $null }
 }
 if ($tidessqld) {

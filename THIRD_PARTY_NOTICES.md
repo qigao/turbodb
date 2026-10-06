@@ -9,6 +9,14 @@ qigao/vcpkg-cache commit `1da9c439a2380a8752e88046ca0c5ae159991e03` 的 gmssl po
 该 port 包含 Salts CNet 所需 TLS 适配补丁与 SHA1/SHA2/AES/P256 构建选项；
 补丁和版本元数据由 registry 管理。其他 registry 包的原 baseline 不变。
 
+## Zstandard 压缩库
+
+TidesDB 通过既有 vcpkg manifest 和 registry 使用
+[facebook/zstd](https://github.com/facebook/zstd) 的静态库。SDK 的静态 TidesDB
+配置随包提供最终链接所需的私有 archive，按 BSD-3-Clause 许可使用，并保留
+生产端 vcpkg 包的完整许可证文件 `share/tidesdb/zstd/copyright`；版本及构建补丁
+继续由 `vcpkg-configuration.json` 所指的 registry 管理。
+
 ## MySQL 8.4.0 测试语料
 
 `sqlparser/mysql-spec/upstream/` 保存 MySQL 官方测试输入及原始许可证；
