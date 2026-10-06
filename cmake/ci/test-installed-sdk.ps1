@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-foreach ($name in @("GITHUB_WORKSPACE", "TURBODB_CI_PKG_ROOT", "VCPKG_ROOT")) {
+foreach ($name in @("GITHUB_WORKSPACE", "TURBODB_CI_PKG_ROOT", "VCPKG_ROOT", "VCPKG_INSTALLED_DIR")) {
   if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
     throw "$name is required"
   }
@@ -14,6 +14,7 @@ foreach ($name in @("GITHUB_WORKSPACE", "TURBODB_CI_PKG_ROOT", "VCPKG_ROOT")) {
 
 $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
 $packageRoot = [IO.Path]::GetFullPath($env:TURBODB_CI_PKG_ROOT)
+$vcpkgInstalledDir = [IO.Path]::GetFullPath($env:VCPKG_INSTALLED_DIR)
 $source = Join-Path $workspace "packaging/tests/installed-consumer"
 $build = Join-Path $workspace "build/installed-consumer-$Rid"
 $triplet = if ($Rid -eq "windows-x64") { "x64-windows" } else { "x64-linux" }
@@ -25,7 +26,7 @@ $env:TURBODB_ROOT = if ([string]::IsNullOrWhiteSpace($SdkRoot)) {
   [IO.Path]::GetFullPath($SdkRoot)
 }
 
-foreach ($path in @($source, $env:SALTS_ROOT, $env:SALTS_UTILS_ROOT, $env:TURBODB_ROOT)) {
+foreach ($path in @($source, $env:SALTS_ROOT, $env:SALTS_UTILS_ROOT, $env:TURBODB_ROOT, $vcpkgInstalledDir)) {
   if (-not (Test-Path -LiteralPath $path -PathType Container)) {
     throw "installed consumer input is missing: $path"
   }
@@ -43,6 +44,7 @@ if (-not (Test-Path -LiteralPath $toolchain -PathType Leaf)) {
 & cmake --fresh -S $source -B $build -G Ninja `
   "-DCMAKE_BUILD_TYPE=Release" `
   "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
+  "-DVCPKG_INSTALLED_DIR=$vcpkgInstalledDir" `
   "-DVCPKG_MANIFEST_MODE=OFF" `
   "-DVCPKG_TARGET_TRIPLET=$triplet"
 if ($LASTEXITCODE -ne 0) { throw "installed consumer configure failed" }
