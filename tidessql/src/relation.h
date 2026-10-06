@@ -13,7 +13,7 @@ turbodb_status_t orm_sql_relation_row_size(size_t columns, size_t max_bytes, siz
 turbodb_status_t orm_sql_relation_encode_record(const orm_sql_table_schema *, size_t primary,
     const turbodb_value_t *, const uint8_t prefix[ORM_SQL_RELATION_PREFIX_BYTES],
     uint8_t *, size_t capacity, orm_tidesdb_sql_budget *, turbodb_error_t *);
-/* Private numeric relational rows in the Catalog CF, never legacy ORMTDBv1.
+/* Private numeric relational rows in the Catalog CF.
  * Insert borrows a complete schema-ordered row for the call. Strict kind/NULL
  * checks, no conversion/default/TTL. Duplicate PK -> CONSTRAINT, missing table
  * -> SQL_ERROR. Data and TableVersion+1 are one atomic statement; success is

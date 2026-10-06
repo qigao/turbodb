@@ -1,7 +1,7 @@
 #include <orm_driver_plugin.h>
 #include <orm_tidesdb.h>
 
-#include "backend.h"
+#include "relational_backend.h"
 #include "bridge.h"
 #include "orm_driver_backend_bridge.h"
 
@@ -10,8 +10,6 @@
    ORM_DRIVER_CAP_UPDATE | ORM_DRIVER_CAP_DELETE |                         \
    ORM_DRIVER_CAP_TRANSACTION | ORM_DRIVER_CAP_SAVEPOINT |                 \
    ORM_DRIVER_CAP_INCREMENTAL_ROWS | ORM_DRIVER_CAP_RAW_SQL |               \
-   ORM_DRIVER_CAP_READ_UNCOMMITTED | ORM_DRIVER_CAP_READ_COMMITTED |       \
-   ORM_DRIVER_CAP_REPEATABLE_READ | ORM_DRIVER_CAP_SNAPSHOT |              \
    ORM_DRIVER_CAP_SERIALIZABLE)
 
 static int tidesdb_driver_identity;
@@ -99,7 +97,7 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_driver_create(
   if (self != &tidesdb_driver_identity)
     return ORM_STATUS_INVALID_ARGUMENT;
   return orm_driver_backend_connection_create(
-      orm_tidesdb_backend_create, config, limits, out_connection, error);
+      orm_tidesdb_relational_create, config, limits, out_connection, error);
 }
 
 static const TurboDb_Driver_vtable tidesdb_driver_vtable = {
@@ -137,7 +135,7 @@ static const salts_plugin_manifest tidesdb_manifest = {
     .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
     .abi_version = SALTS_PLUGIN_ABI_VERSION,
     .plugin_id = "tidesdb",
-    .version = {1u, 0u, 0u},
+    .version = {2u, 0u, 0u},
     .exports = tidesdb_exports,
     .export_count = 2u,
     .self = &tidesdb_lifecycle,

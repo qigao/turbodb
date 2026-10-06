@@ -3,7 +3,7 @@
 `sqlparser` 与 `tidessql` 是根目录下两个模块：前者提供 MySQL/SQLite 方言的
 AST，后者负责语义绑定、表达式与查询执行、Catalog、关系记录、索引、事务预算
 和原生 TidesDB 存储适配。解析器接受某种语法不表示执行引擎已经实现其语义；
-当前执行入口仍按下文的 MySQL profile 校验，不能用 SQLite AST 绕过它。
+当前执行入口仍按下文的 MySQL 方言 校验，不能用 SQLite AST 绕过它。
 远程访问时 MySQL ORM driver 只渲染结构化 plan，MySQL client 只传输 COM_QUERY 或
 COM_STMT_PREPARE/EXECUTE；SQL grammar 在 `tidessqld` 调用的 TidesSQL 引擎中解析。
 直接链接本 SDK 时解析器与应用同进程，但所有权和语义事实源仍属于 TidesSQL 引擎。
@@ -58,7 +58,7 @@ request 沿用既有配置和 typed 参数契约，response 用 `tdsql_response_
 或 `TDSQL_ROWS` 的 owned result；不会先试 query，再因错误尝试 command。
 ROWS 的 result 仍须 checked destroy，释放上一结果后才能复用 response。
 失败时完整 response 保持不变，但 SQL/清理失败仍可能要求事务回滚或隔离连接。
-last_insert_id 为 0，因为执行 profile 不支持 AUTO_INCREMENT/LAST_INSERT_ID()；
+last_insert_id 为 0，因为执行器 不支持 AUTO_INCREMENT/LAST_INSERT_ID()；
 显式主键不会被报告为自动生成 ID。现有 execute/query 继续可用，行为不变。
 
 `tdsql_connection_state(connection, state, error)` 将事实源状态复制到
@@ -695,7 +695,7 @@ cmake --build --preset install-win-release-user
 example CF，查询并打印 `42`；之后使用 `tidessql_example DATABASE` 打开。
 重复初始化已有 CF 会返回错误，不会覆写数据。
 
-`drivers/tidesdb` 保留插件注册、ORM plan 渲染/转换、旧 ORMTDB 行适配和
+`drivers/tidesdb` 负责插件注册、结构化 ORM plan 的 MySQL 渲染和
 CFlow/CSerde 结果编码；`relational_backend.c` 通过这些入口适配，不再保存
 连接或事务状态。直接入口的完整使用与生命周期验证见
 [connection_test.c](tests/integration/connection_test.c)，该测试只链接引擎和 TinyTest，
@@ -711,7 +711,7 @@ ctest --preset win-release-user -R "^(orm_|tidessql_)" --output-on-failure -j 2
 ```
 
 验证范围包括直接连接入口、核心单元/原生集成、ORM 插件、事务 owner、
-提交/WAL/资源故障与旧行适配。提交故障测试重新编译实际执行器并只链接
+关系结果所有权与原生 WAL 故障。原生故障测试只链接
 故障版 native core，避免生产 TidesDB 依赖混入后使故障注入失效。
 公共 C/C++ 调用、ABI 拒绝、checked cleanup 和 ORM DTO 兼容性也纳入正式测试。
 2026-10-05 的 `win-release-user` 完整构建与上述 94 项 CTest 全部通过；
@@ -721,8 +721,8 @@ Linux/sanitizer 尚未执行：本机没有 WSL 发行版和匹配 Debug Salts S
 跨编译器/架构二进制兼容或动态插件 ABI。
 
 后续关系执行层的架构、存储与事务边界、分阶段计划见
-[TidesDB SQL 执行层设计](design.md)。该文档是提案；下文描述当前已实现的能力。
-M0 存储契约、WAL 故障与并发测试已落地；关系执行通过显式 opt-in profile 接入，范围见下文。
+[TidesDB SQL 执行层设计](design.md)。该文档记录架构决策与分阶段验证；下文描述当前已实现的能力。
+M0 存储契约、WAL 故障与并发测试已落地；ORM 只使用关系执行器，范围见下文。
 
 M5 已开放 `CREATE INDEX` / `CREATE UNIQUE INDEX`：支持 I64/U64/DOUBLE 普通/唯一复合列键、
 ASC/DESC 和可空列，在同一事务回填已有数据。索引名在表内唯一；非 NULL 唯一键重复
@@ -819,10 +819,10 @@ savepoint 回滚，无隐式提交，沿用已有 schema wire v1/v2，无新版�
 类型变更和多动作 ALTER 尚未开放。解析器接受单个 `ALTER TABLE ... ADD ... FOREIGN KEY`，
 但关系执行器尚未实现外键约束，因此明确返回 UNSUPPORTED，不修改目录或数据。
 
-## 连接 profile
+## 连接配置
 
-缺省或 `sql_profile=legacy` 保留已有 KV 行和结构化 ORM 行为。
-`sql_profile=relational` 使用关系 Catalog 与数值表，支持 raw SQL 的 CREATE/DROP/TRUNCATE TABLE、ALTER TABLE rename/默认值/有界增删列、CREATE [UNIQUE] INDEX、DROP INDEX、
+TidesDB ORM 插件仅使用 TidesSQL 关系执行器。`sql_profile` 已删除，传入该选项即报 INVALID_ARGUMENT；旧 ORMTDB 格式不再支持，不自动迁移或降级。
+执行器使用关系 Catalog 与数值表，支持 raw SQL 的 CREATE/DROP/TRUNCATE TABLE、ALTER TABLE rename/默认值/有界增删列、CREATE [UNIQUE] INDEX、DROP INDEX、
 SELECT、INSERT、UPDATE、DELETE、SHOW TABLES/COLUMNS/INDEX/CREATE TABLE、EXPLAIN SELECT，以及 ORM 显式 SERIALIZABLE 事务和连接级 SQL 事务。
 raw SELECT 已支持数值/BOOL/NULL 输出的 DISTINCT 去重，可与 ORDER BY、LIMIT/OFFSET 组合。
 也支持 GROUP BY 列/表达式/别名/序号、COUNT/MIN/MAX、DOUBLE SUM/AVG、方差/标准差、数值位聚合和 HAVING，含全局聚合及排序分页；普通 COUNT/SUM/AVG/MIN/MAX 的 DISTINCT 范围见下文。
@@ -837,9 +837,8 @@ raw SELECT 已接入 INNER/LEFT/RIGHT/CROSS JOIN、自连接和多表链，复�
 显式设置正整数 `sql_max_recursive_iterations` 后，支持有界 `WITH RECURSIVE` 查询及其
 default/TRADITIONAL EXPLAIN，包括全局 LIMIT/OFFSET、多个成员、重复引用和已有 JOIN/依赖。
 省略该选项仍拒绝递归自引用；`WITH RECURSIVE` 中没有自引用的定义不需要该选项。
-两者不互相降级；legacy 连接发现关系 Manifest 时拒绝打开该 CF。
 
-关系 profile 必须指定 `path` 和 `column_family`。首次在独占、静止数据库中设置
+连接必须指定 `path` 和 `column_family`。首次在独占、静止数据库中设置
 `sql_initialize=true` 创建新 SYNC_FULL CF 和 Manifest；CF 已存在则拒绝初始化。
 之后省略该选项或设为 false，只打开已初始化的关系 CF。初始化失败保留 CF，不删除数据。
 此入口不迁移旧库，不隐式提交 DDL。
@@ -871,7 +870,7 @@ SQL 生命周期支持 `BEGIN [WORK]`、`START TRANSACTION [READ WRITE|READ ONLY
 不必传入 ORM transaction handle；结束后沿用会话的 autocommit 模式（默认开启）。SQL 再次 BEGIN 会先提交旧事务，
 CHAIN 在结束后开始新事务并保留只读模式；保存点不跨事务保留。
 再次执行没有访问模式的 BEGIN 也保留当前只读模式；显式 START TRANSACTION READ WRITE 可覆盖它。
-READ ONLY 拒绝本 profile 的表/索引 DDL 和 DML，不能与 ORM 显式事务并存。
+READ ONLY 拒绝执行器 的表/索引 DDL 和 DML，不能与 ORM 显式事务并存。
 ORM transaction handle 内的 SQL 生命周期命令继续拒绝，必须通过该 handle 的 API 结束。
 `RELEASE`、`WITH CONSISTENT SNAPSHOT` 未开放，
 在改变事务状态前明确拒绝。关闭活动 cursor 前，后续命令及事务控制返回 BUSY。
@@ -887,7 +886,7 @@ ORM transaction handle 内的 SQL 生命周期命令继续拒绝，必须通过�
 只改指定特征；在事务间设置 SESSION 访问模式会覆盖未使用的同名下一事务设置。
 CHAIN 与无模式的再次 BEGIN 保留当前模式；非 CHAIN 完成后恢复会话默认值。
 GLOBAL 和其他隔离级别仍拒绝，不静默改为 SERIALIZABLE。
-MED｜本 profile 所有自动查询都有 Catalog 事务，SHOW、EXPLAIN 和常量 SELECT 也消费
+MED｜执行器 所有自动查询都有 Catalog 事务，SHOW、EXPLAIN 和常量 SELECT 也消费
 下一事务设置；尚未模拟 MySQL 未访问事务表时的特征保留规则。
 详见 [事务特征协议](design.md#sql-事务特征的-session-与下一事务协议)。
 支持单项 `SET [SESSION|LOCAL] autocommit=value` 及 `@@autocommit`、
@@ -904,7 +903,7 @@ ORM handle 内的 autocommit 命令明确拒绝，以保留该 handle 的提交/
 单项 SET 也支持 `transaction_read_only` 与 `transaction_isolation`，RHS 可使用
 类型化参数、已支持的纯表达式和会话变量读取。只读值使用上述布尔转换，隔离接受
 ASCII 大小写不敏感的 `SERIALIZABLE` 或枚举序号 3；其他已知隔离级别返回 UNSUPPORTED，
-非法类型或值返回 SQL_ERROR。DEFAULT 恢复本 profile 的固定默认（READ WRITE/SERIALIZABLE）。
+非法类型或值返回 SQL_ERROR。DEFAULT 恢复执行器 的固定默认（READ WRITE/SERIALIZABLE）。
 按 [官方事务变量作用域](https://dev.mysql.com/doc/refman/8.4/en/set-transaction.html)，
 `SET transaction_read_only=…`、SESSION/LOCAL 和 `@@SESSION`/`@@LOCAL` 修改会话默认；
 `SET @@transaction_read_only=…` 只影响下一事务，在活动事务内拒绝。隔离变量同理。
@@ -987,118 +986,6 @@ WITH RECURSIVE c(n) AS (
 会话变量，不提供 SET 或热更新；不支持的递归形状仍明确报错。
 
 事实｜递归驱动准入新增 12 项真实插件测试，关系插件累计 80 项/3472 条断言通过。
-Windows Release 的 9 个相关回归目标全部通过（67.05 秒），包含 legacy SQL、公开 Flow、
-所有权、runtime 及 CTE 目标；构建无警告或错误，空白检查通过。
-未运行 MySQL 服务端差分、sanitizer 或 benchmark。
-
-以下 AST 转换和方言边界描述 **legacy profile**；关系能力及限制见后文各执行模块。
-
-## MySQL AST 转换设计
-
-SQL 前端统一使用 `TurboDB::SqlParser`，`sql/` 负责将受支持的 AST 转换为
-`orm_query_plan`。选择这一分层是为了消除重复语法实现，同时复用现有执行器；
-直接执行通用 AST 则需要新增表达式引擎、查询计划和事务语义，超出此次迁移范围。
-
-- 输入 SQL 与绑定参数由 raw plan 持有，是唯一事实源。转换为单线程同步调用，
-  不改变输入，无队列、全局可变状态或数据库副作用。
-- parser 独占 SQL 副本与不可变 AST；转换层只在调用内借用节点及 span。
-  结果计划深拷贝所有名称和值，转换结束即销毁 AST；查询游标继续独占结果计划。
-- 固定选择 MySQL 和 `NO_BACKSLASH_ESCAPES`，保留旧入口中反斜杠作为普通字符的行为。
-  模式在解析开始前显式指定，不执行 `SET sql_mode`，也不在失败后切换方言或旧解析器。
-  规则依据：[MySQL 字符串字面量](https://dev.mysql.com/doc/refman/8.4/en/string-literals.html)。
-- AST 节点与解析栈受公共 parser 的默认硬上限约束，输入还受 ORM 的 `max_query_bytes`
-  约束；单次只允许一条语句。WHERE 遍历使用有界 CSTL 工作栈，避免 C 递归。
-  参数按 SQL 文本顺序绑定，计划仍受列、赋值、谓词和参数字节预算约束。
-- 全部转换和参数核对成功后才能执行；失败释放 AST、临时值、工作栈和部分计划，
-  输出归零。错误保留状态码、失败阶段与字节位置，不回显 SQL 或参数。
-- 保持 `orm_tidesdb_sql_parse()`、ORM 公共接口、插件 ABI、键和行格式不变；
-  `sqlparser` 新增显式选项入口，原有入口保持默认行为。TidesDB 构建必须启用
-  `TURBODB_BUILD_SQLPARSER`，缺少依赖时配置失败。
-- 迁移先替换解析前端，验证 CRUD、NULL、绑定顺序、限额、分配失败、事务与游标寿命，
-  再扩展执行能力。回滚恢复旧驱动即可，无数据迁移；新接受的语法会在旧驱动上被拒绝。
-
-**HIGH｜兼容性：** AST 可解析不代表后端可执行。所有无法表示的节点、子句和修饰符
-必须返回不支持，不能丢弃后继续执行。**MED｜成本：** 每次调用增加有界 AST 和 SQL
-副本；不承诺性能提升。关键字识别改为 MySQL 规则，旧入口允许的 MySQL 保留字名称
-需要使用反引号，解码后仍须符合后端 ASCII 标识符约束。
-
-TidesDB 驱动将 `orm_raw()` 的受限 SQL 转换为已有 `orm_query_plan`，再执行原来的 TidesDB 后端。插件声明 `ORM_DRIVER_CAP_RAW_SQL`，但使用 MySQL 语法前端，只执行下列 CRUD 子集，不提供完整 MySQL 引擎兼容。
-
-支持的语句：
-
-```sql
-SELECT id, score FROM people WHERE score >= ? AND note IS NOT NULL LIMIT ? OFFSET ?;
-```
-
-```sql
-INSERT INTO people (id, score, note) VALUES (?, ?, 'O''Brien');
-```
-
-```sql
-UPDATE people SET score = ? WHERE id = ?;
-```
-
-```sql
-DELETE FROM people WHERE id = ?;
-```
-
-每次 `orm_raw()` 只提交一条语句，末尾分号可省略。通过 `orm_query_bind()` 从左到右绑定匿名 `?`，缺少或多余参数均报错。字符串和二进制参数作为值复制，不拼接进 SQL。
-
-SELECT 使用 `orm_query_open_flow()`，写入使用 `orm_query_open_command_flow()`；显式事务使用对应的 `_in_transaction()` API。命令保持惰性执行，解析或执行失败通过 Publisher 的错误终态报告。完整、可编译的调用例子见 [SQL 集成测试](../orm/tests/integration/tidesdb/sql/sql_test.c)。
-
-## 方言与边界
-
-- 关键字不区分大小写；标识符保留大小写，解码后只接受 `[A-Za-z_][A-Za-z_0-9]*`，最长 63 字节；支持包围这些名称的反引号，不支持限定名或别名。保留字名称必须加反引号。
-- SELECT 必须显式列出唯一的列名；WHERE 支持 AND 及其分组括号、`= != <> < <= > >=`、`IS NULL`、`IS NOT NULL`。
-- 普通比较的右侧为 NULL（包括绑定 NULL）会明确报不支持，避免沿用结构化查询的 NULL 相等规则而误解 SQL。请使用 `IS NULL` 或 `IS NOT NULL`。
-- INSERT 只支持单行 VALUES；必须提供后端配置的主键列。UPDATE/DELETE 沿用后端的主键等值定位约束：WHERE 必须包含主键，其他谓词也必须是非 NULL 等值比较；不执行全表批量修改。
-- 字面量支持有符号/无符号 64 位范围内的十进制整数、单双引号文本（重复分隔引号转义，反斜杠为普通字符）、TRUE/FALSE/NULL。浮点数、二进制和其他文本通过参数绑定；浮点参数必须有限。不做字符串与数字之间的隐式类型转换。
-- 分页支持 `LIMIT 非负整数 [OFFSET 非负整数]`，以及 MySQL 的 `LIMIT offset, count`，也支持绑定整数；绑定按文本顺序进行，不支持独立 OFFSET。没有 ORDER BY 时，不保证业务意义上的行顺序。
-- 支持普通 MySQL 注释和不改变已支持表达式含义的括号；不支持可执行注释、优化器提示、`SELECT *`、DISTINCT、SQL_CALC_FOUND_ROWS、JOIN、OR、函数、算术、子查询、聚合、排序、DDL、REPLACE、LOW_PRIORITY、多行写入、多语句、RETURNING、显式 SQL BEGIN/COMMIT；事务通过现有 ORM API 控制。异步查询仍不支持。
-
-## 实现选择与兼容性
-
-复用仓库 `sqlparser` 的 re2c/Lemon 前端，转换层逐项校验 AST 并调用已有
-`orm_plan_*` 构建函数。不会把 AST 重渲染成 SQL，也不会重新分词或尝试旧解析器。
-构建时链接 `TurboDB::SqlParser`，没有新增外部库或服务依赖。
-
-**MED｜兼容性边界：** MySQL 关键字规则和错误分类代替旧的手写语法；新增接受普通
-注释、反引号 ASCII 名称、表达式分组、双引号文本和逗号 LIMIT。无法解析的输入返回
-SQL_ERROR，可解析但不能执行的结构返回 UNSUPPORTED；第二条语句触发语句数上限。
-原有成功 CRUD 的值类型、NULL 规则、参数顺序与执行边界保持不变。
-
-## 所有权、限额与错误
-
-原始 SQL 和绑定参数由 ORM 查询持有，是转换的事实源。解析为单线程同步过程，不引入线程、队列或全局可变状态；公共 parser 拥有输入副本及 AST，转换层临时借用节点，结果计划深拷贝标识符和参数，AST 在调用返回前释放。命令的临时计划在返回后释放，SELECT 的计划由游标独占，直到取消后的销毁或正常销毁。游标保留原有连接及插件租约。
-
-完整解析和参数核对发生在事务写入之前，不能执行多语句前缀。失败销毁部分计划；解析失败没有数据库副作用。所有权转移后不会再修改计划。
-
-**HIGH｜提交错误边界：** 原生 commit 除已确认的 WAL 写入前冲突（BUSY）外，其余失败
-均返回 `ORM_STATUS_COMMIT_UNKNOWN`，因为原生错误码无法说明 WAL 是否已经写入，
-包括提交阶段的分配失败。自动提交和显式提交共用该规则；连接停止接受业务操作，
-显式事务进入结果不确定终态，销毁只释放资源，不尝试以 rollback 撤销可能被恢复的 WAL。
-错误保留原生错误码；不能自动重试，须重新打开数据库并核对结果后再由应用决定后续操作。
-提交前的解析、预算和分配失败仍使用各自错误码。
-
-`max_query_bytes`、`max_parameters`、`max_columns`、`max_assignments`、`max_predicates` 和 `max_parameter_bytes` 约束输入与转换结果，字面量也计入参数字节预算。SELECT 继续受 `max_result_rows`、`max_result_bytes`、`max_scan_rows`、`max_scan_bytes` 约束；需求驱动逐行读取，不预先物化整表。
-
-若 SQL 长度为 B、AST 节点数为 N、列数为 C、赋值数为 A，解析及 AST 遍历为
-O(B+N)，重复列/赋值检查为 O(C²+A²)，标识符长度上限为 63。这些数量由预算控制。
-AST 采用公共 parser 默认上限（1 MiB 输入、65536 节点、4096 解析栈项），输入长度还取
-ORM `max_query_bytes` 的较小值；语句数固定为 1。WHERE 工作栈最多
-`min(max_predicates, N)` 个节点 ID，不递归使用 C 栈。
-临时空间包含 SQL 副本、AST、解析栈、WHERE 工作栈和一个解码文本；结果计划继续受
-ORM 预算约束。满额直接返回 LIMIT_EXCEEDED，分配失败立即返回 OUT_OF_MEMORY。
-
-语法错误为 `ORM_STATUS_SQL_ERROR`，不支持的语法为 `ORM_STATUS_UNSUPPORTED`，参数不匹配为 `ORM_STATUS_INVALID_ARGUMENT`，预算或整数范围超限为 `ORM_STATUS_LIMIT_EXCEEDED`，分配失败为 `ORM_STATUS_OUT_OF_MEMORY`。解析诊断包含 SQL 字节偏移，不打印 SQL 内容或参数。
-
-UPDATE/DELETE 的 WHERE 求值失败保留原始错误（例如 TYPE_ERROR、OUT_OF_MEMORY），
-不能当作无匹配行成功。自动事务回滚；显式事务在本次写入尚未发生时保留此前成功写入。
-
-## 验证
-
-驱动 AST 转换单测位于 [TinyTest/TinyMock 测试](../orm/tests/driver/tidesdb/sql/parser_test.c)，覆盖绑定与复制、MySQL AST 语义拒绝、字符串模式、逗号 LIMIT 顺序、截断输入、整数边界、NULL、深层 AND、解析栈/计划限额和分配失败。实际 TidesDB 集成用例位于 [integration/tidesdb/sql](../orm/tests/integration/tidesdb/sql/sql_test.c)，覆盖 CRUD、与结构化查询互通、事务和保存点、拒绝后无写入、游标生命周期及取消。
-
 [存储契约集成测试](../orm/tests/integration/tidesdb/sql/storage_test.c) 直接通过内部
 bridge 验证真实 TidesDB 的事务、WAL 配置和进程退出恢复。它复现原生 iterator 的谓词
 写偏差，并验证表级版本键保护方案；该方案尚未接入关系执行器，不能据此声称已支持
@@ -1110,30 +997,14 @@ bridge 验证真实 TidesDB 的事务、WAL 配置和进程退出恢复。它复
 另外覆盖显式 `fdatasync` 调用前/后报错及进程退出：同步后的探针先执行真实同步，
 再模拟返回错误。Windows 走 `FlushFileBuffers`，使用 `O_DSYNC` 的平台明确跳过
 这组独立同步调用用例，不更改原生同步策略。
-[提交故障集成测试](../orm/tests/integration/tidesdb/sql/commit_fault_test.c)
-验证真实 ORM 对 INSERT/UPDATE/DELETE 自动提交、显式提交、已准备命令及确定冲突的
-处理，自动和显式提交均包含同步失败路径。生产库没有注入钩子。以上不包含实际设备/
-内核同步失败或硬件掉电；保留 OS 缓存的进程退出不能证明断电持久性。
-
 [多线程存储测试](../orm/tests/integration/tidesdb/sql/storage_race_test.c)
 用 4 个真实线程、每场景 16 轮验证唯一键竞争、表版本键保护和不相干写入；同时核验
 旧快照、新读结果与重开后的整批状态。它使用原生库，Salts 只管理测试线程及同步门，
 没有替换 TidesDB 文件 I/O。固定规模并发测试不代表长时间压力或性能验收。
 
-[资源故障测试](../orm/tests/integration/tidesdb/sql/resource_test.c) 对现有驱动的
-数值副本、行解码副本、编码追加调用逐次注入失败，验证错误码、提交/回滚次数、数据
-不变及后续可用性；同时覆盖编码大小、扫描行数/字节、结果字节预算。注入只位于独立
-测试中的 row.c 调用点，不替换 Salts allocator，不代表已覆盖整个原生库的堆分配。
-
-原生 commit 的内存故障用例复用 `tidesdb_init` allocator 钩子，并在私有测试库中补上
-未经过该钩子的 skip-list 分配。按 WAL 完整写入前/后注入真实分配失败：前者重启保留
-旧数据，后者即使 commit 报 MEMORY、rollback 成功，仍恢复完整批次。自动/显式提交
-均验证 COMMIT_UNKNOWN 和终态；测试安装/卸载 allocator 时没有活跃原生句柄或线程，
-不改变生产 allocator、I/O 或配置。完整分配失败矩阵和 sanitizer 验收仍未完成。
-
 新关系执行器的 [私有预算组件](src/budget.h) 已有
 [20 项契约测试](tests/unit/budget_test.c)，覆盖联合扣费、
-容量峰值、溢出、清理和事务累计读写。它已接入 relational profile 的绑定、查询、
+容量峰值、溢出、清理和事务累计读写。它已接入 关系执行器 的绑定、查询、
 物化及写入路径，由连接的 sql_max_* 和 max_scan_* 配置约束。原生 TidesDB 内部堆分配与缓存
 不由该预算逐次计量；不能将语句预算视为整个进程的内存上限。
 
@@ -1146,7 +1017,7 @@ NULL 传播，整数溢出或非有限结果立即报错。动态 U64 负号仍�
 整数 DIV 和除法/取模的类型及告警规则见下文。
 带符号整数字面量继续精确转换，包含 INT64_MIN；规则见[算术协议](design.md#53-有界数值算术)。
 **MED｜兼容性边界：** 这是严格类型、TEXT 字节比较的内部子集，不支持 MySQL 的
-完整隐式转换或默认 collation；已通过表达式程序接入 relational profile 的 SQL 执行。
+完整隐式转换或默认 collation；已通过表达式程序接入 关系执行器 的 SQL 执行。
 规则依据见设计文档[值语义](design.md#5-sql-值与表达式语义)。
 
 [私有表达式程序](src/expr.h) 已串联 MySQL AST、标量类型和预算，支持 BOOL/NULL/整数/TEXT
@@ -1174,7 +1045,7 @@ digits 为 I64/U64/NULL，任一为 NULL 时返回 NULL。ROUND 省略 digits �
 结果保留 value 的 kind。整数负精度使用精确十进制舍入，ROUND 中点远离零，TRUNCATE
 向零，不通过 DOUBLE；结果溢出返回 LIMIT_EXCEEDED，IGNORE 也不吞掉该错误。
 DOUBLE 按宿主 C 库 rint/trunc 和十进制缩放计算，正精度缩放溢出时保留原有限值，
-极大负精度为零，最终非有限结果报错。小数字面量仍沿用本 profile 的 DOUBLE 推断，
+极大负精度为零，最终非有限结果报错。小数字面量仍沿用执行器 的 DOUBLE 推断，
 不代表 DECIMAL 舍入。非整数 digits 和 BOOL/TEXT/BLOB 隐式转换尚未开放。
 分组、窗口外层表达式、子查询、集合、默认值及写入共享同一内核；ROUND 本身不能
 加 OVER。协议及边界见[ROUND/TRUNCATE 协议](design.md#round-与-truncate-执行协议)。
@@ -1185,7 +1056,7 @@ DOUBLE 按宿主 C 库 rint/trunc 和十进制缩放计算，正精度缩放溢�
 严格 INSERT/UPDATE/REPLACE/default 的 1292 返回 SQL_ERROR，QUERY/IGNORE 保留
 结果和 warning；1105 在严格写入仍是 warning。I64/U64 数值互转保留补码且没有文本告警。
 NULL 传播，转换不保留输入字节，失败不发布结果；可组合分组、窗口、子查询、集合和
-有界递归 CTE。有限 DOUBLE 到整数采用本 profile 的最近偶数/I64 范围 lane，
+有界递归 CTE。有限 DOUBLE 到整数采用执行器 的最近偶数/I64 范围 lane，
 尚未保存 MySQL Item 来源或支持 DECIMAL，其他 CAST 目标也未开放。
 FLOAT 无精度参数或 p=0..24 时先检查单精度范围再舍入，p=25..53 时采用 DOUBLE；
 其他精度或非整数参数在绑定时返回 SQL_ERROR。单精度舍入结果通过既有 DOUBLE
@@ -1207,7 +1078,7 @@ DOUBLE，两次边界比较都采用 DOUBLE；参数原始 kind 仍严格校验�
 探针编码为单个整数键，沿用扫描准入和原谓词复核。类型、精度及预算边界见
 [混合比较协议](design.md#double-与整数混合比较协议)。
 静态 NULL 左值保持原有 NULL 传播，不对无需执行的边界值做数值转换。
-小数和指数字面量仍按本 profile 映射为 DOUBLE，尚未实现 MySQL 小数字面量的 DECIMAL 类型推断。
+小数和指数字面量仍按执行器 映射为 DOUBLE，尚未实现 MySQL 小数字面量的 DECIMAL 类型推断。
 除零按固定严格模式处理：SELECT/DELETE 返回 NULL 并记录 1365 告警，严格
 INSERT/UPDATE/REPLACE 及默认值折叠返回 SQL_ERROR，IGNORE 写入返回 NULL 并记录告警。
 NULL/零不产生告警；EXPLAIN、LIMIT 0、懒分支及 EXISTS 的已裁剪投影不求值。
@@ -1491,22 +1362,6 @@ max(left-right,0) 次，DISTINCT 先对两侧分别去重。EXISTS 仍计算真�
 带尾部的组；这不代表全部 MySQL 类型、collation 或服务端优化行为等价。
 协议见[集合查询接入](design.md#集合操作接入复合查询的执行协议)。
 
-[私有原生表行源](../drivers/tidesdb/sql/table.h) 已将真实 TidesDB iterator 接入上述 SELECT 执行器。
-调用方提供同一活跃事务、完整表键前缀和声明 schema，读取现有 ORMTDB v1 记录；
-每次拉取只持有一条行视图，不物化整表。参数和 schema 元数据复制，TEXT/BLOB 输出
-借用到下次拉取/关闭；一个 source 只能有一个活跃 scan，先关闭 SELECT，再关闭 source，
-最后结束事务。首次拉取才创建 iterator，LIMIT 0 或提前取消不读取存储。
-物理 key+value 字节及行数由 source 统一计费，坏记录、字段缺失/额外字段、类型漂移
-明确失败。驱动工作区在 open 固定分配，native 引擎内存另属原生生命周期。
-
-[11 项原生查询集成测试](../orm/tests/integration/tidesdb/sql/table_test.c) 验证重开后的
-参数/LIKE/计算列/分页、真实快照、本事务写入可见、前缀隔离、空范围、取消、坏行、
-类型及资源边界，另逐一注入 iterator 操作和 workspace reserve/resize 失败。
-**HIGH｜接入边界：** 这仍是读取旧行格式的私有只读适配器，schema 由调用者提供；
-下述持久化 Catalog 使用独立 CF，尚未接入该行源或生产 relational profile。
-生产 `orm_raw()` 继续使用本文开头的 CRUD 子集。
-设计及所有权见[原生只读行源协议](design.md#原生只读行源接入)。
-
 [私有 Catalog 定义绑定](src/catalog.h) 将单条 MySQL CREATE TABLE 转换为独立拥有的
 schema，可供 SELECT bind 和 table_open 复制使用；销毁 AST/定义后查询仍可执行。
 例如 `CREATE TABLE metrics (id BIGINT PRIMARY KEY, score BIGINT NOT NULL)`。
@@ -1517,8 +1372,7 @@ schema，可供 SELECT bind 和 table_open 复制使用；销毁 AST/定义后�
 AUTO_INCREMENT、外键与 CHECK。
 这一步只校验和拥有元数据，不创建表，不检查表是否存在，也不写入 Catalog。
 [39 项定义及 codec 测试](tests/unit/catalog_test.c) 验证类型/主键、
-名称和错误边界、资源限制、逐分配点退款及生命周期；上述原生集成目标还验证用
-DDL 生成 schema 查询重开后的持久化行。协议及官方依据见
+名称和错误边界、资源限制、逐分配点退款及生命周期。协议及官方依据见
 [Catalog 定义增量](design.md#catalog-建表定义私有绑定增量)。
 
 [私有持久化 Catalog](src/catalog_store.h) 已实现独立空 SYNC_FULL CF 的显式初始化、
@@ -1540,7 +1394,7 @@ schema codec 有独立 golden bytes、每个截断长度与坏字段测试，目
 使用的原生扫描源。类型为 I64/U64/有限 F64，非主键可按 schema 允许 NULL；无隐式转换。
 Data key/value 使用独立版本化编码，主键与行内值一致，插入与 TableVersion 递增使用
 同一保存点批次。扫描打开时登记表版本，活动 source 阻止同 owner 写入和结束事务；
-EOF/取消后仍须 close。已有 ORMTDB v1 行源保持独立，不混写格式。
+EOF/取消后仍须 close。
 
 [105 项关系行集成测试](tests/integration/relation_test.c) 覆盖重开后
 SQL SELECT、数值端点/NULL/负零、精确 wire bytes、主键重复/并发冲突、部分写入与
@@ -1665,7 +1519,7 @@ LIKE 的表名匹配大小写敏感，列名和变量名匹配采用 ASCII 折�
 过滤逐行执行，AST 和参数输入在 open 后可释放，取消、步骤限额和失败清理共用
 现有 Scan 协议。详见 [过滤归属](design.md#show-过滤的执行归属与生命周期)。
 数据库限定、FULL/EXTENDED COLUMNS、EXTENDED INDEX 和未列出的 SHOW 仍明确拒绝。
-这不改变数值表的存储类型；SHOW 现已通过 relational profile 的 `orm_raw()` 查询入口接入。
+这不改变数值表的存储类型；SHOW 现已通过 关系执行器 的 `orm_raw()` 查询入口接入。
 新增 16 项 Catalog/SHOW 集成用例覆盖结果、快照、持久化、生命周期、损坏数据、
 iterator/get/分配故障、资源限额和显示名称所有权。
 
@@ -1674,7 +1528,7 @@ iterator/get/分配故障、资源限额和显示名称所有权。
 生成规范化定义，保留列序、三种数值类型、NULL/NOT NULL、显式列默认值、主键及完整二级索引的
 名称、唯一性、复合列序与 ASC/DESC；引用全部名称，不补造 ENGINE 等属性。
 生成文本在 open 内按 WORK/STEP 预算构建，读取与释放沿用上述快照和租约协议。
-生成 SQL 可在同一 relational profile 中重建数值表和全部具名二级索引，目标表名
+生成 SQL 可在同一 关系执行器 中重建数值表和全部具名二级索引，目标表名
 须不存在；不会导出表内数据。数据库限定仍不支持。表级匿名索引及列级 UNIQUE
 使用首列名并以 `_2`、`_3` 消重；显式名称优先，结果不受定义顺序影响。
 SHOW CREATE 会输出生成后的显式名称。回放后唯一约束、索引查询、用户保存点和
@@ -1712,14 +1566,14 @@ SELECT 按语句顺序编号，同一 JOIN 分支共享编号。`UNION RESULT` �
 事务可在语句间隙提交/回滚；owner 结束前 `reset_transaction` 返回 BUSY，不能绕过累计限额。
 runtime 不隐式开始/结束预算，调用方显式设置语句边界；错误、EOF 和取消后的查询仍须 close。
 新增 6 项预算、7 项 runtime 和 3 项 Catalog 用例验证跨语句容量、限额、所有权与提交错误清理。
-**MED｜接入边界：** raw SQL、显式事务、物化结果和 Publisher 已接入 relational profile；
+**MED｜接入边界：** raw SQL、显式事务、物化结果和 Publisher 已接入 关系执行器；
 用户 savepoint 与结构化 ORM CRUD 已接入，M2 数值表最小闭环已接通；
 SELECT 排序、数值 DISTINCT、GROUP BY/HAVING、COUNT/MIN/MAX、DOUBLE SUM/AVG 及基本 JOIN 已接入。
 USING/NATURAL JOIN、派生表、相关子查询、集合操作及索引读取已接入，
 具体范围见对应段落。重复输出列名仍要求显式别名。
 [真实插件测试](../orm/tests/integration/tidesdb/sql/relational_test.c) 验证连接、执行、排序/去重/聚合、计划说明及保存点闭环；
 [40 项 owner 故障测试](../orm/tests/integration/tidesdb/sql/relational_owner_test.c)
-验证提交冲突、COMMIT_UNKNOWN、回滚错误、分配失败和 legacy Manifest 准入失败，
+验证提交冲突、COMMIT_UNKNOWN、回滚错误、分配失败和 Catalog 读取失败，
 以及保存点原生调用前后故障、私有批次隔离、注册表释放和工作/执行步骤限额，
 结构化渲染的参数分配/每次文本追加故障、执行参数预算失败、危险命令修饰拒绝。
 SQL 保存点覆盖与 ORM 混用、自动提交不保留点、大小写/引用名称、容量与取消准入、
@@ -1735,7 +1589,7 @@ autocommit 另覆盖同值无提交、隐式事务延迟创建/共享、关闭�
 
 事实｜Windows Release DISTINCT 增量本轮验证 17 个 TidesDB CTest 目标，全部通过，耗时 59.78 秒，包含
 32 项 relational 插件、17 项 relational owner 故障测试，以及 select 86、scan 18、expr 64、value 26、
-budget 20、legacy parser 21、catalog 16、catalog_store 39、relation 94、runtime 23、真实 SQL 9、原生 table 11、row 4、resource 10、commit_fault 16 项。
+测试覆盖预算、Catalog、关系 CRUD、runtime、原生存储/WAL 和结果所有权。
 前轮结构化入口验证另有 5 项共享 MySQL 渲染测试通过；更早接入验证有 8 个 ORM owner 与 4 个公共流/后端/SQLite 集成目标通过（checked owner 含 185 项）。
 未运行 MySQL 服务端差分或 sanitizer。
 
@@ -1791,9 +1645,8 @@ cmake --build --preset win-release-user --target orm_tidesdb_sql_relation_test
 cmake --build --preset win-release-user --target orm_tidesdb_sql_runtime_test
 cmake --build --preset win-release-user --target orm_tidesdb_sql_relational_test orm_tidesdb_sql_relational_owner_test
 cmake --build --preset win-release-user --target orm_mysql_dialect_test orm_mysql_driver
-cmake --build --preset win-release-user --target orm_tidesdb_sql_table_test orm_tidesdb_row_test
-cmake --build --preset win-release-user --target orm_tidesdb_sql_parser_test orm_tidesdb_sql_test orm_tidesdb_sql_storage_test orm_tidesdb_sql_wal_fault_test orm_tidesdb_sql_commit_fault_test
-cmake --build --preset win-release-user --target orm_tidesdb_sql_storage_race_test orm_tidesdb_sql_resource_test
+cmake --build --preset win-release-user --target orm_tidesdb_sql_storage_test orm_tidesdb_sql_wal_fault_test
+cmake --build --preset win-release-user --target orm_tidesdb_sql_storage_race_test
 ctest --preset win-release-user -R '^orm_tidesdb_'
 ctest --preset win-release-user -R '^orm_mysql_dialect$'
 ```
@@ -1877,7 +1730,7 @@ WHERE 常量所带来的函数依赖，也不从复合分组表达式反推源�
 自引用表仍只允许出现在 member 的直接 FROM 中，不能移入子查询。
 协议及验证范围见[递归内部捕获](design.md#递归定义内部的词法-frame-与分阶段绑定)。
 
-显式 LATERAL 派生表已通过正常依赖图和 runtime 接入 relational profile。前缀按实际
+显式 LATERAL 派生表已通过正常依赖图和 runtime 接入 关系执行器。前缀按实际
 JOIN 准备顺序绑定，RIGHT JOIN 先准备右侧；完整前缀保持 SQL 列序和已完成的 NULL 扩展，
 前缀间保持同一词法层级。来源只能引用已准备好的前缀和所属查询可见的祖先行；自身、
 后续未准备来源及不合法的外连接方向在打开时拒绝。普通非 LATERAL 派生表仍不能引用
@@ -1893,7 +1746,7 @@ AST、输入参数及 marker 字节载荷可在成功打开后释放；捕获借
 关闭失败保留借用与 owner，仅允许释放消费者后重试 close；首错锁定，重复读取不再执行
 或扣额度。步骤超限后清理仍能运行。无磁盘格式、ORM ABI 或连接配置变化。
 直接 `LATERAL (SELECT MAX(a.id))` 在 child 内聚合已验证，完整跨查询聚合重定位仍未实现。
-legacy lowering 和普通私有 FROM 执行入口继续拒绝 LATERAL，runtime 明确选择相关调度。
+普通私有 FROM 执行入口继续拒绝 LATERAL，runtime 明确选择相关调度。
 见 [FROM 调度协议](design.md#from-相关子树调度协议) 与
 [runtime 接入协议](design.md#lateral-依赖来源与-runtime-接入)。
 相关 TEXT/BLOB 标量结果由依赖节点深拷贝并保留到消费者关闭，

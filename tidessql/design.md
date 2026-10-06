@@ -1396,8 +1396,7 @@ ORM driver 转换 ORM 输入和结果、注册插件并衔接 CFlow。查询和�
 首步已迁出执行核心、原生 bridge、18 个单元测试文件和 5 个原生集成测试
 文件，建立 `TurboDB::TidesSQL`。引擎仅复用公开的 `orm_value_t`、状态码和
 错误 DTO；错误填充由内部 `error.h` 完成，不链接 ORM 动态库，不包含
-`orm_internal.h`。`parser.c/sql.h` 中的 ORM plan 转换和 `table.c/table.h`
-中的旧 ORMTDB 行适配留在 driver，MySQL renderer 也由 driver 构建。
+`orm_internal.h`。driver 构建结构化计划的 MySQL renderer，raw SQL 直接交给 TidesSQL；旧 AST lowering、ORMTDB 编解码和行适配器已删除。
 
 第二步已迁出连接选项、SQL 会话、自提交和显式事务生命周期、保存点及
 结果所有权，入口为 [connection.h](src/connection.h)。`relational_backend.c`
@@ -1436,101 +1435,58 @@ drivers。新选项 `TURBODB_BUILD_TIDESSQL` 的默认值跟随 ORM；单独启�
 状态：实现提案，2026-09-30；M0 存储契约、WAL 故障、提交状态与并发验证见第 15 节。
 本文包含目标架构和分阶段实现记录；已接入的 profile 与能力以 [readme.md](readme.md) 为准。
 已实现的私有预算、标量类型与谓词契约在对应章节和验证记录中单独说明。
-关系执行器通过显式 opt-in profile 接入的边界见文末；不迁移旧数据。
+关系执行器是唯一 ORM TidesDB 路径；旧接口清理与数据边界见第 1–3、11 节。
 当前已实现的 MySQL AST 到受限 CRUD 计划转换见 [readme.md](readme.md)。
 
 ## 1. 目标、边界与现状证据
 
-目标是将受支持的 MySQL AST 编译为可在 TidesDB 上执行的关系计划，逐步覆盖单表查询、
-批量写入、聚合、JOIN、子查询、目录与索引。以 MySQL 8.4 作为语法和选定语义的参考；
-每项能力分别记录 parser、binder、executor、持久化恢复与测试状态。
-“parser 接受”不能作为“数据库支持”的判定。完整 MySQL 服务端兼容不是首版承诺。
-
-事实来源：
+TidesDB ORM 插件只有 TidesSQL 关系执行路径。raw SQL 直接进入公共 MySQL parser；
+结构化 ORM 计划由现有 MySQL renderer 转为 SQL 与绑定参数。名称、类型和能力检查
+由引擎负责，不能丢弃不支持的语法后继续执行。
 
 | 当前事实 | 代码与影响 |
 | --- | --- |
-| SQL 前端已采用公共 MySQL parser；转换层保留参数绑定及执行能力检查 | [parser.c](../drivers/tidesdb/sql/parser.c)、[sqlparser.h](../sqlparser/include/sqlparser/sqlparser.h)；可直接复用前端 |
-| ORM 计划是单表、列列表、赋值列表、AND 谓词、单项排序、分页的扁平结构 | [orm_internal.h](../orm/src/abi/orm_internal.h) 中 `orm_query_plan`；不能承载 JOIN、聚合或子查询树 |
-| 后端没有表级目录；行包含字段名、值种类和值字节 | [row.h](../drivers/tidesdb/row.h)、[row.c](../drivers/tidesdb/row.c)；不能从第一行推断可靠表结构，空表也无法提供列定义 |
-| 旧行头为 ORMTDB 加版本字节 1、0；主键编码含类型与文本值 | [row.c](../drivers/tidesdb/row.c)、[backend.c](../drivers/tidesdb/backend.c) 中 `orm_tidesdb_entity_key`；旧键的字典序不能假定为数字顺序 |
-| UPDATE/DELETE 要求非 NULL 等值谓词和主键定位，禁止修改主键 | [backend.c](../drivers/tidesdb/backend.c) 中 `orm_tidesdb_require_id`、`orm_tidesdb_update_or_delete`；批量更新需要新执行逻辑 |
-| 游标逐行扫描，有扫描/结果上限并持有事务；有活跃游标时提交被拒绝 | [backend.c](../drivers/tidesdb/backend.c)、[orm_tidesdb_cursor.h](../drivers/tidesdb/orm_tidesdb_cursor.h)；复用租约与生命周期契约 |
-| 命令在第一次 Publisher resume 内同步执行并返回一个结果 | [orm_command_publisher.c](../orm/src/flow/orm_command_publisher.c)；不能假定当前命令接口可异步挂起或被跨线程中断 |
-| 已有 get/put/delete/iterator、事务及 savepoint 适配 | [bridge.h](src/bridge.h)；存储接口足够承载初期扫描与原子批量写入 |
-| 多 CF 运行时原子性与崩溃原子性不是同一保证 | [tidesdb.h](../tidesdb/src/tidesdb.h) 的 `tidesdb_txn_commit` 注释：per-CF WAL 模式可能留下已提交前缀，UNIFIED 才承诺跨 CF 崩溃原子性 |
+| 插件工厂直接创建关系适配器 | [plugin.c](../drivers/tidesdb/plugin.c)、[relational_backend.c](../drivers/tidesdb/relational_backend.c) |
+| 配置、会话、事务与结果由引擎拥有 | [connection.c](src/connection.c)；ORM 不维护状态副本 |
+| Catalog 与关系行共享同一 CF 事务 | [catalog_store.h](src/catalog_store.h)、[relation.h](src/relation.h) |
+| 结构化计划只负责 ORM 的单表查询入口 | [orm_mysql_render.c](../orm/src/sql/orm_mysql_render.c)；完整 SQL 不压平到 ORM plan |
 
-**HIGH｜事实与设计约束：** 不修改旧 `orm_query_plan` 来容纳完整 SQL，不把旧行升级或
-重新编码成新格式，也不在语义校验失败后降级执行部分 SQL。
+## 2. 单一执行路径的架构决策
 
-## 2. 架构决策与候选方案
+**HIGH｜已实施：** 删除旧 KV/ORMTDB 后端、受限 parser、游标与原生旧行适配器，
+删除 `sql_profile` 选择接口。插件版本提升至 2.0.0，能力只声明 SERIALIZABLE。
+此决定影响 driver、引擎配置、插件元数据、构建、测试和调用文档。
 
-| 方案 | 优点 | 问题 | 决策 |
-| --- | --- | --- | --- |
-| 扩张 ORM 扁平计划 | 初期接入少 | 表达式、关系树和目录状态会扩散到所有驱动及公共 ABI | 不采用 |
-| 直接遍历 parser AST 执行 | 容易做最小原型 | 名称查找和类型判断进入每行热路径；解析对象与事务生命周期耦合 | 不采用 |
-| 驱动内 Binder → 关系计划 → 受限优化 → SQL 执行器 | 边界清楚，其他驱动和公共 parser 不变 | 增加编译阶段及目录，必须验证资源预算与语义 | 采用 |
-| 使用外部完整 SQL 引擎转接 KV | 可复用大量 SQL 能力 | 尚无已接入且能满足 TidesDB 事务/嵌入式边界的现成适配；新增依赖与部署成本 | 本轮不引入 |
-
-分层是同步编译与拉取式执行的混合：查询控制面编译不可变计划，执行面按需求产生行，
-外层继续使用已有 CFlow Publisher。不开新线程，不引入任务队列、服务器或通用插件框架。
+候选方案为保留双路径或只保留关系引擎。按仓库不保留旧接口、不提供 fallback 的要求，
+选择后者；不引入依赖或新执行算法，减少两套行格式与错误语义的维护成本。
+代价是旧连接选项和 ORMTDB 数据不再受支持。关系 Catalog 格式本身不改变。
 
 ```mermaid
 flowchart TD
-    Raw[orm_raw 与绑定参数] --> Profile{连接 SQL profile}
-    Profile -->|legacy| Legacy[现有受限 AST 转换]
-    Legacy --> Old[现有 ORM 计划及后端]
-    Profile -->|relational| Parse[公共 MySQL parser]
-    Parse --> Bind[名称绑定 / 类型检查 / 能力校验]
-    Catalog[事务一致的 Catalog] --> Bind
-    Bind --> Logical[不可变关系计划与表达式程序]
-    Logical --> Physical[规则优化与物理计划]
-    Physical --> Run[单 owner SQL 执行状态]
-    Run --> Storage[Storage 适配 / 同一 CF 中的行与索引]
-    Run --> Output[ORM Row Cursor / Command Result]
-    Output --> Flow[CFlow Publisher / DataBind]
+    Raw[raw SQL 与绑定参数] --> Parse[MySQL parser]
+    Plan[结构化 ORM plan] --> Render[MySQL renderer]
+    Render --> Parse
+    Parse --> Bind[绑定 / 类型检查 / 能力校验]
+    Catalog[同一事务的 Catalog] --> Bind
+    Bind --> Run[TidesSQL 计划与执行状态]
+    Run --> Storage[同一 CF 的目录 / 行 / 索引]
+    Run --> Result[结果 / 命令状态]
+    Result --> Adapter[ORM CSerde cursor / CFlow Publisher]
 ```
 
-两个 profile 在连接建立时显式确定，不自动探测，不因失败互相切换。默认 `legacy`
-保持已存在数据库和结构化查询语义；新增 `relational` 必须显式启用。
+## 3. 状态、资源与交付协议
 
-## 3. 模块、依赖与接入
-
-下列是拟定归属，随阶段实际创建，不预先加入空源码或占位接口：
-
-| 文件/目录 | 职责 |
-| --- | --- |
-| `sql/parser.c` | 保留当前 legacy 转换入口，最终无重复 lexer/grammar |
-| `sql/compile.c`、`sql/bind.c` | AST 校验、作用域、参数槽、名称及类型绑定 |
-| `sql/plan.h`、`sql/plan.c`、`sql/optimize.c` | 类型化关系 IR、计划所有权、有限且可证明的优化规则 |
-| `sql/value.c`、`sql/expr.c` | SQL 值规则、三值逻辑、有界表达式程序执行 |
-| `sql/exec/` | Scan、Filter、Project、Limit、Sort、Aggregate、Join、Write 的状态与组合 |
-| `sql/catalog/` | 表/列/索引定义、目录版本、DDL 状态与维护命令 |
-| `sql/storage/` | 新键空间、行版本及索引键编解码；只经 `bridge.h` 访问 TidesDB |
-| `sql/runtime.c` | 计划实例化、预算、诊断、事务参与及输出适配 |
-| `backend.c` | 按 profile 和入口类型分发，继续负责连接及事务生命周期 |
-
-依赖方向为 `backend → sql/runtime → compile/exec/catalog/storage → bridge`；
-公共 `sqlparser` 不依赖 ORM；其他数据库驱动不依赖 TidesDB SQL 类型。
-表达式和计划模块不调用存储，存储编解码不执行 SQL。
-
-`orm_raw()`、`orm_query_bind()`、行/命令 Publisher 入口保持不变。
-新计划只存在驱动内部，不替换跨插件的 `orm_driver_plan_v1`。
-`relational` 中的结构化查询通过单独的结构化计划适配入口编译为同一关系计划；
-不先渲染 SQL 再解析。两个入口共享绑定、约束、存储和事务事实源。
-M2 在该适配完成前不能宣称结构化与 SQL 互通；未覆盖入口明确返回 UNSUPPORTED。
-
-复用约束：
-
-- 容器、哈希、字符串使用 Salts CSTL / `tstr`；不重写动态数组、哈希表或内存池。
-- SQL Sort 首选 CSTL `stable_sort`，其公开接口提供 scratch 字节上限；SQL 比较规则
-  由类型化排序记录及比较描述符提供。HashAggregate/HashJoin 使用有界 CSTL 容器。
-- CFlow 负责现有 Publisher 的需求、终态和生命周期。其 Graph 已有 bounded sorted、
-  distinct、take/skip 等能力，但 relation/fork-join 是流协调，不能等同 SQL JOIN。
-- 首版选择 SQL 专用同步拉取计划：现有 TidesDB Row Cursor 与 Command Result 接口
-  已有这一边界，且 SQL 还需要联合内存预算、表达式错误、目录快照和事务副作用。
-  不新造通用流框架；未来只有验证同语义、同预算和同错误传播后才增加显式 CFlow
-  计划后端。编译失败不能触发隐藏的解释器回退。
+- 数据单元为绑定参数、SQL 计划和结果行；Catalog、行和索引的事实源是同一 CF。
+- 连接/事务由 TidesSQL 单 owner 同步推进；ORM 继续按已有 admission 协议串行调用。
+  不增加线程、队列、状态副本或后台迁移。
+- 结果拥有其事务引用；输出字节视图在下次拉取或结果关闭时失效。活跃结果阻止
+  不允许的下一条语句或事务结束，关闭顺序仍为结果、事务、连接。
+- 容量继续由查询、结果、扫描、工作空间和事务预算约束，满额返回明确错误。
+  提交不确定时隔离 owner，不重放；错误与清理沿用引擎既有契约。
+- `path`、`column_family` 必填；新 CF 仅显式 `sql_initialize=true` 初始化。
+  旧选项、未知配置和非关系格式直接拒绝，不隐式接管、转换或回退。
+- 验证覆盖无 profile 初始化/重开、旧选项拒绝、能力与隔离级别、结构化/raw SQL、
+  结果所有权、Catalog/索引、资源故障和原生 WAL 恢复。平台未执行的检查另行报告。
 
 ## 4. 编译产物与所有权
 
@@ -1592,7 +1548,7 @@ SQL 允许重复列名的通用结果集协议留到公共结果元数据扩展�
 记录进能力表。不能以“MySQL parser”之名承诺 MySQL 全部隐式转换或排序规则。
 
 - 值先支持 NULL、I64、U64、有限 F64、BOOL、TEXT、BLOB。TEXT 与 BLOB 区分；
-  新关系型行用显式长度，不把内嵌 NUL 截断。旧 ORMTDB v1 的 TEXT 约束保持原状。
+  新关系型行用显式长度，不把内嵌 NUL 截断。不读取 ORMTDB 格式。
 - SQL 布尔为 TRUE/FALSE/UNKNOWN：普通比较遇 NULL 得 UNKNOWN；WHERE/HAVING/ON
   只接纳 TRUE。`IS NULL` 和 `<=>` 单独定义。NOT/AND/OR 用三值真值表测试。
 - I64/U64 比较避免经 double 丢失精度；算术类型由 Binder 固定，溢出立即报错。
@@ -1629,7 +1585,7 @@ M1 首个内部增量是 `value.h` 的标量谓词，不是完整 AST Binder 或
 UNSUPPORTED，非法类型描述或运行时值不符合绑定返回 TYPE_ERROR。TEXT 验证 UTF-8，
 按完整字节序比较，大小写、末尾空格及内嵌 NUL 均有意义；BLOB 不验证 UTF-8，不能
 与 TEXT 混比。F64 必须有限，正负零相等。不采用 MySQL 隐式数字/字符串转换或默认
-collation。这些是新关系 profile 的内部语义，不修改 legacy 的数值比较行为。
+collation。这些是关系执行器的内部语义。
 
 每次执行先验证参数、类型与长度，再联合预留执行步数：固定 1 步，加两侧 TEXT
 UTF-8 验证的字节数，加实际比较字节串时公共前缀长度上界。计数加法溢出及超限立即失败，
@@ -1829,7 +1785,7 @@ LIMIT/OFFSET 接受常量或独立参数，参数声明须为 I64/U64，运行�
 重复解析且混淆值与语法，因此不采用。AST 编译、扫描、绑定三个内部模块共同调整，
 接口不安装/导出，旧零参数调用转入同一实现。参数快照增加有界复制/校验开销并消耗
 预算，收益是独立 run 生命周期；未做吞吐优化或性能承诺。回滚仅移除内部参数接入，
-不涉及存储迁移，现有生产驱动继续走 legacy 路径。
+不涉及存储迁移，生产驱动使用同一关系执行器。
 
 #### TEXT 字面量接入协议
 
@@ -1842,7 +1798,7 @@ COLLATE、BLOB 字面量和表达式投影均不由此增量开放。
 作为所有解码字节的保守上界；容量固定，不随后续常量增长或移动。每个常量保存其中
 的独立只读 view，AST 只借用到编译返回；程序是常量字节的唯一 owner。run 可借用
 到 close，活动 run 阻止程序 destroy；每次 eval 清空寄存器借用，最终仅输出 BOOL/NULL。
-没有线程、队列或 I/O，不改变外层事务和生产 legacy 的字符串转换路径。
+没有线程、队列或 I/O，不改变外层事务。
 
 解码先计原始 span 字节 steps，分配先计 work（含对齐开销），解码后经 value.c 验证
 UTF-8 并计相应步骤；容量减法检查通过后才写入。所有字符串包括死分支均在编译时
@@ -1902,8 +1858,7 @@ LIMIT 10;
 
 ### 7.1 显式存储边界
 
-**HIGH｜提案：** 新 `sql_profile=relational` 要求显式选择新的空 CF；不会接管已有
-legacy CF。关系目录、表数据、唯一键占用记录、二级索引、DDL 状态统一放在该 CF 的
+**HIGH｜事实：** 关系执行器要求显式选择 CF；初始化只允许新的空 CF，不接管已有非关系数据。关系目录、表数据、唯一键占用记录、二级索引、DDL 状态统一放在该 CF 的
 不同二进制键空间，所有一次逻辑写入只提交一个 CF。
 旧格式不复用新前缀、不混写，不自动逐行探测版本。
 
@@ -1961,7 +1916,7 @@ DDL 维护命令在事务中竞争持久化的目录/表维护标记；所有托
 这是首版固定隔离协议，不是遇到错误才启动的 fallback，也不依赖全局执行 mutex。
 代价是同表并发写冲突增多；细化范围保护之前必须有等价性证明和压力测量。
 该协议目前由真实 KV 集成用例验证，尚未接入未实现的关系执行器；M2 所有写入入口
-统一遵守后才能宣称该执行层提供上述隔离。旧 legacy 路径的语义不因这些测试改变。
+统一遵守后才能宣称该执行层提供上述隔离。不提供其他执行路径。
 
 ## 8. 写入、事务与失败收场
 
@@ -1996,7 +1951,7 @@ commit 的 I/O 失败不能一律解释为“未提交”。有不确定结果�
 - 单表 UPDATE 按 MySQL 从左到右更新工作行；`SET a=a+1,b=a` 的 b 读取更新后的 a。
   WHERE 与目标集合选择读取语句输入行。不要误用“所有赋值都读旧行”的同时赋值规则。
   参考：[MySQL UPDATE](https://dev.mysql.com/doc/refman/8.4/en/update.html)。
-- relational 的 UPDATE affected_rows 计实际改变的行；legacy 保持现有行为。
+- UPDATE affected_rows 默认计实际改变的行；sql_client_found_rows 显式选择匹配行数。
   INSERT/DELETE 计成功插入/删除行；失败不返回部分成功计数。matched_rows 仅作为内部指标，
   不私自改变公共 command result 布局。
 - M2 仍禁止修改主键；开放前必须实现旧键删除、新键插入、唯一约束及所有索引的同事务更新。
@@ -2004,7 +1959,7 @@ commit 的 I/O 失败不能一律解释为“未提交”。有不确定结果�
   占用记录，让竞争事务冲突；并发插入同值测试是开放 UNIQUE 的门槛。NULL 规则单独实现。
 - 批量写入不自动分批提交。超过语句/事务总写集上限即失败并回滚该语句。
 - relational 首版不启用 TTL，避免基础行自然过期而索引/唯一键/外键状态未同步变化。
-  legacy TTL 保持既有规则。TTL 与索引一致性解决前不能组合开放。
+  TTL 与索引一致性解决前不能组合开放。
 
 ### 8.3 事务状态归属
 
@@ -2058,7 +2013,7 @@ allocator 覆盖；总进程内存还需 native 配置和测量。不得将 SQL 
 
 #### M0 私有预算契约
 
-M0 私有预算组件的实现契约见 `budget.h`，不接入 legacy 执行或公开 options。
+预算组件的实现契约见 `budget.h`，配置由连接入口统一校验。
 它只保存固定大小的计数，不分配或拥有 SQL 数据，不代替 ORM/native 事务状态机。
 一个同步 owner 持有一份事务账本；同一账本同时只允许一个语句，开始语句时清空
 语句计数，结束前必须归还全部工作内存、物化行和聚合组。成功、失败和取消共用
@@ -2136,26 +2091,18 @@ ALTER 的顺序为：兼容的 rename/default/nullable-column 元数据变更 �
 
 ## 11. 迁移与回滚
 
-- 默认连接仍为 legacy，已有数据和接口不变。relational 要求显式新 CF 和 manifest；
-  新驱动以 legacy profile 打开含 relational manifest 的 CF 必须拒绝。
-- 用户旧数据迁移是单独显式命令，需要明确 Schema、列类型、主键及字段缺失规则。
-  扫描旧数据时固定快照并暂停相关写入；不从样本猜 Schema，不静默截断或转换失败行。
-- 在未发布的新关系 CF/generation 写入，完成行数、键、类型、约束和校验和核对后，
-  显式切换应用配置。导入未完成不能作为可查询表；失败保留原库完整可用。
-- 切换前回滚只需放弃未发布目标；切换后若新库已有写入，回滚不是简单换回旧驱动。
-  必须停止写入并执行验证过的反向导出/恢复，或者接受明确的恢复点；禁止承诺零损回退。
-- 不删除旧 CF、不自动双写。后续删除旧数据属于另一次授权操作。
-- 二进制回滚仅适用于 legacy 兼容路径；旧驱动不支持 relational 格式。
+本次只删除代码与接口，不执行用户数据迁移或删除。现有关系 CF 可继续使用；
+调用方移除 `sql_profile`，保留显式路径/CF 和初始化策略。旧 ORMTDB 库必须由用户
+另行制定 schema、类型和数据核验方案后迁移，本仓库没有自动迁移入口。
 
-**HIGH｜实施门槛：** 新配置和持久化格式的实施/迁移需要单独确认；本设计不执行这些操作。
-估计成本为多阶段工程而非小补丁，必然超过两人日；在 M0 验证 TidesDB 事务和数据路径
-后才能给出有依据的工期。精确估时不是本文已经测得的事实。
+回滚代码需部署经验证的旧版本并使用与其格式匹配的备份；新版本产生的数据不能
+交给旧格式解析器。发生部署故障时停止写入并按明确恢复点处理，不承诺无损降级。
 
 ## 12. 分阶段实现与验收
 
 | 阶段 | 交付内容 | 开放条件 |
 | --- | --- | --- |
-| M0 存储与契约验证 | 真实事务 savepoint、冲突、单 CF commit/恢复、目录 epoch；有界预算、类型/能力枚举 | 驱动正式测试通过；不改变默认 profile，不开放空功能 |
+| M0 存储与契约验证 | 真实事务 savepoint、冲突、单 CF commit/恢复、目录 epoch；有界预算、类型/能力枚举 | 驱动正式测试通过；不开放空功能 |
 | M1 表达式与关系计划 | 值规则、三值逻辑、Binder、不可变 IR、无递归执行、内存 source 的 Filter/Project/Limit | 单元与差分测试通过；仅内部测试入口，不能对用户宣称可执行 SQL 新能力 |
 | M2 最小关系型闭环 | 显式目录初始化、基本 CREATE TABLE、表/列/主键、SHOW TABLES/COLUMNS、单表 SELECT、别名/星号、单/多行 INSERT、批量 UPDATE/DELETE、结构化入口适配 | 数值表最小闭环已接通：opt-in raw SQL、结构化 CRUD 和用户 savepoint 共用 Catalog；单事务行原子性、重启恢复、旧路径回归通过；禁止 TTL 及未实现约束 |
 | M3 排序与聚合 | ORDER BY、DISTINCT、GROUP BY/HAVING、COUNT/MIN/MAX；经验证类型的 SUM/AVG；只读 EXPLAIN | 空集/NULL/溢出/预算边界及排序稳定性测试通过 |
@@ -2186,7 +2133,7 @@ SQLite parser 保持独立可用；关系执行器首版固定 MySQL profile，�
 
 优先验收场景：
 
-1. legacy 当前 21 项转换单测和 9 项 SQL 集成测试持续通过。
+1. 唯一关系路径的 raw/结构化查询与公开结果契约测试持续通过。
 2. 同一组绑定参数在 WHERE、JOIN、SELECT、LIMIT 中按源码位置绑定，类型和值逐一核对。
 3. 三值逻辑真值表、NULL/空集聚合、LEFT JOIN ON 与 WHERE 的差异、IN/NOT IN NULL。
 4. 同一查询经优化/未优化计划在结果多重集、类型、NULL、错误和有 ORDER BY 的序列上相同。
@@ -2208,8 +2155,8 @@ SQLite parser 保持独立可用；关系执行器首版固定 MySQL profile，�
 关系执行能力仍未开放；已实现的 AST 转换和 M0 存储契约的可复验入口为：
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_sql_parser_test orm_tidesdb_sql_test orm_tidesdb_sql_storage_test orm_tidesdb_sql_wal_fault_test orm_tidesdb_sql_commit_fault_test
-cmake --build --preset win-release-user --target orm_tidesdb_sql_storage_race_test orm_tidesdb_sql_resource_test
+cmake --build --preset win-release-user --target orm_tidesdb_sql_storage_test orm_tidesdb_sql_wal_fault_test
+cmake --build --preset win-release-user --target orm_tidesdb_sql_storage_race_test
 ctest --preset win-release-user -R '^orm_tidesdb_sql' --output-on-failure
 ```
 
@@ -2228,9 +2175,11 @@ consumer 工程或独立 smoke 脚本。当前本机缺 Debug Salts/SaltsUtils S
 | HIGH | Schema/新格式覆盖旧数据，错误回滚丢新写入 | 显式新 CF、验证导入、停止写入切换；无自动升级/双写 |
 | MED | blocking operator 内存、取消延迟或写集累积失控 | 联合字节预算、扫描/步骤/事务上限；同步取消限制明确 |
 | MED | 新目录和事务 owner 穿透公共 ABI | 驱动内部计划；会话阶段单独做版本化接口设计 |
-| MED | 新引擎维护成本或性能超出预期 | 按 M0–M6 分阶段验收，保留 legacy；无测量不做优化承诺 |
+| MED | 新引擎维护成本或性能超出预期 | 按 M0–M6 分阶段验收；无测量不做优化承诺 |
 
-## 15. M0 实现与验证记录
+## 15. 分阶段实现与验证记录
+
+以下记录保留各阶段的验证背景；旧后端及专属测试已删除，当前入口和部署契约以第 1–3、11 节为准。
 
 事实来源：[bridge.h](src/bridge.h)、[bridge.c](src/bridge.c)、
 [storage_test.c](../orm/tests/integration/tidesdb/sql/storage_test.c)。
@@ -2250,10 +2199,6 @@ consumer 工程或独立 smoke 脚本。当前本机缺 Debug Salts/SaltsUtils S
 - Windows Release 首批 13 项用例通过。后续故障验证与未完成门槛如下。
 
 ### WAL 写入/同步故障与提交结果
-
-事实来源：[wal_fault.c](../orm/tests/integration/tidesdb/sql/wal_fault.c)、
-[commit_fault_test.c](../orm/tests/integration/tidesdb/sql/commit_fault_test.c)、
-[backend.c](../drivers/tidesdb/backend.c)、[orm_core.c](../orm/src/abi/orm_core.c)。
 
 - 测试库复用真实原生源码与构建依赖，仅替换 block manager 的 `tdb_pwritev_safe`
   和 `fdatasync` 调用点，注入状态属于测试调用线程，单次触发；同步探针只接管该线程
@@ -2309,61 +2254,6 @@ consumer 工程或独立 smoke 脚本。当前本机缺 Debug Salts/SaltsUtils S
   计算：3 场景 × 16 轮 × 4 写事务 = 192 次并发提交尝试；不计 setup/验证事务。
   这是固定规模的并发正确性测试，不代表长时间、多核规模或性能压力验收，也不改变
   原生 iterator 的已知谓词限制；表版本保护仍只在测试中，关系执行器尚未开放。
-
-### 现有执行路径的预算与分配失败
-
-事实来源：[resource_test.c](../orm/tests/integration/tidesdb/sql/resource_test.c)、
-[row_fault.c](../orm/tests/integration/tidesdb/sql/row_fault.c)、
-[sql_test.c](../orm/tests/integration/tidesdb/sql/sql_test.c)。
-
-- **HIGH｜实测并修复：** UPDATE/DELETE 将 WHERE 求值错误送入无匹配行提交分支，
-  覆盖错误并报告成功。插件集成用例先复现 TYPE_ERROR 被吞掉，再验证修复：求值错误
-  直接清理并返回原状态，只有成功且不匹配才能走空提交；影响自动提交的错误报告，
-  不改变成功写入、正常无匹配、ABI 或数据格式。
-- 10 项资源测试复用真实后端/原生数据库。命令测试走驱动 execute_command 契约，
-  检查精确状态码与真实事务调用次数；读取验证走 ORM Publisher，插件错误传播另由
-  SQL 集成测试验证。测试专用 row.c 副本只替换三个 tstr 调用点，TLS 探针单次拒绝，
-  每条路径先测正常调用数，再逐次失败，最多 64 次；未给生产库增加测试状态。
-- 数值准备失败覆盖 INSERT、UPDATE、DELETE；行解码和编码追加失败覆盖 UPDATE。
-  每次要求 OUT_OF_MEMORY、零 affected_rows、零提交；已开启的自动事务恰好回滚，
-  数据保持原样，同一连接仍能执行。显式事务的 WHERE 分配失败不会撤销此前成功语句，
-  后续 commit 保留此前写入而不修改失败语句的目标行。
-- 编码行字节、扫描键+值字节及结果字节均从真实记录测量边界，验证少一个字节失败、
-  恰好容纳成功；编码预算另验证多一个字节成功。两行全不匹配的扫描仍需两行预算，
-  一行预算必须报 LIMIT_EXCEEDED，不能把未输出行视为免费。
-- 这些覆盖属于 legacy 当前预算和选定行分配边界。新引擎的联合预算接入和完整分配
-  失败矩阵仍待实现；私有预算契约及 native commit 的选定分配故障见下文。不把
-  错误清理测试当作 ASan/泄漏证明，不改变第 9 节的资源上限提案。
-- Windows Release：资源测试 10/10、插件 SQL 集成 9/9；完整 `^orm_tidesdb_`
-  回归的 10 个 CTest 目标全部通过，无跳过。修复前插件回归明确观察到应返回 ERROR
-  的命令返回 VALUE_AND_DONE，修复后原始错误按预期传播。
-
-### 原生 commit 分配失败
-
-事实来源：[memory_fault.c](../orm/tests/integration/tidesdb/sql/memory_fault.c)、
-[skip_list_fault.c](../orm/tests/integration/tidesdb/sql/skip_list_fault.c)、
-[storage_test.c](../orm/tests/integration/tidesdb/sql/storage_test.c)、
-[commit_fault_test.c](../orm/tests/integration/tidesdb/sql/commit_fault_test.c)。
-
-- 测试复用原生 `tidesdb_init` allocator 配置，在任何 native 初始化前安装，在所有
-  句柄/后台线程结束后 finalize。回调始终使用 CRT 分配/释放；TLS 探针只拒绝调用
-  线程的指定一次分配，其他线程和未启用阶段正常执行，不统计为覆盖。
-- **MED｜覆盖边界：** 原生 `skip_list.c` 独立编译且未包含 `alloc.h`，其 CRT 调用
-  不经过上述钩子；仅依赖钩子不能验证该路径。测试库另编译原源码的私有副本，重定向
-  malloc/calloc/realloc 到同一 TLS 探针，共享计数，不改变生产库、原生源码或 I/O。
-- 以完整 WAL 帧成功写入为阶段边界，每项严格断言 native MEMORY、恰好一次分配拒绝，
-  以及写入前失败的 0 帧或写入后失败的 1 帧。提交前的语句准备不在注入区间内。
-- 2 项恢复测试在已有目录/行/索引批次上追加 16 个 KV，使 WAL 缓冲需堆分配、memtable
-  需批次分配。写入前拒绝首次分配，写入后拒绝 dedup/slot 准备之后的必要 batch 分配。
-  native commit 返回 MEMORY、rollback 成功后直接退出，重开核验每一个键。
-  **HIGH｜事实：** 前者保留完整旧状态；后者仍重放整个 WAL 批次，说明内存错误也不能
-  推导“未提交”。阶段计数属于测试观测，生产错误码仍没有这些证据。
-- 4 项 ORM 用例覆盖自动/显式提交 × WAL 前/后分配失败。自动提交使用 128 KiB 绑定
-  值触发单行 memtable 分配；显式事务用 16 条单行 SQL 累积原生批次。要求保留 MEMORY
-  原因并返回 COMMIT_UNKNOWN、连接停止业务操作；显式事务不能再次提交/回滚/保存点，
-  close 只释放资源。所有故障均为真实分配调用返回 NULL，不伪造 commit 的返回码。
-- Windows Release：故障恢复 24/24、ORM 提交故障 16/16 通过，无跳过。本轮没有修改
-  生产执行语义；选定故障点的恢复结果不能替代全分配路径覆盖、设备掉电或 sanitizer。
 
 ### 私有联合预算组件
 
@@ -2588,22 +2478,6 @@ MED｜容量边界：扫描投影记录增加了运行状态字段，纯槽位�
 协议：输入和模式借用一次同步求值；描述符仅持有类型、转义字节、否定标志，不保留载荷、不分配内存、不做 I/O。编译后原 AST 可销毁；显式转义在绑定阶段解码并固化。运行错误保留输出，VM 清空寄存器，Scan 保留首错并停止读行，沿用现有取消/关闭契约。动态 ASCII 范围在表达式实际执行时校验，短路未执行分支不检查载荷；显式 ESCAPE 的形状在死分支/LIMIT 0 也检查。没有新配置、公开 ABI 或数据格式变化，回滚只需移除 LIKE 编译映射。验证含空串/NUL、通配符/转义、NULL、类型边界、模式选项、预算重试上限、参数快照及查询错误终态。
 
 事实｜Windows Release 新增 11 项正式测试（value 4、expr 4、select 3），七目标通过：value 26、expr 64、select 56、scan 18、budget 14、parser 21、真实 SQL 9；无失败或跳过，重建无新增编译警告。记录为 `build/Msvc-Release/Testing/Temporary/LastTest.log`，复验命令沿用上节七目标过滤。另在 value 正式用例内，以独立前缀 DP 对照穷举长度 0..4 的二元文本与四元模式：文本数 Σ2^i=31、模式数 Σ4^i=341，共 31×341=10,571 组；转义、NUL 和大小写用独立表驱动用例覆盖。未运行 MySQL 服务端差分、sanitizer 或性能 benchmark。
-## 原生只读行源接入
-
-下一增量将现有 Binder/Filter/Project/Limit 连接到真实 TidesDB iterator，但不提前开放 relational profile。调用者显式提供表前缀、声明 schema 和同一活跃事务，读取已有 ORMTDB v1 行；不能从首行推导目录，也不创建 Manifest、迁移或写入任何数据。Catalog 与 DDL 仍按 M2 单独完成。
-
-架构选择：给 Scan 增加私有同步拉取行源，保留内存入口；原生适配层只经 bridge 调用 iterator，复用 row.c 的格式验证与数值转换。增加无分配的 borrowed field view 解码，并让旧 owning decoder 共用同一字段解析，避免两套格式事实源。与整表物化相比，固定工作空间只随 schema/最大字段数增长；不引入线程、队列或通用流框架。
-
-协议：数据单元为一条完整行，事务内存储是事实源。原生适配器拥有 iterator、前缀/schema 名称副本、固定字段与结果槽，借用事务/CF 至 close；计划与适配器地址在运行期间固定。一个 source 只允许一个同步 consumer，活动 scan 阻止 source 销毁；先 select_close，再 source_close，最后结束事务。首次拉取才创建/定位 iterator，LIMIT 0 与提前取消不读存储。每次拉取前旧输出/寄存器借用已清空，字节 view 在下一次 source 拉取或 source_close 失效。顺序仅为原生键序，不承诺 SQL 排序。
-
-预算：原生源在解码前按 key+encoded value 计一次读行/字节，内存源仍沿用既有计数；执行器不重复计费。max_row_bytes 和字段容量在读取入口检查；字段、类型、名称与投影槽通过 work.c 固定分配，next 不分配驱动 workspace，native iterator 自身分配不属于该 workspace 承诺。解析及字段查找提前计步骤，O(字段数²+schema×字段数+行字节数)，受计划/步骤/行字节上限约束。拒绝缺失/额外字段及类型/nullability 漂移，不能把缺失值当 NULL。容量/原生错误立即返回，Scan 锁定首错、清空部分输出；close 不提交或回滚借用事务。
-
-HIGH｜兼容性：不改变 ORMTDB v1 持久化格式或生产 raw SQL 的执行语义；新入口仅私有测试可达，不承诺写隔离或新 DDL。回滚新增 source 入口即可，无数据迁移。验证使用真实临时 TidesDB：持久化重开、快照/本事务写入、别名/计算/LIKE/分页、参数快照、空表、前缀隔离、坏行/类型漂移、预算失败、取消、重复终态与销毁顺序；同时回归原有 decoder 和真实 CRUD。
-
-事实｜本轮新增 table 集成目标 10 项和 row borrowed decoder 1 项（row 总计 4 项），Windows Release 11 个目标通过，无失败或跳过：parser 21、budget 14、value 26、expr 64、scan 18、select 56、row 4、真实 SQL 9、commit_fault 16、resource 10、table 10。测试禁止工作向量分配后，原生逐行查询仍通过；没有把这一结果当作 native 引擎无分配或性能证明。重启用例为正常关闭后重开，不代替硬件掉电验证。未运行 sanitizer、MySQL 差分或 benchmark。
-
-复验：构建 readme 列出的同名测试 targets 后运行 `ctest --preset win-release-user -R '^orm_tidesdb_(row|sql(_select|_scan|_expr|_value|_budget|_parser|_table|_resource|_commit_fault)?)$' --output-on-failure`；结果位于 `build/Msvc-Release/Testing/Temporary/LastTest.log`。下一阶段仍需持久化 Catalog、DDL、事务一致的目录绑定、结构化入口适配及生产 opt-in profile，不得由此宣称 M2 已完成。
-
 ## Catalog 建表定义：私有绑定增量
 
 先实现 CREATE AST 到独立表定义的纯绑定步骤，作为持久化目录的输入；定义不是已创建的表。`catalog.h` 持有有序列名、严格类型、单列整数主键序号和 IF NOT EXISTS 意图，通过 `schema.h` 的只读视图交给 SELECT 与原生行源。schema 不再依赖 SELECT 的声明，DDL 与 SELECT 共用 `name.c` 的既有 ASCII 标识符规则。没有从首行反推 schema，空表同样可以绑定。
@@ -2823,7 +2697,7 @@ MED｜事实：此前 Catalog owner 的固定元数据通过普通 WORK_BYTES �
 ## 生产 raw SQL 接入：连接、事务和结果所有权
 
 采用独立 `relational_backend.c` 实现既有 backend ops，由连接建立时的
-`sql_profile=relational` 分流；缺省/显式 `legacy` 继续使用原后端。
+直接进入唯一的 TidesSQL 后端；已删除 profile 分流。
 这避免关系目录状态混入旧 KV 行路径，公共 ABI 和持久化格式不变。
 本阶段开放 raw SQL 已实现子集、结构化 ORM CRUD 及用户 savepoint，SQL 事务语句
 和非 SERIALIZABLE 显式隔离级别返回 UNSUPPORTED。M2 数值表最小闭环已接通，
@@ -2859,17 +2733,15 @@ parser 使用自身 input/node/stack 硬上限，与执行 WORK 分开计算；�
 所有执行预算和 parser 深度/栈限制通过 relational 专属连接选项配置，正整数、重复/未知项
 及溢出立即拒绝。事务累计读写不随语句失败或清理重置。
 
-兼容性验证覆盖：legacy 默认路由、显式错误 profile、初始化/重开/持久化、绑定 CRUD/DDL、
+验证覆盖：无 profile 路由、旧选项拒绝、初始化/重开/持久化、绑定 CRUD/DDL、
 事务提交/回滚、活动查询 BUSY、句柄提前释放、取消、结果/工作/累计预算和错误入口。
-回滚部署只需继续使用 legacy profile 和原 CF；禁止将关系 CF 指向旧数据解析路径。
+部署回滚遵循前述恢复协议；不保留旧数据解析路径。
 
 物化执行接入时发现原 `orm_query_execute()` 直接调用 backend，缺少 native admission。
 现将公共物化入口放入 core，结果复制留在 result 模块：从执行前到 cursor dispose 后持有
 同一 connection interval 与 query/transaction dependent lease，按现有规则记录 COMMIT_UNKNOWN
 和连接错误。不会在 owner 锁内执行 backend 或解码；其他连接仍可并行。此修复作用于全部驱动，
 使用 SQLite 回调重入/句柄释放测试和既有 owner 回归验证，公共 ABI 与结果格式不变。
-legacy 连接建立新增只读 Manifest 存在性检查，任何该保留键的值都会拒绝 legacy 接管，
-即使 Manifest 已损坏；原生检查失败关闭连接，绝不解释为 legacy 空目录。
 
 ## 用户保存点接入协议
 
@@ -5637,7 +5509,7 @@ runtime 172 项/430185 条断言。新增 19 个行为用例覆盖清单 AST/spa
 以及所有构造分配点与每个步骤边界的清理。单纯 schema 绑定不读取行，但完整 runtime
 准备仍会查询 Catalog；READ_ROWS 包含元数据读取，不能据该计数声称未访问业务行。
 
-复验：构建 readme 列出的 SQL targets、`orm_tidesdb_sql_parser_test` 和
+复验：构建 readme 列出的 SQL targets 和
 `sqlparser_test sqlparser_dialect_test sqlparser_failure_test sqlparser_sqlite_extension_test
 sqlparser_corpus_test sqlparser_mysql_corpus_test` 后，在 VsDevCmd 环境执行：
 
@@ -5875,7 +5747,7 @@ MySQL 固定语料 385 条仍为 365 接受、20 个上游预期语法拒绝，�
 在 VsDevCmd 环境中构建并运行以下正式测试：
 
 ```powershell
-cmake --build --preset win-release-user --target sqlparser_test sqlparser_failure_test sqlparser_dialect_test sqlparser_sqlite_extension_test sqlparser_corpus_test sqlparser_mysql_corpus_test orm_tidesdb_sql_parser_test orm_tidesdb_sql_window_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_aggregate_test orm_tidesdb_sql_select_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_from_test orm_tidesdb_sql_join_test orm_tidesdb_sql_union_test orm_tidesdb_sql_subquery_test orm_tidesdb_sql_cte_store_test orm_tidesdb_sql_cte_recursive_test orm_tidesdb_sql_cte_bind_test
+cmake --build --preset win-release-user --target sqlparser_test sqlparser_failure_test sqlparser_dialect_test sqlparser_sqlite_extension_test sqlparser_corpus_test sqlparser_mysql_corpus_test orm_tidesdb_sql_window_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_aggregate_test orm_tidesdb_sql_select_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_from_test orm_tidesdb_sql_join_test orm_tidesdb_sql_union_test orm_tidesdb_sql_subquery_test orm_tidesdb_sql_cte_store_test orm_tidesdb_sql_cte_recursive_test orm_tidesdb_sql_cte_bind_test
 ctest --preset win-release-user -R "^(sqlparser_(test|dialect_test|failure_test|sqlite_extension_test|corpus_test|mysql_corpus_test)|orm_tidesdb_sql_(parser|window|scan|aggregate|select|expr|runtime|relational|relational_owner|cte_plan|from|join|union|subquery|cte_store|cte_recursive|cte_bind))$" --output-on-failure
 ```
 
@@ -6489,7 +6361,7 @@ MySQL 固定官方语料 385 条：接受 365、拒绝 20，与基线不符、�
 仍是后续缺口。在 VsDevCmd 环境可复验：
 
 ```powershell
-cmake --build --preset win-release-user --target sqlparser_test sqlparser_dialect_test sqlparser_failure_test sqlparser_corpus_test sqlparser_mysql_corpus_test sqlparser_sqlite_extension_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_parser_test orm_tidesdb_driver orm_tidesdb_sql_runtime_test orm_tidesdb_sql_relational_test
+cmake --build --preset win-release-user --target sqlparser_test sqlparser_dialect_test sqlparser_failure_test sqlparser_corpus_test sqlparser_mysql_corpus_test sqlparser_sqlite_extension_test orm_tidesdb_sql_expr_test orm_tidesdb_driver orm_tidesdb_sql_runtime_test orm_tidesdb_sql_relational_test
 ctest --preset win-release-user -R "^(sqlparser_(test|dialect_test|failure_test|corpus_test|mysql_corpus_test|sqlite_extension_test)|orm_tidesdb_sql_(expr|parser|runtime|relational))$" --output-on-failure
 ```
 
@@ -6561,7 +6433,7 @@ Value 38 项/52807 条、Expr 80 项/6486 条、Catalog 31 项/2140 条均通过
 在 VsDevCmd 环境中复验相关目标（沿用 win-release-user preset）：
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_driver orm_tidesdb_sql_value_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_catalog_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_select_test orm_tidesdb_sql_aggregate_test orm_tidesdb_sql_window_test orm_tidesdb_sql_from_test orm_tidesdb_sql_join_test orm_tidesdb_sql_union_test orm_tidesdb_sql_subquery_test orm_tidesdb_sql_cte_bind_test orm_tidesdb_sql_cte_recursive_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_index_store_test orm_tidesdb_sql_test
+cmake --build --preset win-release-user --target orm_tidesdb_driver orm_tidesdb_sql_value_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_catalog_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_select_test orm_tidesdb_sql_aggregate_test orm_tidesdb_sql_window_test orm_tidesdb_sql_from_test orm_tidesdb_sql_join_test orm_tidesdb_sql_union_test orm_tidesdb_sql_subquery_test orm_tidesdb_sql_cte_bind_test orm_tidesdb_sql_cte_recursive_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_index_store_test
 ctest --preset win-release-user -R "^(orm_tidesdb_sql_(value|expr|catalog|scan|select|aggregate|window|from|join|union|subquery|cte_bind|cte_recursive|runtime|relational|cte_plan|index_store)|orm_tidesdb_sql)$" --output-on-failure
 ```
 
@@ -6868,7 +6740,7 @@ Subquery、递归 CTE/Bind、目录存储、表、旧 SQL 与驱动 parser 回�
 在 VsDevCmd 的 x64 环境使用既有 user preset 复验：
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_driver orm_tidesdb_sql_value_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_aggregate_test orm_tidesdb_sql_window_test orm_tidesdb_sql_select_test orm_tidesdb_sql_catalog_test orm_tidesdb_sql_join_test orm_tidesdb_sql_from_test orm_tidesdb_sql_union_test orm_tidesdb_sql_subquery_test orm_tidesdb_sql_cte_recursive_test orm_tidesdb_sql_cte_bind_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_index_store_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_test orm_tidesdb_sql_parser_test orm_tidesdb_sql_catalog_store_test orm_tidesdb_sql_table_test -j 4
+cmake --build --preset win-release-user --target orm_tidesdb_driver orm_tidesdb_sql_value_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_aggregate_test orm_tidesdb_sql_window_test orm_tidesdb_sql_select_test orm_tidesdb_sql_catalog_test orm_tidesdb_sql_join_test orm_tidesdb_sql_from_test orm_tidesdb_sql_union_test orm_tidesdb_sql_subquery_test orm_tidesdb_sql_cte_recursive_test orm_tidesdb_sql_cte_bind_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_index_store_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_catalog_store_test -j 4
 ctest --preset win-release-user -R "^orm_tidesdb_sql(_(value|expr|scan|aggregate|window|select|catalog|join|from|union|subquery|cte_recursive|cte_bind|runtime|cte_plan|index_store|relational|parser|catalog_store|table))?$" --output-on-failure
 ```
 
@@ -7104,7 +6976,7 @@ TODO。真实插件 247 项/13311 条断言，owner 故障 21 项/1191 条，Cat
 在既有 VS x64 开发环境中，可使用当前 build tree 复验：
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_driver orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_catalog_store_test orm_tidesdb_sql_index_store_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_table_test -j 4
+cmake --build --preset win-release-user --target orm_tidesdb_driver orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_catalog_store_test orm_tidesdb_sql_index_store_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test -j 4
 ctest --preset win-release-user -R '^orm_tidesdb_sql_(relational(_owner)?|catalog_store|index_store|runtime|cte_plan|table)$' --output-on-failure
 ```
 
@@ -7175,7 +7047,7 @@ cursor 准入、Publisher 取消与延迟释放、提交冲突/未知结果、�
 ```powershell
 cmake --build --preset win-release-user --target orm_tidesdb_driver orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_relational_test -j 4
 ctest --preset win-release-user -R '^orm_tidesdb_sql_relational(_owner)?$' --output-on-failure
-cmake --build --preset win-release-user --target orm_tidesdb_sql_resource_test orm_tidesdb_sql_commit_fault_test orm_tidesdb_sql_table_test orm_tidesdb_sql_catalog_store_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_index_store_test orm_tidesdb_sql_test -j 4
+cmake --build --preset win-release-user --target orm_tidesdb_sql_catalog_store_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_cte_plan_test orm_tidesdb_sql_index_store_test -j 4
 ctest --preset win-release-user -R '^orm_tidesdb_sql(_(resource|commit_fault|table|catalog_store|runtime|cte_plan|index_store))?$' --output-on-failure
 ```
 
@@ -7335,7 +7207,7 @@ row/legacy SQL、提交故障、资源限额，以及通用 checked owner、C/C+
 执行器或原生存储目标。编译和 `git diff --check` / cached check 通过，CodeGraph 已同步。
 
 ```powershell
-cmake --build --preset win-release-user --target orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_mysql_dialect_test orm_tidesdb_sql_test orm_tidesdb_sql_resource_test orm_tidesdb_sql_commit_fault_test orm_tidesdb_row_test -j 4
+cmake --build --preset win-release-user --target orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test orm_mysql_dialect_test -j 4
 ctest --preset win-release-user -R '^(orm_owner_(checked|public_flow|cpp_flow)|orm_mysql_dialect|orm_tidesdb_row|orm_tidesdb_sql($|_(resource|commit_fault)))$' --output-on-failure
 ```
 
@@ -7411,7 +7283,7 @@ missing_syntax/over_accept/baseline_mismatches 均为 0；这仅证明 manifest 
 在 VS x64 开发环境复验专项：
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_driver sqlparser_test sqlparser_dialect_test sqlparser_failure_test sqlparser_corpus_test sqlparser_mysql_corpus_test sqlparser_sqlite_extension_test orm_tidesdb_sql_parser_test orm_tidesdb_sql_relational_owner_test -j 4
+cmake --build --preset win-release-user --target orm_tidesdb_driver sqlparser_test sqlparser_dialect_test sqlparser_failure_test sqlparser_corpus_test sqlparser_mysql_corpus_test sqlparser_sqlite_extension_test orm_tidesdb_sql_relational_owner_test -j 4
 ctest --preset win-release-user -R '^(sqlparser_(test|dialect_test|failure_test|corpus_test|mysql_corpus_test|sqlite_extension_test)|orm_tidesdb_sql_(parser|relational_owner))$' --output-on-failure
 ```
 
@@ -7422,7 +7294,7 @@ row、共享 MySQL renderer，以及通用 checked owner 和 C/C++ 公共流。�
 CodeGraph 已同步，无新公开 ABI、持久化格式、配置或依赖。
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_sql_relational_test orm_tidesdb_sql_test orm_tidesdb_sql_resource_test orm_tidesdb_sql_commit_fault_test orm_tidesdb_row_test orm_mysql_dialect_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test -j 4
+cmake --build --preset win-release-user --target orm_tidesdb_sql_relational_test orm_mysql_dialect_test orm_owner_checked_test orm_owner_public_flow_test orm_owner_cpp_flow_test -j 4
 ctest --preset win-release-user -R '^(orm_tidesdb_sql_relational|orm_owner_(checked|public_flow|cpp_flow)|orm_mysql_dialect|orm_tidesdb_row|orm_tidesdb_sql($|_(resource|commit_fault)))$' --output-on-failure
 ```
 
@@ -7513,7 +7385,7 @@ all-target 构建及 `install-win-release-user` 均成功；安装结果保留�
 当前复验集合不再包含已删除的 Redis ORM contract target：
 
 ```powershell
-cmake --build --preset win-release-user --target tidessqld_config_test tidessqld_cli_test tidessqld_process_e2e_test orm_mysql_tidessqld_e2e_test orm_driver_interface_test orm_driver_interface_cpp_test orm_runtime_registry_test orm_runtime_race_test orm_mysql_plugin_test orm_postgresql_plugin_test orm_sqlite_plugin_test orm_tidesdb_public_flow_test orm_sql_plugin_matrix_test -j 4
+cmake --build --preset win-release-user --target tidessqld_config_test tidessqld_cli_test tidessqld_process_e2e_test orm_mysql_tidessqld_e2e_test orm_driver_interface_test orm_driver_interface_cpp_test orm_runtime_registry_test orm_runtime_race_test orm_mysql_plugin_test orm_postgresql_plugin_test orm_sqlite_plugin_test orm_sql_plugin_matrix_test -j 4
 ctest --preset win-release-user -R '^(tidessqld_config|tidessqld_cli|tidessqld_process_e2e|orm_mysql_tidessqld_e2e|orm_driver_interface|orm_driver_interface_cpp|orm_runtime_registry|orm_runtime_race|orm_mysql_plugin|orm_postgresql_plugin|orm_sqlite_plugin|orm_tidesdb_public_flow|orm_sql_plugin_matrix_(sqlite|postgresql|both))$' --output-on-failure
 ```
 
@@ -7580,7 +7452,7 @@ commit fault/resource CTest 全部通过，耗时 22.52 秒。共新增 11 个�
 未运行 MySQL 服务端差分、完整字符 collation 或 sanitizer；没有改变原数值表格式。
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_sql_runtime_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_select_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_resource_test orm_tidesdb_sql_commit_fault_test orm_tidesdb_sql_test -j 4
+cmake --build --preset win-release-user --target orm_tidesdb_sql_runtime_test orm_tidesdb_sql_relational_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_select_test orm_tidesdb_sql_scan_test orm_tidesdb_sql_relational_owner_test -j 4
 ctest --preset win-release-user -R '^orm_tidesdb_sql($|_(runtime|relational|expr|select|scan|relational_owner|resource|commit_fault))$' --output-on-failure
 ```
 
@@ -7630,6 +7502,6 @@ scope 拒绝的错误文本集中为一个常量后重建实际插件和故障�
 不据这些测试宣称完整服务器兼容。
 
 ```powershell
-cmake --build --preset win-release-user --target orm_tidesdb_sql_relational_test orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_runtime_test orm_tidesdb_sql_resource_test orm_tidesdb_sql_commit_fault_test orm_tidesdb_sql_test -j 4
+cmake --build --preset win-release-user --target orm_tidesdb_sql_relational_test orm_tidesdb_sql_relational_owner_test orm_tidesdb_sql_expr_test orm_tidesdb_sql_runtime_test -j 4
 ctest --preset win-release-user -R '^orm_tidesdb_sql($|_(relational|relational_owner|expr|runtime|resource|commit_fault))$' --output-on-failure
 ```

@@ -2,10 +2,10 @@ cmake_add_test(
   NAME orm_tidesdb_sql_relational_owner_test TEST_NAME orm_tidesdb_sql_relational_owner
   FOLDER "orm/tests/integration/tidesdb/sql"
   SOURCES relational_owner_test.c ${PROJECT_SOURCE_DIR}/tidessql/src/bridge.c
-  LIBS TidesDB::tidesdb orm_tidesdb_sql TurboDB::SqlParser ${ORM_INTERNAL_TEST_LIBRARY}
+  LIBS TidesDB::tidesdb TurboDB::TidesSQL TurboDB::SqlParser ${ORM_INTERNAL_TEST_LIBRARY}
     Salts::CSTL Salts::CSerde Salts::CFlow Salts::TinyTest
   DEFS ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE
-  INCLUDES ${PROJECT_SOURCE_DIR}/tidessql/src ${ORM_SOURCE_DIR}/../drivers/tidesdb ${ORM_SOURCE_DIR}/src/abi ${ORM_SOURCE_DIR}/src/flow)
+  INCLUDES ${PROJECT_SOURCE_DIR}/tidessql/src ${ORM_SOURCE_DIR}/../drivers/tidesdb ${ORM_SOURCE_DIR}/src/abi ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/sql)
 set_target_properties(orm_tidesdb_sql_relational_owner_test PROPERTIES LINKER_LANGUAGE CXX)
 set_tests_properties(orm_tidesdb_sql_relational_owner PROPERTIES TIMEOUT 60)
 if(WIN32)
@@ -26,18 +26,6 @@ set_tests_properties(orm_tidesdb_sql_relational PROPERTIES TIMEOUT 120
   ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_relational PROPERTIES ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")
-endif()
-
-cmake_add_test(
-  NAME orm_tidesdb_sql_test TEST_NAME orm_tidesdb_sql
-  FOLDER "orm/tests/integration/tidesdb/sql" SOURCES sql_test.c
-  LIBS turbo_orm Salts::CFlow Salts::TinyTest
-  INCLUDES ${ORM_SOURCE_DIR}/include/orm)
-add_dependencies(orm_tidesdb_sql_test orm_tidesdb_driver)
-set_tests_properties(orm_tidesdb_sql PROPERTIES TIMEOUT 60
-  ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
-if(WIN32)
-  set_tests_properties(orm_tidesdb_sql PROPERTIES ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")
 endif()
 
 # Reuse the native source/dependency selection, replacing block-manager and
@@ -79,27 +67,6 @@ endforeach()
 set_target_properties(orm_tidesdb_wal_fault_core PROPERTIES
   FOLDER "orm/tests/integration/tidesdb/sql" POSITION_INDEPENDENT_CODE ON)
 
-# Compile the actual engine against the fault native core. The normal engine's
-# private native dependency would otherwise pull production TidesDB back in.
-get_target_property(tdsql_fault_source_dir turbodb_tidessql SOURCE_DIR)
-get_target_property(tdsql_fault_sources turbodb_tidessql SOURCES)
-set(tdsql_fault_absolute_sources)
-foreach(tdsql_fault_source IN LISTS tdsql_fault_sources)
-  cmake_path(ABSOLUTE_PATH tdsql_fault_source BASE_DIRECTORY "${tdsql_fault_source_dir}")
-  list(APPEND tdsql_fault_absolute_sources "${tdsql_fault_source}")
-endforeach()
-list(REMOVE_ITEM tdsql_fault_absolute_sources "${tdsql_fault_source_dir}/src/bridge.c")
-add_library(orm_tidesdb_sql_fault_engine STATIC ${tdsql_fault_absolute_sources})
-target_include_directories(orm_tidesdb_sql_fault_engine PUBLIC
-  "${tdsql_fault_source_dir}/include" PRIVATE "${tdsql_fault_source_dir}/src")
-target_link_libraries(orm_tidesdb_sql_fault_engine PUBLIC TurboDB::Types TurboDB::SqlParser
-  Salts::CSTL Salts::CFlow PRIVATE orm_tidesdb_wal_fault_core)
-if(UNIX AND NOT APPLE)
-  target_link_libraries(orm_tidesdb_sql_fault_engine PRIVATE m)
-endif()
-set_target_properties(orm_tidesdb_sql_fault_engine PROPERTIES
-  FOLDER "orm/tests/integration/tidesdb/sql" POSITION_INDEPENDENT_CODE ON)
-
 cmake_add_test(
   NAME orm_tidesdb_sql_wal_fault_test TEST_NAME orm_tidesdb_sql_wal_fault
   FOLDER "orm/tests/integration/tidesdb/sql"
@@ -111,44 +78,6 @@ set_tests_properties(orm_tidesdb_sql_wal_fault PROPERTIES TIMEOUT 90
   ENVIRONMENT "ORM_TDB_STORAGE_TEST_EXE=$<TARGET_FILE:orm_tidesdb_sql_wal_fault_test>")
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_wal_fault PROPERTIES
-    ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")
-endif()
-
-cmake_add_test(
-  NAME orm_tidesdb_sql_commit_fault_test TEST_NAME orm_tidesdb_sql_commit_fault
-  FOLDER "orm/tests/integration/tidesdb/sql"
-  SOURCES commit_fault_test.c ${PROJECT_SOURCE_DIR}/tidessql/src/bridge.c
-    ${ORM_SOURCE_DIR}/../drivers/tidesdb/relational_backend.c
-    ${ORM_SOURCE_DIR}/../drivers/tidesdb/sql/parser.c
-    ${ORM_SOURCE_DIR}/src/sql/orm_mysql_render.c
-    ${ORM_SOURCE_DIR}/../drivers/tidesdb/row.c
-    ${ORM_SOURCE_DIR}/../drivers/tidesdb/orm_tidesdb_cursor.c
-  LIBS orm_tidesdb_sql_fault_engine orm_tidesdb_wal_fault_core TurboDB::SqlParser ${ORM_INTERNAL_TEST_LIBRARY}
-    Salts::CSTL Salts::DataBind Salts::CSerde Salts::CFlow Salts::TinyTest
-  DEFS ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE
-  INCLUDES ${PROJECT_SOURCE_DIR}/tidessql/src ${ORM_SOURCE_DIR}/../drivers/tidesdb
-    ${ORM_SOURCE_DIR}/src/sql ${ORM_SOURCE_DIR}/src/abi
-    ${ORM_SOURCE_DIR}/src/flow)
-set_tests_properties(orm_tidesdb_sql_commit_fault PROPERTIES TIMEOUT 60)
-if(WIN32)
-  set_tests_properties(orm_tidesdb_sql_commit_fault PROPERTIES
-    ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")
-endif()
-
-cmake_add_test(
-  NAME orm_tidesdb_sql_resource_test TEST_NAME orm_tidesdb_sql_resource
-  FOLDER "orm/tests/integration/tidesdb/sql"
-  SOURCES resource_test.c row_fault.c ${PROJECT_SOURCE_DIR}/tidessql/src/bridge.c
-    ${ORM_SOURCE_DIR}/../drivers/tidesdb/relational_backend.c
-    ${ORM_SOURCE_DIR}/../drivers/tidesdb/orm_tidesdb_cursor.c
-  LIBS TidesDB::tidesdb orm_tidesdb_sql TurboDB::SqlParser ${ORM_INTERNAL_TEST_LIBRARY}
-    Salts::CSTL Salts::DataBind Salts::CSerde Salts::CFlow Salts::TinyTest
-  DEFS ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE
-  INCLUDES ${PROJECT_SOURCE_DIR}/tidessql/src ${ORM_SOURCE_DIR}/../drivers/tidesdb ${ORM_SOURCE_DIR}/src/abi
-    ${ORM_SOURCE_DIR}/src/flow)
-set_tests_properties(orm_tidesdb_sql_resource PROPERTIES TIMEOUT 60)
-if(WIN32)
-  set_tests_properties(orm_tidesdb_sql_resource PROPERTIES
     ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")
 endif()
 
@@ -175,19 +104,4 @@ set_tests_properties(orm_tidesdb_sql_storage PROPERTIES TIMEOUT 90
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_storage PROPERTIES
     ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")
-endif()
-cmake_add_test(
-  NAME orm_tidesdb_sql_table_test TEST_NAME orm_tidesdb_sql_table
-  FOLDER "orm/tests/integration/tidesdb/sql"
-  SOURCES table_test.c ${PROJECT_SOURCE_DIR}/tidessql/src/bridge.c
-    ${ORM_SOURCE_DIR}/../drivers/tidesdb/row.c
-  LIBS TidesDB::tidesdb orm_tidesdb_sql TurboDB::SqlParser ${ORM_INTERNAL_TEST_LIBRARY}
-    Salts::CSTL Salts::CFlow Salts::TinyTest
-  DEFS ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE
-  INCLUDES ${PROJECT_SOURCE_DIR}/tidessql/src ${ORM_SOURCE_DIR}/../drivers/tidesdb/sql ${ORM_SOURCE_DIR}/../drivers/tidesdb
-    ${ORM_SOURCE_DIR}/src/abi ${ORM_SOURCE_DIR}/src/flow)
-set_target_properties(orm_tidesdb_sql_table_test PROPERTIES LINKER_LANGUAGE CXX)
-set_tests_properties(orm_tidesdb_sql_table PROPERTIES TIMEOUT 60)
-if(WIN32)
-  set_tests_properties(orm_tidesdb_sql_table PROPERTIES ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")
 endif()

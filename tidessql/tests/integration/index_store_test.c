@@ -737,7 +737,6 @@ spec("TidesDB private first-index transaction") {
     check_equal(orm_tidesdb_txn_rollback(tx), ORM_TDB_SUCCESS); orm_tidesdb_txn_free(tx);
     check_equal(orm_tidesdb_sql_catalog_begin(database, family, MAX_RECORD, &budget, &owner, &error), TURBODB_STATUS_OK);
     check_not_null(owner.transaction);
-    check_equal(orm_tidesdb_sql_catalog_require_legacy(database, family, &error), TURBODB_STATUS_INVALID_STATE);
   }
   it("publishes an empty index with only directory, TableVersion and Manifest writes") {
     faults_clear(); uint64_t id = OUTPUT_SENTINEL;

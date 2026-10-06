@@ -29,6 +29,6 @@ TURBODB_NUPKG="dist/TurboDB.Native.${version}.nupkg" \
 
 ORM 核心不得直接链接数据库客户端的约束由 `orm_core_dependencies` CTest 用例验证，随 Windows/Linux 的常规测试运行。
 
-普通 CI 和发布共用 `native-sdk.yml`，各平台 job 按 configure → build → test → install 分成独立步骤；失败后不继续安装、暂存或上传该平台 SDK，其他平台继续运行。Windows x64、Linux x64/ARM64 和 macOS ARM64 在原生 runner 上通过对应 user preset 运行正式 CTest，安装后复用 daemon 用例测试安装的 `tidessqld`。Android ARM64 只交叉编译和安装；仓库未配置 Android 设备或模拟器 runner，因此不在宿主上运行 Android 测试。CI 不再调用临时 installed-consumer harness。独立 E2E 覆盖 MySQL、PostgreSQL 真实服务行为，按相关路径触发。发布提交使用 `release: publish TurboDB package` 前缀，跳过重复的普通 SDK 构建；发布流程自身运行同一套测试。
+普通 CI 和发布共用 `native-sdk.yml`，各平台 job 按 configure → build → test → install 分成独立步骤；失败后不继续安装、暂存或上传该平台 SDK，其他平台继续运行。Windows x64、Linux x64/ARM64 和 macOS ARM64 在原生 runner 上通过对应 user preset 运行正式 CTest，安装后复用 daemon 用例测试安装的 `tidessqld`。Android ARM64 只交叉编译和安装；仓库未配置 Android 设备或模拟器 runner，因此不在宿主上运行 Android 测试。独立 E2E 覆盖 MySQL、PostgreSQL 真实服务行为，按相关路径触发。发布提交使用 `release: publish TurboDB package` 前缀，跳过重复的普通 SDK 构建；发布流程自身运行同一套测试。
 
 依赖准备统一在 `.github/actions/setup-native`：读取共享 vcpkg NuGet 二进制缓存，并用 Actions cache 保留本仓库构建产生的本地二进制和 NuGet 包文件。缓存不含凭据配置或构建树，也不替代最新版本解析；vcpkg 仍按包 ABI 选择二进制。

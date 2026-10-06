@@ -1,23 +1,20 @@
-add_subdirectory(sql)
-
 add_library(
   orm_tidesdb_driver MODULE
   plugin.c ${ORM_SOURCE_DIR}/src/driver/orm_driver_backend_bridge.c
-  backend.c bridge.c maintenance.c relational_backend.c row.c
-  orm_tidesdb_cursor.c ${ORM_SOURCE_DIR}/src/abi/orm_plan.c)
+  maintenance.c relational_backend.c ${ORM_SOURCE_DIR}/src/sql/orm_mysql_render.c
+  ${ORM_SOURCE_DIR}/src/abi/orm_plan.c)
 target_compile_definitions(orm_tidesdb_driver
                            PRIVATE ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(
   orm_tidesdb_driver
   PRIVATE ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi ${ORM_SOURCE_DIR}/src/flow
           ${ORM_SOURCE_DIR}/src/driver
-          ${CMAKE_CURRENT_SOURCE_DIR})
+          ${CMAKE_CURRENT_SOURCE_DIR} ${ORM_SOURCE_DIR}/src/sql
+          ${PROJECT_SOURCE_DIR}/tidessql/src)
 target_link_libraries(
   orm_tidesdb_driver
   PRIVATE turbo_orm
-          orm_tidesdb_sql
-          TurboDB::SqlParser
-          TidesDB::tidesdb
+          TurboDB::TidesSQL
           Orm::DriverABI
           Salts::Core
           Salts::CSerde

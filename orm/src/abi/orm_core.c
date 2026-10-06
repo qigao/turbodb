@@ -681,8 +681,10 @@ static bool orm_sql_has_keyword(const unsigned char *sql, size_t size,
   size_t index = 0u;
   const size_t keyword_size = strlen(keyword);
   while (index < size) {
-    if (sql[index] == '\'' || sql[index] == '"') {
-      const unsigned char quote = sql[index++];
+    if (sql[index] == '\'' || sql[index] == '"' || sql[index] == '`' ||
+        sql[index] == '[') {
+      const unsigned char quote = sql[index] == '[' ? ']' : sql[index];
+      ++index;
       while (index < size) {
         if (sql[index++] != quote)
           continue;
@@ -787,13 +789,12 @@ static bool orm_with_returns_rows(const unsigned char *sql, size_t size,
           orm_sql_word_equal(sql, begin, index, "replace") ||
           orm_sql_word_equal(sql, begin, index, "update") ||
           orm_sql_word_equal(sql, begin, index, "delete"))
-        return false;
+        return orm_sql_has_keyword(sql + index, size - index, "returning");
       continue;
     }
     ++index;
   }
-  /* Preserve the old admission behavior for incomplete WITH statements. The
-   * driver remains responsible for reporting their syntax error. */
+  /* The driver validates incomplete WITH statements before opening rows. */
   return true;
 }
 

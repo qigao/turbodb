@@ -73,16 +73,16 @@ static void end_rows(void) {
   publisher = (cflow_publisher){0};
 }
 
-static orm_status_t connect_profile(const char *profile, const char *initialize,
+static orm_status_t connect_database(const char *initialize,
     const orm_option_t *extra, size_t count) {
   enum { OPTION_CAPACITY = 12 };
   orm_option_t options[OPTION_CAPACITY] = {
     {orm_view("path"), orm_view(directory)}, {orm_view("column_family"), orm_view("rel")},
-    {orm_view("sql_profile"), orm_view(profile)}, {orm_view("sql_initialize"), orm_view(initialize)}
+    {orm_view("sql_initialize"), orm_view(initialize)}
   };
-  check_true(count <= OPTION_CAPACITY - 4);
-  for (size_t i = 0; i < count; ++i) options[i + 4] = extra[i];
-  config.driver = orm_view("tidesdb"); config.options = options; config.option_count = (uint32_t)(4 + count);
+  check_true(count <= OPTION_CAPACITY - 3);
+  for (size_t i = 0; i < count; ++i) options[i + 3] = extra[i];
+  config.driver = orm_view("tidesdb"); config.options = options; config.option_count = (uint32_t)(3 + count);
   const orm_status_t status = orm_runtime_connect(runtime, &config, &connection, &error);
   config.options = NULL; config.option_count = 0;
   return status;
@@ -154,7 +154,7 @@ static void seed_doubles(void) {
 }
 static void recursive_connection(const char *iterations) {
   disconnect(); const orm_option_t option={orm_view(recursive_option),orm_view(iterations)};
-  check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK);
+  check_equal(connect_database("false",&option,1),ORM_STATUS_OK);
 }
 
 spec("TidesDB relational profile through the real plugin") {
@@ -168,7 +168,7 @@ spec("TidesDB relational profile through the real plugin") {
     orm_driver_load_config_t load = {0}; load.struct_size = sizeof(load); load.abi_version = ORM_RUNTIME_ABI_VERSION;
     load.module_path = orm_view(module); load.expected_driver_id = orm_view("tidesdb");
     check_equal(orm_runtime_load_driver(runtime, &load, &error), ORM_STATUS_OK);
-    check_equal(connect_profile("relational", "true", NULL, 0), ORM_STATUS_OK);
+    check_equal(connect_database("true", NULL, 0), ORM_STATUS_OK);
   }
   after_each() {
     if (cflow_publisher_valid(&publisher)) cflow_publisher_destroy(&publisher);
@@ -202,7 +202,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("ROLLBACK"); command(0);
       raw_query("SET LOCAL TRANSACTION READ ONLY"); command(0);
       raw_query("SELECT @@LOCAL.transaction_read_only"); check_equal(execute(),ORM_STATUS_OK); integer_at(0,0,1);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT @@transaction_read_only,@@autocommit"); check_equal(execute(),ORM_STATUS_OK); integer_at(0,0,0); integer_at(0,1,1);
     }
     it("uses the old snapshot for autocommit self assignment and commits only a successful zero to one transition") {
@@ -398,7 +398,7 @@ spec("TidesDB relational profile through the real plugin") {
       check_equal(cflow_publisher_resume(&publisher,NULL,&output).kind,CFLOW_STEP_VALUE_AND_DONE);check_equal(output.affected_rows,0u);
       cflow_publisher_destroy(&publisher);publisher=(cflow_publisher){0};
       raw_query("UPDATE items SET score=41 WHERE id=1");check_equal(execute(),ORM_STATUS_SQL_ERROR);
-      disconnect();check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect();check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT @@transaction_read_only,@@transaction_isolation,@@autocommit");
       check_equal(execute(),ORM_STATUS_OK);integer_at(0,0,0);text_at(0,1,"SERIALIZABLE");integer_at(0,2,1);
     }
@@ -487,7 +487,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("ROLLBACK TO SAVEPOINT float_default"); command(0);
       check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK);
       orm_transaction_destroy(transaction); transaction=NULL; disconnect();
-      check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT a,b,c FROM float_values ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(3);
       double_at(0,0,16777216.0); double_at(0,1,16777217.0);
       double_at(1,0,0.100000001490116119384765625); double_at(1,1,0.1);
@@ -519,7 +519,7 @@ spec("TidesDB relational profile through the real plugin") {
     }
     it("returns exact prefixes and complements with bounded query diagnostics") {
       disconnect(); const orm_option_t option={orm_view("sql_max_warnings"),orm_view("2")};
-      check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK);
+      check_equal(connect_database("false",&option,1),ORM_STATUS_OK);
       raw_query("SELECT CAST('-1.9' AS UNSIGNED INTEGER) AS u,CAST('12.9e3' AS SIGNED) AS i,"
         "CAST(18446744073709551615 AS SIGNED INTEGER) AS n,CAST('18446744073709551615' AS SIGNED) AS t,"
         "CAST('12.9e3' AS DOUBLE) AS d,CAST(TRUE AS REAL) AS b");
@@ -547,7 +547,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("SELECT id,score FROM items ORDER BY id"); open_rows(); row(1,10); row(2,20); row(3,30); row(4,40); end_rows();
       check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK);
       orm_transaction_destroy(transaction); transaction=NULL; disconnect();
-      check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,score FROM items ORDER BY id"); open_rows(); row(1,10); row(2,20); row(3,30); row(4,40); end_rows();
     }
     it("preserves CAST versus assignment semantics in IGNORE writes and persists numeric defaults") {
@@ -564,7 +564,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("SELECT n,u,d FROM cast_items ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(5);
       integer_at(0,0,12); unsigned_at(0,1,UINT64_MAX); double_at(0,2,12900.0);
       integer_at(1,0,3); integer_at(2,0,2); integer_at(3,0,7); integer_at(4,0,12);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT n,d FROM cast_items WHERE id=5"); check_equal(execute(),ORM_STATUS_OK); integer_at(0,0,12); double_at(0,1,12900.0);
     }
     it("binds CAST children across grouped window correlated recursive and compound queries") {
@@ -603,7 +603,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("REPLACE INTO converted(id) VALUES(6)");command(1);
       raw_query("UPDATE converted SET n=DEFAULT WHERE id=1");command(1);
       raw_query("INSERT INTO converted(id,n) VALUES(0,99) ON DUPLICATE KEY UPDATE n=DEFAULT");command(2);
-      disconnect();check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect();check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,n,u,v,extra FROM converted ORDER BY id");check_equal(execute(),ORM_STATUS_OK);count_is(7);
       for(uint64_t i=0;i<7;++i) {
         integer_at(i,0,(int64_t)i);integer_at(i,1,i<2||i>4?1:3);unsigned_at(i,2,UINT64_MAX);
@@ -627,7 +627,7 @@ spec("TidesDB relational profile through the real plugin") {
       }
       raw_query("SHOW TABLES");check_equal(execute(),ORM_STATUS_OK);count_is(1);text_at(0,0,"items");
       raw_query("INSERT INTO items(id) VALUES(4)");command(1);
-      disconnect();check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect();check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT score FROM items ORDER BY id");check_equal(execute(),ORM_STATUS_OK);count_is(4);
       integer_at(0,0,10);integer_at(1,0,20);integer_at(2,0,30);integer_at(3,0,7);
     }
@@ -645,7 +645,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("INSERT INTO items(id) VALUES(4)");command(1);
       orm_result_destroy(result);result=NULL;orm_query_destroy(query);query=NULL;
       check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK);orm_transaction_destroy(transaction);transaction=NULL;
-      disconnect();check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect();check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT score FROM items ORDER BY id");check_equal(execute(),ORM_STATUS_OK);count_is(4);integer_at(3,0,3);
     }
     it("uses the same decimal conversion for defaults raw writes and structured assignments") {
@@ -719,14 +719,14 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("ROLLBACK WORK TO rounding_default"); command(0);
       check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK);
       orm_transaction_destroy(transaction); transaction=NULL; disconnect();
-      check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT n,v,u,c FROM rounded ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(2);
       integer_at(0,0,30); integer_at(1,0,-20);
       for(uint64_t i=0;i<2;++i) { double_at(i,1,-1.37); unsigned_at(i,2,UINT64_C(18446744073709551610)); double_at(i,3,4.0); }
       raw_query("INSERT INTO rounded(id) VALUES(4)"); command(1);
       raw_query("SELECT n,v FROM rounded WHERE id=4"); check_equal(execute(),ORM_STATUS_OK); integer_at(0,0,-20); double_at(0,1,-1.37);
       raw_query("UPDATE rounded SET v=ROUND(v,1)"); command(3);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT v FROM rounded ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(3);
       for(uint64_t i=0;i<3;++i) double_at(i,0,-1.4);
     }
@@ -748,7 +748,7 @@ spec("TidesDB relational profile through the real plugin") {
       check_equal(orm_transaction_rollback(transaction,&error),ORM_STATUS_OK);
       orm_transaction_destroy(transaction); transaction=NULL;
       raw_query("UPDATE items SET score=TRUNCATE(score,-1) ORDER BY id"); command(2);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT score FROM items ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(3);
       integer_at(0,0,10); integer_at(1,0,20); integer_at(2,0,INT64_C(9223372036854775800));
     }
@@ -769,7 +769,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("INSERT INTO numbers(id) VALUES(1)"); command(1);
       raw_query("ALTER TABLE numbers ADD u BIGINT UNSIGNED NOT NULL DEFAULT (ABS(18446744073709551615))"); command(0);
       raw_query("ALTER TABLE numbers ALTER v SET DEFAULT (CEILING(1.25))"); command(0);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("INSERT INTO numbers(id) VALUES(2)"); command(1);
       raw_query("SELECT id,v,s,u FROM numbers ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(2);
       double_at(0,1,-2.0); double_at(1,1,2.0);
@@ -817,7 +817,7 @@ spec("TidesDB relational profile through the real plugin") {
     it("streams common names into typed row flows and preserves them across reopen") {
       seed(); raw_query("SELECT id,score FROM items a JOIN (SELECT id FROM items) b USING(id) ORDER BY id");
       open_rows(); row(1,10); row(2,20); row(3,30); end_rows();
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("WITH c AS (SELECT id FROM items) SELECT id,score FROM items a NATURAL JOIN c b ORDER BY id");
       open_rows(); row(1,10); row(2,20); row(3,30); end_rows();
     }
@@ -859,7 +859,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("ALTER TABLE items ADD v DOUBLE NOT NULL DEFAULT (1.25*2.0) AFTER id"); command(0);
       raw_query("ALTER TABLE items ADD n BIGINT DEFAULT NULL"); command(0);
       raw_query("INSERT INTO items(id,score) VALUES(4,40)"); command(1);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0), ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0), ORM_STATUS_OK);
       raw_query("SELECT id,u,v FROM items ORDER BY id"); check_equal(execute(), ORM_STATUS_OK); count_is(4);
       for (uint64_t i=0; i<4; ++i) { integer_at(i,0,(int64_t)i+1); unsigned_at(i,1,UINT64_MAX); double_at(i,2,2.5); }
       raw_query("SELECT id FROM items WHERE n IS NULL ORDER BY id"); check_equal(execute(), ORM_STATUS_OK); count_is(4);
@@ -885,7 +885,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("SELECT score FROM items WHERE id=4"); check_equal(execute(), ORM_STATUS_OK); integer_at(0,0,5);
       orm_result_destroy(result); result=NULL; orm_query_destroy(query); query=NULL;
       check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0), ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0), ORM_STATUS_OK);
       raw_query("SHOW COLUMNS FROM items"); check_equal(execute(), ORM_STATUS_OK); count_is(2); text_at(1,4,"5");
       raw_query("SELECT id FROM items ORDER BY id"); check_equal(execute(), ORM_STATUS_OK); count_is(4); integer_at(3,0,4);
     }
@@ -965,7 +965,7 @@ spec("TidesDB relational profile through the real plugin") {
       seed(); raw_query("CREATE TABLE reals(id BIGINT PRIMARY KEY,n DOUBLE)"); command(0);
       raw_query("INSERT INTO reals SELECT 1,7 UNION ALL SELECT 2,18446744073709551615 UNION ALL SELECT 3,?");
       parameter(orm_f64(0.5)); command(3);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,n FROM reals ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(3);
       double_at(0,1,7.0); double_at(1,1,18446744073709551616.0); double_at(2,1,0.5);
       raw_query("INSERT INTO items SELECT 4,10 UNION ALL SELECT 5,18446744073709551615 UNION ALL SELECT 6,?");
@@ -1166,7 +1166,7 @@ spec("TidesDB relational profile through the real plugin") {
   it("retains an aggregate window flow across disconnect and isolates later query errors") {
     seed(); raw_query("SELECT id,COUNT(*) OVER(ORDER BY id ROWS 1 PRECEDING) AS score FROM items ORDER BY id");
     open_rows(); row(1,1); disconnect(); row(2,2); row(3,2); end_rows();
-    check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT COUNT(DISTINCT id) OVER() AS n FROM items"); check_equal(execute(),ORM_STATUS_UNSUPPORTED); check_null(result);
     raw_query("SELECT SUM(score) OVER() AS n FROM items LIMIT 0"); check_equal(execute(),ORM_STATUS_UNSUPPORTED); check_null(result);
     raw_query("SELECT id,COUNT(*) OVER() AS score FROM items ORDER BY id"); open_rows(); row(1,3); row(2,3); row(3,3); end_rows();
@@ -1484,7 +1484,7 @@ spec("TidesDB relational profile through the real plugin") {
     parameter(orm_i64(10)); parameter(orm_i64(1)); parameter(orm_i64(20)); parameter(orm_i64(2)); command(2);
     raw_query("UPDATE items SET id=id+1,score=score+? ORDER BY id DESC"); parameter(orm_i64(5)); command(2);
     raw_query("DELETE FROM items WHERE score=?"); parameter(orm_i64(15)); command(1);
-    disconnect(); check_equal(connect_profile("relational", "false", NULL, 0), ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false", NULL, 0), ORM_STATUS_OK);
     raw_query("SELECT id,score+? AS score FROM items WHERE id=? LIMIT ?");
     parameter(orm_i64(2)); parameter(orm_i64(3)); parameter(orm_i64(1)); open_rows(); row(3,27); end_rows();
   }
@@ -1736,7 +1736,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("UPDATE items SET score=COALESCE(score,7/0.0) WHERE id=1");command(0);
       raw_query("SHOW WARNINGS");check_equal(execute(),ORM_STATUS_OK);count_is(0);
       raw_query("UPDATE items SET score=COALESCE(7/0.0,7) WHERE id=1");check_equal(execute(),ORM_STATUS_SQL_ERROR);check_null(result);
-      disconnect();check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect();check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("INSERT INTO chosen(id) VALUES(2)");command(1);
       raw_query("SELECT n FROM chosen ORDER BY id");check_equal(execute(),ORM_STATUS_OK);count_is(5);
       const double values[]={7.0,9.0,10.0,20.0,30.0};for(size_t i=0;i<sizeof(values)/sizeof(values[0]);++i) double_at(i,0,values[i]);
@@ -1833,7 +1833,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("INSERT INTO promoted(id) VALUES(1)"); command(1);
       raw_query("ALTER TABLE promoted ALTER n SET DEFAULT(MOD(-7,2.5))"); command(0);
       seed(); raw_query("INSERT INTO promoted(id,n) WITH c AS(SELECT id+10 AS id,score*0.5 AS n FROM items) SELECT id,n FROM c"); command(3);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("INSERT INTO promoted(id) VALUES(2)"); command(1);
       raw_query("SELECT n FROM promoted ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(5);
       const double expected[]={3.5,-2.0,5.0,10.0,15.0};
@@ -1854,7 +1854,7 @@ spec("TidesDB relational profile through the real plugin") {
     }
     it("returns query NULLs and exposes retained and total division warnings") {
       disconnect(); const orm_option_t option={orm_view("sql_max_warnings"),orm_view("2")};
-      check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK); seed();
+      check_equal(connect_database("false",&option,1),ORM_STATUS_OK); seed();
       raw_query("SELECT id DIV 0 AS q,MOD(score,0) AS r FROM items ORDER BY id");
       check_equal(execute(),ORM_STATUS_OK); count_is(3);
       for(uint64_t r=0;r<3;++r) for(uint64_t c=0;c<2;++c) {
@@ -1902,7 +1902,7 @@ spec("TidesDB relational profile through the real plugin") {
     }
     it("inherits query warning receivers in recursion and avoids pruned expression evaluation") {
       disconnect(); const orm_option_t option={orm_view(recursive_option),orm_view("5")};
-      check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK);
+      check_equal(connect_database("false",&option,1),ORM_STATUS_OK);
       raw_query("WITH RECURSIVE c(n,z) AS(SELECT 1,MOD(7,0) UNION ALL SELECT n+1,MOD(n,0) FROM c WHERE n<3) SELECT z FROM c");
       check_equal(execute(),ORM_STATUS_OK); count_is(3);
       for(uint64_t r=0;r<3;++r) { uint8_t missing=0;
@@ -1934,7 +1934,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("INSERT INTO division_defaults(id) VALUES(1)"); command(1);
       raw_query("ALTER TABLE division_defaults ALTER n SET DEFAULT(1 DIV 0)"); check_equal(execute(),ORM_STATUS_SQL_ERROR);
       raw_query("ALTER TABLE division_defaults ALTER n SET DEFAULT(MOD(-7,3))"); command(0);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("INSERT INTO division_defaults(id) VALUES(2)"); command(1);
       raw_query("SELECT n,v FROM division_defaults ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(2);
       integer_at(0,0,2); integer_at(1,0,-1); double_at(0,1,1.5); double_at(1,1,1.5);
@@ -1963,7 +1963,7 @@ spec("TidesDB relational profile through the real plugin") {
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK);
     orm_transaction_destroy(transaction); transaction=NULL;
     raw_query("SELECT id,score FROM items WHERE id=4"); open_rows(); row(4,40); end_rows();
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items ORDER BY id"); open_rows();
     row(1,10); row(2,20); row(3,30); row(4,40); end_rows();
   }
@@ -1979,7 +1979,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("UPDATE items SET score=45 WHERE id=1"); check_equal(execute(),ORM_STATUS_CONSTRAINT); check_null(result);
     structured(STRUCT_DELETE,"items"); where("id",ORM_COMPARE_EQUAL,orm_i64(5)); command(1);
     raw_query("INSERT INTO items(id,score) VALUES(6,45)"); command(1);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("INSERT INTO items(id,score) VALUES(7,45)"); check_equal(execute(),ORM_STATUS_CONSTRAINT); check_null(result);
     raw_query("SELECT id,score FROM items ORDER BY id"); open_rows();
     row(1,10); row(2,20); row(3,30); row(6,45); end_rows();
@@ -1998,7 +1998,7 @@ spec("TidesDB relational profile through the real plugin") {
   it("opts into MySQL CLIENT_FOUND_ROWS reporting for UPDATE and duplicate keys") {
     seed(); disconnect();
     const orm_option_t option={orm_view(found_rows_option),orm_view("true")};
-    check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&option,1),ORM_STATUS_OK);
     raw_query("UPDATE items SET score=score ORDER BY id LIMIT 2"); command(2);
     raw_query("INSERT INTO items VALUES(1,99) "
         "ON DUPLICATE KEY UPDATE score=score"); command(1);
@@ -2024,7 +2024,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("REPLACE INTO replacements VALUES(1,11,101)"); command(2);
     raw_query("REPLACE INTO replacements SET id=3,score=30,tag=300"); command(1);
     raw_query("REPLACE INTO replacements SELECT 4,20,101"); command(3);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM replacements ORDER BY id"); open_rows();
     row(3,30); row(4,20); end_rows();
   }
@@ -2158,7 +2158,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("ALTER TABLE defaults ADD extra BIGINT"); command(0);
     raw_query("INSERT INTO defaults(id) VALUES(6)"); command(1);
     disconnect();
-    check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,n,u,v FROM defaults ORDER BY id");
     check_equal(execute(),ORM_STATUS_OK); count_is(6);
     for(uint64_t i=0;i<6;++i) {
@@ -2229,7 +2229,7 @@ spec("TidesDB relational profile through the real plugin") {
 
     disconnect();
     const orm_option_t warning_limit={orm_view("sql_max_warnings"),orm_view("2")};
-    check_equal(connect_profile("relational","false",&warning_limit,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&warning_limit,1),ORM_STATUS_OK);
     raw_query("DELETE FROM warning_items"); command(2);
     raw_query("INSERT IGNORE INTO warning_items(id,score) VALUES"
         "('invalid',NULL),(-1,2)"); command(1);
@@ -2252,7 +2252,7 @@ spec("TidesDB relational profile through the real plugin") {
     row(1,10); row(2,22); row(3,30); row(8,80); end_rows();
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK);
     orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items ORDER BY id"); open_rows();
     row(1,10); row(2,22); row(3,30); row(8,80); end_rows();
   }
@@ -2282,7 +2282,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("DROP INDEX ux ON items"); command(0);
     raw_query("DROP INDEX ux ON items"); check_equal(execute(),ORM_STATUS_SQL_ERROR); check_null(result);
     structured(STRUCT_INSERT,"items"); assign("id",orm_i64(4)); assign("score",orm_i64(10)); command(1);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items ORDER BY id"); open_rows();
     row(1,10); row(2,20); row(3,30); row(4,10); end_rows();
     raw_query("CREATE UNIQUE INDEX ux ON items (score)"); check_equal(execute(),ORM_STATUS_CONSTRAINT); check_null(result);
@@ -2290,7 +2290,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("CREATE UNIQUE INDEX ux ON items (score)"); command(0);
     raw_query("INSERT INTO items(id,score) VALUES(4,10)"); check_equal(execute(),ORM_STATUS_CONSTRAINT); check_null(result);
     raw_query("DROP INDEX ux ON items"); command(0); raw_query("DROP INDEX ix ON items"); command(0);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("INSERT INTO items(id,score) VALUES(4,10)"); command(1);
   }
   it("truncates indexed tables through SQL and rolls back via user savepoints") {
@@ -2306,7 +2306,7 @@ spec("TidesDB relational profile through the real plugin") {
     structured(STRUCT_INSERT,"items"); assign("id",orm_i64(4)); assign("score",orm_i64(20)); command(1);
     raw_query("INSERT INTO items(id,score) VALUES(5,20)"); check_equal(execute(),ORM_STATUS_CONSTRAINT);
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score=20"); open_rows(); row(4,20); end_rows();
     raw_query("EXPLAIN SELECT id FROM items WHERE score=20"); check_equal(execute(),ORM_STATUS_OK); text_at(0,6,"ux");
   }
@@ -2322,7 +2322,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("SELECT id,score FROM kept WHERE score=90"); open_rows(); row(9,90); end_rows();
     raw_query("DROP TABLE IF EXISTS missing,items,kept CASCADE"); command(0);
     raw_query("DROP TABLE IF EXISTS missing,items,kept RESTRICT"); command(0);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SHOW TABLES"); check_equal(execute(),ORM_STATUS_OK); count_is(0);
     raw_query(ddl); command(0); raw_query("CREATE UNIQUE INDEX ix ON items(score)"); command(0);
     raw_query("INSERT INTO items(id,score) VALUES(1,100)"); command(1);
@@ -2347,7 +2347,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("SELECT id,score FROM items WHERE score=? ORDER BY id DESC"); parameter(orm_i64(20)); open_rows(); row(4,20); row(2,20); end_rows();
     structured(STRUCT_SELECT,"items"); project("id"); project("score"); where("score",ORM_COMPARE_EQUAL,orm_i64(20));
     open_rows(); row(2,20); row(4,20); end_rows();
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score=20 ORDER BY id"); open_rows(); row(2,20); row(4,20); end_rows();
     raw_query("CREATE UNIQUE INDEX by_id ON items (id)"); command(0);
     raw_query("EXPLAIN SELECT score FROM items WHERE id=2"); check_equal(execute(),ORM_STATUS_OK); text_at(0,4,"const"); text_at(0,6,"by_id");
@@ -2368,7 +2368,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("SELECT id,score FROM items WHERE score=20 AND id>2"); open_rows(); row(4,20); end_rows();
     structured(STRUCT_SELECT,"items"); project("id"); project("score"); where("score",ORM_COMPARE_GREATER,orm_i64(20));
     open_rows(); row(3,30); end_rows();
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score>=20 AND score<30 ORDER BY id"); open_rows(); row(2,20); row(4,20); end_rows();
     raw_query("EXPLAIN SELECT id FROM items WHERE score=20 AND id>=2"); check_equal(execute(),ORM_STATUS_OK);
     text_at(0,4,"range"); text_at(0,7,"18");
@@ -2385,7 +2385,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("SELECT COUNT(*) AS n FROM items WHERE score IN (10,20) OR score IN (20,30)");
     check_equal(execute(),ORM_STATUS_OK); count_is(1); int64_t count = 0;
     check_equal(orm_result_get_int64(result,0,0,&count,&error),ORM_STATUS_OK); check_equal(count,4);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score=10 OR score=30 ORDER BY id"); open_rows(); row(1,10); row(3,30); end_rows();
     raw_query("SELECT id FROM items WHERE score IN (NULL) OR score IS NULL"); check_equal(execute(),ORM_STATUS_OK); count_is(1);
     int64_t id = 0; check_equal(orm_result_get_int64(result,0,0,&id,&error),ORM_STATUS_OK); check_equal(id,5);
@@ -2398,7 +2398,7 @@ spec("TidesDB relational profile through the real plugin") {
     structured(STRUCT_DELETE,"items"); where("score",ORM_COMPARE_LESS_EQUAL,orm_i64(20)); command(2);
     structured(STRUCT_SELECT,"items"); check_equal(orm_query_select_all(query,&error),ORM_STATUS_OK);
     check_equal(execute(),ORM_STATUS_OK); count_is(2);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items"); open_rows(); row(3,30); row(5,45); end_rows();
   }
   it("applies qualified projections and pagination to structured row publishers") {
@@ -2466,7 +2466,7 @@ spec("TidesDB relational profile through the real plugin") {
   }
   it("enforces the rendered SQL byte limit before writes and keeps the connection usable") {
     seed(); disconnect(); config.max_query_bytes=128;
-    check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     structured(STRUCT_UPDATE,"items"); assign("score",orm_i64(99));
     for(size_t i=0;i<12;++i) where("id",ORM_COMPARE_EQUAL,orm_i64(1));
     check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
@@ -2500,7 +2500,7 @@ spec("TidesDB relational profile through the real plugin") {
     check_equal(orm_query_set_limit(query,1,&error),ORM_STATUS_OK);
     check_equal(orm_query_set_offset(query,1,&error),ORM_STATUS_OK); open_rows(); row(2,20); end_rows();
     disconnect(); const orm_option_t limit={orm_view("sql_max_materialized_rows"),orm_view("2")};
-    check_equal(connect_profile("relational","false",&limit,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&limit,1),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items ORDER BY score DESC LIMIT 1");
     check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,10); end_rows();
@@ -2511,7 +2511,7 @@ spec("TidesDB relational profile through the real plugin") {
     for(size_t pass=0;pass<2;++pass) {
       raw_query("SELECT a.id+? AS id,b.score FROM items a INNER JOIN extra b ON a.id+?=b.id WHERE a.id>? ORDER BY id");
       parameter(orm_i64(10)); parameter(orm_i64(1)); parameter(orm_i64(0)); open_rows(); row(11,200); row(13,400); end_rows();
-      if(!pass) { disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK); }
+      if(!pass) { disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK); }
     }
     raw_query("SELECT a.id AS aid,b.id AS bid FROM items a RIGHT JOIN extra b ON a.id=b.id ORDER BY bid");
     check_equal(execute(),ORM_STATUS_OK); count_is(2);
@@ -2544,7 +2544,7 @@ spec("TidesDB relational profile through the real plugin") {
   }
   it("enforces configured JOIN pair bounds and retains usable data after query failure") {
     seed(); disconnect(); const orm_option_t limit={orm_view("sql_max_join_pairs"),orm_view("1")};
-    check_equal(connect_profile("relational","false",&limit,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&limit,1),ORM_STATUS_OK);
     raw_query("SELECT a.id FROM items a CROSS JOIN items b"); check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     raw_query("SELECT id,score FROM items WHERE id=2"); open_rows(); row(2,20); end_rows();
     raw_query("SELECT a.id,a.score FROM items a CROSS JOIN items b LIMIT 1"); open_rows(); row(1,10); end_rows();
@@ -2564,7 +2564,7 @@ spec("TidesDB relational profile through the real plugin") {
     seed(); for(size_t pass=0;pass<2;++pass) {
       raw_query("SELECT id+? AS id,score FROM items WHERE id=1 UNION ALL SELECT id+? AS other,score AS points FROM items WHERE id=2 ORDER BY id");
       parameter(orm_i64(10)); parameter(orm_i64(20)); open_rows(); row(11,10); row(22,20); end_rows();
-      if(!pass) { disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK); }
+      if(!pass) { disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK); }
     }
     raw_query("(SELECT id,score FROM items ORDER BY id DESC LIMIT 1) UNION ALL (SELECT id,score FROM items ORDER BY id LIMIT 1) ORDER BY id DESC");
     check_equal(open_command(),ORM_STATUS_INVALID_ARGUMENT); check_false(cflow_publisher_valid(&publisher));
@@ -2615,7 +2615,7 @@ spec("TidesDB relational profile through the real plugin") {
   }
   it("rejects UNION materialization and type errors without losing connection admission") {
     seed(); disconnect(); const orm_option_t option={orm_view("sql_max_materialized_rows"),orm_view("2")};
-    check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&option,1),ORM_STATUS_OK);
     raw_query("SELECT id FROM items UNION SELECT id FROM items"); check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     raw_query("SELECT id,score FROM items UNION ALL SELECT id,score FROM items LIMIT 1"); open_rows(); row(1,10); end_rows();
     raw_query("SELECT id FROM items UNION ALL SELECT ? AS n FROM items"); parameter(orm_bool(true));
@@ -2807,7 +2807,7 @@ spec("TidesDB relational profile through the real plugin") {
     recursive_connection("3");
     raw_query("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<3) SELECT n FROM c");
     check_equal(execute(),ORM_STATUS_OK); count_is(3);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<3) SELECT n FROM c");
     check_equal(execute(),ORM_STATUS_UNSUPPORTED); check_null(result);
   }
@@ -2848,7 +2848,7 @@ spec("TidesDB relational profile through the real plugin") {
     check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result); check_contains(error.message,"iteration limit");
     raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,11); end_rows();
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,11); end_rows();
   }
   it("releases recursive flow failure and pre-demand cancellation leases") {
@@ -2914,22 +2914,22 @@ spec("TidesDB relational profile through the real plugin") {
     disconnect(); const char *bad[]={"0","-1","+1"," 1","1 ","1.5","","18446744073709551616"};
     for(size_t i=0;i<sizeof(bad)/sizeof(bad[0]);++i) {
       const orm_option_t option={orm_view(recursive_option),orm_view(bad[i])};
-      check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_INVALID_ARGUMENT); check_null(connection);
+      check_equal(connect_database("false",&option,1),ORM_STATUS_INVALID_ARGUMENT); check_null(connection);
     }
     const orm_option_t duplicate[]={{orm_view(recursive_option),orm_view("1")},{orm_view(recursive_option),orm_view("2")}};
-    check_equal(connect_profile("relational","false",duplicate,2),ORM_STATUS_INVALID_ARGUMENT); check_null(connection);
+    check_equal(connect_database("false",duplicate,2),ORM_STATUS_INVALID_ARGUMENT); check_null(connection);
     const orm_option_t largest={orm_view(recursive_option),orm_view("18446744073709551615")};
-    check_equal(connect_profile("relational","false",&largest,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&largest,1),ORM_STATUS_OK);
     raw_query("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c LIMIT 2) SELECT n FROM c");
     check_equal(execute(),ORM_STATUS_OK); count_is(2);
   }
   it("copies recursive configuration and continues enforcing materialization quotas") {
     disconnect(); char bound[]="1"; const orm_option_t option={orm_view(recursive_option),orm_view(bound)};
-    check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK); bound[0]='9';
+    check_equal(connect_database("false",&option,1),ORM_STATUS_OK); bound[0]='9';
     raw_query("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c LIMIT 3) SELECT n FROM c");
     check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     disconnect(); const orm_option_t limits[]={{orm_view(recursive_option),orm_view("9")},{orm_view("sql_max_materialized_rows"),orm_view("2")}};
-    check_equal(connect_profile("relational","false",limits,2),ORM_STATUS_OK);
+    check_equal(connect_database("false",limits,2),ORM_STATUS_OK);
     raw_query("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c LIMIT 5) SELECT n FROM c");
     check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     raw_query("SELECT 7 AS id,70 AS score"); open_rows(); row(7,70); end_rows();
@@ -3061,7 +3061,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("SELECT score AS id,COUNT(*) AS score FROM items GROUP BY score ORDER BY id");
     open_rows(); row(10,1); row(20,1); row(30,1); end_rows();
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT COUNT(*) AS id,MAX(score) AS score FROM items"); open_rows(); row(3,30); end_rows();
   }
   it("aggregates persisted doubles through savepoint rollback commit and reopen") {
@@ -3078,7 +3078,7 @@ spec("TidesDB relational profile through the real plugin") {
     check_equal(execute(),ORM_STATUS_OK); double_at(0,0,12.0); double_at(0,1,4.0);
     raw_query("UPDATE metrics SET score=? WHERE id=4"); parameter(orm_f64(4.0)); command(1);
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT SUM(score) AS total,AVG(score) AS mean FROM metrics");
     check_equal(execute(),ORM_STATUS_OK); double_at(0,0,16.0); double_at(0,1,4.0);
   }
@@ -3118,7 +3118,7 @@ spec("TidesDB relational profile through the real plugin") {
   }
   it("fails grouped result capacity explicitly and releases the failed query for reuse") {
     seed(); disconnect(); const orm_option_t limit={orm_view("sql_max_groups"),orm_view("2")};
-    check_equal(connect_profile("relational","false",&limit,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&limit,1),ORM_STATUS_OK);
     raw_query("SELECT score,COUNT(*) AS n FROM items GROUP BY score ORDER BY score");
     check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     raw_query("SELECT score AS id,COUNT(*) AS score FROM items GROUP BY score ORDER BY id"); open_rows();
@@ -3153,31 +3153,31 @@ spec("TidesDB relational profile through the real plugin") {
     check_equal(orm_transaction_rollback_to_savepoint(transaction,orm_view("before"),&error),ORM_STATUS_OK);
     raw_query("SELECT DISTINCT score FROM items"); check_equal(execute(),ORM_STATUS_OK); count_is(3);
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT DISTINCT score FROM items"); check_equal(execute(),ORM_STATUS_OK); count_is(3);
   }
   it("rejects DISTINCT candidate quota exhaustion and late projection errors without partial output") {
     seed(); raw_query("UPDATE items SET score=10"); command(2); disconnect();
     const orm_option_t limit={orm_view("sql_max_materialized_rows"),orm_view("2")};
-    check_equal(connect_profile("relational","false",&limit,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&limit,1),ORM_STATUS_OK);
     raw_query("SELECT DISTINCT score FROM items LIMIT 1"); check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     raw_query("SELECT DISTINCT score AS id,score FROM items"); open_rows(); orm_tides_public_row value={0};
     check_equal(cflow_publisher_resume(&publisher,NULL,&value).kind,CFLOW_STEP_ERROR);
     cflow_publisher_destroy(&publisher); publisher=(cflow_publisher){0}; disconnect();
-    check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT DISTINCT CASE WHEN id=3 THEN id+9223372036854775807 ELSE 0 END AS k FROM items LIMIT 1");
     check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
     raw_query("SELECT DISTINCT score AS id,score FROM items"); open_rows(); row(10,10); end_rows();
   }
   it("fails result row and byte limits rather than returning a successful prefix") {
     seed(); disconnect(); config.max_result_rows = 1;
-    check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items"); open_rows(); row(1,10);
     orm_tides_public_row value = {0}; cflow_step step = cflow_publisher_resume(&publisher,NULL,&value);
     check_equal(step.kind,CFLOW_STEP_ERROR); check_contains(step.error,"row limit");
     cflow_publisher_destroy(&publisher); publisher = (cflow_publisher){0}; disconnect();
     config.max_result_rows = 10; config.max_result_bytes = 22;
-    check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items LIMIT 1"); check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
   }
   it("resets statement budgets while preserving cumulative transaction write limits") {
@@ -3186,7 +3186,7 @@ spec("TidesDB relational profile through the real plugin") {
       {orm_view("sql_max_write_bytes"),orm_view("128")},
       {orm_view("sql_max_transaction_write_bytes"),orm_view("128")}
     };
-    check_equal(connect_profile("relational","false",limits,2),ORM_STATUS_OK);
+    check_equal(connect_database("false",limits,2),ORM_STATUS_OK);
     check_equal(orm_transaction_begin(connection,ORM_ISOLATION_SERIALIZABLE,&transaction,&error),ORM_STATUS_OK);
     check_equal(orm_transaction_savepoint(transaction,orm_view("before_update"),&error),ORM_STATUS_OK);
     raw_query("UPDATE items SET score=99 WHERE id=1"); command(1);
@@ -3196,10 +3196,13 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("UPDATE items SET score=97 WHERE id=3"); command(1);
     raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,10); end_rows();
   }
-  it("rejects duplicate invalid and legacy-only options and refuses reinitialization") {
-    disconnect(); check_equal(connect_profile("relational","true",NULL,0),ORM_STATUS_INVALID_STATE); check_null(connection);
+  it("rejects duplicate invalid and removed options and refuses reinitialization") {
+    disconnect(); check_equal(connect_database("true",NULL,0),ORM_STATUS_INVALID_STATE); check_null(connection);
     const orm_option_t invalid[] = {
-      {orm_view("sql_profile"),orm_view("relational")}, {orm_view("sql_max_work_bytes"),orm_view("0")},
+      {orm_view("column_family"),orm_view("rel")},
+      {orm_view("sql_profile"),orm_view("relational")},
+      {orm_view("sql_profile"),orm_view("legacy")},
+      {orm_view("sql_max_work_bytes"),orm_view("0")},
       {orm_view("sql_max_work_bytes"),orm_view("18446744073709551616")},
       {orm_view("sql_max_stack_entries"),orm_view("1")}, {orm_view("sql_max_transaction_write_bytes"),orm_view("1")},
       {orm_view("sql_max_savepoints"),orm_view("0")}, {orm_view("sql_max_savepoints"),orm_view("2147483647")},
@@ -3208,39 +3211,47 @@ spec("TidesDB relational profile through the real plugin") {
       {orm_view("key_prefix"),orm_view("legacy:")}, {orm_view("typo"),orm_view("1")}
     };
     for(size_t i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) {
-      check_equal(connect_profile("relational","false",&invalid[i],1),ORM_STATUS_INVALID_ARGUMENT); check_null(connection);
+      check_equal(connect_database("false",&invalid[i],1),ORM_STATUS_INVALID_ARGUMENT); check_null(connection);
     }
-    check_equal(connect_profile("mysql","false",NULL,0),ORM_STATUS_INVALID_ARGUMENT);
-    check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK); seed();
+    check_equal(connect_database("false",NULL,0),ORM_STATUS_OK); seed();
   }
   it("enforces a small work budget and recovers after a failed query open") {
     seed(); disconnect(); orm_option_t limit = {orm_view("sql_max_work_bytes"),orm_view("2048")};
-    check_equal(connect_profile("relational","false",&limit,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&limit,1),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items"); check_equal(execute(),ORM_STATUS_LIMIT_EXCEEDED); check_null(result);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,10); end_rows();
   }
-  it("requires an explicit initialized CF and keeps explicit legacy routing usable") {
+  it("requires an explicit initialized CF without a profile selector") {
     disconnect();
     orm_option_t options[] = {
-      {orm_view("path"),orm_view(directory)}, {orm_view("sql_profile"),orm_view("relational")},
+      {orm_view("path"),orm_view(directory)},
       {orm_view("column_family"),orm_view("absent")}
     };
-    config.driver = orm_view("tidesdb"); config.options = options; config.option_count = 2;
+    config.driver = orm_view("tidesdb"); config.options = options; config.option_count = 1;
     check_equal(orm_runtime_connect(runtime,&config,&connection,&error),ORM_STATUS_INVALID_ARGUMENT); check_null(connection);
-    config.option_count = 3;
+    config.option_count = sizeof(options)/sizeof(options[0]);
     check_equal(orm_runtime_connect(runtime,&config,&connection,&error),ORM_STATUS_INVALID_STATE); check_null(connection);
-    options[1].value = orm_view("legacy"); options[2].value = orm_view("rel");
-    check_equal(orm_runtime_connect(runtime,&config,&connection,&error),ORM_STATUS_INVALID_STATE); check_null(connection);
-    options[1].value = orm_view("legacy"); options[2].value = orm_view("old");
+    options[1].value = orm_view("rel");
     check_equal(orm_runtime_connect(runtime,&config,&connection,&error),ORM_STATUS_OK);
-    raw_query("INSERT INTO people(id,score) VALUES(1,7)"); command(1); disconnect();
-    options[1].value = orm_view("relational");
-    check_equal(orm_runtime_connect(runtime,&config,&connection,&error),ORM_STATUS_INVALID_STATE); check_null(connection);
-    options[1].value = orm_view("legacy");
-    check_equal(orm_runtime_connect(runtime,&config,&connection,&error),ORM_STATUS_OK);
-    raw_query("SELECT id,score FROM people"); open_rows(); row(1,7); end_rows();
     config.options = NULL; config.option_count = 0;
+    seed();
+    raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,10); end_rows();
+  }
+  it("advertises only the isolation level supported by the relational engine") {
+    orm_driver_info_t info = {0};
+    info.struct_size = sizeof(info);
+    check_equal(orm_runtime_driver_info(runtime,orm_view("tidesdb"),&info,&error),ORM_STATUS_OK);
+    const uint64_t unsupported = ORM_DRIVER_CAP_READ_UNCOMMITTED |
+        ORM_DRIVER_CAP_READ_COMMITTED | ORM_DRIVER_CAP_REPEATABLE_READ | ORM_DRIVER_CAP_SNAPSHOT;
+    check_equal(info.capabilities & unsupported, UINT64_C(0));
+    check_not_equal(info.capabilities & ORM_DRIVER_CAP_SERIALIZABLE, UINT64_C(0));
+    const orm_isolation_t levels[] = {ORM_ISOLATION_READ_UNCOMMITTED,
+        ORM_ISOLATION_READ_COMMITTED, ORM_ISOLATION_REPEATABLE_READ, ORM_ISOLATION_SNAPSHOT};
+    for (size_t i=0;i<sizeof(levels)/sizeof(levels[0]);++i) {
+      check_equal(orm_transaction_begin(connection,levels[i],&transaction,&error),ORM_STATUS_UNSUPPORTED);
+      check_null(transaction);
+    }
   }
   group("DOUBLE secondary indexes through the real plugin") {
     it("maintains unique DOUBLE keys across zero signs structured updates REPLACE and reopen") {
@@ -3254,7 +3265,7 @@ spec("TidesDB relational profile through the real plugin") {
       count_is(1); integer_at(0,0,2); double_at(0,1,3.5);
       raw_query("SELECT id FROM reals WHERE score=0 ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(1); integer_at(0,0,5);
       raw_query("SELECT id FROM reals WHERE score IS NULL ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(2); integer_at(0,0,3); integer_at(1,0,4);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("EXPLAIN SELECT id FROM reals WHERE score=3.5"); check_equal(execute(),ORM_STATUS_OK); text_at(0,4,"const"); text_at(0,6,"score");
       raw_query("SELECT id,score FROM reals WHERE score>=2.0 ORDER BY score"); check_equal(execute(),ORM_STATUS_OK);
       count_is(2); integer_at(0,0,6); double_at(0,1,2.5); integer_at(1,0,2); double_at(1,1,3.5);
@@ -3288,7 +3299,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("BEGIN"); command(0); raw_query("SAVEPOINT keep_index"); command(0);
       raw_query("DROP INDEX ux ON reals"); command(0); raw_query("TRUNCATE reals"); command(0);
       raw_query("ROLLBACK TO keep_index"); command(0); raw_query("COMMIT"); command(0);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("EXPLAIN SELECT id FROM reals WHERE score=1.5"); check_equal(execute(),ORM_STATUS_OK); text_at(0,4,"const"); text_at(0,6,"ux");
       raw_query("SELECT id,score FROM reals ORDER BY id"); check_equal(execute(),ORM_STATUS_OK); count_is(2); double_at(0,1,1.5); double_at(1,1,2.5);
     }
@@ -3319,7 +3330,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("START TRANSACTION READ WRITE"); command(0);
       raw_query("INSERT INTO items VALUES(4,40)"); command(1);
       raw_query("ROLLBACK AND NO CHAIN NO RELEASE"); command(0);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,score FROM items ORDER BY id"); open_rows(); row(1,11); row(2,22); row(3,30); end_rows();
     }
     it("uses the same SQL snapshot through grouping windows CTEs and savepoint rollback") {
@@ -3378,7 +3389,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("ROLLBACK AND CHAIN"); command(0);
       raw_query("RELEASE SAVEPOINT chained"); check_equal(execute(),ORM_STATUS_SQL_ERROR);
       raw_query("COMMIT"); command(0);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,score FROM items ORDER BY id"); open_rows(); row(1,40); row(2,20); row(3,30); end_rows();
     }
     it("rejects unsupported characteristics and parameters before any implicit commit") {
@@ -3440,7 +3451,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("SELECT id,score FROM items WHERE id=1"); open_rows();
       orm_query_destroy(query); query=NULL; orm_disconnect(connection); connection=NULL;
       row(1,40); end_rows();
-      check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,10); end_rows();
     }
   }
@@ -3469,7 +3480,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("ROLLBACK"); command(0);
       raw_query("UPDATE items SET score=42 WHERE id=1"); command(1); raw_query("SET autocommit=1"); command(0);
       raw_query("ROLLBACK"); command(0);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,42); end_rows();
     }
     it("accepts session spellings symbolic values default and scalar typed expressions") {
@@ -3548,7 +3559,7 @@ spec("TidesDB relational profile through the real plugin") {
       seed(); raw_query("SET autocommit=0"); command(0); raw_query("UPDATE items SET score=40 WHERE id=1"); command(1);
       raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); orm_query_destroy(query); query=NULL;
       orm_disconnect(connection); connection=NULL; row(1,40); end_rows();
-      check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("UPDATE items SET score=41 WHERE id=1"); command(1); raw_query("ROLLBACK"); command(0);
       raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,41); end_rows();
     }
@@ -3652,7 +3663,7 @@ spec("TidesDB relational profile through the real plugin") {
       check_equal(cflow_publisher_resume(&publisher,NULL,&output).kind,CFLOW_STEP_VALUE_AND_DONE); check_equal(output.affected_rows,0u);
       cflow_publisher_destroy(&publisher); publisher=(cflow_publisher){0};
       raw_query("UPDATE items SET score=41 WHERE id=1"); check_equal(execute(),ORM_STATUS_SQL_ERROR);
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("UPDATE items SET score=42 WHERE id=1"); command(1);
       raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,42); end_rows();
     }
@@ -3684,7 +3695,7 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("RELEASE SAVEPOINT middle"); command(0);
       check_equal(orm_transaction_release_savepoint(transaction,orm_view("MIDDLE"),&error),ORM_STATUS_SQL_ERROR);
       check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,40); end_rows();
     }
     it("releases only the named point without committing or losing newer points") {
@@ -3718,13 +3729,13 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("INSERT INTO items VALUES(4,40)"); command(1);
       raw_query("RELEASE SAVEPOINT catalog_start"); command(0);
       check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-      disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+      disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
       raw_query("SELECT id,score FROM items ORDER BY id"); open_rows(); row(1,10); row(2,20); row(3,30); row(4,40); end_rows();
       raw_query("SELECT id,score FROM undone"); check_equal(execute(),ORM_STATUS_OK); count_is(0);
     }
     it("shares the configured live-point bound with ORM names and permits replacement at capacity") {
       seed(); disconnect(); const orm_option_t option={orm_view("sql_max_savepoints"),orm_view("2")};
-      check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK);
+      check_equal(connect_database("false",&option,1),ORM_STATUS_OK);
       check_equal(orm_transaction_begin(connection,ORM_ISOLATION_SERIALIZABLE,&transaction,&error),ORM_STATUS_OK);
       raw_query("SAVEPOINT one"); command(0);
       check_equal(orm_transaction_savepoint(transaction,orm_view("two"),&error),ORM_STATUS_OK);
@@ -3864,7 +3875,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("CREATE TABLE undone(id BIGINT PRIMARY KEY,score BIGINT)"); command(0);
     raw_query("INSERT INTO undone(id,score) VALUES(2,7)"); command(1);
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE id=1"); open_rows(); row(1,10); end_rows();
     raw_query("SELECT id,score FROM undone"); open_rows(); row(2,7); end_rows();
   }
@@ -3881,7 +3892,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("ALTER TABLE items RENAME COLUMN id TO identifier"); command(0);
     raw_query("ALTER TABLE items RENAME TO renamed"); command(0);
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT identifier AS id,score FROM renamed WHERE score=20"); open_rows(); row(2,20); end_rows();
     raw_query("SHOW TABLES"); check_equal(execute(),ORM_STATUS_OK); text_at(0,0,"renamed");
     raw_query("UPDATE renamed SET identifier=4,score=40 WHERE identifier=2"); command(1);
@@ -3911,7 +3922,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("ALTER TABLE items ADD COLUMN extra BIGINT NOT NULL"); command(0);
     raw_query("ALTER TABLE items DROP COLUMN extra"); command(0);
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("INSERT INTO items(id,score) VALUES(1,10)"); command(1);
     raw_query("SELECT id,score FROM items WHERE score=10"); open_rows(); row(1,10); end_rows();
     raw_query("INSERT INTO items(id,score) VALUES(2,10)"); check_equal(execute(),ORM_STATUS_CONSTRAINT);
@@ -3928,7 +3939,7 @@ spec("TidesDB relational profile through the real plugin") {
     check_equal(orm_transaction_rollback_to_savepoint(transaction,orm_view("before_drop"),&error),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score=10 AND extra=?"); parameter(orm_f64(2.5)); open_rows(); row(1,10); end_rows();
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score=10 AND extra=?"); parameter(orm_f64(2.5)); open_rows(); row(1,10); end_rows();
     raw_query("ALTER TABLE items DROP extra"); command(0);
     raw_query("INSERT INTO items(id,score) VALUES(9,10)"); check_equal(execute(),ORM_STATUS_CONSTRAINT);
@@ -3938,7 +3949,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("CREATE UNIQUE INDEX score_key ON items(score)"); command(0);
     raw_query("INSERT INTO items(extra,id,score) VALUES(?,1,10)"); parameter(orm_f64(2.5)); command(1);
     raw_query("ALTER TABLE items DROP extra"); command(0);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score=10"); open_rows(); row(1,10); end_rows();
     raw_query("UPDATE items SET score=20 WHERE id=1"); command(1);
     raw_query("SELECT id,score FROM items WHERE score=20"); open_rows(); row(1,20); end_rows();
@@ -3954,7 +3965,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("ALTER TABLE items ADD extra DOUBLE FIRST"); command(0);
     raw_query("ALTER TABLE items ADD marker BIGINT UNSIGNED AFTER id"); command(0);
     raw_query("UPDATE items SET extra=?,marker=? WHERE id=1"); parameter(orm_f64(2.5)); parameter(orm_u64(UINT64_MAX)); command(1);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SHOW COLUMNS FROM items"); check_equal(execute(),ORM_STATUS_OK);
     text_at(0,0,"extra"); text_at(1,0,"id"); text_at(1,3,"PRI"); text_at(2,0,"marker"); text_at(3,0,"score");
     raw_query("SELECT * FROM items WHERE score=10"); check_equal(execute(),ORM_STATUS_OK);
@@ -4031,7 +4042,7 @@ spec("TidesDB relational profile through the real plugin") {
     check_equal(orm_transaction_rollback_to_savepoint(transaction,orm_view("metadata"),&error),ORM_STATUS_OK);
     raw_query("SHOW INDEX FROM items"); check_equal(execute(),ORM_STATUS_OK); count_is(2); text_at(1,4,"score");
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SHOW COLUMNS FROM items"); check_equal(execute(),ORM_STATUS_OK); text_at(1,3,"UNI");
     raw_query("SHOW INDEX FROM items"); check_equal(execute(),ORM_STATUS_OK); count_is(2); text_at(1,2,"score_key");
   }
@@ -4089,7 +4100,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("SHOW CREATE TABLE items"); check_equal(execute(),ORM_STATUS_OK);
     text_at(0,1,"CREATE TABLE `items` (\n  `id` bigint NOT NULL,\n  `score` bigint NULL,\n  PRIMARY KEY (`id`)\n)");
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SHOW CREATE TABLE items"); check_equal(execute(),ORM_STATUS_OK);
     text_at(0,1,"CREATE TABLE `items` (\n  `id` bigint NOT NULL,\n  `score` bigint NULL,\n  PRIMARY KEY (`id`)\n)");
   }
@@ -4101,7 +4112,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("DROP TABLE items"); command(0); raw_query(copy); command(0); tstr_free(copy);
     raw_query("INSERT INTO items(id,score) VALUES(1,10),(2,NULL),(3,NULL)"); command(3);
     raw_query("INSERT INTO items(id,score) VALUES(4,10)"); check_equal(execute(),ORM_STATUS_CONSTRAINT);
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("SELECT id,score FROM items WHERE score=10"); open_rows(); row(1,10); end_rows();
     raw_query("UPDATE items SET score=10 WHERE id=2"); check_equal(execute(),ORM_STATUS_CONSTRAINT);
     raw_query("CREATE TABLE IF NOT EXISTS items(id BIGINT PRIMARY KEY,score BIGINT,KEY ignored(score))"); command(0);
@@ -4117,7 +4128,7 @@ spec("TidesDB relational profile through the real plugin") {
     raw_query("SHOW TABLES"); check_equal(execute(),ORM_STATUS_OK); count_is(0);
     raw_query("CREATE TABLE items(id BIGINT PRIMARY KEY,score BIGINT,KEY ordinary(score DESC))"); command(0);
     check_equal(orm_transaction_commit(transaction,&error),ORM_STATUS_OK); orm_transaction_destroy(transaction); transaction=NULL;
-    disconnect(); check_equal(connect_profile("relational","false",NULL,0),ORM_STATUS_OK);
+    disconnect(); check_equal(connect_database("false",NULL,0),ORM_STATUS_OK);
     raw_query("INSERT INTO items(id,score) VALUES(1,10),(2,10)"); command(2);
     raw_query("SHOW COLUMNS FROM items"); check_equal(execute(),ORM_STATUS_OK); text_at(1,3,"MUL");
   }
@@ -4212,7 +4223,7 @@ spec("TidesDB relational profile through the real plugin") {
   }
   it("bounds live savepoints while allowing replacement and slot reuse at capacity") {
     seed(); disconnect(); orm_option_t option={orm_view("sql_max_savepoints"),orm_view("2")};
-    check_equal(connect_profile("relational","false",&option,1),ORM_STATUS_OK);
+    check_equal(connect_database("false",&option,1),ORM_STATUS_OK);
     check_equal(orm_transaction_begin(connection,ORM_ISOLATION_SERIALIZABLE,&transaction,&error),ORM_STATUS_OK);
     check_equal(orm_transaction_savepoint(transaction,orm_view("one"),&error),ORM_STATUS_OK);
     check_equal(orm_transaction_savepoint(transaction,orm_view("two"),&error),ORM_STATUS_OK);

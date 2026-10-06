@@ -43,13 +43,6 @@ turbodb_status_t orm_tidesdb_sql_catalog_rollback_to(orm_sql_catalog_store *stor
 turbodb_status_t orm_tidesdb_sql_catalog_release_savepoint(orm_sql_catalog_store *store,
     vstr name, turbodb_error_t *error);
 
-/* Connection admission for the legacy profile. Presence of the reserved
- * Manifest key (including an invalid value) forbids legacy access. Missing key
- * is OK; native errors fail closed. Owns and closes one read-only snapshot;
- * no writes, bootstrap, format conversion or SYNC_FULL requirement. */
-turbodb_status_t orm_tidesdb_sql_catalog_require_legacy(orm_tidesdb_database_t *database,
-    orm_tidesdb_column_family_t *family, turbodb_error_t *error);
-
 /* Explicit bootstrap of an EXISTING empty SYNC_FULL CF. Caller guarantees
  * exclusive/quiescent access; CF creation is outside this transaction. Commits
  * only the Manifest; refuses every nonempty CF, including initialized ones.

@@ -35,24 +35,6 @@ turbodb_status_t orm_sql_store_native(turbodb_error_t *error, int code, const ch
       code == ORM_TDB_ERR_CONFLICT || code == ORM_TDB_ERR_BUSY ? TURBODB_STATUS_BUSY :
       code == ORM_TDB_ERR_PRECONDITION ? TURBODB_STATUS_INVALID_STATE : TURBODB_STATUS_DATASTORE_ERROR, message);
 }
-turbodb_status_t orm_tidesdb_sql_catalog_require_legacy(orm_tidesdb_database_t *database,
-    orm_tidesdb_column_family_t *family, turbodb_error_t *error) {
-  if (!database || !family) return store_error(error, TURBODB_STATUS_INVALID_ARGUMENT, "legacy Catalog probe requires DB and CF");
-  orm_tidesdb_transaction_t *transaction = NULL;
-  int code = orm_tidesdb_txn_begin_with_isolation(database, ORM_TDB_ISOLATION_SNAPSHOT, &transaction);
-  if (code != ORM_TDB_SUCCESS) return orm_sql_store_native(error, code, "begin legacy admission");
-  if (!transaction) return store_error(error, TURBODB_STATUS_INTERNAL_ERROR, "legacy admission received no transaction");
-  uint8_t *data = NULL; size_t size = 0;
-  code = orm_tidesdb_txn_get(transaction, family, store_manifest_key, sizeof(store_manifest_key), &data, &size);
-  turbodb_status_t status = code == ORM_TDB_ERR_NOT_FOUND ? TURBODB_STATUS_OK : code == ORM_TDB_SUCCESS
-      ? store_error(error, TURBODB_STATUS_INVALID_STATE, "relational Manifest forbids legacy access to this CF")
-      : orm_sql_store_native(error, code, "probe legacy Manifest");
-  orm_tidesdb_free(data);
-  code = orm_tidesdb_txn_rollback(transaction);
-  orm_tidesdb_txn_free(transaction);
-  if (code != ORM_TDB_SUCCESS) status = orm_sql_store_native(error, code, "close legacy admission");
-  return status;
-}
 turbodb_status_t orm_sql_store_ready(orm_sql_catalog_store *store, turbodb_error_t *error) {
   if (!store || !store->transaction || !store->budget)
     return store_error(error, TURBODB_STATUS_INVALID_ARGUMENT, "SQL Catalog owner is required");

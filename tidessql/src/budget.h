@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Private relational-engine contract; not installed or used by legacy SQL.
+/* Private relational-engine contract; not installed.
  * Fixed-size counters only: no allocator, native transaction or data ownership.
  * One synchronous owner; no concurrent calls. Fields are read-only to callers
  * after init. Keep this ledger alive through statement cleanup and the last

@@ -1,7 +1,6 @@
 add_subdirectory(postgresql)
 add_subdirectory(sqlite)
 add_subdirectory(mysql)
-add_subdirectory(tidesdb)
 add_subdirectory(cross_driver)
 
 # Candidate plan adapter is exercised against the real core, not the SDK

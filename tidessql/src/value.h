@@ -3,7 +3,7 @@
 
 #include "budget.h"
 
-/* Shared decimal literal conversion for legacy lowering and relational code.
+/* Decimal integer literal conversion for relational expressions.
  * No allocation; rejects fractions/exponents, checks signed/unsigned range.
  * Failure preserves output. Negative INT64_MIN is represented exactly. */
 turbodb_status_t orm_tidesdb_sql_integer_literal(vstr text, bool negative,

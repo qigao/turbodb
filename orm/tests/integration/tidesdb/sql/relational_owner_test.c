@@ -115,7 +115,7 @@ static tdsql_result *shared_result;
 static void connect_database(bool initialize) {
   orm_config_t config; orm_config(&config);
   orm_option_t options[] = {{orm_view("path"),orm_view(directory)},
-    {orm_view("column_family"),orm_view("rel")}, {orm_view("sql_profile"),orm_view("relational")},
+    {orm_view("column_family"),orm_view("rel")},
     {orm_view("sql_initialize"),orm_view(initialize ? "true" : "false")}};
   config.driver = orm_view("tidesdb"); config.options = options; config.option_count = sizeof(options)/sizeof(options[0]);
   check_equal(orm_connect_with_factory_v1(&config,orm_tidesdb_relational_create,&connection,&error),ORM_STATUS_OK);
@@ -833,25 +833,6 @@ spec("TidesDB relational ORM owner failures") {
     fail_allocation = 0; score_is(10);
     check_equal(orm_transaction_rollback(transaction,&error),ORM_STATUS_OK);
   }
-  it("rejects legacy admission on a Manifest or a native read or cleanup failure") {
-    tdsql_connection *backend = connection->backend.context;
-    check_equal(orm_tidesdb_sql_catalog_require_legacy(backend->database,backend->family,&error),ORM_STATUS_INVALID_STATE);
-    orm_tidesdb_column_family_config_t settings = orm_tidesdb_default_column_family_config();
-    check_equal(orm_tidesdb_create_column_family(backend->database,"old",&settings),ORM_TDB_SUCCESS);
-    orm_tidesdb_column_family_t *old = orm_tidesdb_get_column_family(backend->database,"old"); check_not_null(old);
-    check_equal(orm_tidesdb_sql_catalog_require_legacy(backend->database,old,&error),ORM_STATUS_OK);
-    get_failure = true;
-    check_equal(orm_tidesdb_sql_catalog_require_legacy(backend->database,old,&error),ORM_STATUS_DATASTORE_ERROR); check_false(get_failure);
-    rollback_failure = true;
-    check_equal(orm_tidesdb_sql_catalog_require_legacy(backend->database,old,&error),ORM_STATUS_DATASTORE_ERROR); check_false(rollback_failure);
-    check_equal(orm_tidesdb_sql_catalog_require_legacy(backend->database,old,&error),ORM_STATUS_OK);
-    orm_tidesdb_transaction_t *native = NULL;
-    check_equal(orm_tidesdb_txn_begin_with_isolation(backend->database,ORM_TDB_ISOLATION_SERIALIZABLE,&native),ORM_TDB_SUCCESS);
-    const uint8_t corrupt = 1;
-    check_equal(orm_tidesdb_txn_put(native,backend->family,store_manifest_key,sizeof(store_manifest_key),&corrupt,sizeof(corrupt),0),ORM_TDB_SUCCESS);
-    check_equal(orm_tidesdb_txn_commit(native),ORM_TDB_SUCCESS); orm_tidesdb_txn_free(native);
-    check_equal(orm_tidesdb_sql_catalog_require_legacy(backend->database,backend->family,&error),ORM_STATUS_INVALID_STATE);
-  }
   it("cleans every structured rendering failure before native writes and allows retry") {
     begin_transaction();
     orm_query_destroy(query); query=NULL; orm_result_destroy(result); result=NULL;
@@ -1082,7 +1063,7 @@ int main(int argc, char **argv) {
     directory=argv[3]; orm_error_init(&error);
     orm_config_t child_config; orm_config(&child_config);
     const orm_option_t options[]={{orm_view("path"),orm_view(directory)},
-      {orm_view("column_family"),orm_view("rel")},{orm_view("sql_profile"),orm_view("relational")}};
+      {orm_view("column_family"),orm_view("rel")}};
     child_config.driver=orm_view("tidesdb"); child_config.options=options;
     child_config.option_count=sizeof(options)/sizeof(options[0]);
     sql_close_child_require(orm_connect_with_factory_v1(&child_config,orm_tidesdb_relational_create,&connection,&error)==ORM_STATUS_OK);

@@ -21,7 +21,7 @@ enum {
     ORM_TDB_SYNC_FULL = 1
 };
 
-/* Private driver configuration; DEFAULT preserves native legacy defaults. */
+/* Private storage configuration; DEFAULT selects the native defaults. */
 typedef struct orm_tidesdb_column_family_config { int sync_mode; }
     orm_tidesdb_column_family_config_t;
 

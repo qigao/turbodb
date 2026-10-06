@@ -319,14 +319,14 @@ must outlive that Publisher.
   affected-row parsing; explicit transactions and savepoints. Field OIDs select
   supported scalar token kinds; arbitrary-precision and unknown types remain
   strings instead of being narrowed.
-- TidesDB: iterator-backed row Publisher, direct commands, and a
-  [bounded SQL frontend](../tidessql/readme.md) for parameterized
-  SELECT/INSERT/UPDATE/DELETE. Stateful ordering,
-  grouping and aggregation are not executed eagerly by the backend; express
-  them as bounded CFlow operators when pushdown cannot preserve semantics.
-  SELECT requires an explicit projection. Iterator scans are capped by
-  `max_scan_rows` and `max_scan_bytes`; transaction commit/rollback returns
-  `ORM_STATUS_BUSY` while a transaction row Publisher is open.
+- TidesDB: the TidesSQL relational engine serves raw SQL and structured ORM
+  queries through row and command Publishers. Connections require explicit
+  `path` and `column_family`; use `sql_initialize=true` only to initialize a new
+  empty column family. Tables require explicit CREATE TABLE. The driver supports
+  SERIALIZABLE transactions and savepoints; live result cursors block transaction
+  completion. Query, scan and transaction budgets are enforced by TidesSQL.
+  The `sql_profile` selector and the ORMTDB KV format are not supported.
+  See the [TidesSQL contract](../tidessql/readme.md).
 
 MongoDB and Redis are intentionally not ORM backends: they do not implement the
 SQL contract expected by this layer. Use the independently selectable

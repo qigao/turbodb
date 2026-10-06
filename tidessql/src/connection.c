@@ -148,9 +148,7 @@ static turbodb_status_t conn_settings(conn_configuration *b, const tdsql_config 
       if (o->keyword.len == config->options[j].keyword.len &&
           !memcmp(o->keyword.data, config->options[j].keyword.data, o->keyword.len))
         return conn_error(error, TURBODB_STATUS_INVALID_ARGUMENT, "duplicate relational connection option");
-    if (conn_equal(o->keyword, "sql_profile")) {
-      if (!conn_equal(o->value, "relational")) return conn_error(error, TURBODB_STATUS_INVALID_ARGUMENT, "invalid SQL profile");
-    } else if (conn_equal(o->keyword, "path") || conn_equal(o->keyword, "column_family")) {
+    if (conn_equal(o->keyword, "path") || conn_equal(o->keyword, "column_family")) {
       const bool family = conn_equal(o->keyword, "column_family");
       const char *reason = NULL;
       if (!o->value.len || o->value.len > limits->max_query_bytes || memchr(o->value.data, 0, o->value.len) ||
