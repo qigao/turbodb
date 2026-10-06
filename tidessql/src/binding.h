@@ -29,6 +29,10 @@ typedef struct orm_sql_derived_binding {
 struct orm_sql_query_scope;
 typedef turbodb_status_t (*orm_sql_dependency_schema_prepare)(
     struct orm_sql_query_scope *scope,void *context,turbodb_error_t *error);
+typedef turbodb_status_t (*orm_sql_query_parameters_prepare)(
+    struct orm_sql_query_scope *scope,void *context,turbodb_error_t *error);
+typedef bool (*orm_sql_query_output_parameters_pending)(
+    const struct orm_sql_query_scope *scope,void *context);
 typedef struct orm_sql_query_scope {
   const sqlparser_document *document;
   sqlparser_id root;
@@ -63,6 +67,21 @@ typedef struct orm_sql_query_scope {
   void *dependency_schema_context;
   bool force_dependency_schema; /* Lexical captures need the complete root row. */
   orm_sql_evaluation evaluation;
+  /* Optional statement-inference state. A false marker has no type and must
+   * fail before compilation; zeroed orm_sql_type storage is never semantic.
+   * The callback may resolve markers in this query block before it binds. */
+  const bool *parameter_resolved;
+  orm_sql_query_parameters_prepare prepare_parameters;
+  void *parameter_context;
+  /* Compound binding may prepare marker-free leaves first, then use their
+   * immutable result kinds to constrain corresponding projection markers.
+   * output_root prevents a copied scope from leaking the context into nested
+   * dependencies. The pending hook only classifies projection markers; all
+   * actual inference remains owned by prepare_parameters. */
+  orm_sql_query_output_parameters_pending output_parameters_pending;
+  const orm_sql_type *parameter_output_types;
+  size_t parameter_output_count;
+  sqlparser_id parameter_output_root;
 } orm_sql_query_scope;
 
 /* Basic private type-only admission; validates borrowed document/root/types,
@@ -104,6 +123,7 @@ typedef struct orm_sql_binding_scope {
   const size_t *capture_slots; /* NULL for original rows; source-to-group/window input slots otherwise. */
   size_t capture_count;
   bool ascii_insensitive_names; /* SHOW result labels; ordinary schemas retain exact names. */
+  const bool *parameter_resolved; /* NULL means every supplied marker type is resolved. */
 } orm_sql_binding_scope;
 typedef struct orm_sql_expression_target {
   orm_sql_expr *program;

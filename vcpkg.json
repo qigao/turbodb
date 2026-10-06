@@ -11,7 +11,7 @@
   ],
   "features": {
     "sqlite": {
-      "description": "Build SQLite ORM and database-tool backends",
+      "description": "Build SQLite ORM/database-tool backends and SQL parser reference tests",
       "dependencies": [
         "sqlite3"
       ]

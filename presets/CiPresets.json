@@ -44,7 +44,8 @@
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-windows",
         "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
-        "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe"
+        "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe",
+        "TURBODB_BUILD_TIDESSQL_SERVER": true
       }
     },
     {
@@ -62,7 +63,8 @@
       },
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux"
+        "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
+        "TURBODB_BUILD_TIDESSQL_SERVER": true
       }
     },
     {
@@ -93,7 +95,8 @@
       },
       "cacheVariables": {
         "BUILD_TESTS": false,
-        "BUILD_E2E_TESTS": true
+        "BUILD_E2E_TESTS": true,
+        "TURBODB_BUILD_TIDESSQL_SERVER": false
       }
     },
     {

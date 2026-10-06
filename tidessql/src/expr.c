@@ -89,7 +89,8 @@ static bool function_name_is(const sqlparser_document *document,
   return true;
 }
 
-static bool expr_numeric_function(orm_sql_expr_function function, orm_sql_arithmetic_op *out) {
+bool orm_tidesdb_sql_expr_function_arithmetic(orm_sql_expr_function function,
+    orm_sql_arithmetic_op *out) {
   switch (function) {
     case ORM_SQL_FUNCTION_ABS: *out = ORM_SQL_ABSOLUTE; break;
     case ORM_SQL_FUNCTION_SIGN: *out = ORM_SQL_SIGN; break;
@@ -102,7 +103,7 @@ static bool expr_numeric_function(orm_sql_expr_function function, orm_sql_arithm
   }
   return true;
 }
-static bool expr_numeric_binary(orm_sql_arithmetic_op op) {
+bool orm_tidesdb_sql_expr_arithmetic_binary(orm_sql_arithmetic_op op) {
   return op == ORM_SQL_MODULO || op == ORM_SQL_ROUND || op == ORM_SQL_TRUNCATE;
 }
 
@@ -183,7 +184,8 @@ turbodb_status_t orm_tidesdb_sql_expr_resolve_call(const sqlparser_document *doc
     return expr_error(error, TURBODB_STATUS_UNSUPPORTED, call->span.offset, "function DISTINCT is unsupported");
   enum { BINARY_FUNCTION_ARGUMENTS = 2, UNARY_FUNCTION_ARGUMENTS = 1 };
   orm_sql_arithmetic_op operation;
-  const size_t arity = expr_numeric_function(function,&operation) && (!expr_numeric_binary(operation) || function == ORM_SQL_FUNCTION_ROUND) ?
+  const size_t arity = orm_tidesdb_sql_expr_function_arithmetic(function,&operation) &&
+      (!orm_tidesdb_sql_expr_arithmetic_binary(operation) || function == ORM_SQL_FUNCTION_ROUND) ?
       UNARY_FUNCTION_ARGUMENTS : BINARY_FUNCTION_ARGUMENTS;
   const size_t maximum = function == ORM_SQL_FUNCTION_ROUND ? BINARY_FUNCTION_ARGUMENTS : arity;
   if (!call->as.call.arguments.count || (function != ORM_SQL_COALESCE &&
@@ -465,7 +467,7 @@ static turbodb_status_t compile_leaf(expr_compiler *c, const sqlparser_node *nod
   } else if (node->kind == SQLPARSER_VARIABLE) {
     instruction.opcode = EXPR_SESSION;
     status = orm_sql_session_resolve(c->document,node,c->program.budget,&instruction.variable,c->error);
-    type = (orm_sql_type){instruction.variable == ORM_SQL_SESSION_TRANSACTION_ISOLATION ? TURBODB_VALUE_TEXT : TURBODB_VALUE_INT64,true};
+    type = orm_sql_session_type(instruction.variable);
     if (status == TURBODB_STATUS_OK) c->program.uses_session = true;
   } else {
     if (node->kind == SQLPARSER_NULL) instruction.constant = turbodb_null();
@@ -760,18 +762,18 @@ static turbodb_status_t compile_call(expr_compiler *c, const sqlparser_node *nod
     frame->item = node->as.call.arguments.first;
     frame->remaining = node->as.call.arguments.count;
     frame->accumulated_type = (orm_sql_type){TURBODB_VALUE_NULL, true};
-    frame->arithmetic = expr_numeric_function(function,&frame->arithmetic_op);
+    frame->arithmetic=orm_tidesdb_sql_expr_function_arithmetic(function,&frame->arithmetic_op);
     frame->phase = function == ORM_SQL_NULLIF ? EXPR_NULLIF_FIRST : EXPR_CALL_ARGUMENT;
     return push_frame(c, frame->item);
   }
   status = advance_argument(c, frame);
   if (status != TURBODB_STATUS_OK) return status;
   if (frame->arithmetic) {
-    if (expr_numeric_binary(frame->arithmetic_op) && frame->remaining) {
+    if (orm_tidesdb_sql_expr_arithmetic_binary(frame->arithmetic_op) && frame->remaining) {
       frame->left = c->last_register; frame->left_type = c->last_type;
       return push_frame(c,frame->item);
     }
-    const bool binary = expr_numeric_binary(frame->arithmetic_op);
+    const bool binary=orm_tidesdb_sql_expr_arithmetic_binary(frame->arithmetic_op);
     if (frame->arithmetic_op == ORM_SQL_ROUND && node->as.call.arguments.count == 1) {
       frame->left = c->last_register; frame->left_type = c->last_type;
       c->last_register = c->program.register_count++;

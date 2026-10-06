@@ -146,11 +146,18 @@ spec("MySQL server TLS negotiation and handshake payloads") {
       tdsql_mysql_negotiation fresh={0}; check_equal(tdsql_mysql_negotiation_init(&fresh,advertised&~required[i]),TDSQL_MYSQL_INVALID); check_equal(fresh.phase,0);
     }
   }
-  it("rejects zero packet size, unsupported charset and every nonzero reserved byte") {
+  it("accepts binary and utf8mb4 clients but rejects other charsets and nonzero reserved bytes") {
     tdsql_mysql_login_header header={.max_packet_size=TEST_TRAILER}; const tdsql_mysql_login_header original=header;
     uint8_t bytes[TDSQL_MYSQL_SSL_BYTES]; memcpy(bytes,ssl,sizeof(bytes)); memset(bytes+TEST_HEADER_PACKET,0,sizeof(uint32_t));
     check_equal(tdsql_mysql_ssl_decode(bytes,sizeof(bytes),advertised,&header),TDSQL_MYSQL_INVALID); check_equal(&header,&original,sizeof(header));
-    memcpy(bytes,ssl,sizeof(bytes)); bytes[TEST_HEADER_CHARSET]=45;
+    const uint8_t supported[]={TDSQL_MYSQL_UTF8MB4_GENERAL_CI,TDSQL_MYSQL_UTF8MB4_0900_AI_CI};
+    for(size_t i=0;i<sizeof(supported)/sizeof(supported[0]);++i) {
+      memcpy(bytes,ssl,sizeof(bytes)); bytes[TEST_HEADER_CHARSET]=supported[i];
+      check_equal(tdsql_mysql_ssl_decode(bytes,sizeof(bytes),advertised,&header),TDSQL_MYSQL_OK);
+      check_equal(header.character_set,supported[i]);
+    }
+    header=original;
+    memcpy(bytes,ssl,sizeof(bytes)); bytes[TEST_HEADER_CHARSET]=1;
     check_equal(tdsql_mysql_ssl_decode(bytes,sizeof(bytes),advertised,&header),TDSQL_MYSQL_UNSUPPORTED);
     for(size_t i=TEST_HEADER_FILLER;i<sizeof(bytes);++i) {
       memcpy(bytes,ssl,sizeof(bytes)); bytes[i]=1;

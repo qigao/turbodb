@@ -14,7 +14,6 @@ if(WIN32)
                                    "${ORM_TEST_RUNTIME_PATH}")
 endif()
 
-add_subdirectory(redis)
 
 cmake_add_test(
   NAME orm_execution_plan_test

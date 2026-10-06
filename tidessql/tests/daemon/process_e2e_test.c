@@ -31,7 +31,7 @@ spec("standalone tidessqld process with the existing MySQL driver") {
 
     tidessqld_test_daemon daemon = {0};
     const int started = tidessqld_test_daemon_start(
-        &daemon, TEST_TIDESSQLD, config);
+        &daemon, tidessqld_test_executable(TEST_TIDESSQLD), config);
     uint16_t port = 0;
     const int ready = started == 0
                           ? tidessqld_test_daemon_wait_for_port(

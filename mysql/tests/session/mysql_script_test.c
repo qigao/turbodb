@@ -1,22 +1,46 @@
 #include <cnet/cnet.h>
-#include <tinymock.h>
 #include <salts_buffer.h>
+#include <tinytest.h>
 
-TINYMOCk_MOCK(int, script_receive, cnet_client *, size_t)
+typedef struct mysql_script_fake_state {
+  int receive_result;
+  int send_result;
+  int init_result;
+  size_t receive_calls;
+  size_t send_calls;
+  size_t init_calls;
+  size_t receive_demand;
+  cnet_client *receive_client;
+  cnet_client *send_client;
+} mysql_script_fake_state;
+
+static mysql_script_fake_state script_fake;
+
 static int test_receive(cnet_client *client, cnet_connection connection, size_t demand) {
   (void)connection;
-  return script_receive(client, demand);
+  ++script_fake.receive_calls;
+  script_fake.receive_client = client;
+  script_fake.receive_demand = demand;
+  return script_fake.receive_result;
 }
-TINYMOCk_MOCK(int, script_init, cnet_client *, const cnet_client_config *)
-TINYMOCk_MOCK(int, script_send, cnet_client *, mem_buffer_t *)
+
+static int script_init(cnet_client *client, const cnet_client_config *config) {
+  (void)client;
+  (void)config;
+  ++script_fake.init_calls;
+  return script_fake.init_result;
+}
+
 enum { SCRIPT_CAPTURE_CAPACITY = 256u };
 static uint8_t sent_packet[SCRIPT_CAPTURE_CAPACITY];
 static size_t sent_size;
 static int test_send(cnet_client *client, cnet_connection connection, mem_buffer_t *buffer) {
   (void)connection;
+  ++script_fake.send_calls;
+  script_fake.send_client = client;
   sent_size = mem_buffer_used(buffer);
   if (sent_size <= sizeof(sent_packet)) memcpy(sent_packet, mem_buffer_data(buffer), sent_size);
-  return script_send(client, buffer);
+  return script_fake.send_result;
 }
 
 #define cnet_send_buffer test_send
@@ -47,14 +71,10 @@ spec("MySQL native schema script protocol") {
     session.client_capabilities = MYSQL_WIRE_CLIENT_PROTOCOL_41;
     check_equal(mysql_wire_packet_stream_init(&session.stream, 1u,
                     MYSQL_SESSION_CONTROL_CAPACITY), MYSQL_WIRE_STATUS_OK);
-    mock_script_send_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-    mock_script_receive_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-    mock_script_init_set_default_return(TINYMOCk_RETURN(SALTS_ENOMEM));
-  }
-  after_each() {
-    mock_script_send_verify();
-    mock_script_receive_verify();
-    mock_script_init_verify();
+    script_fake = (mysql_script_fake_state){
+        .receive_result = SALTS_OK,
+        .send_result = SALTS_OK,
+        .init_result = SALTS_ENOMEM};
   }
 
   it("sends the complete script as one COM_QUERY and enters multi-result receive") {
@@ -69,8 +89,8 @@ spec("MySQL native schema script protocol") {
     check_equal(memcmp(sent_packet + 5u, sql, sizeof(sql) - 1u), 0);
     mysql_session_on_send(&session, session.connection, sent_size);
     check_equal(session.phase, MYSQL_PHASE_WAIT_SCRIPT_REPLY);
-    tinymock_mock_verify_times(&tinymock_script_send, 1u);
-    tinymock_mock_verify_times(&tinymock_script_receive, 1u);
+    check_equal(script_fake.send_calls, (size_t)1u);
+    check_equal(script_fake.receive_calls, (size_t)1u);
   }
 
   it("negotiates multi-statements only for script sessions before TLS") {
@@ -90,7 +110,7 @@ spec("MySQL native schema script protocol") {
     greeting[23] = 0x08; /* Remove both multi-statement capability bits. */
     mysql_session_handle_greeting(&session, greeting, sizeof(greeting), 0u);
     check_equal(error.status, MYSQL_SESSION_UNSUPPORTED);
-    tinymock_mock_verify_times(&tinymock_script_send, 2u);
+    check_equal(script_fake.send_calls, (size_t)2u);
   }
 
   it("counts multiple OK packets arriving together without finishing early") {
@@ -101,7 +121,7 @@ spec("MySQL native schema script protocol") {
     mysql_session_on_receive(&session, session.connection, &view);
     check_equal(session.phase, MYSQL_PHASE_DONE);
     check_equal(session.script_statements, (uint64_t)2u);
-    tinymock_mock_verify_never(&tinymock_script_receive);
+    check_equal(script_fake.receive_calls, (size_t)0u);
   }
 
   it("waits for a fragmented final result after the first statement") {
@@ -118,7 +138,7 @@ spec("MySQL native schema script protocol") {
     mysql_session_on_receive(&session, session.connection, &view);
     check_equal(session.phase, MYSQL_PHASE_DONE);
     check_equal(session.script_statements, (uint64_t)2u);
-    tinymock_mock_verify_times(&tinymock_script_receive, 1u);
+    check_equal(script_fake.receive_calls, (size_t)1u);
   }
 
   it("preserves a later SQL error without exposing the server text") {
@@ -192,30 +212,29 @@ spec("MySQL native schema script protocol") {
     config.ca_file = "";
     check_equal(mysql_session_execute_script(&config, sql, 1u, 1u,
                     &statements, &error), MYSQL_SESSION_INVALID);
-    tinymock_mock_verify_never(&tinymock_script_init);
+    check_equal(script_fake.init_calls, (size_t)0u);
   }
 
   it("stops after send admission fails without requesting a reply") {
     const uint8_t sql[] = "create table alpha(id int);";
     session.control_sql = sql;
     session.control_sql_size = sizeof(sql) - 1u;
-    mock_script_send_expect(TINYMOCk_ARG(&session.client), TINYMOCk_ANY,
-                            TINYMOCk_RETURN(SALTS_ENOBUFS));
+    script_fake.send_result = SALTS_ENOBUFS;
     mysql_session_begin_action(&session);
     check_equal(session.phase, MYSQL_PHASE_FAILED);
     check_equal(error.status, MYSQL_SESSION_IO);
     check_equal(error.cnet_status, SALTS_ENOBUFS);
     check_equal(error.stage, "send");
-    tinymock_mock_verify_times(&tinymock_script_send, 1u);
-    tinymock_mock_verify_never(&tinymock_script_receive);
+    check_equal(script_fake.send_calls, (size_t)1u);
+    check_true(script_fake.send_client == &session.client);
+    check_equal(script_fake.receive_calls, (size_t)0u);
   }
 
   it("reports receive admission failure after the script was sent") {
     const uint8_t sql[] = "create table alpha(id int);";
     session.control_sql = sql;
     session.control_sql_size = sizeof(sql) - 1u;
-    mock_script_receive_expect(TINYMOCk_ARG(&session.client), TINYMOCk_ARG((size_t)1u),
-                               TINYMOCk_RETURN(SALTS_ENOBUFS));
+    script_fake.receive_result = SALTS_ENOBUFS;
     mysql_session_begin_action(&session);
     mysql_session_on_send(&session, session.connection, sent_size);
     check_equal(session.phase, MYSQL_PHASE_FAILED);
@@ -223,8 +242,10 @@ spec("MySQL native schema script protocol") {
     check_equal(error.cnet_status, SALTS_ENOBUFS);
     check_equal(error.stage, "receive");
     check_equal(session.script_statements, (uint64_t)0u);
-    tinymock_mock_verify_times(&tinymock_script_send, 1u);
-    tinymock_mock_verify_times(&tinymock_script_receive, 1u);
+    check_equal(script_fake.send_calls, (size_t)1u);
+    check_equal(script_fake.receive_calls, (size_t)1u);
+    check_true(script_fake.receive_client == &session.client);
+    check_equal(script_fake.receive_demand, (size_t)1u);
   }
 
   it("fails when the connection closes with another statement result pending") {
@@ -235,8 +256,8 @@ spec("MySQL native schema script protocol") {
     check_equal(error.status, MYSQL_SESSION_IO);
     check_equal(error.stage, "closed");
     check_equal(session.script_statements, (uint64_t)1u);
-    tinymock_mock_verify_never(&tinymock_script_send);
-    tinymock_mock_verify_never(&tinymock_script_receive);
+    check_equal(script_fake.send_calls, (size_t)0u);
+    check_equal(script_fake.receive_calls, (size_t)0u);
   }
 
   it("keeps a final successful result when the peer closes afterward") {
@@ -246,7 +267,7 @@ spec("MySQL native schema script protocol") {
     check_equal(session.phase, MYSQL_PHASE_DONE);
     check_equal(error.status, MYSQL_SESSION_OK);
     check_equal(session.script_statements, (uint64_t)1u);
-    tinymock_mock_verify_never(&tinymock_script_receive);
+    check_equal(script_fake.receive_calls, (size_t)0u);
   }
 
   it("rejects a truncated server error without publishing SQL diagnostics") {
@@ -257,7 +278,7 @@ spec("MySQL native schema script protocol") {
     check_equal(error.stage, "script-result");
     check_equal(error.server_error, (uint16_t)0u);
     check_equal(session.script_statements, (uint64_t)0u);
-    tinymock_mock_verify_never(&tinymock_script_receive);
+    check_equal(script_fake.receive_calls, (size_t)0u);
   }
 
   it("returns transport failure even when optional diagnostic storage is absent") {
@@ -266,7 +287,7 @@ spec("MySQL native schema script protocol") {
     check_equal(mysql_session_execute_script(&config, sql, sizeof(sql) - 1u,
                     sizeof(sql), &statements, NULL), MYSQL_SESSION_IO);
     check_equal(statements, (uint64_t)0u);
-    tinymock_mock_verify_times(&tinymock_script_init, 1u);
+    check_equal(script_fake.init_calls, (size_t)1u);
   }
 
   it("propagates transport allocation failure without publishing a statement count") {
@@ -276,6 +297,6 @@ spec("MySQL native schema script protocol") {
                     sizeof(sql), &statements, &error), MYSQL_SESSION_IO);
     check_equal(statements, (uint64_t)0u);
     check_equal(error.cnet_status, SALTS_ENOMEM);
-    tinymock_mock_verify_times(&tinymock_script_init, 1u);
+    check_equal(script_fake.init_calls, (size_t)1u);
   }
 }

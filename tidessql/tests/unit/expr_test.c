@@ -143,6 +143,27 @@ spec("TidesDB bounded AST predicate program") {
       check_null(program.budget); check_equal(budget.used.value[ORM_SQL_BUDGET_WORK_BYTES],0u);
     }
   }
+  it("exposes the Connector/J initialization aliases and metadata values") {
+    const char *const sql[]={
+      "SELECT @@tx_isolation='SERIALIZABLE'",
+      "SELECT @@query_cache_size=0",
+      "SELECT @@query_cache_type='OFF'",
+      "SELECT @@sql_mode='NO_BACKSLASH_ESCAPES,STRICT_TRANS_TABLES'",
+      "SELECT @@max_allowed_packet=4096",
+      "SELECT @@character_set_results IS NULL"
+    };
+    const orm_sql_evaluation evaluation={
+      .session={.valid=true,.autocommit=true,.max_allowed_packet=4096}
+    };
+    for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
+      reset_budget(); parse(sql[i]); check_equal(binding_count,0u);
+      check_equal(compile(),TURBODB_STATUS_OK);
+      turbodb_value_t output=turbodb_null();
+      check_equal(orm_tidesdb_sql_expr_eval_evaluation(&program,NULL,0,
+          evaluation,&output,&error),TURBODB_STATUS_OK);
+      expect_truth(output,1);
+    }
+  }
   it("includes resolved variable identity in expression equality") {
     parse("SELECT @@autocommit=1"); check_equal(compile(),TURBODB_STATUS_OK);
     orm_sql_expr other={0}; bool same=true;

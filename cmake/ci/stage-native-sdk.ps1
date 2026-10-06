@@ -38,15 +38,37 @@ foreach ($file in Get-Content -LiteralPath $manifest | Sort-Object -Unique) {
   Copy-Item -LiteralPath $file -Destination $destination
 }
 
-# A released Windows SDK carries its vcpkg DLL closure. Salts/SaltsUtils remain
-# explicit NuGet dependencies; development builds keep using the preset PATH.
+$tidessqld = switch ($Rid) {
+  "windows-x64" { Join-Path $stage "bin/tidessqld.exe" }
+  "linux-x64" { Join-Path $stage "bin/tidessqld" }
+  default { $null }
+}
+if ($tidessqld) {
+  if (-not (Test-Path -LiteralPath $tidessqld -PathType Leaf)) {
+    throw "host SDK is missing tidessqld: $tidessqld"
+  }
+} elseif ((Test-Path -LiteralPath (Join-Path $stage "bin/tidessqld") -PathType Leaf) -or
+         (Test-Path -LiteralPath (Join-Path $stage "bin/tidessqld.exe") -PathType Leaf)) {
+  throw "Android SDK must not contain tidessqld"
+}
+
+# Keep this list to the runtime closure of the shipped SQLite and PostgreSQL
+# drivers. Copying the entire vcpkg bin directory leaks unrelated tools and
+# libraries into the SDK. libpq requires the BoringSSL runtime DLLs; the
+# MySQL/TidesSQL implementation and public SDK continue to use bundled GmSSL.
 if ($Rid -eq "windows-x64") {
-  Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/x64-windows/bin/*.dll") `
-    -Destination (Join-Path $stage "bin")
+  $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/x64-windows/bin"
+  foreach ($runtimeDll in @("crypto.dll", "libpq.dll", "sqlite3.dll", "ssl.dll")) {
+    $source = Join-Path $vcpkgBin $runtimeDll
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+      throw "required Windows driver runtime is missing: $source"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $stage "bin")
+  }
 }
 @(
   "package=TurboDB.Native", "version=$Version", "rid=$Rid", "profile=release",
   "salts=$env:SALTS_PACKAGE_VERSION", "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
-  "drivers=sqlite,postgresql,mysql,redis,tidesdb", "source=$env:GITHUB_SHA"
+  "drivers=sqlite,postgresql,mysql,tidesdb", "source=$env:GITHUB_SHA"
 ) | Set-Content -LiteralPath (Join-Path $stage "turbodb-sdk-manifest.txt") -Encoding utf8NoBOM
 "TURBODB_ROOT=$($stage.Replace('\', '/'))" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8

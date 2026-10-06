@@ -2,6 +2,7 @@
 #include "orm_tidesdb_cursor.h"
 
 #include <cmeta/struct.h>
+#define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include "tinymock.h"
 
 #include <stddef.h>
@@ -46,8 +47,16 @@ typedef struct orm_tides_test_state {
   size_t next_count;
 } orm_tides_test_state;
 
-TINYMOCk_MOCK_VOID(orm_tides_test_release_call, void *, void *)
-TINYMOCk_MOCK_VOID(orm_tides_test_destroy, void *)
+FunctionDecl(value, void, orm_tides_test_release_call,
+    (void *, context, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),
+    (void *, row, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+FunctionDecl(value, void, orm_tides_test_destroy,
+    (void *, context, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+TINYMOCk_FUNCTION_DECLARE(orm_tides_test_release_call);
+TINYMOCk_FUNCTION_DECLARE(orm_tides_test_destroy);
 
 static void orm_tides_test_release(void *context,
                                    const unsigned char *row) {
@@ -71,6 +80,14 @@ static const orm_tidesdb_driver_ops orm_tides_test_ops = {
     orm_tides_test_next, orm_tides_test_release, orm_tides_test_destroy};
 
 spec("ORM TidesDB CFlow cursor") {
+  before_each() {
+    TINYMOCk_FUNCTION_RESET(orm_tides_test_release_call);
+    TINYMOCk_FUNCTION_RESET(orm_tides_test_destroy);
+  }
+  after_each() {
+    TINYMOCk_FUNCTION_DESTROY(orm_tides_test_release_call);
+    TINYMOCk_FUNCTION_DESTROY(orm_tides_test_destroy);
+  }
   it("decodes one stored row without constructing a result matrix") {
     static const unsigned char encoded[] = {
         'O','R','M','T','D','B',1,0, 2,0,0,0,
@@ -89,11 +106,6 @@ spec("ORM TidesDB CFlow cursor") {
     cflow_step step;
 
     orm_error_init(&error);
-    mock_orm_tides_test_release_call_reset();
-    mock_orm_tides_test_destroy_reset();
-    mock_orm_tides_test_release_call_expect(TINYMOCk_ARG((void *)&state),
-                                            TINYMOCk_ARG((void *)encoded));
-    mock_orm_tides_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_tidesdb_cursor_start(&cursor, &driver, &cursor_config,
                                          &error), ORM_STATUS_OK);
     check_null(driver.ops);
@@ -106,8 +118,14 @@ spec("ORM TidesDB CFlow cursor") {
     step = cflow_publisher_resume(&source, NULL, &row);
     check_equal(step.kind, CFLOW_STEP_DONE);
     cflow_publisher_destroy(&source);
-    mock_orm_tides_test_release_call_verify();
-    mock_orm_tides_test_destroy_verify();
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_tides_test_release_call, 1u);
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_tides_test_destroy, 1u);
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_tides_test_release_call, 0u, "context", &state));
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_tides_test_release_call, 0u, "row", encoded));
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_tides_test_destroy, 0u, "context", &state));
   }
 
   it("fails fast on a truncated stored row and still releases ownership") {
@@ -127,11 +145,6 @@ spec("ORM TidesDB CFlow cursor") {
     cflow_step step;
 
     orm_error_init(&error);
-    mock_orm_tides_test_release_call_reset();
-    mock_orm_tides_test_destroy_reset();
-    mock_orm_tides_test_release_call_expect(TINYMOCk_ARG((void *)&state),
-                                            TINYMOCk_ARG((void *)truncated));
-    mock_orm_tides_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_tidesdb_cursor_start(&cursor, &driver, &cursor_config,
                                          &error), ORM_STATUS_OK);
     check_equal(orm_row_publisher_init(&source, &cursor, &publisher_config,
@@ -140,7 +153,13 @@ spec("ORM TidesDB CFlow cursor") {
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
     cflow_publisher_destroy(&source);
-    mock_orm_tides_test_release_call_verify();
-    mock_orm_tides_test_destroy_verify();
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_tides_test_release_call, 1u);
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_tides_test_destroy, 1u);
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_tides_test_release_call, 0u, "context", &state));
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_tides_test_release_call, 0u, "row", truncated));
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_tides_test_destroy, 0u, "context", &state));
   }
 }

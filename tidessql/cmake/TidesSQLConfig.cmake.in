@@ -2,14 +2,22 @@
 
 include(CMakeFindDependencyMacro)
 set(_TidesSQL_PREFIX "${PACKAGE_PREFIX_DIR}")
-find_dependency(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}"
+cmake_path(CONVERT "$ENV{SALTS_ROOT}" TO_CMAKE_PATH_LIST _TidesSQL_SALTS_ROOT NORMALIZE)
+find_dependency(Salts CONFIG REQUIRED PATHS "${_TidesSQL_SALTS_ROOT}"
   NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 set(TidesDB_DIR "${_TidesSQL_PREFIX}/@CMAKE_INSTALL_LIBDIR@/cmake/tidesdb")
 find_dependency(TidesDB CONFIG REQUIRED NO_DEFAULT_PATH
   PATHS "${TidesDB_DIR}" NO_CMAKE_FIND_ROOT_PATH)
+if(@TURBODB_BUILD_ORM@)
+  # A combined producer export also contains the static MySQL target, whose
+  # link interface names the bundled provider even when only TidesSQL is used.
+  find_dependency(GmSSL CONFIG REQUIRED
+    PATHS "${_TidesSQL_PREFIX}/share/gmssl" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+endif()
 # Shared types and the parser are exported by the same producer installation.
 # This loads no ORM runtime or plugin targets.
 include("${_TidesSQL_PREFIX}/@CMAKE_INSTALL_LIBDIR@/cmake/TurboDB/TurboDBTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/TidesSQLTargets.cmake")
+unset(_TidesSQL_SALTS_ROOT)
 unset(_TidesSQL_PREFIX)
 check_required_components(TidesSQL)

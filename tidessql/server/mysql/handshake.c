@@ -7,6 +7,11 @@ static uint32_t handshake_required(void) {
   return MYSQL_WIRE_CLIENT_PROTOCOL_41|MYSQL_WIRE_CLIENT_SSL|
       MYSQL_WIRE_CLIENT_SECURE_CONNECTION|MYSQL_WIRE_CLIENT_PLUGIN_AUTH;
 }
+static bool handshake_character_set(uint8_t character_set) {
+  return character_set==TDSQL_MYSQL_BINARY_CHARSET ||
+      character_set==TDSQL_MYSQL_UTF8MB4_GENERAL_CI ||
+      character_set==TDSQL_MYSQL_UTF8MB4_0900_AI_CI;
+}
 uint32_t tdsql_mysql_server_capabilities(bool database) {
   return handshake_required()|MYSQL_WIRE_CLIENT_LONG_PASSWORD|MYSQL_WIRE_CLIENT_LONG_FLAG|
       MYSQL_WIRE_CLIENT_TRANSACTIONS|MYSQL_WIRE_CLIENT_DEPRECATE_EOF|
@@ -69,7 +74,7 @@ static tdsql_mysql_status handshake_header(const uint8_t *data,size_t size,uint3
   if(flags!=TDSQL_MYSQL_OK) return flags;
   header.character_set=data[offset++];
   if(!header.max_packet_size) return TDSQL_MYSQL_INVALID;
-  if(header.character_set!=TDSQL_MYSQL_BINARY_CHARSET) return TDSQL_MYSQL_UNSUPPORTED;
+  if(!handshake_character_set(header.character_set)) return TDSQL_MYSQL_UNSUPPORTED;
   const uint8_t empty[HANDSHAKE_SSL_FILLER]={0};
   if(memcmp(data+HANDSHAKE_SSL_OFFSET,empty,sizeof(empty))) return TDSQL_MYSQL_INVALID;
   *out=header; return TDSQL_MYSQL_OK;

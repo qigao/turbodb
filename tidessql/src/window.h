@@ -15,6 +15,11 @@ typedef enum orm_sql_window_kind {
   ORM_SQL_WINDOW_VAR_POP, ORM_SQL_WINDOW_VAR_SAMP, ORM_SQL_WINDOW_STDDEV_POP, ORM_SQL_WINDOW_STDDEV_SAMP,
   ORM_SQL_WINDOW_BIT_AND, ORM_SQL_WINDOW_BIT_OR, ORM_SQL_WINDOW_BIT_XOR
 } orm_sql_window_kind;
+/* Shared case-insensitive name classification for SELECT binding and parameter
+ * inference. This validates only CALL/name shape; arity and placement remain
+ * the owning SELECT Binder's responsibility. False preserves kind. */
+bool orm_sql_window_kind_at(const sqlparser_document *document,
+    const sqlparser_node *call,orm_sql_window_kind *kind);
 static inline bool orm_sql_window_offset_kind(orm_sql_window_kind kind) {
   return kind == ORM_SQL_LAG || kind == ORM_SQL_LEAD;
 }

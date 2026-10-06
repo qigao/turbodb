@@ -213,8 +213,14 @@ static turbodb_status_t cte_query_page(const orm_sql_query_scope *scope,const or
     if(status!=TURBODB_STATUS_OK) break;
     status=orm_tidesdb_sql_select_destroy(&tail,error);
     orm_sql_query_scope child=*scope; child.root=node->ast; child.anonymous_output=true;
+    if(status==TURBODB_STATUS_OK&&scope->binding_only&&child.prepare_parameters)
+      status=child.prepare_parameters(&child,child.parameter_context,error);
     if(status==TURBODB_STATUS_OK) status=orm_tidesdb_sql_select_bind_tail(&child,&query->schema.schema,
         (sqlparser_list){0},page,&tail,error);
+    if(status==TURBODB_STATUS_OK&&scope->binding_only) {
+      recursion->paged=true;
+      continue;
+    }
     uint64_t skip=0,take=0;
     if(status==TURBODB_STATUS_OK) status=orm_tidesdb_sql_select_validate_parameters(&tail,parameters,vec_size(&tail.parameter_types),&skip,&take,error);
     if(status!=TURBODB_STATUS_OK) break;
@@ -242,8 +248,9 @@ turbodb_status_t orm_sql_cte_query_seed_open(const orm_sql_query_scope *scope,sq
     const vec_t *references,orm_sql_catalog_store *owner,const turbodb_value_t *parameters,
     const orm_sql_cte_query_spec *spec,orm_sql_cte_query *out,turbodb_error_t *error) {
   if(!scope || !scope->document || !scope->budget || !owner || scope->budget!=owner->budget ||
-      !spec || !spec->max_iterations || !out || out->budget || (scope->parameter_count && (!parameters || !scope->parameter_types)) ||
-      (scope->outer_schema&&scope->outer_schema->count&&!parameters) ||
+      !spec || !spec->max_iterations || !out || out->budget ||
+      (scope->parameter_count && (!scope->parameter_types || (!parameters&&!scope->binding_only))) ||
+      (scope->outer_schema&&scope->outer_schema->count&&!parameters&&!scope->binding_only) ||
       (scope->derived_count && !scope->derived) ||
       ((spec->rounds.open || spec->rounds.close || spec->rounds.context) &&
        (!spec->rounds.open || !spec->rounds.close || !spec->rounds.context)) ||
@@ -284,8 +291,8 @@ turbodb_status_t orm_sql_cte_query_member_open(const orm_sql_query_scope *scope,
   if(!scope||!out||out->complete||out->budget!=scope->budget||!owner||owner->budget!=out->budget||
       scope->document!=out->binding_document||definition!=out->binding_definition||
       scope->parameter_count!=out->marker_count||!out->schema.schema.columns||
-      (scope->parameter_count&&(!parameters||!scope->parameter_types))||
-      (scope->outer_schema&&scope->outer_schema->count&&!parameters)||
+      (scope->parameter_count&&(!scope->parameter_types||(!parameters&&!scope->binding_only)))||
+      (scope->outer_schema&&scope->outer_schema->count&&!parameters&&!scope->binding_only)||
       (scope->derived_count&&!scope->derived)||
       (!out->describe&&scope->derived_count&&!out->rounds.open)||
       (!out->describe&&scope->query_count&&(!sources||sources->count!=scope->query_count||!sources->items)))
@@ -309,7 +316,7 @@ turbodb_status_t orm_sql_cte_query_member_open(const orm_sql_query_scope *scope,
     status=cte_query_error(error,TURBODB_STATUS_INVALID_STATE,"recursive CTE parameter layouts differ");
   orm_sql_cte_recursion recursion={out,cte_query_round_open,cte_query_round_close,out->recursion.max_iterations,distinct};
   if(status==TURBODB_STATUS_OK) status=cte_query_page(scope,&shape,parameters,out,&recursion,error);
-  if(status==TURBODB_STATUS_OK && !out->describe) {
+  if(status==TURBODB_STATUS_OK && !out->describe && !scope->binding_only) {
     out->recursion=recursion;
     out->parameter_count=vec_size(&out->initial.plan->parameter_types);
     const size_t captured=out->parameter_count-out->marker_count;
@@ -340,7 +347,9 @@ turbodb_status_t orm_sql_cte_query_member_open(const orm_sql_query_scope *scope,
   }
   turbodb_status_t released=orm_sql_work_release(&bindings,bytes,scope->budget,status==TURBODB_STATUS_OK?error:NULL);
   if(status==TURBODB_STATUS_OK) status=released;
-  if(status==TURBODB_STATUS_OK) { out->complete=true; out->binding_document=NULL; out->execution_closed=false; }
+  if(status==TURBODB_STATUS_OK) {
+    out->complete=true; out->binding_document=NULL; out->execution_closed=scope->binding_only;
+  }
   released=orm_sql_cte_shape_close(&shape,status==TURBODB_STATUS_OK?error:NULL);
   if(status==TURBODB_STATUS_OK) status=released;
   if(status!=TURBODB_STATUS_OK) {

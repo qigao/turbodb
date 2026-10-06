@@ -45,7 +45,7 @@ cmake_add_test(
   TEST_NAME orm_postgres_flow
   SOURCES orm_postgres_flow_test.c
     ${ORM_SOURCE_DIR}/../drivers/postgresql/orm_postgres_cursor.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyTest
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyMock
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/../drivers/postgresql)

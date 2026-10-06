@@ -16,6 +16,14 @@ enum { EXPLAIN_DELIMITER_BYTES = sizeof("; ")-1 };
 static turbodb_status_t explain_error(turbodb_error_t *error, turbodb_status_t status, const char *reason) {
   tdsql_error_set(error,status,reason); return status;
 }
+bool orm_sql_explain_column_at(size_t ordinal,orm_sql_schema_column *out) {
+  static const char *const names[ORM_SQL_EXPLAIN_COLUMNS] = {
+    "id","select_type","table","partitions","type","possible_keys","key","key_len","ref","rows","filtered","Extra"};
+  if(ordinal>=ORM_SQL_EXPLAIN_COLUMNS||!out) return false;
+  const orm_sql_type type={ordinal==EXPLAIN_ID||ordinal==EXPLAIN_ROWS?TURBODB_VALUE_INT64:
+      ordinal==EXPLAIN_FILTERED?TURBODB_VALUE_DOUBLE:TURBODB_VALUE_TEXT,ordinal>=EXPLAIN_TABLE};
+  *out=(orm_sql_schema_column){vstr_from_cstr(names[ordinal]),type}; return true;
+}
 static turbodb_status_t explain_next(void *context, const turbodb_value_t **out, turbodb_error_t *error) {
   orm_sql_explain_source *source = context;
   orm_sql_budget_amount amount = {0}; amount.value[ORM_SQL_BUDGET_EXECUTION_STEPS] = 1;
@@ -70,12 +78,9 @@ turbodb_status_t orm_tidesdb_sql_explain_open(const orm_sql_select *plan, vstr t
   if (length) out->extra[length-EXPLAIN_DELIMITER_BYTES] = '\0';
   if (table.len) memcpy(out->table,table.data,table.len);
   out->table[table.len] = '\0';
-  static const char *const names[ORM_SQL_EXPLAIN_COLUMNS] = {
-    "id","select_type","table","partitions","type","possible_keys","key","key_len","ref","rows","filtered","Extra"};
   for (size_t i = 0; i < ORM_SQL_EXPLAIN_COLUMNS; ++i) {
-    out->types[i] = (orm_sql_type){i == EXPLAIN_ID || i == EXPLAIN_ROWS ? TURBODB_VALUE_INT64 :
-        i == EXPLAIN_FILTERED ? TURBODB_VALUE_DOUBLE : TURBODB_VALUE_TEXT,i >= EXPLAIN_TABLE};
-    out->columns[i] = (orm_sql_schema_column){vstr_from_cstr(names[i]),out->types[i]}; out->values[i] = turbodb_null();
+    (void)orm_sql_explain_column_at(i,&out->columns[i]); out->types[i]=out->columns[i].type;
+    out->values[i] = turbodb_null();
   }
   out->values[EXPLAIN_ID] = turbodb_i64(1); out->values[EXPLAIN_SELECT_TYPE] = turbodb_text("SIMPLE");
   out->values[EXPLAIN_TABLE] = table.len ? turbodb_text(out->table) : turbodb_null();

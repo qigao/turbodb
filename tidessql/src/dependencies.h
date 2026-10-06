@@ -112,8 +112,9 @@ turbodb_status_t orm_sql_dependencies_lateral_metadata_open(const orm_sql_query_
     orm_sql_dependencies *out,turbodb_error_t *error);
 /* Type-only metadata graph for #206. No parameter values/snapshots, runtime
  * caches, EXPLAIN operators or business reads. Nonrecursive WITH/derived,
- * LATERAL and scalar/IN/EXISTS share existing lexical/capture/shape checks;
- * recursive definitions reject. Publishes schemas/binding types only, with
+ * LATERAL and scalar/IN/EXISTS share existing lexical/capture/shape checks.
+ * The recursive variant additionally compiles bounded seed/member schemas but
+ * opens no cache or iteration. Publishes schemas/binding types only, with
  * no evaluable sources; execution reuse rejects. AST/types may die on success.
  * Stable graph/owner/budget live through reverse-topological close. Partial
  * failure remains closeable, following open's cleanup and bounded complexity.
@@ -121,6 +122,9 @@ turbodb_status_t orm_sql_dependencies_lateral_metadata_open(const orm_sql_query_
  * Formal examples/fault tests: ../tests/integration/runtime_test.c. */
 turbodb_status_t orm_sql_dependencies_bind(const orm_sql_query_scope *scope,
     orm_sql_catalog_store *owner,orm_sql_dependencies *out,turbodb_error_t *error);
+turbodb_status_t orm_sql_dependencies_bind_recursive(const orm_sql_query_scope *scope,
+    orm_sql_catalog_store *owner,uint64_t max_iterations,
+    orm_sql_dependencies *out,turbodb_error_t *error);
 /* Construction-only metadata composition; no business runs or query eval.
  * Root must be fully bound, at its final address, before attaching this scan. */
 turbodb_status_t orm_sql_dependencies_explain(struct orm_sql_query *root, turbodb_error_t *error);

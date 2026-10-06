@@ -67,7 +67,8 @@ static void open_database(const char *count,const char *bytes) {
     {turbodb_view("column_family"),turbodb_view(family_name)},
     {turbodb_view("sql_initialize"),turbodb_view("true")},
     {turbodb_view("sql_max_prepared_statements"),turbodb_view(count)},
-    {turbodb_view("sql_max_prepared_bytes"),turbodb_view(bytes)}
+    {turbodb_view("sql_max_prepared_bytes"),turbodb_view(bytes)},
+    {turbodb_view("sql_max_recursive_iterations"),turbodb_view("64")}
   };
   tdsql_config config=tdsql_config_default(); config.options=options; config.option_count=sizeof(options)/sizeof(options[0]);
   check_equal(tdsql_database_open(&config,&database,&error),TURBODB_STATUS_OK);
@@ -127,6 +128,271 @@ spec("TidesSQL public prepared statement lifecycle") {
     check_equal(state().warning_count,1u); check_equal(tdsql_statement_reset(statement,&error),TURBODB_STATUS_OK);
     check_equal(state().warning_count,1u);
   }
+  it("prepares scalar-filtered SHOW and simple EXPLAIN metadata without executing either query") {
+    check_equal(prepare("SHOW TABLES",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),0u); check_equal(tdsql_statement_columns(statement),1u);
+    tdsql_column column={0};
+    check_equal(tdsql_statement_column(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.name.data,"Tables_in_prepared",column.name.len);
+    check_false(state().in_transaction); check_false(state().busy);
+    check_equal(execute(NULL,0),TURBODB_STATUS_OK);
+    tdsql_row row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,1u);
+    check_equal(row.values[0].data.text_value.data,"items",row.values[0].data.text_value.len);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("SHOW TABLES WHERE `Tables_in_prepared`=?",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),1u); check_equal(tdsql_statement_columns(statement),1u);
+    check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_TEXT); check_true(column.nullable);
+    const turbodb_value_t table=turbodb_text("items"); check_equal(execute(&table,1),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW);
+    check_equal(row.values[0].data.text_value.data,"items",row.values[0].data.text_value.len);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("SHOW TABLES WHERE CASE WHEN `Tables_in_prepared`=? "
+        "THEN TRUE ELSE FALSE END",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),1u); check_equal(tdsql_statement_columns(statement),1u);
+    check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_TEXT); check_true(column.nullable);
+    check_equal(execute(&table,1),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,1u);
+    check_equal(row.values[0].data.text_value.data,"items",row.values[0].data.text_value.len);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("SHOW FULL TABLES WHERE `Tables_in_prepared` LIKE ? AND NOT ?",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),2u); check_equal(tdsql_statement_columns(statement),2u);
+    check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_TEXT); check_true(column.nullable);
+    check_equal(tdsql_statement_parameter(statement,1,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_BOOLEAN); check_true(column.nullable);
+    const turbodb_value_t full_table[]={turbodb_text("it%"),turbodb_bool(false)};
+    check_equal(execute(full_table,2),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,2u);
+    check_equal(row.values[0].data.text_value.data,"items",row.values[0].data.text_value.len);
+    check_equal(row.values[1].data.text_value.data,"BASE TABLE",row.values[1].data.text_value.len);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("SHOW TABLES WHERE `Tables_in_prepared` BETWEEN ? AND ? AND "
+        "`Tables_in_prepared` IN (?,?)",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),4u); check_equal(tdsql_statement_columns(statement),1u);
+    for(size_t i=0;i<4;++i) {
+      check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,TURBODB_VALUE_TEXT); check_true(column.nullable);
+    }
+    const turbodb_value_t compound[]={turbodb_text("a"),turbodb_text("z"),
+      turbodb_text("items"),turbodb_text("other")};
+    check_equal(execute(compound,4),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,1u);
+    check_equal(row.values[0].data.text_value.data,"items",row.values[0].data.text_value.len);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("SHOW INDEX FROM items WHERE Non_unique=?",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),1u); check_equal(tdsql_statement_columns(statement),15u);
+    check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_INT64); check_true(column.nullable);
+    const turbodb_value_t unique=turbodb_i64(0); check_equal(execute(&unique,1),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,15u);
+    check_equal(row.values[2].data.text_value.data,"PRIMARY",row.values[2].data.text_value.len);
+    close_result(); close_statement(&statement);
+
+    check_equal(prepare("SHOW VARIABLES WHERE Variable_name=?",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),1u); check_equal(tdsql_statement_columns(statement),2u);
+    const turbodb_value_t variable=turbodb_text("autocommit"); check_equal(execute(&variable,1),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,2u);
+    check_equal(row.values[0].data.text_value.data,"autocommit",row.values[0].data.text_value.len);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("EXPLAIN SELECT score FROM items WHERE id=1",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),0u); check_equal(tdsql_statement_columns(statement),12u);
+    check_equal(tdsql_statement_column(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.name.data,"id",column.name.len);
+    check_equal(tdsql_statement_column(statement,11,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.name.data,"Extra",column.name.len);
+    check_false(state().in_transaction); check_false(state().busy);
+    check_equal(execute(NULL,0),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,12u);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("EXPLAIN SELECT score FROM items WHERE id=?",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),1u); check_equal(tdsql_statement_columns(statement),12u);
+    check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_INT64); check_true(column.nullable);
+    const turbodb_value_t id=turbodb_i64(1); check_equal(execute(&id,1),TURBODB_STATUS_OK);
+    row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,12u);
+    check_equal(next().state,TDSQL_DONE); close_result();
+    check_equal(run_on(other,"ALTER TABLE items ADD COLUMN extra BIGINT"),TURBODB_STATUS_OK);
+    check_equal(execute(&id,1),TURBODB_STATUS_INVALID_STATE); check_null(response.result);
+    check_equal(run_on(other,"ALTER TABLE items DROP COLUMN extra"),TURBODB_STATUS_OK);
+  }
+  it("prepares dependency query markers and tracks their physical schemas") {
+    const struct { const char *sql; size_t columns; } cases[]={
+      {"EXPLAIN SELECT (SELECT score FROM items WHERE id=?) AS value",12},
+      {"SELECT (SELECT score FROM items WHERE id=?) AS value",1},
+      {"WITH q AS(SELECT score FROM items WHERE id=?) SELECT score FROM q",1},
+      {"SELECT q.score FROM (SELECT score FROM items WHERE id=?) q",1},
+      {"SELECT id FROM items WHERE id IN(SELECT id FROM items WHERE score>?)",1},
+      {"SELECT EXISTS(SELECT id FROM items WHERE id=?) AS present",1}
+    };
+    const turbodb_value_t parameter=turbodb_i64(1); tdsql_column column={0};
+    for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
+      info("prepared dependency query: %s",cases[i].sql);
+      check_equal(prepare(cases[i].sql,&statement),TURBODB_STATUS_OK);
+      check_equal(tdsql_statement_parameters(statement),1u);
+      check_equal(tdsql_statement_columns(statement),cases[i].columns);
+      check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,TURBODB_VALUE_INT64); check_true(column.nullable);
+      check_equal(execute(&parameter,1),TURBODB_STATUS_OK); check_equal(next().state,TDSQL_ROW);
+      close_result(); close_statement(&statement);
+    }
+    check_equal(prepare("WITH q AS(SELECT score FROM items WHERE id=?) SELECT score FROM q",
+        &statement),TURBODB_STATUS_OK);
+    check_equal(run_on(other,"ALTER TABLE items ADD COLUMN extra BIGINT"),TURBODB_STATUS_OK);
+    check_equal(execute(&parameter,1),TURBODB_STATUS_INVALID_STATE); check_null(response.result);
+    close_statement(&statement);
+    check_equal(run_on(other,"ALTER TABLE items DROP COLUMN extra"),TURBODB_STATUS_OK);
+  }
+  it("propagates dependency result types through scalar IN and compound prepared expressions") {
+    tdsql_column column={0};
+    check_equal(prepare("SELECT ?+(SELECT id FROM items LIMIT 1) AS n LIMIT ?",&statement),
+        TURBODB_STATUS_OK);
+    const turbodb_value_kind_t scalar_kinds[]={TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64};
+    for(size_t i=0;i<sizeof(scalar_kinds)/sizeof(scalar_kinds[0]);++i) {
+      check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,scalar_kinds[i]); check_true(column.nullable);
+    }
+    const turbodb_value_t scalar[]={turbodb_i64(4),turbodb_u64(1)};
+    check_equal(execute(scalar,2),TURBODB_STATUS_OK);
+    tdsql_row row=next(); check_equal(row.state,TDSQL_ROW);
+    check_equal(row.values[0].kind,TURBODB_VALUE_INT64);
+    check_equal(row.values[0].data.int64_value,5); check_equal(next().state,TDSQL_DONE);
+    close_result(); close_statement(&statement);
+
+    check_equal(prepare("SELECT ? IN(SELECT id FROM items) AS matched",&statement),
+        TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_INT64); check_true(column.nullable);
+    const turbodb_value_t member=turbodb_i64(1);
+    check_equal(execute(&member,1),TURBODB_STATUS_OK); row=next();
+    check_equal(row.state,TDSQL_ROW); check_equal(row.values[0].kind,TURBODB_VALUE_BOOLEAN);
+    check_true(row.values[0].data.boolean_value); check_equal(next().state,TDSQL_DONE);
+    close_result(); close_statement(&statement);
+
+    check_equal(prepare("SELECT ?+1 AS n UNION ALL SELECT score+? AS n FROM items LIMIT ?",
+        &statement),TURBODB_STATUS_OK);
+    const turbodb_value_kind_t compound_kinds[]={
+      TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64};
+    for(size_t i=0;i<sizeof(compound_kinds)/sizeof(compound_kinds[0]);++i) {
+      check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,compound_kinds[i]); check_true(column.nullable);
+    }
+    const turbodb_value_t compound[]={turbodb_i64(4),turbodb_i64(2),turbodb_u64(2)};
+    check_equal(execute(compound,3),TURBODB_STATUS_OK); row=next();
+    check_equal(row.state,TDSQL_ROW); check_equal(row.values[0].data.int64_value,5);
+    row=next(); check_equal(row.state,TDSQL_ROW);
+    check_equal(row.values[0].data.int64_value,12); check_equal(next().state,TDSQL_DONE);
+  }
+  it("infers prepared projection markers from either compound sibling direction") {
+    const char *const sql[]={
+      "SELECT ? AS n UNION ALL SELECT score AS n FROM items LIMIT ?",
+      "SELECT score AS n FROM items WHERE id=1 UNION ALL SELECT ? AS n LIMIT ?"};
+    const int64_t expected[][2]={{7,10},{10,7}};
+    for(size_t statement_index=0;statement_index<sizeof(sql)/sizeof(sql[0]);++statement_index) {
+      check_equal(prepare(sql[statement_index],&statement),TURBODB_STATUS_OK);
+      check_equal(tdsql_statement_parameters(statement),2u);
+      tdsql_column column={0};
+      const turbodb_value_kind_t kinds[]={TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64};
+      for(size_t i=0;i<sizeof(kinds)/sizeof(kinds[0]);++i) {
+        check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+        check_equal(column.kind,kinds[i]); check_true(column.nullable);
+      }
+      const turbodb_value_t values[]={turbodb_i64(7),turbodb_u64(2)};
+      check_equal(execute(values,2),TURBODB_STATUS_OK);
+      for(size_t i=0;i<2;++i) {
+        const tdsql_row row=next(); check_equal(row.state,TDSQL_ROW);
+        check_equal(row.values[0].kind,TURBODB_VALUE_INT64);
+        check_equal(row.values[0].data.int64_value,expected[statement_index][i]);
+      }
+      check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+    }
+
+    check_equal(prepare("SELECT 1 AS n UNION ALL SELECT 1.5 UNION ALL SELECT ? LIMIT ?",&statement),
+        TURBODB_STATUS_OK);
+    tdsql_column column={0};
+    check_equal(tdsql_statement_parameter(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_DOUBLE); check_true(column.nullable);
+    check_equal(tdsql_statement_parameter(statement,1,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_UINT64); check_true(column.nullable);
+  }
+  it("prepares and executes bounded recursive CTE markers without running recursion at prepare") {
+    const char *const sql="WITH RECURSIVE c(n) AS(SELECT 1 UNION ALL "
+        "SELECT n+? FROM c WHERE n<? LIMIT ?) SELECT n+? AS n FROM c ORDER BY n";
+    check_equal(prepare(sql,&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),4u);
+    check_equal(tdsql_statement_columns(statement),1u);
+    tdsql_column column={0};
+    const turbodb_value_kind_t kinds[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,
+      TURBODB_VALUE_UINT64,TURBODB_VALUE_INT64};
+    for(size_t i=0;i<sizeof(kinds)/sizeof(kinds[0]);++i) {
+      check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,kinds[i]); check_true(column.nullable);
+    }
+    check_equal(tdsql_statement_column(statement,0,&column,&error),TURBODB_STATUS_OK);
+    check_equal(column.kind,TURBODB_VALUE_INT64);
+    check_false(state().in_transaction); check_false(state().busy);
+    const turbodb_value_t values[]={turbodb_i64(1),turbodb_i64(100),turbodb_u64(3),turbodb_i64(10)};
+    check_equal(execute(values,4),TURBODB_STATUS_OK);
+    for(int64_t expected=11;expected<=13;++expected) {
+      const tdsql_row row=next(); check_equal(row.state,TDSQL_ROW);
+      check_equal(row.values[0].kind,TURBODB_VALUE_INT64);
+      check_equal(row.values[0].data.int64_value,expected);
+    }
+    check_equal(next().state,TDSQL_DONE);
+  }
+  it("prepares and executes supported scalar function parameters with derived metadata") {
+    check_equal(prepare("SELECT ABS(?) AS absolute,COALESCE(?,score) AS selected,"
+        "ROUND(?,?) AS rounded FROM items WHERE id=1",&statement),TURBODB_STATUS_OK);
+    check_equal(tdsql_statement_parameters(statement),4u); check_equal(tdsql_statement_columns(statement),3u);
+    const turbodb_value_kind_t kinds[]={TURBODB_VALUE_DOUBLE,TURBODB_VALUE_INT64,
+      TURBODB_VALUE_DOUBLE,TURBODB_VALUE_INT64};
+    tdsql_column column={0};
+    for(size_t i=0;i<sizeof(kinds)/sizeof(kinds[0]);++i) {
+      check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,kinds[i]); check_true(column.nullable);
+    }
+    const turbodb_value_t values[]={turbodb_f64(-2.5),turbodb_i64(7),turbodb_f64(1.5),turbodb_i64(0)};
+    check_equal(execute(values,sizeof(values)/sizeof(values[0])),TURBODB_STATUS_OK);
+    const tdsql_row row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,3u);
+    check_equal(row.values[0].kind,TURBODB_VALUE_DOUBLE); check_equal(row.values[0].data.double_value,2.5);
+    check_equal(row.values[1].kind,TURBODB_VALUE_INT64); check_equal(row.values[1].data.int64_value,7);
+    check_equal(row.values[2].kind,TURBODB_VALUE_DOUBLE); check_equal(row.values[2].data.double_value,2.0);
+    check_equal(next().state,TDSQL_DONE);
+  }
+  it("prepares and executes JOIN aggregate and window markers with stable derived metadata") {
+    check_equal(prepare("SELECT a.id,SUM(?) AS total FROM items a JOIN items b ON a.id=b.id+? "
+        "GROUP BY a.id HAVING a.id>?",&statement),TURBODB_STATUS_OK);
+    const turbodb_value_kind_t grouped[]={TURBODB_VALUE_DOUBLE,TURBODB_VALUE_INT64,TURBODB_VALUE_INT64};
+    tdsql_column column={0};
+    for(size_t i=0;i<sizeof(grouped)/sizeof(grouped[0]);++i) {
+      check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,grouped[i]); check_true(column.nullable);
+    }
+    const turbodb_value_t values[]={turbodb_f64(2.5),turbodb_i64(0),turbodb_i64(0)};
+    check_equal(execute(values,3),TURBODB_STATUS_OK);
+    tdsql_row row=next(); check_equal(row.state,TDSQL_ROW); check_equal(row.count,2u);
+    check_equal(row.values[0].data.int64_value,1); check_equal(row.values[1].data.double_value,2.5);
+    check_equal(next().state,TDSQL_DONE); close_result(); close_statement(&statement);
+
+    check_equal(prepare("SELECT NTILE(?) OVER(ORDER BY id ROWS ? PRECEDING) AS bucket "
+        "FROM items",&statement),TURBODB_STATUS_OK);
+    for(size_t i=0;i<2;++i) {
+      check_equal(tdsql_statement_parameter(statement,i,&column,&error),TURBODB_STATUS_OK);
+      check_equal(column.kind,TURBODB_VALUE_UINT64); check_true(column.nullable);
+    }
+    const turbodb_value_t window[]={turbodb_u64(2),turbodb_u64(1)};
+    check_equal(execute(window,2),TURBODB_STATUS_OK); row=next();
+    check_equal(row.state,TDSQL_ROW); check_equal(row.values[0].data.int64_value,1);
+    check_equal(next().state,TDSQL_DONE);
+  }
   it("preserves next read-only transaction mode during prepare") {
     check_equal(run("SET TRANSACTION READ ONLY"),TURBODB_STATUS_OK);
     check_equal(prepare("UPDATE items SET score=? WHERE id=?",&statement),TURBODB_STATUS_OK);
@@ -183,6 +449,25 @@ spec("TidesSQL public prepared statement lifecycle") {
     check_equal(execute(values,2),TURBODB_STATUS_INVALID_STATE); score_is(ORIGINAL_SCORE);
     close_statement(&statement); check_equal(prepare("UPDATE items SET score=? WHERE id=?",&statement),TURBODB_STATUS_OK);
     check_equal(execute(values,2),TURBODB_STATUS_OK); score_is(CHANGED_SCORE);
+  }
+  it("tracks every ordinary JOIN source and invalidates when either schema changes") {
+    check_equal(run("CREATE TABLE other(id BIGINT PRIMARY KEY,value BIGINT)"),TURBODB_STATUS_OK);
+    check_equal(run("INSERT INTO other VALUES(1,20)"),TURBODB_STATUS_OK);
+    check_equal(prepare("SELECT a.score,b.value FROM items a JOIN other b ON a.id=b.id+?",&statement),
+        TURBODB_STATUS_OK);
+    const turbodb_value_t offset=turbodb_i64(0);
+    check_equal(execute(&offset,1),TURBODB_STATUS_OK); tdsql_row row=next();
+    check_equal(row.state,TDSQL_ROW); check_equal(row.values[0].data.int64_value,ORIGINAL_SCORE);
+    check_equal(row.values[1].data.int64_value,20); close_result();
+    check_equal(run_on(other,"ALTER TABLE other ADD COLUMN extra BIGINT"),TURBODB_STATUS_OK);
+    check_equal(execute(&offset,1),TURBODB_STATUS_INVALID_STATE); check_null(response.result);
+    check_equal(tdsql_statement_reset(statement,&error),TURBODB_STATUS_INVALID_STATE);
+    close_statement(&statement);
+    check_equal(run_on(other,"ALTER TABLE other DROP COLUMN extra"),TURBODB_STATUS_OK);
+    check_equal(prepare("SELECT a.score,b.value FROM items a JOIN other b ON a.id=b.id+?",&statement),
+        TURBODB_STATUS_OK);
+    check_equal(run_on(other,"ALTER TABLE items ADD COLUMN extra BIGINT"),TURBODB_STATUS_OK);
+    check_equal(execute(&offset,1),TURBODB_STATUS_INVALID_STATE); check_null(response.result);
   }
   it("invalidates an identical schema after drop and recreate changes table identity") {
     check_equal(prepare("SELECT score FROM items WHERE id=?",&statement),TURBODB_STATUS_OK);
@@ -272,9 +557,9 @@ spec("TidesSQL public prepared statement lifecycle") {
     check_equal(column.kind,TURBODB_VALUE_BLOB);
   }
   it("rejects unsupported prepare shapes without reserving a descriptor") {
-    const char *const unsupported[]={"CREATE TABLE x(id BIGINT)","WITH q AS(SELECT 1 AS id) SELECT id FROM q",
-      "SELECT a.id FROM items a JOIN items b ON a.id=b.id","SELECT ABS(?) AS value",
-      "SELECT score FROM items WHERE id=? AND score=?","INSERT INTO items SELECT id,score FROM items"};
+    const char *const unsupported[]={"CREATE TABLE x(id BIGINT)",
+      "SELECT UNKNOWN_FUNCTION(?) AS value",
+      "INSERT INTO items SELECT id,score FROM items"};
     for(size_t i=0;i<sizeof(unsupported)/sizeof(unsupported[0]);++i) {
       info("unsupported prepared SQL: %s",unsupported[i]);
       check_equal(prepare(unsupported[i],&statement),TURBODB_STATUS_UNSUPPORTED); check_null(statement);
@@ -338,18 +623,32 @@ spec("TidesSQL public prepared statement lifecycle") {
     check_equal(execute(values,1),TURBODB_STATUS_OK); check_equal(response.affected_rows,1u); score_is(ORIGINAL_SCORE);
   }
   it("refunds every temporary and retained WORK reservation on prepare allocation failures") {
-    const char *sql="SELECT score AS value FROM items WHERE id=? LIMIT ?";
-    reserves=resizes=0; check_equal(prepare(sql,&statement),TURBODB_STATUS_OK);
-    const size_t reserve_count=reserves,resize_count=resizes; check_greater(reserve_count,0u); check_greater(resize_count,0u);
-    close_statement(&statement);
-    for(size_t pass=0;pass<2;++pass) {
-      const size_t count=pass?resize_count:reserve_count;
-      for(size_t point=1;point<=count;++point) {
-        reserves=resizes=0; fail_reserve=pass?0:point; fail_resize=pass?point:0;
-        check_equal(prepare(sql,&statement),TURBODB_STATUS_OUT_OF_MEMORY); check_null(statement);
-        fail_reserve=fail_resize=0; check_false(state().busy); check_false(state().in_transaction);
-        check_false(state().rollback_required); check_equal(state().failure,TURBODB_STATUS_OK);
-        check_equal(prepare(sql,&statement),TURBODB_STATUS_OK); close_statement(&statement);
+    const char *const statements[]={
+      "SELECT score AS value FROM items WHERE id=? LIMIT ?",
+      "SHOW TABLES WHERE `Tables_in_prepared` BETWEEN ? AND ? AND `Tables_in_prepared` IN (?,?)",
+      "SELECT CASE WHEN id=? THEN ? ELSE score END AS value FROM items",
+      "SELECT a.id FROM items a JOIN items b ON a.id=b.id+?",
+      "EXPLAIN SELECT score FROM items WHERE id=?",
+      "WITH q AS(SELECT score+? AS n FROM items) SELECT n FROM q WHERE n>?",
+      "SELECT ?+(SELECT id FROM items LIMIT 1) AS n LIMIT ?",
+      "SELECT ?+1 AS n UNION ALL SELECT score+? AS n FROM items LIMIT ?",
+      "SELECT ? AS n UNION ALL SELECT score AS n FROM items LIMIT ?",
+      "WITH RECURSIVE c(n) AS(SELECT 1 UNION ALL SELECT n+? FROM c WHERE n<? LIMIT ?) "
+        "SELECT n+? AS n FROM c"
+    };
+    for(size_t s=0;s<sizeof(statements)/sizeof(statements[0]);++s) {
+      reserves=resizes=0; check_equal(prepare(statements[s],&statement),TURBODB_STATUS_OK);
+      const size_t counts[]={reserves,resizes};
+      check_greater(counts[0],0u); check_greater(counts[1],0u); close_statement(&statement);
+      for(size_t pass=0;pass<2;++pass) {
+        for(size_t point=1;point<=counts[pass];++point) {
+          info("prepare allocation failure: statement %zu, pass %zu, point %zu",s,pass,point);
+          reserves=resizes=0; fail_reserve=pass?0:point; fail_resize=pass?point:0;
+          check_equal(prepare(statements[s],&statement),TURBODB_STATUS_OUT_OF_MEMORY); check_null(statement);
+          fail_reserve=fail_resize=0; check_false(state().busy); check_false(state().in_transaction);
+          check_false(state().rollback_required); check_equal(state().failure,TURBODB_STATUS_OK);
+          check_equal(prepare(statements[s],&statement),TURBODB_STATUS_OK); close_statement(&statement);
+        }
       }
     }
     score_is(ORIGINAL_SCORE);

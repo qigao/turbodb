@@ -308,7 +308,7 @@ static int run_process_e2e(void) {
     goto cleanup;
   }
   if (tidessqld_test_daemon_start(
-          &daemon, TEST_TIDESSQLD, config) != 0) {
+          &daemon, tidessqld_test_executable(TEST_TIDESSQLD), config) != 0) {
     failed = 1;
     goto cleanup;
   }

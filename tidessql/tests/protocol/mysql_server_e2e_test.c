@@ -54,6 +54,24 @@ static void close_client_and_drain_server(void) {
   }
   if(server.initialized) check_equal(server.active,0u);
 }
+static void start_client_until_accepted(void) {
+  uint16_t port=0; check_equal(tdsql_mysql_server_port(&server,&port,&error),TURBODB_STATUS_OK);
+  mysql_session_config_t client={.host="127.0.0.1",.port=port,.username="alice",
+    .password=password,.database="tenant",.ca_file=TEST_TLS_CA,.server_name="localhost",
+    .timeout_ms=TEST_IO_TIMEOUT_MS};
+  mysql_session_cursor_limits_t limits={.max_result_rows=8,.max_columns=8,
+    .max_metadata_bytes=TEST_BUFFER_BYTES,.max_row_bytes=TEST_BUFFER_BYTES,
+    .max_command_bytes=TEST_BUFFER_BYTES};
+  check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
+    &source,&client_error),MYSQL_SESSION_OK);
+  const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
+  while(server.active==0 && salts_monotonic_ms()<deadline) {
+    const mysql_async_step step=mysql_session_async_next(&source);
+    check_false(step.kind==MYSQL_ASYNC_ERROR);
+    size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
+  }
+  check_equal(server.active,1u); check_equal(server.accepted,UINT64_C(1));
+}
 spec("TidesSQL MySQL server existing client end to end") {
   before_each() {
     database=NULL; directory=tt_make_temp_dir("tidessql-mysql-server"); check_not_null(directory);
@@ -156,7 +174,7 @@ spec("TidesSQL MySQL server existing client end to end") {
     check_equal(server.accepted,UINT64_C(1)); check_equal(server.transport_failures,UINT64_C(0));
     check_equal(server.protocol_failures,UINT64_C(0));
   }
-  it("keeps two simultaneous authenticated prepared result sessions isolated") {
+  it("keeps two authenticated prepared result sessions isolated") {
     uint16_t port=0; check_equal(tdsql_mysql_server_port(&server,&port,&error),TURBODB_STATUS_OK);
     mysql_session_config_t client={.host="127.0.0.1",.port=port,.username="alice",
       .password=password,.database="tenant",.ca_file=TEST_TLS_CA,.server_name="localhost",
@@ -166,46 +184,67 @@ spec("TidesSQL MySQL server existing client end to end") {
       .max_command_bytes=TEST_BUFFER_BYTES};
     check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
       &source,&client_error),MYSQL_SESSION_OK);
+    bool first_ready=false;
+    mysql_session_status_t first_status=MYSQL_SESSION_OK;
+    const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
+    while(!first_ready && first_status==MYSQL_SESSION_OK && salts_monotonic_ms()<deadline) {
+      size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
+      const mysql_async_step step=mysql_session_async_next(&source);
+      if(step.kind==MYSQL_ASYNC_METADATA) first_ready=true;
+      else if(step.kind==MYSQL_ASYNC_ERROR) first_status=step.status;
+    }
+    check_equal(first_status,MYSQL_SESSION_OK); check_true(first_ready);
     check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
       &second_source,&client_error),MYSQL_SESSION_OK);
     bool first_done=false,second_done=false,first_row=false,second_row=false;
-    const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
+    mysql_session_status_t second_status=MYSQL_SESSION_OK;
     while((!first_done || !second_done) && salts_monotonic_ms()<deadline) {
       size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
       if(!first_done) {
         const mysql_async_step step=mysql_session_async_next(&source);
         if(step.kind==MYSQL_ASYNC_ROW) first_row=true;
         else if(step.kind==MYSQL_ASYNC_DONE) first_done=true;
-        else check_false(step.kind==MYSQL_ASYNC_ERROR);
+        else if(step.kind==MYSQL_ASYNC_ERROR) { first_status=step.status; first_done=true; }
       }
       if(!second_done) {
         const mysql_async_step step=mysql_session_async_next(&second_source);
         if(step.kind==MYSQL_ASYNC_ROW) second_row=true;
         else if(step.kind==MYSQL_ASYNC_DONE) second_done=true;
-        else check_false(step.kind==MYSQL_ASYNC_ERROR);
+        else if(step.kind==MYSQL_ASYNC_ERROR) { second_status=step.status; second_done=true; }
       }
     }
-    check_true(first_done); check_true(second_done); check_true(first_row); check_true(second_row);
     check_equal(server.accepted,UINT64_C(2)); check_equal(server.active,2u);
     check_equal(server.transport_failures,UINT64_C(0)); check_equal(server.protocol_failures,UINT64_C(0));
+    check_equal(first_status,MYSQL_SESSION_OK); check_equal(second_status,MYSQL_SESSION_OK);
+    check_true(first_done); check_true(second_done); check_true(first_row); check_true(second_row);
   }
   it("bounds shutdown when an accepted client stops before TLS negotiation") {
-    uint16_t port=0; check_equal(tdsql_mysql_server_port(&server,&port,&error),TURBODB_STATUS_OK);
-    mysql_session_config_t client={.host="127.0.0.1",.port=port,.username="alice",
-      .password=password,.database="tenant",.ca_file=TEST_TLS_CA,.server_name="localhost",
-      .timeout_ms=TEST_IO_TIMEOUT_MS};
-    mysql_session_cursor_limits_t limits={.max_result_rows=8,.max_columns=8,
-      .max_metadata_bytes=TEST_BUFFER_BYTES,.max_row_bytes=TEST_BUFFER_BYTES,
-      .max_command_bytes=TEST_BUFFER_BYTES};
-    check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
-      &source,&client_error),MYSQL_SESSION_OK);
+    start_client_until_accepted();
+    check_equal(tdsql_mysql_server_stop(&server,TEST_IO_TIMEOUT_MS,&error),TURBODB_STATUS_OK);
+    check_false(server.initialized);
+    check_equal(mysql_session_async_close(&source,&client_error),MYSQL_SESSION_OK);
+    check_null(source.context);
+  }
+  it("expires an accepted client that stalls before TLS negotiation") {
+    start_client_until_accepted();
     const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-    while(server.active==0 && salts_monotonic_ms()<deadline) {
-      const mysql_async_step step=mysql_session_async_next(&source);
-      check_false(step.kind==MYSQL_ASYNC_ERROR);
-      size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
+    while(server.active && salts_monotonic_ms()<deadline) {
+      size_t events=0;
+      check_equal(tdsql_mysql_server_poll(&server,10,&events,&error),TURBODB_STATUS_OK);
     }
-    check_equal(server.active,1u); check_equal(server.accepted,UINT64_C(1));
+    check_equal(server.active,0u); check_equal(server.closed,UINT64_C(1));
+    check_equal(server.transport_failures,UINT64_C(1));
+    check_equal(server.network_failure,SALTS_ETIMEDOUT);
+    check_equal(mysql_session_async_close(&source,&client_error),MYSQL_SESSION_OK);
+    check_null(source.context);
+  }
+  it("keeps stop timeout retryable without reopening admission") {
+    start_client_until_accepted();
+    check_equal(tdsql_mysql_server_stop(&server,0,&error),TURBODB_STATUS_BUSY);
+    check_true(server.initialized); check_true(server.stopping);
+    size_t events=TEST_CONNECTIONS;
+    check_equal(tdsql_mysql_server_poll(&server,0,&events,&error),TURBODB_STATUS_INVALID_STATE);
+    check_equal(events,0u);
     check_equal(tdsql_mysql_server_stop(&server,TEST_IO_TIMEOUT_MS,&error),TURBODB_STATUS_OK);
     check_false(server.initialized);
     check_equal(mysql_session_async_close(&source,&client_error),MYSQL_SESSION_OK);

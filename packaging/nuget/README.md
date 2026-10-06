@@ -1,10 +1,10 @@
 # TurboDB.Native
 
-预编译 Release SDK，包含 ORM 核心、SQLite/PostgreSQL/MySQL/Redis/TidesDB 驱动，以及 MySQL 和 Redis 通用客户端。MongoDB 暂不发布。
+预编译 Release SDK，包含 ORM 核心、SQLite/PostgreSQL/MySQL/TidesDB 驱动，以及 MySQL 和 Redis 通用客户端。Windows/Linux 另发布独立 `tidessqld`；Redis 不作为 ORM 驱动发布，MongoDB 暂不发布。
 
 每个平台的安装树位于 `sdk/linux-x64`、`sdk/windows-x64`、`sdk/macos-arm64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 另含 dbtools；Android 只发布库。
 
-CI 和发布流程始终以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新稳定版本，通过 `--no-cache --force-evaluate` 重新解析，不锁定版本、不生成依赖锁文件。每个安装树的 `turbodb-sdk-manifest.txt` 仅记录实际构建版本供诊断，不参与后续版本选择。Windows 安装树包含 vcpkg DLL，Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux）加入库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
+CI 和发布流程始终以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新稳定版本，通过 `--no-cache --force-evaluate` 重新解析，不锁定版本、不生成依赖锁文件。每个安装树的 `turbodb-sdk-manifest.txt` 仅记录实际构建版本供诊断，不参与后续版本选择。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll`、`libpq.dll`、`ssl.dll` 和 `crypto.dll`；后两者是 libpq 的传递运行时，不是 MySQL/TidesSQL 的构建接口。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux）加入库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
 
 消费项目也应直接声明 `Salts.Native`、`SaltsUtils.Native` 的 `PackageReference Version="*"`，并在 restore 时使用 `--no-cache --force-evaluate`。NuGet 发布包中的传递依赖不能保证每次都选择最新版本，直接浮动引用才表达这一要求，参见 [NuGet 依赖解析规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution)。
 
@@ -14,7 +14,7 @@ CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 
 
 客户端按需链接 `Orm::C`、`Orm::Cpp`、`Orm::DriverABI`、`TurboDB::MySQL`、`TurboDB::Redis` 或 `TurboDB::SchemaABI`。驱动不通过链接自动加载：从 `TurboDB_DRIVER_DIR` 选择模块并调用 `orm_runtime_load_driver`。ORM 核心不直接依赖数据库客户端。
 
-发布包将核心与五种驱动一起交付，客户端仍按需加载。当前仅支持 Driver ABI 2 / `TurboDb.Driver` 契约版本 4，旧 ABI 插件直接拒绝；升级时统一重编驱动 SDK 消费代码并成套替换核心与驱动。数据库格式不变。
+发布包将核心与四种驱动一起交付，客户端仍按需加载。当前仅支持 Driver ABI 2 / `TurboDb.Driver` 契约版本 4，旧 ABI 插件直接拒绝；升级时统一重编驱动 SDK 消费代码并成套替换核心与驱动。数据库格式不变。
 
 从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。Salts/SaltsUtils 始终使用最新稳定版本。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
 
@@ -27,6 +27,6 @@ TURBODB_NUPKG="dist/TurboDB.Native.${version}.nupkg" \
 
 ORM 核心不得直接链接数据库客户端的约束由 `orm_core_dependencies` CTest 用例验证，随 Windows/Linux 的常规测试运行。
 
-普通 CI 和发布共用 `native-sdk.yml`：各平台构建、测试并安装 SDK；不再运行额外的 installed-consumer 验证。独立 E2E 覆盖 MySQL、PostgreSQL、Redis 真实服务行为，按相关路径触发。发布提交使用 `release: publish TurboDB package` 前缀，跳过重复的普通 SDK 构建；发布流程自身运行同一套测试。
+普通 CI 和发布共用 `native-sdk.yml`：各平台构建、测试并安装 SDK；Windows/Linux 随后分别从安装树和最终 staging 树独立执行 `find_package(TidesSQL)`、`find_package(TurboDB)`，编译链接 `TurboDB::TidesSQL`、`TurboDB::MySQL` 与 `Orm::C`，再从导出的 `TurboDB_DRIVER_DIR` 加载对应 MySQL plugin，核对公开 ABI/driver metadata 并完成生命周期 smoke。独立 E2E 覆盖 MySQL、PostgreSQL 真实服务行为，按相关路径触发。发布提交使用 `release: publish TurboDB package` 前缀，跳过重复的普通 SDK 构建；发布流程自身运行同一套测试。
 
 依赖准备统一在 `.github/actions/setup-native`：读取共享 vcpkg NuGet 二进制缓存，并用 Actions cache 保留本仓库构建产生的本地二进制和 NuGet 包文件。缓存不含凭据配置或构建树，也不替代最新版本解析；vcpkg 仍按包 ABI 选择二进制。

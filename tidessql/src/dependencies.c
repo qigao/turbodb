@@ -1231,7 +1231,8 @@ static turbodb_status_t dependency_recursive_seed_prepare(const orm_sql_query_sc
   }
   if(status==TURBODB_STATUS_OK) status=orm_sql_work_zero(&node->recursion,1,sizeof(orm_sql_cte_query),
       _Alignof(orm_sql_cte_query),scope->budget,&node->recursion_bytes,error);
-  const orm_sql_cte_query_spec spec={.max_iterations=max_iterations,.describe=node->graph->describe,.sources=sources,
+  const orm_sql_cte_query_spec spec={.max_iterations=max_iterations,
+      .describe=node->graph->describe&&!node->graph->binding_only,.sources=sources,
       .rounds={node,dependency_round_open,dependency_round_close}};
   if(status==TURBODB_STATUS_OK)
     status=orm_sql_cte_query_seed_open(&child,node->ast,references,owner,parameters,&spec,vec_at(&node->recursion,0),error);
@@ -1456,6 +1457,14 @@ turbodb_status_t orm_sql_dependencies_lateral_metadata_open(const orm_sql_query_
 turbodb_status_t orm_sql_dependencies_bind(const orm_sql_query_scope *scope,
     orm_sql_catalog_store *owner,orm_sql_dependencies *out,turbodb_error_t *error) {
   return dependency_open(scope,owner,NULL,DEPENDENCY_BIND,0,out,error);
+}
+turbodb_status_t orm_sql_dependencies_bind_recursive(const orm_sql_query_scope *scope,
+    orm_sql_catalog_store *owner,uint64_t max_iterations,
+    orm_sql_dependencies *out,turbodb_error_t *error) {
+  if(!max_iterations)
+    return dependency_error(error,TURBODB_STATUS_INVALID_ARGUMENT,
+        "recursive dependency binding iteration limit must be positive");
+  return dependency_open(scope,owner,NULL,DEPENDENCY_BIND,max_iterations,out,error);
 }
 static bool dependency_replays(const dependency_node *node,size_t round_owner) {
   if(node->lateral) return false;

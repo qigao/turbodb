@@ -34,6 +34,7 @@ typedef struct binding_context {
   vstr qualifier;
   const orm_sql_type *parameter_types;
   const uint64_t *parameter_offsets;
+  const bool *parameter_resolved;
   size_t parameter_count, parameter_marker_count, offset;
   const orm_sql_table_schema *outer_schema;
   vstr outer_qualifier;
@@ -202,6 +203,8 @@ static turbodb_status_t binding_parameter(binding_context *b, const sqlparser_no
   }
   if (first == b->parameter_marker_count || b->parameter_offsets[first] != node->span.offset)
     return binding_error(b, TURBODB_STATUS_INTERNAL_ERROR, "parameter occurrence is not indexed");
+  if (b->parameter_resolved && !b->parameter_resolved[first])
+    return binding_error(b,TURBODB_STATUS_INVALID_STATE,"parameter type is unresolved");
   *slot = first; return TURBODB_STATUS_OK;
 }
 static turbodb_status_t binding_query(binding_context *b, sqlparser_id id, size_t *slot) {
@@ -416,6 +419,7 @@ static turbodb_status_t binding_expression(binding_context *b, sqlparser_id root
 static binding_context binding_scope(const orm_sql_binding_scope *scope, turbodb_error_t *error) {
   return (binding_context){.document = scope->document, .schema = scope->schema, .qualifier = scope->qualifier,
       .parameter_types = scope->parameter_types, .parameter_offsets = scope->parameter_offsets,
+      .parameter_resolved=scope->parameter_resolved,
       .parameter_count = scope->parameter_count,
       .parameter_marker_count=scope->outer_schema ? scope->parameter_marker_count : scope->parameter_count,
       .outer_schema=scope->outer_schema,.outer_qualifier=scope->outer_qualifier,.correlated=scope->correlated,

@@ -19,6 +19,7 @@ static orm_config_t config;
 static const char ddl[] = "CREATE TABLE items(id BIGINT PRIMARY KEY,score BIGINT)";
 static const char recursive_option[] = "sql_max_recursive_iterations";
 static const char found_rows_option[] = "sql_client_found_rows";
+enum { EXPECTED_SESSION_VARIABLE_COUNT = 23, EXPECTED_AUTO_PREFIX_VARIABLE_COUNT = 2 };
 
 static void raw_query(const char *sql) {
   orm_query_destroy(query);
@@ -242,11 +243,12 @@ spec("TidesDB relational profile through the real plugin") {
       raw_query("SET autocommit=1"); command(0);
     }
     it("enumerates supported SHOW VARIABLES values and matches ASCII names with LIKE") {
-      raw_query("SHOW VARIABLES"); check_equal(execute(),ORM_STATUS_OK); count_is(3);
+      raw_query("SHOW VARIABLES"); check_equal(execute(),ORM_STATUS_OK); count_is(EXPECTED_SESSION_VARIABLE_COUNT);
       text_at(0,0,"autocommit"); text_at(0,1,"ON"); text_at(1,0,"transaction_isolation"); text_at(1,1,"SERIALIZABLE");
       text_at(2,0,"transaction_read_only"); text_at(2,1,"OFF");
       raw_query("SET autocommit=0"); command(0); raw_query("SET SESSION TRANSACTION READ ONLY"); command(0);
-      raw_query("SHOW SESSION VARIABLES LIKE 'AUTO%' "); check_equal(execute(),ORM_STATUS_OK); count_is(1); text_at(0,0,"autocommit"); text_at(0,1,"OFF");
+      raw_query("SHOW SESSION VARIABLES LIKE 'AUTO%' "); check_equal(execute(),ORM_STATUS_OK);
+      count_is(EXPECTED_AUTO_PREFIX_VARIABLE_COUNT); text_at(0,0,"autocommit"); text_at(0,1,"OFF");
       raw_query("SHOW LOCAL VARIABLES LIKE 'TRANSACTION_READ_O_L%'"); check_equal(execute(),ORM_STATUS_OK); count_is(1); text_at(0,1,"ON");
       raw_query("SHOW VARIABLES LIKE 'transaction%' "); check_equal(execute(),ORM_STATUS_OK); count_is(2);
       raw_query("SHOW VARIABLES LIKE 'missing%' "); check_equal(execute(),ORM_STATUS_OK); count_is(0);
@@ -255,7 +257,9 @@ spec("TidesDB relational profile through the real plugin") {
     }
     it("rejects unsupported variable scopes names and SHOW filters before writing or committing") {
       seed(); raw_query("BEGIN"); command(0); raw_query("UPDATE items SET score=40 WHERE id=1"); command(1);
-      const char *const unsupported[]={"SELECT @@GLOBAL.autocommit","SELECT @autocommit","SELECT @@sql_mode",
+      raw_query("SELECT @@sql_mode"); check_equal(execute(),ORM_STATUS_OK);
+      text_at(0,0,"NO_BACKSLASH_ESCAPES,STRICT_TRANS_TABLES");
+      const char *const unsupported[]={"SELECT @@GLOBAL.autocommit","SELECT @autocommit",
         "SELECT CASE WHEN FALSE THEN @@unknown ELSE 1 END LIMIT 0",
         "SELECT id FROM items WHERE @@missing=1 LIMIT 0", "SHOW GLOBAL VARIABLES", "SHOW VARIABLES WHERE @@unknown=1",
         "SHOW VARIABLES LIKE 'é%'", "UPDATE items SET score=@@unknown WHERE id=1",

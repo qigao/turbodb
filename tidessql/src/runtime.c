@@ -737,7 +737,10 @@ turbodb_status_t orm_sql_runtime_scope_open(const orm_sql_query_scope *scope,
   memset(&out->as,0,sizeof(out->as));
   const orm_sql_expr_query_sources execution = sources ? *sources :
       (orm_sql_expr_query_sources){.evaluation=scope->evaluation};
-  status = runtime_build(scope,parameters,explain,&execution,out,error);
+  if(scope->prepare_parameters)
+    status=scope->prepare_parameters(&body,scope->parameter_context,error);
+  if(status==TURBODB_STATUS_OK)
+    status = runtime_build(scope,parameters,explain,&execution,out,error);
   if (status != TURBODB_STATUS_OK) {
     const turbodb_status_t released = orm_tidesdb_sql_runtime_close(out,NULL);
     if (released != TURBODB_STATUS_OK) return released;
@@ -784,7 +787,9 @@ static turbodb_status_t runtime_query_construct(const orm_sql_query_scope *input
   scope.dependency_schema_context=out;
   status=runtime_prepare_dependency_schema(&scope,out,false,error);
   if(status==TURBODB_STATUS_OK) status = binding_only ?
-      orm_sql_dependencies_bind(&scope,owner,&out->dependencies,error) : scope.max_iterations ?
+      (scope.max_iterations?
+        orm_sql_dependencies_bind_recursive(&scope,owner,scope.max_iterations,&out->dependencies,error):
+        orm_sql_dependencies_bind(&scope,owner,&out->dependencies,error)) : scope.max_iterations ?
       orm_sql_dependencies_open_recursive(&scope,owner,parameters,false,
           scope.max_iterations,&out->dependencies,error) :
       orm_sql_dependencies_open(&scope,owner,parameters,false,
@@ -795,6 +800,11 @@ static turbodb_status_t runtime_query_construct(const orm_sql_query_scope *input
   scope.derived_count = out->dependencies.derived_count;
   const orm_sql_expr_query_sources sources = {
       vec_data_const(&out->dependencies.sources),out->dependencies.query_count,scope.evaluation};
+  if(status==TURBODB_STATUS_OK&&scope.prepare_parameters) {
+    orm_sql_query_scope body=scope;
+    body.root=runtime_body(scope.document,scope.root);
+    status=scope.prepare_parameters(&body,scope.parameter_context,error);
+  }
   if (status == TURBODB_STATUS_OK)
     status = runtime_build(&scope,parameters,false,&sources,out,error);
   if (status == TURBODB_STATUS_OK && scope.parameter_count&&!binding_only)

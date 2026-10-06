@@ -2,6 +2,7 @@
 #include "orm_mongo_cursor.h"
 
 #include <cmeta/struct.h>
+#define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include "tinymock.h"
 
 #include <stddef.h>
@@ -59,7 +60,10 @@ typedef struct orm_mongo_test_driver_state {
   int fail_next;
 } orm_mongo_test_driver_state;
 
-TINYMOCk_MOCK_VOID(orm_mongo_test_destroy, void *)
+FunctionDecl(value, void, orm_mongo_test_destroy,
+    (void *, context, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+TINYMOCk_FUNCTION_DECLARE(orm_mongo_test_destroy);
 
 static orm_mongo_driver_step orm_mongo_test_next(void *context,
                                                   const void **document) {
@@ -106,6 +110,8 @@ static const orm_mongo_driver_ops orm_mongo_test_ops = {
     orm_mongo_test_next, orm_mongo_test_find, orm_mongo_test_destroy};
 
 spec("ORM MongoDB CFlow cursor") {
+  before_each() { TINYMOCk_FUNCTION_RESET(orm_mongo_test_destroy); }
+  after_each() { TINYMOCk_FUNCTION_DESTROY(orm_mongo_test_destroy); }
   it("accepts the exact byte budget then rejects the next document") {
     static const unsigned char id[] = "id";
     static const unsigned char native_id[] = "_id";
@@ -123,8 +129,6 @@ spec("ORM MongoDB CFlow cursor") {
     orm_row_cursor_step step;
 
     orm_error_init(&error);
-    mock_orm_mongo_test_destroy_reset();
-    mock_orm_mongo_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_mongo_cursor_start(&cursor, &driver, fields, 2u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
@@ -134,7 +138,9 @@ spec("ORM MongoDB CFlow cursor") {
     check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
     check_equal(step.status, ORM_STATUS_LIMIT_EXCEEDED);
     cursor.ops->destroy(cursor.context);
-    mock_orm_mongo_test_destroy_verify();
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_mongo_test_destroy, 1u);
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_mongo_test_destroy, 0u, "context", &state));
   }
 
   it("rejects a document beyond max_result_bytes") {
@@ -154,8 +160,6 @@ spec("ORM MongoDB CFlow cursor") {
     orm_row_cursor_step step;
 
     orm_error_init(&error);
-    mock_orm_mongo_test_destroy_reset();
-    mock_orm_mongo_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_mongo_cursor_start(&cursor, &driver, fields, 2u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
@@ -163,7 +167,9 @@ spec("ORM MongoDB CFlow cursor") {
     check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
     check_equal(step.status, ORM_STATUS_LIMIT_EXCEEDED);
     cursor.ops->destroy(cursor.context);
-    mock_orm_mongo_test_destroy_verify();
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_mongo_test_destroy, 1u);
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_mongo_test_destroy, 0u, "context", &state));
   }
 
   it("advances one native document per resume and destroys the driver once") {
@@ -187,8 +193,6 @@ spec("ORM MongoDB CFlow cursor") {
     cflow_step step;
 
     orm_error_init(&error);
-    mock_orm_mongo_test_destroy_reset();
-    mock_orm_mongo_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_mongo_cursor_start(&cursor, &driver, fields, 2u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
@@ -209,7 +213,9 @@ spec("ORM MongoDB CFlow cursor") {
     check_equal(step.kind, CFLOW_STEP_DONE);
 
     cflow_publisher_destroy(&source);
-    mock_orm_mongo_test_destroy_verify();
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_mongo_test_destroy, 1u);
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_mongo_test_destroy, 0u, "context", &state));
   }
 
   it("propagates a native cursor failure and destroys the driver once") {
@@ -229,8 +235,6 @@ spec("ORM MongoDB CFlow cursor") {
     cflow_step step;
 
     orm_error_init(&error);
-    mock_orm_mongo_test_destroy_reset();
-    mock_orm_mongo_test_destroy_expect(TINYMOCk_ARG((void *)&state));
     check_equal(orm_mongo_cursor_start(&cursor, &driver, &field, 1u,
                                        &cursor_config, &error),
                 ORM_STATUS_OK);
@@ -240,6 +244,8 @@ spec("ORM MongoDB CFlow cursor") {
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_not_null(step.error);
     cflow_publisher_destroy(&source);
-    mock_orm_mongo_test_destroy_verify();
+    TINYMOCk_FUNCTION_VERIFY_TIMES(orm_mongo_test_destroy, 1u);
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_mongo_test_destroy, 0u, "context", &state));
   }
 }

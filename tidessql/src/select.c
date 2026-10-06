@@ -73,6 +73,7 @@ typedef struct select_binder {
   const orm_sql_table_schema *outer_schema;
   vstr outer_qualifier;
   size_t parameter_marker_count;
+  const bool *parameter_resolved;
   bool correlated;
   size_t offset;
   turbodb_error_t *error;
@@ -119,6 +120,7 @@ static turbodb_status_t bind_parameters(select_binder *b, const orm_sql_type *ty
         _Alignof(orm_sql_type), &b->plan.parameter_type_bytes);
   for (size_t i = 0; status == TURBODB_STATUS_OK && i < count+outer; ++i) {
     const orm_sql_type type=i<count?types[i]:b->outer_schema->columns[i-count].type;
+    if(i<count&&b->parameter_resolved&&!b->parameter_resolved[i]) continue;
     orm_sql_predicate validator;
     status = orm_tidesdb_sql_predicate_bind(ORM_SQL_IS_NULL, type, NULL, &validator, b->error);
     if (status == TURBODB_STATUS_OK) *(orm_sql_type *)vec_at(&b->plan.parameter_types, i) = type;
@@ -137,6 +139,8 @@ static turbodb_status_t parameter_slot(select_binder *b, const sqlparser_node *n
   if (first == vec_size(&b->plan.parameter_offsets) ||
       *(const uint64_t *)vec_at_const(&b->plan.parameter_offsets, first) != node->span.offset)
     return bind_error(b, TURBODB_STATUS_INTERNAL_ERROR, "parameter occurrence is not indexed");
+  if(b->parameter_resolved&&!b->parameter_resolved[first])
+    return bind_error(b,TURBODB_STATUS_INVALID_STATE,"parameter type is unresolved");
   *slot = first;
   return TURBODB_STATUS_OK;
 }
@@ -199,6 +203,7 @@ static turbodb_status_t node_name(select_binder *b, sqlparser_id id, bool qualif
 static turbodb_status_t find_column(select_binder *b, sqlparser_id node, size_t *out) {
   const orm_sql_binding_scope scope = {.document=b->document,.schema=b->schema,.qualifier=b->qualifier,.budget=b->plan.budget,
       .parameter_types=vec_data_const(&b->plan.parameter_types),.parameter_count=vec_size(&b->plan.parameter_types),
+      .parameter_resolved=b->parameter_resolved,
       .parameter_marker_count=b->parameter_marker_count,.outer_schema=b->outer_schema,.outer_qualifier=b->outer_qualifier,
       .correlated=&b->correlated,.hidden_input=b->hidden_input};
   return orm_sql_bind_column(&scope,node,out,b->error);
@@ -395,6 +400,7 @@ static turbodb_status_t bind_expression(select_binder *b, sqlparser_id root, siz
     select_expression_target target, bool predicate) {
   const orm_sql_binding_scope scope = {.document = b->document, .schema = b->schema, .qualifier = b->qualifier,
       .parameter_types = vec_data_const(&b->plan.parameter_types), .parameter_offsets = vec_data_const(&b->plan.parameter_offsets),
+      .parameter_resolved=b->parameter_resolved,
       .parameter_count = vec_size(&b->plan.parameter_types), .budget = b->plan.budget,
       .parameter_marker_count=b->parameter_marker_count,.outer_schema=b->outer_schema,.outer_qualifier=b->outer_qualifier,
       .correlated=&b->correlated,
@@ -445,23 +451,6 @@ static turbodb_status_t bind_query_scope(select_binder *b, const sqlparser_node 
         *(unsigned char *)vec_at(&b->nested_nodes,j) = 1;
   }
   return status;
-}
-static bool bind_window_kind(select_binder *b, const sqlparser_node *call, orm_sql_window_kind *kind) {
-  static const char *const names[] = {"ROW_NUMBER","RANK","DENSE_RANK","PERCENT_RANK","CUME_DIST","NTILE","LAG","LEAD",
-      "FIRST_VALUE","LAST_VALUE","NTH_VALUE"};
-  if (!call || call->kind != SQLPARSER_CALL) return false;
-  const sqlparser_node *name = sqlparser_get_node(b->document,call->as.call.name);
-  const char *text = sqlparser_text(b->document,name->span);
-  for (size_t i = 0; i < sizeof(names)/sizeof(names[0]); ++i) {
-    bool same = name->span.length == strlen(names[i]);
-    for (size_t j = 0; same && j < name->span.length; ++j)
-      same = (text[j] >= 'a' && text[j] <= 'z' ? text[j]-('a'-'A') : text[j]) == names[i][j];
-    if (same) { *kind = (orm_sql_window_kind)i; return true; }
-  }
-  orm_sql_aggregate_kind aggregate;
-  if (!orm_sql_bind_aggregate_kind(b->document,call,&aggregate)) return false;
-  *kind=(orm_sql_window_kind)(ORM_SQL_WINDOW_COUNT_ALL+aggregate);
-  return true;
 }
 static bool select_window_name_same(vstr left, vstr right) {
   if (left.len != right.len) return false;
@@ -598,7 +587,7 @@ static turbodb_status_t bind_window_admission(select_binder *b, const sqlparser_
       if (status != TURBODB_STATUS_OK) return status;
     }
     const sqlparser_node *call = sqlparser_get_node(b->document,node->as.window.call);
-    if (!bind_window_kind(b,call,&window->kind))
+    if (!orm_sql_window_kind_at(b->document,call,&window->kind))
       return bind_error(b,TURBODB_STATUS_UNSUPPORTED,"unsupported SQL window function");
     const bool offset = orm_sql_window_offset_kind(window->kind);
     const bool aggregate_window = orm_sql_window_aggregate_kind(window->kind);
@@ -1611,6 +1600,7 @@ static turbodb_status_t select_bind_parameters(const sqlparser_document *documen
       .scalar_output=scope && scope->scalar_output,.anonymous_output=scope && scope->anonymous_output,
       .no_from=!statement->as.select.from,.hidden_input=!statement->as.select.from,
       .outer_schema=scope?scope->outer_schema:NULL,.outer_qualifier=scope?scope->outer_qualifier:(vstr){0}};
+  b.parameter_resolved=scope?scope->parameter_resolved:NULL;
   b.plan.distinct = statement->as.select.distinct;
   vec_t group_schema = {0}, substitutions = {0}; size_t group_schema_bytes = 0, substitution_bytes = 0;
   vec_t window_schema = {0}; size_t window_schema_bytes = 0;
@@ -1716,7 +1706,8 @@ turbodb_status_t orm_tidesdb_sql_select_bind_tail(const orm_sql_query_scope *sco
     return select_error(error,TURBODB_STATUS_LIMIT_EXCEEDED,0,"query tail width exceeds plan capacity");
   select_binder b = {.document=scope->document,.schema=schema,.plan={.budget=scope->budget},.error=error,
       .queries=scope->queries,.query_count=scope->query_count,.anonymous_output=scope->anonymous_output,
-      .outer_schema=scope->outer_schema,.outer_qualifier=scope->outer_qualifier};
+      .outer_schema=scope->outer_schema,.outer_qualifier=scope->outer_qualifier,
+      .parameter_resolved=scope->parameter_resolved};
   turbodb_status_t status = orm_tidesdb_sql_budget_reserve_capacity(scope->budget,1,sizeof(b),0,&b.plan.metadata_bytes,error);
   if (status == TURBODB_STATUS_OK) status = bind_schema(&b,scope->scalar_output || scope->anonymous_output,true);
   if (status == TURBODB_STATUS_OK) status = bind_parameters(&b,scope->parameter_types,scope->parameter_count);

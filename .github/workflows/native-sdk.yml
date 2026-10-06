@@ -48,6 +48,26 @@ jobs:
           "VSINSTALL=$vs" >> $env:GITHUB_ENV
           choco install ninja -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw 'Ninja install failed' }
+      - name: Install Java for Connector/J compatibility test
+        if: matrix.rid != 'android-arm64-v8a'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Fetch Connector/J compatibility fixture
+        if: matrix.rid != 'android-arm64-v8a'
+        shell: pwsh
+        env:
+          CONNECTOR_J_VERSION: '9.1.0'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          mvn --batch-mode dependency:get "-Dartifact=com.mysql:mysql-connector-j:$env:CONNECTOR_J_VERSION" -Dtransitive=false
+          if ($LASTEXITCODE -ne 0) { throw 'Connector/J download failed' }
+          $userHome = [Environment]::GetFolderPath('UserProfile')
+          if ([string]::IsNullOrWhiteSpace($userHome)) { throw 'User profile directory was not found' }
+          $jar = Join-Path $userHome ".m2/repository/com/mysql/mysql-connector-j/$env:CONNECTOR_J_VERSION/mysql-connector-j-$env:CONNECTOR_J_VERSION.jar"
+          if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Connector/J jar was not found: $jar" }
+          "CONNECTOR_J_JAR=$jar" >> $env:GITHUB_ENV
       - name: Install published native SDK pair
         shell: pwsh
         env:
@@ -58,12 +78,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake --preset '${{ matrix.preset }}'
+          if [[ '${{ matrix.rid }}' == linux-x64 ]]; then
+            cmake --preset '${{ matrix.preset }}' -DTURBODB_MYSQL_CONNECTOR_J_JAR="$CONNECTOR_J_JAR"
+          else
+            cmake --preset '${{ matrix.preset }}'
+          fi
           cmake --build --preset '${{ matrix.preset }}' --parallel 4
           if [[ '${{ matrix.rid }}' == linux-x64 ]]; then
             ctest --preset '${{ matrix.preset }}'
           fi
           cmake --build --preset 'install-${{ matrix.preset }}' --parallel 4
+          if [[ '${{ matrix.rid }}' == linux-x64 ]]; then
+            pwsh -NoProfile -File ./cmake/ci/test-installed-sdk.ps1 -Rid linux-x64
+          fi
       - name: Build test and install on macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -79,7 +106,7 @@ jobs:
         run: |
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
-          cmake --preset ci-windows-release
+          cmake --preset ci-windows-release -DTURBODB_MYSQL_CONNECTOR_J_JAR="%CONNECTOR_J_JAR%"
           if errorlevel 1 exit /b 1
           cmake --build --preset ci-windows-release --parallel 4
           if errorlevel 1 exit /b 1
@@ -87,9 +114,40 @@ jobs:
           if errorlevel 1 exit /b 1
           cmake --build --preset install-ci-windows-release --parallel 4
           if errorlevel 1 exit /b 1
+          pwsh -NoProfile -File .\cmake\ci\test-installed-sdk.ps1 -Rid windows-x64
+          if errorlevel 1 exit /b 1
+      - name: Test installed tidessqld
+        if: matrix.rid != 'android-arm64-v8a'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $executable = if ($IsWindows) { 'tidessqld.exe' } else { 'tidessqld' }
+          $env:TURBODB_TEST_TIDESSQLD = Join-Path $env:TURBODB_CI_PKG_ROOT "turbodb/release/bin/$executable"
+          if (-not (Test-Path -LiteralPath $env:TURBODB_TEST_TIDESSQLD -PathType Leaf)) {
+            throw "installed tidessqld was not found: $env:TURBODB_TEST_TIDESSQLD"
+          }
+          ctest --preset '${{ matrix.preset }}' `
+            -R '^(tidessqld_(process_e2e|cli|connector_j_e2e)|orm_mysql_tidessqld_e2e)$' `
+            -j 1 --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'installed tidessqld tests failed' }
       - name: Stage native SDK
         shell: pwsh
         run: ./cmake/ci/stage-native-sdk.ps1 -Rid '${{ matrix.rid }}' -Version '${{ inputs.version }}'
+      - name: Test staged native SDK on Linux
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        run: >-
+          pwsh -NoProfile -File ./cmake/ci/test-installed-sdk.ps1
+          -Rid linux-x64
+          -SdkRoot "$GITHUB_WORKSPACE/build/stage/sdk/linux-x64"
+      - name: Test staged native SDK on Windows
+        if: matrix.rid == 'windows-x64'
+        shell: cmd
+        run: |
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+          if errorlevel 1 exit /b 1
+          pwsh -NoProfile -File .\cmake\ci\test-installed-sdk.ps1 -Rid windows-x64 -SdkRoot "%GITHUB_WORKSPACE%\build\stage\sdk\windows-x64"
+          if errorlevel 1 exit /b 1
       - uses: actions/upload-artifact@v4
         with:
           name: turbodb-sdk-${{ matrix.rid }}

@@ -2,7 +2,7 @@ cmake_add_test(
   NAME orm_command_publisher_mock_test
   TEST_NAME orm_command_publisher_mock
   SOURCES orm_command_publisher_mock_test.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyTest Salts::TinyMock
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
   FOLDER "orm/tests/flow/command")

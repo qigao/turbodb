@@ -95,7 +95,7 @@ static void statement_metadata(const char *sql,const turbodb_value_kind_t *kinds
   const orm_sql_budget_amount before=budget.used;
   orm_tidesdb_transaction_t *transaction=owner.transaction;
   const uint64_t warnings=evaluation_diagnostics.total;
-  const turbodb_status_t status=orm_sql_parameters_statement(document,&owner,DEPTH,&parameters,&error);
+  const turbodb_status_t status=orm_sql_parameters_statement(document,&owner,DEPTH,DEPTH,&parameters,&error);
   if(status!=expected) info("statement inference status %d: %s",status,error.message);
   check_equal(status,expected); sqlparser_document_destroy(document);
   if(status==TURBODB_STATUS_OK) {
@@ -724,15 +724,15 @@ spec("TidesDB private unified SQL runtime") {
         check_equal(owner.active_sources,0u); check_equal(budget.used.value[ORM_SQL_BUDGET_WORK_BYTES],work);
       }
     }
-    it("rejects recursive definitions even with a positive iteration budget") {
+    it("binds recursive definitions only with a positive iteration budget") {
       const char *const sql="WITH RECURSIVE q(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM q WHERE n<3) SELECT n FROM q";
       check_equal(bind_query(sql,NULL,0),TURBODB_STATUS_UNSUPPORTED);
       sqlparser_document *document=parse(sql);
       const orm_sql_query_scope scope={.document=document,.root=sqlparser_statements(document).first,
         .max_depth=DEPTH,.max_iterations=DEPTH,.budget=&budget};
-      check_equal(orm_sql_runtime_query_bind(&scope,&owner,&query,&error),TURBODB_STATUS_UNSUPPORTED);
+      check_equal(orm_sql_runtime_query_bind(&scope,&owner,&query,&error),TURBODB_STATUS_OK);
       sqlparser_document_destroy(document);
-      check_null(query.owner); check_equal(owner.active_sources,0u);
+      close_query(&query); check_equal(owner.active_sources,0u);
     }
     it("refunds every allocation failure in correlated CTE and lateral metadata graphs") {
       seed(); const orm_sql_type type={TURBODB_VALUE_INT64,true};
@@ -858,14 +858,15 @@ spec("TidesDB private unified SQL runtime") {
       check_equal(orm_sql_change_bind(&scope,&owner,&error),TURBODB_STATUS_UNSUPPORTED);
       sqlparser_document_destroy(document);
     }
-    it("keeps recursive preparation disabled regardless of the supplied iteration limit") {
+    it("binds bounded recursive INSERT SELECT but rejects recursive mutation dependencies") {
       seed(); const char *const sql[]={
         "WITH RECURSIVE c(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<3) UPDATE items SET score=1 WHERE id IN(SELECT n FROM c)",
         "WITH RECURSIVE c(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<3) DELETE FROM items WHERE id IN(SELECT n FROM c)",
         "INSERT INTO items WITH RECURSIVE c(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<3) SELECT n,n FROM c"};
       for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
         check_equal(bind_write(sql[i],NULL,0),TURBODB_STATUS_UNSUPPORTED);
-        check_equal(bind_write_iterations(sql[i],NULL,0,DEPTH),TURBODB_STATUS_UNSUPPORTED);
+        check_equal(bind_write_iterations(sql[i],NULL,0,DEPTH),i==2?
+            TURBODB_STATUS_OK:TURBODB_STATUS_UNSUPPORTED);
       }
     }
     it("refunds every partial reserve and resize failure in write dependency binding") {
@@ -1003,6 +1004,20 @@ spec("TidesDB private unified SQL runtime") {
         TURBODB_VALUE_UINT64,TURBODB_VALUE_UINT64};
       statement_metadata("SELECT i.*,?+i.score AS n FROM items i WHERE i.id=? ORDER BY i.score+? DESC LIMIT ?,?",
           table,sizeof(table)/sizeof(table[0]),TURBODB_STATUS_OK);
+      statement_metadata("SELECT id FROM items WHERE id=? AND score=?",
+          table,2,TURBODB_STATUS_OK);
+      const turbodb_value_kind_t compound[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_INT64,TURBODB_VALUE_INT64};
+      statement_metadata("SELECT id FROM items WHERE id BETWEEN ? AND ? AND score IN (?,?)",
+          compound,sizeof(compound)/sizeof(compound[0]),TURBODB_STATUS_OK);
+      const turbodb_value_kind_t conditional[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64};
+      statement_metadata("SELECT CASE WHEN id=? THEN ? ELSE score END AS value FROM items",
+          conditional,sizeof(conditional)/sizeof(conditional[0]),TURBODB_STATUS_OK);
+      const turbodb_value_kind_t functions[]={TURBODB_VALUE_DOUBLE,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_DOUBLE,TURBODB_VALUE_INT64,TURBODB_VALUE_INT64};
+      statement_metadata("SELECT ABS(?) AS absolute,COALESCE(?,score) AS selected,"
+          "ROUND(?,?) AS rounded FROM items WHERE id=?",functions,
+          sizeof(functions)/sizeof(functions[0]),TURBODB_STATUS_OK);
     }
     it("maps reordered multirow INSERT targets SET defaults REPLACE and duplicate assignments to real columns") {
       seed(); const turbodb_value_kind_t types[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,
@@ -1043,6 +1058,77 @@ spec("TidesDB private unified SQL runtime") {
       statement_metadata("UPDATE items SET score=DEFAULT WHERE id=1",NULL,0,TURBODB_STATUS_OK);
       statement_metadata("DELETE FROM items WHERE id=1 LIMIT 0",NULL,0,TURBODB_STATUS_OK);
     }
+    it("infers ordinary JOIN grouping aggregate and window control markers before full binding") {
+      seed();
+      const turbodb_value_kind_t grouped[]={TURBODB_VALUE_DOUBLE,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64};
+      statement_metadata("SELECT a.id,SUM(?) AS total FROM items a JOIN items b ON a.id=b.id+? "
+          "WHERE a.score>? GROUP BY a.id HAVING a.id>? ORDER BY a.id+? LIMIT ?",
+          grouped,sizeof(grouped)/sizeof(grouped[0]),TURBODB_STATUS_OK);
+      const turbodb_value_kind_t windowed[]={TURBODB_VALUE_UINT64,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64,TURBODB_VALUE_UINT64,
+        TURBODB_VALUE_TEXT,TURBODB_VALUE_UINT64};
+      statement_metadata("SELECT NTILE(?) OVER(PARTITION BY id+? ORDER BY score+? "
+          "ROWS BETWEEN ? PRECEDING AND ? FOLLOWING) AS bucket,"
+          "LAG(?) OVER(ORDER BY id) AS carried FROM items LIMIT ?",
+          windowed,sizeof(windowed)/sizeof(windowed[0]),TURBODB_STATUS_OK);
+      const turbodb_value_kind_t named[]={TURBODB_VALUE_TEXT,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64};
+      statement_metadata("SELECT COUNT(?) OVER w AS count FROM items WINDOW w AS "
+          "(PARTITION BY id+? ORDER BY score+? ROWS ? PRECEDING)",
+          named,sizeof(named)/sizeof(named[0]),TURBODB_STATUS_OK);
+    }
+    it("infers CTE and derived query-block markers before binding their owners") {
+      seed();
+      const turbodb_value_kind_t one[]={TURBODB_VALUE_INT64};
+      statement_metadata("SELECT d.n FROM (SELECT score+? AS n FROM items) d",
+          one,sizeof(one)/sizeof(one[0]),TURBODB_STATUS_OK);
+      statement_metadata("WITH q AS(SELECT score+? AS n FROM items) SELECT n FROM q",
+          one,sizeof(one)/sizeof(one[0]),TURBODB_STATUS_OK);
+      const turbodb_value_kind_t text[]={TURBODB_VALUE_TEXT};
+      statement_metadata("WITH q AS(SELECT 1 AS n) SELECT ? AS label FROM q",
+          text,sizeof(text)/sizeof(text[0]),TURBODB_STATUS_OK);
+    }
+    it("infers markers against correlated outer query schemas") {
+      seed(); const turbodb_value_kind_t one[]={TURBODB_VALUE_INT64};
+      statement_metadata("SELECT (SELECT a.score+?) AS n FROM items a",
+          one,sizeof(one)/sizeof(one[0]),TURBODB_STATUS_OK);
+    }
+    it("keeps unrelated root markers unresolved while binding an earlier scalar child") {
+      seed();
+      const turbodb_value_kind_t nested[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_UINT64};
+      statement_metadata("SELECT (SELECT score+? FROM items) AS n FROM items WHERE id>? LIMIT ?",
+          nested,sizeof(nested)/sizeof(nested[0]),TURBODB_STATUS_OK);
+    }
+    it("infers markers from scalar IN and compound query dependencies") {
+      seed();
+      statement_metadata("SELECT (SELECT 1) AS n",NULL,0,TURBODB_STATUS_OK);
+      statement_metadata("SELECT id FROM items WHERE id IN(SELECT id FROM items)",NULL,0,TURBODB_STATUS_OK);
+      statement_metadata("SELECT id FROM items UNION SELECT id FROM items",NULL,0,TURBODB_STATUS_OK);
+      const turbodb_value_kind_t scalar[]={TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64};
+      statement_metadata("SELECT ?+(SELECT id FROM items LIMIT 1) AS n LIMIT ?",scalar,2,TURBODB_STATUS_OK);
+      const turbodb_value_kind_t membership[]={TURBODB_VALUE_INT64};
+      statement_metadata("SELECT ? IN(SELECT id FROM items) AS matched",membership,1,TURBODB_STATUS_OK);
+      const turbodb_value_kind_t compound[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_UINT64};
+      statement_metadata("SELECT ?+1 AS n UNION ALL SELECT score+? AS n FROM items LIMIT ?",
+          compound,sizeof(compound)/sizeof(compound[0]),TURBODB_STATUS_OK);
+    }
+    it("binds recursive CTE seed and member metadata without parameter values or iteration") {
+      seed();
+      const turbodb_value_kind_t recursive[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,
+        TURBODB_VALUE_UINT64,TURBODB_VALUE_INT64};
+      statement_metadata("WITH RECURSIVE c(n) AS(SELECT 1 UNION ALL "
+          "SELECT n+? FROM c WHERE n<? LIMIT ?) SELECT n+? AS n FROM c",
+          recursive,sizeof(recursive)/sizeof(recursive[0]),TURBODB_STATUS_OK);
+      sqlparser_document *document=parse("WITH RECURSIVE c(n) AS(SELECT 1 UNION ALL "
+          "SELECT n+? FROM c WHERE n<?) SELECT n FROM c");
+      orm_sql_parameters parameters={0};
+      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,0,&parameters,&error),
+          TURBODB_STATUS_UNSUPPORTED);
+      check_null(parameters.budget); sqlparser_document_destroy(document);
+    }
     it("rejects statement level name shape predicate and modifier errors after partial inference and refunds all work") {
       seed();
       const struct { const char *sql; turbodb_status_t status; } cases[]={
@@ -1060,46 +1146,42 @@ spec("TidesDB private unified SQL runtime") {
     }
     it("explicitly rejects unimplemented inference frames expressions dialects and batches") {
       seed(); const char *const sql[]={
-        "SELECT ABS(?) AS n", "SELECT id FROM items WHERE id=? AND score=?",
-        "SELECT ? AS n FROM items GROUP BY id", "SELECT ? AS n FROM items HAVING id=1",
-        "SELECT ? AS n FROM items a JOIN items b ON a.id=b.id",
-        "SELECT (SELECT 1) AS n", "SELECT ? AS n UNION SELECT ? AS n",
-        "WITH c AS(SELECT 1 AS n) SELECT ? AS n FROM c",
+        "SELECT UNKNOWN_FUNCTION(?) AS n",
         "INSERT INTO items SELECT ?,?", "INSERT INTO items VALUES(?,?) AS incoming",
-        "SELECT id FROM items WHERE id IN(SELECT id FROM items)", "CREATE TABLE other(id BIGINT PRIMARY KEY)",
+        "CREATE TABLE other(id BIGINT PRIMARY KEY)",
         "SELECT ?; SELECT ?"};
       for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i)
         statement_metadata(sql[i],NULL,0,TURBODB_STATUS_UNSUPPORTED);
       sqlparser_document *document=NULL; sqlparser_error parse_error; const char sqlite[]="SELECT ?";
       check_equal(sqlparser_parse_dialect(sqlite,strlen(sqlite),SQLPARSER_SQLITE,NULL,&document,&parse_error),SQLPARSER_OK);
       orm_sql_parameters parameters={0};
-      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,&parameters,&error),TURBODB_STATUS_UNSUPPORTED);
+      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,0,&parameters,&error),TURBODB_STATUS_UNSUPPORTED);
       check_null(parameters.budget); sqlparser_document_destroy(document);
     }
     it("preserves occupied ready metadata and fails fast on invalid input inactive owner and exhausted quotas") {
       seed(); sqlparser_document *document=parse("UPDATE items SET score=?+? WHERE id=?");
       orm_sql_parameters parameters={0};
-      check_equal(orm_sql_parameters_statement(NULL,&owner,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
-      check_equal(orm_sql_parameters_statement(document,NULL,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
-      check_equal(orm_sql_parameters_statement(document,&owner,0,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
-      check_equal(orm_sql_parameters_statement(document,&owner,SIZE_MAX,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
-      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,NULL,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+      check_equal(orm_sql_parameters_statement(NULL,&owner,DEPTH,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+      check_equal(orm_sql_parameters_statement(document,NULL,DEPTH,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+      check_equal(orm_sql_parameters_statement(document,&owner,0,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+      check_equal(orm_sql_parameters_statement(document,&owner,SIZE_MAX,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,DEPTH,NULL,&error),TURBODB_STATUS_INVALID_ARGUMENT);
       orm_sql_catalog_store closed={0}; const uint64_t before_work=budget.used.value[ORM_SQL_BUDGET_WORK_BYTES];
-      check_equal(orm_sql_parameters_statement(document,&closed,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+      check_equal(orm_sql_parameters_statement(document,&closed,DEPTH,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
       owner.failed=true;
-      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_STATE);
+      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_STATE);
       check_true(owner.failed); owner.failed=false;
       check_null(parameters.budget); check_equal(budget.used.value[ORM_SQL_BUDGET_WORK_BYTES],before_work);
-      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,&parameters,&error),TURBODB_STATUS_OK);
+      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,DEPTH,&parameters,&error),TURBODB_STATUS_OK);
       const orm_sql_type *view=NULL,*same=NULL; size_t count=0,same_count=0;
       check_equal(orm_sql_parameters_types(&parameters,&view,&count,&error),TURBODB_STATUS_OK);
       const uint64_t work=budget.used.value[ORM_SQL_BUDGET_WORK_BYTES];
-      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_ARGUMENT);
       check_equal(orm_sql_parameters_types(&parameters,&same,&same_count,&error),TURBODB_STATUS_OK);
       check_true(same==view); check_equal(same_count,count); check_equal(view[0].kind,TURBODB_VALUE_INT64);
       check_equal(budget.used.value[ORM_SQL_BUDGET_WORK_BYTES],work);
       check_equal(orm_sql_parameters_close(&parameters,&error),TURBODB_STATUS_OK);
-      check_equal(orm_sql_parameters_statement(document,&owner,1,&parameters,&error),TURBODB_STATUS_LIMIT_EXCEEDED);
+      check_equal(orm_sql_parameters_statement(document,&owner,1,DEPTH,&parameters,&error),TURBODB_STATUS_LIMIT_EXCEEDED);
       check_null(parameters.budget); sqlparser_document_destroy(document);
       const orm_sql_budget_limits limits=budget.limits;
       const orm_sql_budget_resource resources[]={ORM_SQL_BUDGET_WORK_BYTES,ORM_SQL_BUDGET_EXECUTION_STEPS,ORM_SQL_BUDGET_PLAN_NODES};
@@ -1110,18 +1192,23 @@ spec("TidesDB private unified SQL runtime") {
       }
       next_statement(); check_equal(orm_tidesdb_sql_budget_end(&budget,&error),TURBODB_STATUS_OK);
       document=parse("SELECT ?");
-      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_STATE);
+      check_equal(orm_sql_parameters_statement(document,&owner,DEPTH,DEPTH,&parameters,&error),TURBODB_STATUS_INVALID_STATE);
       check_null(parameters.budget); sqlparser_document_destroy(document);
       check_equal(orm_tidesdb_sql_budget_begin(&budget,&error),TURBODB_STATUS_OK);
     }
     it("refunds every injected WORK Vec allocation failure across statement inference and final validation") {
       seed(); const char *const sql[]={"INSERT INTO items(score,id) VALUES(?+?,?) ON DUPLICATE KEY UPDATE score=score+?",
-        "SELECT ?+score AS n FROM items WHERE id=? LIMIT ?"};
+        "SELECT ?+score AS n FROM items WHERE id=? LIMIT ?",
+        "WITH q AS(SELECT score+? AS n FROM items) SELECT n FROM q WHERE n>?"};
       const turbodb_value_kind_t insert[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_INT64};
       const turbodb_value_kind_t select[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64};
+      const turbodb_value_kind_t dependency[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64};
+      const turbodb_value_kind_t *const kinds[]={insert,select,dependency};
+      const size_t counts[]={sizeof(insert)/sizeof(insert[0]),sizeof(select)/sizeof(select[0]),
+        sizeof(dependency)/sizeof(dependency[0])};
       for(size_t form=0;form<sizeof(sql)/sizeof(sql[0]);++form) {
         next_statement(); reserves=resizes=0;
-        statement_metadata(sql[form],form?select:insert,form?3:4,TURBODB_STATUS_OK);
+        statement_metadata(sql[form],kinds[form],counts[form],TURBODB_STATUS_OK);
         const size_t reserve_points=reserves,resize_points=resizes;
         check_true(reserve_points>0); check_true(resize_points>0);
         for(size_t mode=0;mode<2;++mode) {
@@ -1231,9 +1318,13 @@ spec("TidesDB private unified SQL runtime") {
       check_equal(next().state,ORM_SQL_SCAN_DONE); close_query(&query);
     }
     it("shares WHERE evaluation with the copied session snapshot") {
-      const orm_sql_session_snapshot session={.valid=true,.autocommit=false,.read_only=true};
+      const orm_sql_session_snapshot session={.valid=true,.autocommit=false,
+          .read_only=true,.max_allowed_packet=4096};
       check_equal(open_session_query("SHOW VARIABLES WHERE Value='ON' AND @@autocommit=0",session),TURBODB_STATUS_OK);
       text_is(next().values[0].data.text_value,"transaction_read_only");
+      check_equal(next().state,ORM_SQL_SCAN_DONE); close_query(&query); check_equal(owner.active_sources,0u);
+      check_equal(open_session_query("SHOW VARIABLES WHERE Variable_name='max_allowed_packet' AND Value='4096'",session),TURBODB_STATUS_OK);
+      text_is(next().values[0].data.text_value,"max_allowed_packet");
       check_equal(next().state,ORM_SQL_SCAN_DONE); close_query(&query); check_equal(owner.active_sources,0u);
     }
     it("validates WHERE on empty sources and releases rejected constructions") {

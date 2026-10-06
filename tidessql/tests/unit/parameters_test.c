@@ -113,6 +113,19 @@ spec("TidesSQL scalar unknown parameter inference") {
     sqlparser_document_destroy(document); document=NULL;
     expect(kinds,2); check_equal(view[0].kind,TURBODB_VALUE_TEXT);
   }
+  it("fails binding before unresolved type storage can be consumed") {
+    parse("SELECT ?+i"); metadata_open(); orm_sql_binding_scope local=scope();
+    local.parameter_types=vec_data_const(&parameters.types);
+    local.parameter_offsets=vec_data_const(&parameters.offsets);
+    local.parameter_count=vec_size(&parameters.types);
+    local.parameter_resolved=vec_data_const(&parameters.resolved);
+    orm_sql_expr program={0}; vec_t slots={0}; size_t slot_bytes=0;
+    const orm_sql_expression_target target={.program=&program,.slots=&slots,.slot_bytes=&slot_bytes};
+    const turbodb_status_t status=orm_sql_bind_expression(&local,projection(0),DEPTH,target,false,&error);
+    check_equal(status,TURBODB_STATUS_INVALID_STATE);
+    check_equal(orm_tidesdb_sql_expr_destroy(&program,&error),TURBODB_STATUS_OK);
+    check_equal(orm_sql_work_release(&slots,slot_bytes,&budget,&error),TURBODB_STATUS_OK);
+  }
   it("derives direct comparison and arithmetic markers from their peer") {
     const char *const sql[]={"SELECT ?+1","SELECT 1+?","SELECT ?+1.5","SELECT ?=TRUE","SELECT 'text'=?","SELECT ?=?","SELECT ?=NULL",
       "SELECT ?=18446744073709551615","SELECT ?=-9223372036854775808"};
@@ -139,6 +152,15 @@ spec("TidesSQL scalar unknown parameter inference") {
       parse(sql[i]); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_OK); expect(&kinds[i],1); reset();
     }
   }
+  it("derives correlated marker types from an immutable outer schema") {
+    parse("SELECT items.i+?"); metadata_open();
+    const orm_sql_table_schema empty={0}; orm_sql_binding_scope local=scope();
+    local.schema=&empty; local.qualifier=(vstr){0}; local.outer_schema=&schema;
+    local.outer_qualifier=schema.name;
+    check_equal(orm_sql_parameters_infer(&parameters,&local,projection(0),NULL,DEPTH,&error),
+        TURBODB_STATUS_OK);
+    const turbodb_value_kind_t kind=TURBODB_VALUE_INT64; expect(&kind,1);
+  }
   it("uses real assignment contexts and numeric CAST targets without executing conversion") {
     for(size_t i=0;i<schema.count;++i) {
       parse("SELECT ?"); metadata_open(); check_equal(infer(0,&columns[i].type,DEPTH),TURBODB_STATUS_OK);
@@ -155,6 +177,103 @@ spec("TidesSQL scalar unknown parameter inference") {
     const turbodb_value_kind_t numeric[]={TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_INT64}; expect(numeric,3); reset();
     parse("SELECT ?=?"); metadata_open(); check_equal(infer(0,&columns[0].type,DEPTH),TURBODB_STATUS_OK);
     const turbodb_value_kind_t strings[]={TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT}; expect(strings,2);
+  }
+  it("derives LIKE text and boolean logic markers without evaluating") {
+    const char *const sql[]={"SELECT t LIKE ?","SELECT ? NOT LIKE t ESCAPE '!'",
+      "SELECT (t LIKE ?) AND (? OR NOT ?)","SELECT (?=i) OR (? AND NOT ?)"};
+    const size_t counts[]={1,1,3,3};
+    const turbodb_value_kind_t expected[][3]={
+      {TURBODB_VALUE_TEXT},{TURBODB_VALUE_TEXT},
+      {TURBODB_VALUE_TEXT,TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_BOOLEAN},
+      {TURBODB_VALUE_INT64,TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_BOOLEAN}};
+    for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
+      parse(sql[i]); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_OK);
+      expect(expected[i],counts[i]); reset();
+    }
+  }
+  it("derives scalar IN and BETWEEN markers from one comparison domain") {
+    const char *const sql[]={"SELECT i BETWEEN ? AND ?","SELECT ? BETWEEN i AND u",
+      "SELECT ? BETWEEN 1 AND 1.5","SELECT ? BETWEEN ? AND ?",
+      "SELECT i IN (?,?+1,CAST(? AS UNSIGNED))","SELECT ? IN (?,d,?)",
+      "SELECT ? NOT IN ('a',?)","SELECT t IN (?,NULL)",
+      "SELECT (?+?) IN (?,?)","SELECT ? BETWEEN (?+?) AND ?"};
+    const size_t counts[]={2,1,1,3,3,3,2,1,4,4};
+    const turbodb_value_kind_t expected[][4]={
+      {TURBODB_VALUE_INT64,TURBODB_VALUE_INT64},
+      {TURBODB_VALUE_INT64},{TURBODB_VALUE_INT64},
+      {TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT},
+      {TURBODB_VALUE_INT64,TURBODB_VALUE_INT64,TURBODB_VALUE_UINT64},
+      {TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT},{TURBODB_VALUE_TEXT},
+      {TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE}};
+    for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
+      parse(sql[i]); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_OK);
+      expect(expected[i],counts[i]); reset();
+    }
+  }
+  it("derives searched and simple CASE condition and result domains") {
+    const char *const sql[]={"SELECT CASE WHEN ? THEN i ELSE i END",
+      "SELECT CASE WHEN ? THEN ? ELSE i END",
+      "SELECT CASE ? WHEN 1 THEN ? WHEN 2 THEN ? ELSE ? END",
+      "SELECT CASE ? WHEN i THEN d ELSE ? END",
+      "SELECT CASE WHEN ? THEN ?+? ELSE d END",
+      "SELECT CASE WHEN ? THEN CASE ? WHEN i THEN ? ELSE i END ELSE i END",
+      "SELECT CASE WHEN ? THEN i WHEN ? THEN u ELSE ? END",
+      "SELECT CASE ? WHEN ? THEN i ELSE i END"};
+    const size_t counts[]={1,2,4,2,3,3,3,2};
+    const turbodb_value_kind_t expected[][4]={
+      {TURBODB_VALUE_BOOLEAN},
+      {TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_INT64},
+      {TURBODB_VALUE_INT64,TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT},
+      {TURBODB_VALUE_INT64,TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_INT64,TURBODB_VALUE_INT64},
+      {TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT}};
+    for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
+      parse(sql[i]); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_OK);
+      expect(expected[i],counts[i]); reset();
+    }
+    parse("SELECT CASE WHEN ? THEN ? ELSE ? END"); metadata_open();
+    check_equal(infer(0,&columns[1].type,DEPTH),TURBODB_STATUS_OK);
+    const turbodb_value_kind_t context[]={TURBODB_VALUE_BOOLEAN,TURBODB_VALUE_UINT64,TURBODB_VALUE_UINT64};
+    expect(context,3);
+  }
+  it("derives supported scalar function arguments from function and peer domains") {
+    const char *const sql[]={"SELECT COALESCE(?,i,?)","SELECT IFNULL(?,d)",
+      "SELECT COALESCE(?,?,?)","SELECT NULLIF(?,i)","SELECT NULLIF(?,?)",
+      "SELECT COALESCE(i,u,?)","SELECT ABS(?)","SELECT SIGN(?)",
+      "SELECT FLOOR(?)","SELECT CEILING(?)","SELECT MOD(?,i)","SELECT MOD(?,?)",
+      "SELECT ROUND(?)","SELECT ROUND(?,?)","SELECT TRUNCATE(i,?)",
+      "SELECT ABS(COALESCE(?,d))","SELECT COALESCE(ABS(?),d)"};
+    const size_t counts[]={2,1,3,1,2,1,1,1,1,1,1,2,1,2,1,1,1};
+    const turbodb_value_kind_t expected[][3]={
+      {TURBODB_VALUE_INT64,TURBODB_VALUE_INT64},{TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT},{TURBODB_VALUE_INT64},
+      {TURBODB_VALUE_TEXT,TURBODB_VALUE_TEXT},{TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_DOUBLE},{TURBODB_VALUE_DOUBLE},{TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_DOUBLE},{TURBODB_VALUE_INT64},
+      {TURBODB_VALUE_DOUBLE,TURBODB_VALUE_DOUBLE},{TURBODB_VALUE_DOUBLE},
+      {TURBODB_VALUE_DOUBLE,TURBODB_VALUE_INT64},{TURBODB_VALUE_INT64},
+      {TURBODB_VALUE_DOUBLE},{TURBODB_VALUE_DOUBLE}};
+    for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
+      parse(sql[i]); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_OK);
+      expect(expected[i],counts[i]); reset();
+    }
+  }
+  it("propagates an outer scalar context through selectable and numeric functions") {
+    const char *const sql[]={"SELECT COALESCE(?,?)","SELECT NULLIF(?,?)","SELECT ABS(?)","SELECT ROUND(?,?)"};
+    const size_t counts[]={2,2,1,2};
+    const turbodb_value_kind_t expected[][2]={
+      {TURBODB_VALUE_UINT64,TURBODB_VALUE_UINT64},
+      {TURBODB_VALUE_UINT64,TURBODB_VALUE_UINT64},
+      {TURBODB_VALUE_UINT64},
+      {TURBODB_VALUE_UINT64,TURBODB_VALUE_INT64}};
+    for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
+      parse(sql[i]); metadata_open(); check_equal(infer(0,&columns[1].type,DEPTH),TURBODB_STATUS_OK);
+      expect(expected[i],counts[i]); reset();
+    }
   }
   it("does not use NULL literals as unknown types or evaluate dangerous known subexpressions") {
     const char *const sql[]={"SELECT NULL+?","SELECT ?+(9223372036854775807+1)","SELECT ?+(1.0/0.0)"};
@@ -183,13 +302,26 @@ spec("TidesSQL scalar unknown parameter inference") {
     check_equal(orm_sql_parameters_types(&parameters,&again,&count,&error),TURBODB_STATUS_OK); check_true(again==view);
   }
   it("rejects unsupported AST scopes instead of guessing types") {
-    const char *const sql[]={"SELECT COALESCE(?,1)","SELECT ? BETWEEN 1 AND 2","SELECT ? IN(1,2)",
-      "SELECT ? LIKE 'text'","SELECT NOT ?","SELECT (SELECT ?)","SELECT ?/1"};
+    const char *const sql[]={"SELECT UNKNOWN_FUNCTION(?)","SELECT ? IN(SELECT i FROM items)",
+      "SELECT (SELECT ?)","SELECT ?/1","SELECT 'a' LIKE 'a' ESCAPE ?"};
     for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
       parse(sql[i]); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_UNSUPPORTED); reset();
     }
     parse("SELECT ?+missing"); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_SQL_ERROR); reset();
     parse("SELECT ?=other.i"); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_SQL_ERROR);
+  }
+  it("rejects incompatible compound comparison domains without publishing candidates") {
+    const char *const sql[]={"SELECT ? IN ('a',1)","SELECT ? BETWEEN TRUE AND 2.0",
+      "SELECT CASE WHEN ? THEN 'a' ELSE 1 END",
+      "SELECT CASE ? WHEN 'a' THEN 1 WHEN 2 THEN 2 ELSE 3 END",
+      "SELECT CASE WHEN 1 THEN ? ELSE i END","SELECT COALESCE(?,TRUE,1)",
+      "SELECT ROUND(?,1.5)"};
+    for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
+      parse(sql[i]); metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_UNSUPPORTED);
+      const orm_sql_type *types=NULL; size_t count=OUTPUT_SENTINEL;
+      check_equal(orm_sql_parameters_types(&parameters,&types,&count,&error),TURBODB_STATUS_INVALID_STATE);
+      check_null(types); check_equal(count,(size_t)OUTPUT_SENTINEL); reset();
+    }
   }
   it("rejects invalid admission and NULL inference context without allocation") {
     parse("SELECT ?"); metadata_open(); orm_sql_binding_scope local=scope();
@@ -203,7 +335,14 @@ spec("TidesSQL scalar unknown parameter inference") {
     check_equal(infer(0,&null_context,DEPTH),TURBODB_STATUS_TYPE_ERROR);
     local.parameter_count=1;
     check_equal(orm_sql_parameters_infer(&parameters,&local,projection(0),NULL,DEPTH,&error),TURBODB_STATUS_INVALID_ARGUMENT);
-    local=scope(); local.outer_schema=&schema;
+    local=scope(); local.query_count=1;
+    check_equal(orm_sql_parameters_infer(&parameters,&local,projection(0),NULL,DEPTH,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+    orm_sql_expr_query_binding query={.node=(sqlparser_id)(sqlparser_node_count(document)+1)};
+    local.queries=&query;
+    check_equal(orm_sql_parameters_infer(&parameters,&local,projection(0),NULL,DEPTH,&error),TURBODB_STATUS_INVALID_ARGUMENT);
+    orm_sql_expr_query_binding duplicate[]={
+      {.node=projection(0)},{.node=projection(0)}};
+    local.queries=duplicate; local.query_count=2;
     check_equal(orm_sql_parameters_infer(&parameters,&local,projection(0),NULL,DEPTH,&error),TURBODB_STATUS_INVALID_ARGUMENT);
     check_equal(budget.used.value[ORM_SQL_BUDGET_WORK_BYTES],work);
   }
@@ -220,7 +359,9 @@ spec("TidesSQL scalar unknown parameter inference") {
     check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_OK);
   }
   it("refunds every injected reserve and resize failure in metadata and inference construction") {
-    const char *const sql[]={"SELECT CAST(? AS SIGNED)+i","SELECT ?+(?+?)"};
+    const char *const sql[]={"SELECT CAST(? AS SIGNED)+i","SELECT ?+(?+?)",
+      "SELECT (t LIKE ?) AND (? OR NOT ?)","SELECT (i BETWEEN ? AND ?) AND t IN (?,?)",
+      "SELECT CASE WHEN ? THEN ?+? ELSE d END","SELECT ROUND(COALESCE(?,d),?)"};
     for(size_t i=0;i<sizeof(sql)/sizeof(sql[0]);++i) {
       parse(sql[i]); reserves=resizes=0; metadata_open(); check_equal(infer(0,NULL,DEPTH),TURBODB_STATUS_OK);
       const size_t allocations[]={reserves,resizes}; reset();

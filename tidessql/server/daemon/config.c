@@ -14,7 +14,8 @@
 #endif
 
 enum { TIDESSQLD_ERROR_TEXT = 256, TIDESSQLD_MAX_NAME_BYTES = 128,
-       TIDESSQLD_MAX_PATH_BYTES = 4096, TIDESSQLD_MAX_VERSION_BYTES = 128 };
+       TIDESSQLD_MAX_PATH_BYTES = 4096,
+       TIDESSQLD_MAX_VERSION_BYTES = MYSQL_WIRE_SERVER_VERSION_CAPACITY - 1u };
 
 static turbodb_status_t config_error(turbodb_error_t *error, turbodb_status_t status,
                                      const char *reason) {
@@ -150,7 +151,7 @@ cnet_client_config tidessqld_transport_config(const tidessqld_server_config *con
 static turbodb_status_t server_defaults(tidessqld_server_config *server,
                                         turbodb_error_t *error) {
   server->host = tstr_dup("127.0.0.1");
-  server->server_version = tstr_dup("TidesSQL-1.3");
+  server->server_version = tstr_dup("8.0.0-TidesSQL-1.3");
   if (!server->host || !server->server_version)
     return config_error(error, TURBODB_STATUS_OUT_OF_MEMORY, "create server defaults");
   server->port = 3306;
@@ -201,13 +202,13 @@ static turbodb_status_t parse_server(const toml_table_t *root, tidessqld_config 
   READ_SIZE(backlog, 1, 65535); READ_SIZE(max_connections, 1, TDSQL_MYSQL_SERVER_MAX_CONNECTIONS);
   READ_U32(poll_timeout_ms, 1, 60000); READ_U32(shutdown_timeout_ms, 1, 600000);
   READ_SIZE(input_bytes, TDSQL_MYSQL_SERVER_MIN_INPUT_BYTES, INT32_MAX);
-  READ_SIZE(scratch_bytes, TDSQL_MYSQL_SERVER_MIN_INPUT_BYTES, INT32_MAX);
+  READ_SIZE(scratch_bytes, TDSQL_MYSQL_MIN_REPLY_BYTES, INT32_MAX);
   READ_SIZE(output_bytes, TDSQL_MYSQL_SERVER_MIN_OUTPUT_BYTES, INT32_MAX);
   READ_SIZE(command_capacity, 1, 1048576); READ_SIZE(request_capacity, 1, 1048576);
   { int64_t n=(int64_t)config->server.completion_capacity;
     if(status==TURBODB_STATUS_OK) status=integer_value(table,"completion_batch_capacity",1,1048576,false,&n,error);
     config->server.completion_capacity=(size_t)n; }
-  READ_SIZE(event_capacity, 1, 1048576);
+  READ_SIZE(event_capacity, 2, 1048576);
   READ_SIZE(command_buffer_bytes, 0, INT32_MAX); READ_SIZE(event_buffer_bytes, 0, INT32_MAX);
   READ_U32(read_timeout_ms, 1, 600000); READ_U32(write_timeout_ms, 1, 600000);
   READ_U32(tls_handshake_timeout_ms, 1, 600000);

@@ -20,7 +20,7 @@ typedef struct tdsql_mysql_frontend_config {
 } tdsql_mysql_frontend_config;
 static inline tdsql_mysql_frontend_config tdsql_mysql_frontend_config_default(void) {
   return (tdsql_mysql_frontend_config){.registry=tdsql_mysql_registry_config_default(),
-      .server_version={"TidesSQL",8}};
+      .server_version={"8.0.0-TidesSQL-1.3",18}};
 }
 /* One TCP connection's synchronous protocol owner. Caller supplies distinct,
  * stable fixed input/reply scratch buffers. Network callbacks feed borrowed

@@ -4,6 +4,9 @@
 AST，后者负责语义绑定、表达式与查询执行、Catalog、关系记录、索引、事务预算
 和原生 TidesDB 存储适配。解析器接受某种语法不表示执行引擎已经实现其语义；
 当前执行入口仍按下文的 MySQL profile 校验，不能用 SQLite AST 绕过它。
+远程访问时 MySQL ORM driver 只渲染结构化 plan，MySQL client 只传输 COM_QUERY 或
+COM_STMT_PREPARE/EXECUTE；SQL grammar 在 `tidessqld` 调用的 TidesSQL 引擎中解析。
+直接链接本 SDK 时解析器与应用同进程，但所有权和语义事实源仍属于 TidesSQL 引擎。
 
 构建 target 为 `turbodb_tidessql`，别名 `TurboDB::TidesSQL`。根选项
 `TURBODB_BUILD_TIDESSQL` 默认跟随 `TURBODB_BUILD_ORM`；启用时必须启用
@@ -129,12 +132,14 @@ WITH、派生/LATERAL 表和表达式依赖。只校验 Catalog/类型/捕获，
 全通过，Windows Release 完整构建及 96 项 SDK/ORM CTest 全通过（170.76 秒），
 安装 preset 已更新 SDK 1.2.0 静态库。Linux/sanitizer 未执行；代码未提交/推送。
 
-#206 新增私有标量参数推导器，显式区分 unresolved 与实际 NULL：根据 local schema、
+#206 新增私有标量参数推导器，显式区分 unresolved 与实际 NULL：根据 local/outer schema、
 同级操作数、赋值上下文或 CAST 目标推导 source-order 参数类型，全部完成后才
 提供只读视图，再交给既有 typed Binder 校验。推导只编译、不求值或读取业务行；
 AST 释放后完整类型视图仍由参数 owner 持有，须在 statement budget 结束前 close。
-本阶段支持标量算术/二元比较/numeric CAST；函数、CASE、IN/BETWEEN/LIKE、
-逻辑及查询依赖的未知参数推导明确拒绝，已有显式 typed 执行范围不变。
+当前支持标量算术/二元比较、scalar-list IN/NOT IN、BETWEEN/NOT BETWEEN、CASE、
+LIKE、NOT/AND/OR、numeric CAST，以及 COALESCE/IFNULL/NULLIF 和现有数值标量函数；
+其他函数及查询依赖的未知参数推导明确拒绝，已有
+显式 typed 执行范围不变。
 这是标量内部构件；常用整句编排和公开 prepared 生命周期见下方增量。
 正式例子见 [parameters_test.c](tests/unit/parameters_test.c) 和原生
 [runtime_test.c](tests/integration/runtime_test.c)，边界见
@@ -150,8 +155,17 @@ schema，自动遍历常用 SELECT、INSERT/REPLACE VALUES/SET、单表 UPDATE/D
 推导赋值、比较、排序、CAST 与 LIMIT/OFFSET 的 source-order 参数类型，最后
 通过既有整句 Binder 校验。成功只保留参数元数据，AST 可释放，临时计划/Catalog
 租约均关闭；不接收实际值、不求值、读写业务行或改变事务/诊断。
-GROUP/HAVING/windows、JOIN/查询依赖、INSERT SELECT/incoming alias，以及含 marker
-的函数/CASE/IN/BETWEEN/LIKE/逻辑表达式推导仍明确拒绝；既有显式 typed 执行不变。
+普通表 JOIN 的 ON、可独立标量定型的 GROUP BY/HAVING、聚合参数，以及窗口
+key/control/frame marker 已按真实多表 schema 和最终 Binder 推导。非递归 CTE、
+derived、标量/IN/EXISTS 子查询会按依赖拓扑逐 query block 推导：子块先用自己的
+FROM 与只读 outer frame 定型，再发布 schema 给父块；未解析位图阻止其他 query block
+的零初始化 type storage 被消费。scalar dependency result 与 IN element type 可向父表达式
+传播；compound 会先绑定投影中没有未决 marker 的叶子，再把对应输出列类型传播给其余
+叶子的投影 marker，左右分支方向、数值 DOUBLE 提升及 LIMIT/OFFSET 均可推导。
+需要 INSERT SELECT/incoming alias，以及未列入白名单的
+函数表达式仍明确拒绝；
+scalar-list IN、BETWEEN、CASE、LIKE、NOT/AND/OR、
+COALESCE/IFNULL/NULLIF 与数值标量函数使用标量推导器，既有显式 typed 执行不变。
 该内部构件不是公开 prepared handle，不支持跨事务计划、RESET/CLOSE 或 schema 重准备。
 范围/所有权见 [整句参数推导设计](design.md#206-常用整句参数推导)，正式例子见
 [runtime_test.c](tests/integration/runtime_test.c) 的 `whole statement unknown parameter inference`。
@@ -163,26 +177,44 @@ GROUP/HAVING/windows、JOIN/查询依赖、INSERT SELECT/incoming alias，以及
 SDK 1.3.0 已增加真正的公开 `tdsql_connection_statement_prepare()` 与
 `tdsql_statement_parameters/parameter/columns/column/execute/reset/close()`。
 PREPARE 接收无参数值的 request（parameter_count 为 0，reader/context 为 NULL），
-独立保存 SQL、初始参数/列元数据以及单表 ID/schema；不求值、读写业务行、重置警告
+独立保存 SQL、初始参数/列元数据以及每个物理 Catalog 来源 occurrence 的表 ID/schema；
+CTE 引用按既有词法绑定结果跳过，定义、派生表和表达式子查询下的实体表仍纳入指纹。
+准备不求值、读写业务行、重置警告
 或消耗 next transaction access。已有 SQL 事务用其快照，其他情况关闭临时 Catalog
 事务；statement 不保留 native transaction/iterator/物理计划。旧的
 `tdsql_connection_prepare()` 仍只负责 ORM 入场检查。
 
 EXECUTE 接收 `tdsql_bindings_default(values,count)` 初始化的 typed bindings，
 参数数量须完全匹配；七种值和字节 payload 沿用原有执行契约，不拼接 SQL。
-每轮 DML 在当前执行快照中先检查 table ID/规范 schema，再重新绑定并执行。普通 DML
-的 TableVersion 变化不使描述符失效；删除/重建或修改列/默认值后返回 INVALID_STATE
+每轮执行在当前快照中先检查全部已记录来源的 table ID/规范 schema，再重新绑定并执行。
+普通 DML 的 TableVersion 变化不使描述符失效；任一来源删除/重建或修改列/默认值后返回 INVALID_STATE
 并锁定失效，须 close 后重新 prepare，RESET 不恢复。当前没有
 [MySQL 的自动重准备](https://dev.mysql.com/doc/refman/8.4/en/statement-caching.html)。
 初始列类型是推导结果，每轮 `tdsql_result_column()` 才是实际执行元数据；未来
 frontend 须发送完整 metadata，不协商 optional result metadata。
 
-首版公开 PREPARE 范围为 SELECT 无 FROM/单表、INSERT/REPLACE VALUES/SET、
-单表 UPDATE/DELETE；含 marker 的算术/比较/numeric CAST 可推导，其余函数、
-CASE/IN/BETWEEN/LIKE/逻辑、GROUP/HAVING/window、JOIN/CTE/derived/capture/集合、
-INSERT SELECT/incoming aliases、SHOW/EXPLAIN 明确返回 UNSUPPORTED。已有显式 typed run
+公开 PREPARE 范围为 SELECT 无 FROM/普通表 JOIN（含上述可推导的 GROUP/HAVING 与窗口子集）、
+INSERT/REPLACE VALUES/SET、
+单表 UPDATE/DELETE、无 marker 或 WHERE 使用当前标量推导子集的 SHOW，以及同一
+普通表/JOIN 推导子集的 EXPLAIN SELECT；
+含 marker 的算术/比较/scalar-list IN/BETWEEN/CASE/LIKE/NOT/AND/OR/numeric CAST、
+COALESCE/IFNULL/NULLIF 及 ABS/SIGN/FLOOR/CEIL/CEILING/MOD/ROUND/TRUNCATE 可推导，
+非递归 CTE、derived 及 scalar/IN/EXISTS 依赖在同一拓扑中推导并生成来源指纹；
+scalar result、IN element 及 compound 兄弟分支输出支持父级 marker 推导；显式配置
+正数 `sql_max_recursive_iterations` 时，有界递归 SELECT 的 seed/member 也可无值推导；
+其余函数、递归 UPDATE/DELETE 查询依赖、
+INSERT SELECT/incoming aliases、SHOW LIKE 子句 marker/含未支持表达式的 WHERE 明确返回
+UNSUPPORTED。已有显式 typed run
 支持范围保持不变。
 持久化表列仍限 BIGINT/BIGINT UNSIGNED/DOUBLE，不等于参数值只支持这三类。
+
+SHOW/EXPLAIN 准备只在当前 Catalog snapshot 中构造输出 metadata，传入真实 column
+family 显示名和 connection session snapshot。带 WHERE 的 SHOW 以显示 schema 推导并
+编译 predicate，但不创建 scan 或读取行；取得列名/类型后立即关闭临时 query、依赖图和
+Catalog lease。SHOW/EXPLAIN descriptor 仍只持有 SQL、参数类型与复制后的列 metadata，
+不缓存 AST/计划；查询 descriptor 另保留根查询及全部依赖查询中每个物理 Catalog 来源的
+identity/canonical schema slice，任一来源变化都会锁定失效。两类 metadata 语句的输出形状
+固定，EXECUTE 重新解析并绑定当前 snapshot。
 
 DDL PREPARE 已接入当前引擎支持的 CREATE/ALTER/DROP/TRUNCATE TABLE 与
 CREATE/DROP INDEX。没有参数或结果列；准备只校验结构和必要的 Catalog/索引
@@ -221,10 +253,57 @@ DDL 增量新增 12 个用例，覆盖全部现有分支、默认值检查阶段
 回滚/只读、逐点 WORK 分配失败及 native 读写/提交/回滚观察；业务命名空间
 读取探针开启拒绝时仍能准备，physical row/index 的 get/seek 均为 0。
 
+事实｜2026-10-06 SHOW/simple EXPLAIN、scalar-list IN/BETWEEN/CASE/标量函数，以及
+普通 JOIN/group/window 参数推导与多来源 schema 失效增量后，prepared suite 为
+33 用例/11483 断言，MySQL dispatch suite 为 18 用例/2120 断言，参数推导 suite
+保持 21 用例/3188 断言，runtime suite 为 284 用例/647468 断言，均无失败、跳过或
+TODO；相邻 prepared owner、registry、registry owner 与 dispatch 四项 CTest 也全部
+通过。覆盖 SDK 和 COM_STMT_PREPARE/EXECUTE 的列名、参数化 SHOW/EXPLAIN、二进制行、
+TABLES/TEXT、IN/BETWEEN/CASE/LIKE、选择/数值标量函数与布尔参数、INDEX/I64、
+VARIABLES/session snapshot、dependent EXPLAIN/未知函数拒绝、descriptor 原子发布、
+多来源 schema 失效及复合比较/LIKE/逻辑/函数/JOIN 路径的逐点 WORK reserve/resize
+退款。递归准备、Linux/sanitizer 与外部 Connector 验证仍属
+#206/#209。
+
+事实｜2026-10-06 私有整句推导继续覆盖非递归 CTE、派生表、scalar/IN/EXISTS
+依赖查询及相关外层 schema；未解析 marker 由显式 resolved mask 隔离，不再把零初始化
+存储当成类型。durable prepared 复用 CTE lexical binder，跳过 CTE 引用并为依赖图下的
+物理 Catalog 来源保存 identity/canonical schema slice；SDK 与 COM_STMT_PREPARE/EXECUTE
+现可执行 marker-bearing CTE、derived、scalar、IN、EXISTS 及 dependent EXPLAIN，来源
+schema 改变仍在参数读取/业务执行前锁定失效。参数推导 suite 为 23 用例/3216 断言，
+runtime suite 为 288 用例/653295 断言，prepared suite 为 33 用例/16414 断言，MySQL
+dispatch suite 为 19 用例/2222 断言；完整 Windows Release 构建及 prepared/owner、
+registry/owner、dispatch、select、from、parameters、runtime 共 9 项相邻 CTest 顺序执行
+全部通过（74.13 秒）。跨 compound 分支输出传播已在后续增量补齐；递归推导及
+Linux/sanitizer 仍属后续。
+
+事实｜2026-10-06 后续增量已接入 scalar query result、IN query element 与可独立定型的
+compound 分支/尾部分页参数传播；公开 SDK 及 MySQL COM_STMT_PREPARE/EXECUTE 均验证实际
+结果，prepare allocation fault matrix 覆盖新增路径。参数 suite 为 23 用例/3222 断言、
+runtime 为 288 用例/653316 断言、prepared 为 34 用例/22843 断言、dispatch 为 20 用例/
+2414 断言；四项 Windows Release CTest 顺序执行全部通过（65.01 秒）。后续增量已补齐
+跨 compound 分支输出类型传播；递归准备、Linux/sanitizer 与外部 Connector 仍属后续。
+
+事实｜2026-10-06 compound PREPARE 会把 marker-free 叶子的真实 SELECT 输出类型作为
+只读上下文，按投影序号传播给有未决 marker 的兄弟叶子；已覆盖 marker 位于左右任一
+分支、I64 列传播、三分支 DOUBLE 提升及全局 LIMIT。上下文只在对应叶根绑定期间借用，
+不进入嵌套依赖；临时类型向量受 WORK 预算约束并在成功或失败时退款。SDK 筛选用例
+1 项/62 断言、MySQL binary protocol 筛选用例 1 项/281 断言通过；prepared、dispatch、
+runtime 三项 Windows Release CTest 全部通过（65.28 秒）。递归 PREPARE、Linux/sanitizer
+与外部 Connector 验证仍属后续。
+
+事实｜2026-10-06 有界递归 SELECT 已接入公开 PREPARE 与 MySQL binary protocol。准备阶段
+只编译 seed/member schema 和参数类型，不传参数值、不打开递归 cache、不迭代或读取业务行；
+执行仍使用同一 `sql_max_recursive_iterations` 事实源。未配置正数上限时保持 UNSUPPORTED，
+递归 UPDATE/DELETE 查询依赖仍不在本增量范围。SDK/runtime/MySQL 三项递归筛选用例分别
+通过 49/49、49/49、396/396 条断言；全量 prepared 36 项/33378 条、runtime 289 项/
+653365 条、dispatch 20 项/2618 条断言全部通过，三项 Windows Release CTest 顺序执行
+耗时 65.79 秒。Linux/sanitizer 与外部 Connector 验证仍属后续。
+
 后续已将 ORM Driver SDK 与全部插件统一升级至当前 Salts Plugin ABI 4，并完成
 真实 MySQL Driver 到独立 `tidessqld` 的 TLS/认证/事务链路验证。ABI 3 插件必须与
 宿主协调重编译，不能混部署；该升级不改变 TidesSQL SDK ABI、MySQL wire 或磁盘格式。
-Linux/sanitizer 与外部 MySQL 服务端差分仍由独立环境验证。
+Linux 实际 runner 与外部 MySQL 服务端差分仍由独立环境验证；Windows sanitizer 结果见下文。
 最小复验（VS x64 开发环境）：
 
 ```powershell
@@ -295,11 +374,11 @@ metadata/affected rows/事务 flags/warnings 是事实源，两种 EOF 模式显
 ERR 后断连。断连先释放结果/registry，再 close SQL session 执行回滚。
 [响应设计与边界](design.md#207-command-响应状态机)。
 
-事实｜2026-10-05 [dispatch suite](tests/protocol/mysql_dispatch_test.c) 16 用例/
-1513 断言、扩展 native owner suite 6 用例/213 断言全部通过。覆盖两种 EOF、
+事实｜2026-10-06 [dispatch suite](tests/protocol/mysql_dispatch_test.c) 17 用例/
+1871 断言、扩展 native owner suite 6 用例/213 断言全部通过。覆盖两种 EOF、
 空集/多行、动态 prepared metadata、七种值、DDL/DML、RESET cache、错误与
 多语句 admission、ACK/容量重取、lazy warnings/事务 flags、SDK/scratch/row
-限额及断连回滚。native 故障验证末尾清理失败 ERR、提交未知不重放与 PREPARE
+限额、SHOW/参数化 EXPLAIN 的 prepared metadata/二进制行及断连回滚。native 故障验证末尾清理失败 ERR、提交未知不重放与 PREPARE
 snapshot cleanup 不发布 metadata。最小 2 项 CTest 通过（4.21 秒），构建无
 编译警告/错误；日志 `build/Msvc-Release/Testing/mysql-dispatch-final-test.log`。
 Windows Release 的全部 34 项 TidesSQL 与 7 项 MySQL client CTest 通过（82.57 秒），
@@ -361,10 +440,48 @@ listener：固定 slot/connection workspace、单次在途 retained send、同 h
 终态 session 回滚与 cleanup quarantine 均由单 owner poll 推进。它仍不安装，也没有
 daemon CLI/TOML 或部署账户文件。
 
-事实｜正式 `tidessql_mysql_server_e2e` 6 个用例/261 条断言通过。仓库现有 `TurboDB::MySQL`
+事实｜正式 `tidessql_mysql_server_e2e` 现有 8 个用例；最新成功运行 358 条断言全部通过。仓库现有 `TurboDB::MySQL`
 async session 通过 loopback TCP 和证书校验 TLS 完成 full-auth、prepared
 `SELECT 42 AS n`、metadata/row 与关闭；另测错误密码、正确密码但无数据库 grant、
-两个同时在线 session、TLS 前停滞客户端的有界停止，以及无界/畸形服务配置的原子拒绝。
+两个同时在线 session、TLS 前停滞客户端的有界停止和 read timeout 主动回收、零超时 stop
+的 BUSY/重试状态机，以及无界/畸形服务配置的原子拒绝。慢客户端用例在 client 被接受后
+停止推进其异步状态机，仅轮询 server，确认 CNet 发布 `SALTS_ETIMEDOUT`、slot/workspace
+回收且 transport failure 可观测；完整目标连续运行 5 次通过，该慢客户端用例随后隔离连续
+运行 10 次也全部通过。
+双 session 用例先让第一连接进入 metadata，再在其结果会话仍存活时建立并执行第二连接；
+它验证同时在线 slot/结果隔离，不把两个提供者握手重叠当作 TidesSQL 状态机契约。
+
+HIGH｜历史诊断：Windows 重复压力测试曾发现 GmSSL TLS 1.3 `CertificateVerify` 间歇失败；
+同一签名校验栈也在单客户端 transaction E2E 和独立 `tidessqld` ORM E2E 中复现，因此不能
+归因于双会话 slot。影响是远程连接可用性和测试稳定性，不是已观察到的 SQL 数据错误。
+事实｜当时的 Salts SDK 1.8.25（commit `21f02db32def5a3a4f8d28f97abed0f9aaef8090`）
+在 CNet 中静态链接 GmSSL #5，基于上游 `7c9f02904ef33e59c87b4f16621cc8fd434e7579`。
+该版本的 `ecdsa_signature_from_der` 允许 ASN.1 INTEGER 去除前导零后长度小于 32，随后却把
+变长地址直接交给固定读取 32 字节的 `secp256r1_from_32bytes`；31 字节的 `r` 或 `s` 会把
+相邻 DER 内容读入椭圆曲线整数。[上游修复 c5ee40e3](https://github.com/guanzhi/GmSSL/commit/c5ee40e3dfb640547afea7f3a9fc8fe0c9412d4a)
+通过清零 32 字节缓冲区并右对齐复制 `r/s` 修正这一边界。
+
+事实｜未打补丁的旧 CNet 完整 server suite 在第 8 次重复运行命中同一校验失败；以该
+上游修复回移到实际旧版 API、重新构建 GmSSL #6 和 Salts/CNet 后，完整
+`tidessql_mysql_server_e2e`、`tidessql_mysql_server_transaction_e2e`、
+`orm_mysql_tidessqld_e2e` 分别连续 20/20 通过，共执行 280 个正式测试用例。测试未增加
+重试、串行 accept 或协议降级。另以合法的 31 字节 `r` 构造确定性 DER 契约，旧 provider
+编译后运行失败，补丁版同一源码通过。
+
+事实｜永久发布链已于 2026-10-06 完成：`qigao/vcpkg-cache` PR #182 发布带上述确定性契约的
+GmSSL #6（merge `b8bcce436838b716522bb2c8b35438b47ac1830b`），PR #185 对齐 Salts manifest/
+registry 身份与首次安装顺序（merge `ab71347f4df19381c819ce8989cb22cb3c61da10`）；cache-only
+验证从 NuGet 恢复 ABI `589630979a67bf8bd74bd84176635e9fc518c9bd1800f1f9fa3027a49de71fbe`。
+Salts `v1.8.27` 精确指向 commit `c11b508cc6c4d54a34404a9849bd89023d1790a3`，release workflow
+run `37399469140` 的七个平台 SDK、Linux arm64 cache-only/smoke、打包和发布全部通过。
+发布资产 `Salts.Native.1.8.27.nupkg` 的 SHA-256 为
+`670cf8fdcb97d188935ae1e00fb00a14c5bddd56b26d81390affc039747729e7`。
+TurboDB 已用该发布资产的 Windows x64 Release SDK 全量重建；TLS、server E2E、transaction
+E2E 各连续 20/20 通过（共 60 次进程测试，293.53 秒），没有重试或协议降级。该 HIGH 发布
+阻断已关闭。相邻 MySQL frontend/daemon/ORM 远程组合 15/15 通过（53.15 秒），最终 Windows
+Release 全套 142/142 通过（433.72 秒）。全套首次运行暴露 relational 集成测试仍按旧的 3 项
+SHOW 变量和 `@@sql_mode` 不支持语义断言；对齐当前 23 项只读变量契约后，该 suite 292/292、
+16580 条断言通过，生产实现未改。有限重复次数仍不能证明所有 TLS 路径不存在其他独立问题。
 
 现有同步 `TurboDB::MySQL` transaction API 也已通过真实 server E2E。测试以一个有界
 Salts Executor shard 持有 server poll owner，客户端经 TCP/TLS/full-auth 完成远程
@@ -383,8 +500,8 @@ MySQL client 的测试私有 fault hook 另在 COMMIT 完成 CNet 发送后丢�
 再以 PREPARE/EXECUTE 写入：直接断开回滚该行，切回 ON 则提交并可由新连接读取。
 生产 client target 不包含这些测试 hook。MySQL protocol、client 与 daemon 相邻回归
 20/20 通过（41.98 秒），复验日志为
-`build/Msvc-Release/Testing/tidessql-autocommit-regression.log`。剩余远程缺口是
-Linux/sanitizer 和通用 Connector 初始化 SQL。
+`build/Msvc-Release/Testing/tidessql-autocommit-regression.log`。通用 Connector 初始化 SQL
+已由后述 Connector/J 进程 E2E 覆盖；剩余远程缺口包括 Linux 实际 runner。
 
 ```powershell
 cmake --build --preset win-release-user --target tidessql_mysql_password_test tidessql_mysql_tls_test mysql_auth_boundary_test -j 4
@@ -392,7 +509,9 @@ ctest --preset win-release-user -R '^(tidessql_mysql_(password|tls)|mysql_auth_b
 ```
 
 可部署 `tidessqld` 已作为默认关闭的可选目标接入：配置时启用
-`-DTURBODB_BUILD_TIDESSQL_SERVER=ON`，随后构建/安装 `tidessqld`。它只接受显式绝对
+`TURBODB_BUILD_TIDESSQL_SERVER=ON`，随后构建/安装 `tidessqld`；仓库标准 Windows/Linux
+user 与 CI preset 已选择该选项，裸 CMake 默认仍为 `OFF`，Android 与外部数据库 E2E
+profile 不构建 daemon。它只接受显式绝对
 TOML 路径，严格验证 numeric host、TLS keypair、CNet capacity、database/account/grant
 以及 PBKDF2 verifier，再按 database → auth policy → listener 顺序启动。完整配置和边界见
 [部署入口](design.md#204208-tidessqld-部署入口)。
@@ -403,16 +522,152 @@ tidessqld check-config --config C:/etc/tidessql/tidessqld.toml
 tidessqld serve --config C:/etc/tidessql/tidessqld.toml
 ```
 
-事实｜`tidessqld_config` 5 项/44 条断言和 `tidessqld_process_e2e` 1 项/16 条断言通过。
-后者启动独立 daemon，由现有 `TurboDB::MySQL` 经 TLS/full-auth 完成事务内 DDL、DML、
+事实｜`tidessqld_config` 10 项/220 条断言、`tidessqld_cli` 5 项/45 条断言和
+`tidessqld_process_e2e` 1 项/16 条断言通过。
+配置 suite 覆盖恰好 1 MiB、1 MiB+1、嵌入 NUL，以及多数据库启动中途失败后的逆序关闭；
+server 数值字段的零值/精确最小值、queue 形状、frontend scratch 和 server version 边界
+与实际 CNet/MySQL frontend 准入一致；
+CLI suite 以有界独立子进程覆盖 help/version、配置检查、严格参数拒绝、PBKDF2 输出形状、
+空密码环境及非法迭代次数，并确认输出不包含输入明文；进程 E2E 启动独立 daemon，由现有 `TurboDB::MySQL` 经 TLS/full-auth 完成事务内 DDL、DML、
 SAVEPOINT、COMMIT 与 prepared SELECT。Windows install component 同时安装 executable、
 `cnet.dll` 与 `salts.dll`；仅系统 PATH 下 `tidessqld --version` 退出码为 0。
+runtime stop 在配置的总 shutdown deadline 内以最长 50 ms 切片重试 CNet BUSY；只有 server
+quiescent 后才关闭数据库。server E2E 另以活动、尚未完成 TLS 的连接强制执行零超时 stop，
+验证 BUSY 保留 owner、停止后拒绝 poll/新准入，并可在后续正常 deadline 内重试至完整释放；
+该用例单独连续运行 20 次通过（每次 22 条断言）。
 
 `orm_mysql_tidessqld_e2e` 另以动态加载的 MySQL ORM plugin 连接该独立 daemon，覆盖
 TLS/full-auth、raw prepared INSERT、结构化 SELECT/UPDATE、SERIALIZABLE 事务与回滚
-可见性。进程 fixture 由两条测试共享，仍只属于测试代码。
+可见性。MySQL plugin 的 capability 元数据现同步声明 `ORM_DRIVER_CAP_SERIALIZABLE`，
+与 backend 映射及上述真实链路一致；进程 fixture 由两条测试共享，仍只属于测试代码。
 
-MED｜登录速率/CPU 配额、Linux/sanitizer/benchmark 和通用 Connector 初始化 SQL 仍待继续。
+可选的 `tidessqld_connector_j_e2e` 使用官方 MySQL Connector/J jar 启动真实 Java
+进程，经 `VERIFY_IDENTITY` TLS、`caching_sha2_password` full-auth 连接 daemon，再完成
+关闭 autocommit、建表、参数化 INSERT、COMMIT 和参数化 SELECT。配置时显式提供
+`TURBODB_MYSQL_CONNECTOR_J_JAR=<absolute-jar>` 才注册该测试，不把 Java 或 Connector/J
+变成生产依赖。Connector/J 8.3.0 与 9.1.0 已分别通过。
+现有 native SDK workflow 在 Windows 与 Linux host job 固定获取 9.1.0 并启用同一测试；
+Android 交叉编译 job 不下载 Java 或 Connector/J。
+
+当前远程客户端验收矩阵如下；“通过”只表示列出的链路和版本，不外推到未测试版本：
+
+| 客户端 | 实际版本/边界 | 已验证链路 |
+|---|---|---|
+| `TurboDB::MySQL` | 与当前工作树同版本 | TCP、TLS 1.3、full-auth、prepared DDL/DML/query、事务、保存点、autocommit、断连回滚与 COMMIT_UNKNOWN |
+| MySQL ORM plugin | Driver Plugin ABI 4，与当前工作树同版本 | 独立 `tidessqld`、raw prepared DML、结构化查询/更新及 SERIALIZABLE rollback |
+| MySQL Connector/J | 8.3.0、9.1.0；Java 17 | 独立 `tidessqld`、`VERIFY_IDENTITY`、full-auth、关闭 autocommit、DDL、参数化 INSERT/SELECT 与 COMMIT |
+
+Connector/J 9.1.0 在当前服务版本下实际执行并由集成测试固定验证的初始化投影为：
+
+```sql
+SELECT @@session.auto_increment_increment AS auto_increment_increment,
+       @@character_set_client AS character_set_client,
+       @@character_set_connection AS character_set_connection,
+       @@character_set_results AS character_set_results,
+       @@character_set_server AS character_set_server,
+       @@collation_server AS collation_server,
+       @@collation_connection AS collation_connection,
+       @@init_connect AS init_connect,
+       @@interactive_timeout AS interactive_timeout,
+       @@license AS license,
+       @@lower_case_table_names AS lower_case_table_names,
+       @@max_allowed_packet AS max_allowed_packet,
+       @@net_write_timeout AS net_write_timeout,
+       @@performance_schema AS performance_schema,
+       @@query_cache_size AS query_cache_size,
+       @@query_cache_type AS query_cache_type,
+       @@sql_mode AS sql_mode,
+       @@system_time_zone AS system_time_zone,
+       @@time_zone AS time_zone,
+       @@tx_isolation AS transaction_isolation,
+       @@wait_timeout AS wait_timeout;
+```
+
+该语句的列顺序、类型和值由
+[`connection_test.c`](tests/integration/connection_test.c) 的正式 21 列用例约束；驱动后续
+发送的事务与 prepared SQL 则由真实进程 E2E 约束。
+
+HIGH｜当前 GmSSL 3.2.0#3 会拒绝 JDK 默认 ClientHello 中空的 OCSP
+`status_request` 扩展；不设置开关时真实测试稳定在 TLS 握手阶段失败。测试进程仅设置
+`-Djdk.tls.client.enableStatusRequestExtension=false`，其余 TLS version、cipher、签名算法、
+命名组和 session ticket 使用 JDK/Connector/J 默认值，证书链与 `localhost` 身份验证仍启用。
+这是一项明确的 GmSSL/JDK 部署兼容限制，不代表默认 Java TLS 已完全兼容；正确修复边界
+在 GmSSL/CNet provider，不能通过关闭 `sslMode=VERIFY_IDENTITY` 或明文回退规避。
+
+```powershell
+cmake --preset win-release-user `
+  -DTURBODB_MYSQL_CONNECTOR_J_JAR=C:/path/to/mysql-connector-j-9.1.0.jar
+cmake --build --preset win-release-user --target tidessqld_connector_j_e2e_test
+ctest --preset win-release-user -R '^tidessqld_connector_j_e2e$' --output-on-failure
+```
+
+事实｜2026-10-06 `install-win-release-user` 已重新构建并安装当前 Release 树；已安装
+`tidessqld --version` 输出 2.0.1，安装 manifest 与 package export 不包含 Redis ORM driver，
+driver 目录仅有 SQLite、PostgreSQL、MySQL、TidesDB 四个插件。独立 `TurboDB::Redis`
+client/header/export 仍保留，未被误删；复用旧安装前缀遗留的单个
+`turbodb_driver_redis.dll` 已按精确路径清除。重新安装后以只含系统目录的 PATH 运行
+`tidessqld --version` 仍成功；`tidessqld_config/process_e2e/cli/connector_j_e2e`、
+`orm_driver_interface`、`orm_driver_interface_cpp`、`orm_mysql_plugin` 与
+`orm_mysql_tidessqld_e2e` 八项 Windows Release CTest 顺序执行全部通过（5.12 秒）。
+进程测试以测试专用绝对路径覆盖直接启动上述已安装 `tidessqld.exe`，CLI、现有 MySQL
+driver 事务/保存点、Connector/J 和 MySQL ORM plugin 四项再次顺序通过（4.22 秒）；
+默认构建树路径的同四项也通过（4.24 秒）。覆盖路径不存在或不是绝对文件时不回退 PATH。
+Windows/Linux native workflow 在 install 后、stage 前使用各自安装树执行同一四项；本地仅
+验证 Windows，Linux 结果须由实际 runner 产生后才能计入验收。入口 workflow 的 push/PR
+过滤已覆盖 `tidessql/**`、packaging/cmake/presets、CMake preset 与 vcpkg manifest/config，
+这些范围的独立改动不会再绕过 host matrix。
+Native SDK 暂存和 NuGet 内容测试现将 Windows/Linux 的 `bin/tidessqld[.exe]` 作为必需
+发布文件，并明确拒绝 Android 包误带 host daemon；Redis ORM driver 的负断言保持不变。
+NuGet 内容测试已按当前安装规则改为要求 GmSSL config、头文件、许可证及 Release/Debug
+静态库，同时按目录/库名前缀拒绝遗留 OpenSSL config/header、BoringSSL copyright、
+crypto/ssl 开发库及 pkg-config 文件。Windows 的 PostgreSQL 驱动依赖链经 `dumpbin` 确认为
+`turbodb_driver_postgresql.dll → libpq.dll → ssl.dll/crypto.dll`，因此这两个运行时 DLL 保留；
+MySQL/TidesSQL 的开发接口和静态链接仍只使用随包 GmSSL。staging 不再复制 vcpkg 整个 `bin`，
+而是 fail-fast 复制 `sqlite3.dll`、`libpq.dll`、`ssl.dll`、`crypto.dll` 四项已验证闭包；内容测试
+精确约束 Windows `bin` 的八个 DLL，防止 ECPG/pkgconf 等无关文件泄漏。事实｜新 Windows
+Release install manifest 生成成功，fresh stage 含四种 ORM driver、`tidessqld.exe`、TidesSQL/
+GmSSL SDK 且不含 Redis ORM driver 或旧加密开发文件；正式 staged consumer 配置、编译、链接、
+受限 PATH 运行均通过，stage daemon 的 process/CLI/Connector/J/ORM E2E 4/4 通过。Python 测试文件通过
+语法检查；本机没有 Linux/Android 安装树或 .NET SDK，因此完整三 RID nupkg 内容测试仍须
+由实际 CI runner 验证。
+同一内容测试还明确要求三个 RID 都包含 TidesSQL/TidesDB CMake config、公开 TidesSQL 头和
+平台静态库；Windows install manifest 已与这些路径逐项核对。
+
+HIGH｜安装后 consumer 审计发现并修复两个发布阻断：Windows 原生反斜杠 SDK 环境路径经
+vcpkg `find_package` wrapper 解析时产生非法 CMake 转义；`TurboDBConfig.cmake` 又在
+`TurboDB::Types` 定义前加载引用它的 `OrmTargets.cmake`。导出配置现先规范化依赖根路径，
+按依赖 → `TurboDBTargets` → `OrmTargets`/`TidesSQLTargets` 顺序加载；组合安装的独立
+`TidesSQLConfig.cmake` 也显式解析其导出文件所引用的随包 GmSSL。正式 consumer 使用原生
+Windows 路径，依次完成 `find_package(TidesSQL)`、`find_package(TurboDB)`，编译链接
+`TurboDB::TidesSQL`、`TurboDB::MySQL`、`Orm::C`，从导出的 `TurboDB_DRIVER_DIR` 加载已安装
+MySQL plugin、拒绝同目录出现 Redis ORM plugin 并核对 canonical driver metadata，再以
+仅含三个安装 SDK bin 与系统目录的运行时 PATH 执行 ABI/生命周期 smoke，全部通过。
+fresh stage 也通过同一 plugin load 验证。
+Windows/Linux native workflow 在安装后及 staging 后各运行一次同一 consumer；Linux 结果仍须
+实际 runner 验证。
+
+事实｜2026-10-06 使用已发布 Salts 1.8.27 重新配置 `ci-windows-release`，Connector/J
+9.1.0 在用户 preset 下连续 3/3 通过。CI preset 首轮 143 项 CTest 中唯一失败是从普通
+PowerShell 启动时架构测试找不到 MSVC `dumpbin`；在
+`VsDevCmd.bat -arch=x64 -host_arch=x64` 环境完整重跑后 143/143 通过（350.51 秒）。随后
+`install-ci-windows-release` 成功；fresh staged SDK manifest 固定 `salts=1.8.27`、`saltsutils=4.1.10` 及
+`drivers=sqlite,postgresql,mysql,tidesdb`。安装树与 staged SDK 的独立 consumer 均完成
+configure/build/runtime smoke，staged `tidessqld` 的 process、CLI、Connector/J 和 MySQL
+ORM 四项 E2E 为 4/4 通过（5.12 秒）。这些结果补齐 Windows 安装与真实客户端验证；Linux、
+Android 及 NuGet 三 RID 仍必须由提交后的实际 CI runner 验证，不能由本机结果代替。
+
+事实｜Windows Debug AddressSanitizer 的 engine-only 配置已构建并顺序执行
+`tidessql_prepared`、`tidessql_connection`、`tidessql_parameters`、
+`orm_tidesdb_sql_runtime`、`tidessql_mysql_dispatch` 和
+`tidessql_mysql_server_transaction_e2e`，6/6 通过（119.70 秒）。该配置不混用 Release
+依赖。随后从 SaltsUtils 干净 `HEAD ec6682d133e6` 构建并安装 Debug+ASan 生产包，完整
+ORM/daemon 配置顺序执行 `tidessqld_config/process_e2e/cli/connector_j_e2e`、
+`tidessql_mysql_server_e2e`、`orm_driver_interface`、`orm_driver_interface_cpp`、
+`orm_mysql_plugin` 与 `orm_mysql_tidessqld_e2e`，9/9 通过（17.06 秒）。SaltsUtils 自身
+tests/examples/benchmarks 未纳入该依赖安装；上述结果验证的是 TurboDB 实际消费链路。
+
+MED｜登录速率/CPU 配额、高容量组合的聚合内存预算、Linux CI 的实际 runner 结果、
+benchmark 和上述默认 JDK OCSP ClientHello 兼容仍待继续。
 ORM Driver Plugin ABI 已从 3 升至 4，旧插件二进制必须重编译；MySQL wire 与磁盘格式未变。
 
 `tdsql_transaction_release_checked()` 和 `tdsql_result_destroy_checked()`
@@ -658,13 +913,25 @@ ASCII 大小写不敏感的 `SERIALIZABLE` 或枚举序号 3；其他已知隔�
 与下一事务设置。只有求值、预算与 statement 清理全部成功才发布状态。
 MED｜未实现全局可变默认、多项 SET 和其他隔离级别；完整协议与复验步骤见
 [SET 事务变量](design.md#set-事务变量的单项写入协议)。
-已接入三个会话变量的表达式读取：`@@autocommit`、`@@transaction_read_only`、
+已接入三个可写会话变量的表达式读取：`@@autocommit`、`@@transaction_read_only`、
 `@@transaction_isolation`，支持 SESSION/LOCAL 作用域、ASCII 大小写和既有 backtick
 标识符规则。前两项返回 I64 0/1，隔离返回 TEXT `SERIALIZABLE`；访问模式是会话
 默认值，与当前事务及下一事务覆盖项分开。语句快照传递给 SELECT、依赖查询、
-INSERT/UPDATE/DELETE 及受支持 SET 的 RHS。`SHOW [SESSION|LOCAL] VARIABLES`
-只列这三项，Variable_name/Value 为 TEXT，布尔显示 ON/OFF；LIKE 使用 ASCII
-不区分大小写匹配，WHERE 可使用实际结果列和类型化参数；GLOBAL/其他变量明确拒绝。
+INSERT/UPDATE/DELETE 及受支持 SET 的 RHS。
+
+Connector/J 初始化另可读取只读元数据：`auto_increment_increment`、四个
+`character_set_*`、两个 `collation_*`、`init_connect`、三个 timeout、`license`、
+`lower_case_table_names`、`max_allowed_packet`、`performance_schema`、两个
+`query_cache_*`、`sql_mode`、`system_time_zone` 和 `time_zone`；`tx_isolation` 是隔离变量
+的兼容别名。`max_allowed_packet` 来自本次 request 的 `max_query_bytes` 硬上限，字符集为
+`utf8mb4`/`utf8mb4_bin`，query cache 与 performance schema 为关闭，SQL mode 为
+`NO_BACKSLASH_ESCAPES,STRICT_TRANS_TABLES`。无法从同步 SDK 快照如实得出的 timeout 返回
+SQL NULL，不伪造动态服务配置；`SHOW VARIABLES` 的固定 TEXT `Value` 列将这些 NULL
+呈现为文本 `NULL`。新增元数据不允许 SET。
+
+`SHOW [SESSION|LOCAL] VARIABLES` 枚举同一有界变量表，Variable_name/Value 为 TEXT，
+布尔显示 ON/OFF；LIKE 使用 ASCII 不区分大小写匹配，WHERE 可使用实际结果列和类型化
+参数；GLOBAL/用户变量/未知变量明确拒绝。
 普通表达式 LIKE 的既有大小写敏感规则保持不变。缺少连接快照的私有执行入口
 不允许变量实际求值。
 Salts Plugin 已切换为 ABI 4，旧 epoch 在加载时拒绝；升级 SDK 时须清理旧编译

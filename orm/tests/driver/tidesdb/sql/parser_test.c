@@ -1,8 +1,18 @@
 #include "sql.h"
-#include <tinymock.h>
+#include <tinytest.h>
 #include <string.h>
 
-TINYMOCk_MOCK(tstr, literal_allocate, const void *, size_t)
+static size_t literal_allocate_calls;
+static const void *literal_allocate_input;
+static size_t literal_allocate_size;
+static tstr literal_allocate_result;
+
+static tstr literal_allocate(const void *input, size_t size) {
+  ++literal_allocate_calls;
+  literal_allocate_input = input;
+  literal_allocate_size = size;
+  return literal_allocate_result;
+}
 static bool fail_literal;
 static bool fail_work;
 static tstr allocate_literal(const void *input, size_t size) {
@@ -41,12 +51,14 @@ spec("TidesDB driver SQL AST lowering") {
     orm_error_init(&error);
     fail_literal = false;
     fail_work = false;
-    mock_literal_allocate_reset();
+    literal_allocate_calls = 0u;
+    literal_allocate_input = NULL;
+    literal_allocate_size = 0u;
+    literal_allocate_result = NULL;
   }
   after_each() {
     orm_plan_destroy(&parsed);
     orm_plan_destroy(&raw);
-    mock_literal_allocate_verify();
   }
   it("lowers mixed-case SELECT comparisons and positional pagination") {
     input_sql("SeLeCt id, score FROM people WHERE id >= ? AND score <> 9 LIMIT ? OFFSET 2;");
@@ -183,14 +195,15 @@ spec("TidesDB driver SQL AST lowering") {
     input_sql("SELECT id FROM people LIMIT ?"); bind_parameter(orm_i64(-1));
     check_equal(parse_input(), ORM_STATUS_INVALID_ARGUMENT);
   }
-  it("cleans the partial plan when TinyMock rejects literal allocation") {
+  it("cleans the partial plan when literal allocation fails") {
     input_sql("INSERT INTO people (id, name) VALUES (1, 'text')");
     fail_literal = true;
-    mock_literal_allocate_expect(TINYMOCk_ARG((const void *)NULL), TINYMOCk_ARG((size_t)4), TINYMOCk_RETURN((tstr)NULL));
     check_equal(parse_input(), ORM_STATUS_OUT_OF_MEMORY);
     check_null(parsed.table);
     check_equal(vec_size(&parsed.assignments), 0u);
-    tinymock_mock_verify_times(&tinymock_literal_allocate, 1u);
+    check_equal(literal_allocate_calls, (size_t)1u);
+    check_null(literal_allocate_input);
+    check_equal(literal_allocate_size, (size_t)4u);
   }
 
   it("preserves backslashes and doubled quotes after releasing the AST and raw SQL") {

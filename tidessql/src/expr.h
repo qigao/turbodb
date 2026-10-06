@@ -80,6 +80,10 @@ typedef enum orm_sql_expr_function {
  * Function name nodes are structural and must not appear in input bindings. */
 turbodb_status_t orm_tidesdb_sql_expr_resolve_call(const sqlparser_document *document,
     const sqlparser_node *call, orm_sql_expr_function *out, turbodb_error_t *error);
+/* Shared classification for the resolved numeric-call whitelist. */
+bool orm_tidesdb_sql_expr_function_arithmetic(orm_sql_expr_function function,
+    orm_sql_arithmetic_op *out);
+bool orm_tidesdb_sql_expr_arithmetic_binary(orm_sql_arithmetic_op operation);
 /* Resolve supported numeric CAST targets; TYPE names/precision are structural,
  * not runtime inputs. FLOAT precision text is charged before scanning.
  * Failure preserves target. */

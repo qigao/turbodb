@@ -19,6 +19,10 @@ typedef struct orm_sql_explain_source {
   bool done, recursive;
 } orm_sql_explain_source;
 
+/* Immutable fixed TRADITIONAL output schema. Copies one static name/type pair;
+ * false leaves out unchanged. No owner, allocation or budget charge. */
+bool orm_sql_explain_column_at(size_t ordinal,orm_sql_schema_column *out);
+
 /* Snapshots a validated SELECT plan into one TRADITIONAL row. table is the bound
  * table/alias, or empty for a unit source (NULL table/type, No tables used).
  * Table metadata is nullable so compound/dependency explanations share a schema.

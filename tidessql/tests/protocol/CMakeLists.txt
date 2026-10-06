@@ -39,20 +39,25 @@ if(WIN32)
     "${TIDESSQL_TEST_RUNTIME_PATH};PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::CNet>")
 endif()
 
-cmake_add_test(
-  NAME tidessql_mysql_server_e2e_test TEST_NAME tidessql_mysql_server_e2e
-  FOLDER "tidessql/tests/protocol"
-  SOURCES mysql_server_e2e_test.c
-  LIBS tidessql_mysql_frontend TurboDB::MySQL GmSSL::GmSSL Salts::CNet Salts::TinyTest)
-target_compile_definitions(tidessql_mysql_server_e2e_test PRIVATE
-  "TEST_TLS_CA=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/p256-test-root-cert.pem\""
-  "TEST_TLS_CERT=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/p256-test-server-cert.pem\""
-  "TEST_TLS_KEY=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/p256-test-server-key.pem\"")
-set_target_properties(tidessql_mysql_server_e2e_test PROPERTIES LINKER_LANGUAGE CXX)
-set_tests_properties(tidessql_mysql_server_e2e PROPERTIES TIMEOUT 60)
-if(WIN32)
-  set_tests_properties(tidessql_mysql_server_e2e PROPERTIES ENVIRONMENT_MODIFICATION
-    "${TIDESSQL_TEST_RUNTIME_PATH};PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::CNet>")
+if(TURBODB_BUILD_ORM)
+  cmake_add_test(
+    NAME tidessql_mysql_server_e2e_test TEST_NAME tidessql_mysql_server_e2e
+    FOLDER "tidessql/tests/protocol"
+    SOURCES mysql_server_e2e_test.c
+    LIBS tidessql_mysql_frontend TurboDB::MySQL GmSSL::GmSSL Salts::CNet Salts::TinyTest)
+  target_compile_definitions(tidessql_mysql_server_e2e_test PRIVATE
+    "TEST_TLS_CA=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/p256-test-root-cert.pem\""
+    "TEST_TLS_CERT=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/p256-test-server-cert.pem\""
+    "TEST_TLS_KEY=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/p256-test-server-key.pem\"")
+  set_target_properties(tidessql_mysql_server_e2e_test PROPERTIES LINKER_LANGUAGE CXX)
+  set_tests_properties(tidessql_mysql_server_e2e PROPERTIES TIMEOUT 60)
+  if(WIN32)
+    set_tests_properties(tidessql_mysql_server_e2e PROPERTIES ENVIRONMENT_MODIFICATION
+      "${TIDESSQL_TEST_RUNTIME_PATH};PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::CNet>")
+  endif()
+else()
+  message(STATUS
+    "Skipping tidessql_mysql_server_e2e because TURBODB_BUILD_ORM is disabled")
 endif()
 
 cmake_add_test(

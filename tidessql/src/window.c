@@ -1,8 +1,28 @@
 #include "window.h"
+#include "binding.h"
 #include "work.h"
 #include "error.h"
 #include <stdio.h>
 #include <string.h>
+
+bool orm_sql_window_kind_at(const sqlparser_document *document,
+    const sqlparser_node *call,orm_sql_window_kind *kind) {
+  static const char *const names[] = {"ROW_NUMBER","RANK","DENSE_RANK","PERCENT_RANK","CUME_DIST","NTILE","LAG","LEAD",
+      "FIRST_VALUE","LAST_VALUE","NTH_VALUE"};
+  if(!document||!call||call->kind!=SQLPARSER_CALL||!kind) return false;
+  const sqlparser_node *name=sqlparser_get_node(document,call->as.call.name);
+  if(!name) return false;
+  const char *text=sqlparser_text(document,name->span);
+  for(size_t i=0;i<sizeof(names)/sizeof(names[0]);++i) {
+    bool same=name->span.length==strlen(names[i]);
+    for(size_t j=0;same&&j<name->span.length;++j)
+      same=(text[j]>='a'&&text[j]<='z'?text[j]-('a'-'A'):text[j])==names[i][j];
+    if(same) { *kind=(orm_sql_window_kind)i; return true; }
+  }
+  orm_sql_aggregate_kind aggregate;
+  if(!orm_sql_bind_aggregate_kind(document,call,&aggregate)) return false;
+  *kind=(orm_sql_window_kind)(ORM_SQL_WINDOW_COUNT_ALL+aggregate); return true;
+}
 #include <math.h>
 
 static const char window_busy[] = "SQL window consumer or callback still active";

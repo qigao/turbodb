@@ -16,7 +16,7 @@ cmake_add_test(
   TEST_NAME orm_tidesdb_flow
   SOURCES orm_tidesdb_flow_test.c
     ${ORM_SOURCE_DIR}/../drivers/tidesdb/orm_tidesdb_cursor.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::DataBind Salts::CFlow Salts::TinyTest
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::DataBind Salts::CFlow Salts::TinyMock
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/../drivers/tidesdb)

@@ -3,7 +3,6 @@ get_target_property(ORM_SOURCE_DIR turbo_orm SOURCE_DIR)
 
 add_subdirectory(sqlite)
 add_subdirectory(postgresql)
-add_subdirectory(redis)
 add_subdirectory(tidesdb)
 add_subdirectory(mysql)
 

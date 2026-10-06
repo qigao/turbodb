@@ -18,8 +18,6 @@ if(WIN32)
   string(APPEND ORM_TEST_RUNTIME_PATH
          ";PATH=path_list_prepend:$<TARGET_FILE_DIR:PostgreSQL::PostgreSQL>")
   string(APPEND ORM_TEST_RUNTIME_PATH
-         ";PATH=path_list_prepend:$<TARGET_FILE_DIR:TurboDB::Redis>")
-  string(APPEND ORM_TEST_RUNTIME_PATH
          ";PATH=path_list_prepend:$<TARGET_FILE_DIR:TidesDB::tidesdb>")
   if(TARGET zstd::libzstd_shared)
     string(APPEND ORM_TEST_RUNTIME_PATH

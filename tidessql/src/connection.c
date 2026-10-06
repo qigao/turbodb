@@ -92,10 +92,11 @@ typedef struct conn_input {
 static turbodb_status_t conn_error(turbodb_error_t *error, turbodb_status_t status, const char *message) {
   tdsql_error_set(error, status, message); return status;
 }
-static orm_sql_evaluation conn_evaluation(tdsql_connection *backend) {
+static orm_sql_evaluation conn_evaluation(tdsql_connection *backend,const tdsql_limits *limits) {
   return (orm_sql_evaluation){.diagnostics=&backend->diagnostics,
       .session={.valid=true,.autocommit=backend->autocommit,
-          .read_only=backend->session_access==SQLPARSER_READ_ONLY}};
+          .read_only=backend->session_access==SQLPARSER_READ_ONLY,
+          .max_allowed_packet=limits?limits->max_query_bytes:0}};
 }
 static turbodb_status_t conn_native(turbodb_error_t *error, int code, const char *operation) {
   char message[TURBODB_ERROR_MESSAGE_CAPACITY];
@@ -465,7 +466,7 @@ static bool conn_statement_writes(const sqlparser_document *document, const sqlp
   }
 }
 static turbodb_status_t conn_run_command(tdsql_transaction *t, const conn_input *input,
-    size_t *result, turbodb_error_t *error) {
+    const tdsql_limits *limits,size_t *result, turbodb_error_t *error) {
   const sqlparser_node *statement = sqlparser_get_node(input->document,
       sqlparser_statements(input->document).first);
   if (t->read_only && conn_statement_writes(input->document, statement))
@@ -476,10 +477,11 @@ static turbodb_status_t conn_run_command(tdsql_transaction *t, const conn_input 
   return orm_sql_runtime_execute_evaluation(input->document, &t->owner,
       vec_data_const(&input->parameters), vec_size(&input->parameters), t->backend->config.max_depth,
       t->backend->config.max_recursive_iterations, t->backend->config.client_found_rows,
-      conn_evaluation(t->backend), result, error);
+      conn_evaluation(t->backend,limits), result, error);
 }
 static turbodb_status_t conn_set_characteristics_prepare(tdsql_transaction *t, const conn_input *input,
-    const sqlparser_node *statement, conn_sql_characteristics *out, turbodb_error_t *error);
+    const tdsql_limits *limits,const sqlparser_node *statement,
+    conn_sql_characteristics *out, turbodb_error_t *error);
 static turbodb_status_t conn_execute_prepared(tdsql_transaction *t, const tdsql_request *request,
     conn_input *input, uint64_t *affected, turbodb_error_t *error) {
   size_t result = 0;
@@ -491,8 +493,8 @@ static turbodb_status_t conn_execute_prepared(tdsql_transaction *t, const tdsql_
   if (input->prepared) status = orm_sql_prepared_check(input->prepared, &t->owner, error);
   if (status == TURBODB_STATUS_OK) status = conn_input_parameters(t, request, input, error);
   if (status == TURBODB_STATUS_OK) status = set_characteristics ?
-      conn_set_characteristics_prepare(t,input,statement,&characteristics,error) :
-      conn_run_command(t, input, &result, error);
+      conn_set_characteristics_prepare(t,input,&request->limits,statement,&characteristics,error) :
+      conn_run_command(t,input,&request->limits,&result,error);
   turbodb_status_t cleanup = conn_input_close(t, input, status == TURBODB_STATUS_OK ? error : NULL);
   if (cleanup == TURBODB_STATUS_OK) cleanup = conn_statement_end(t, status == TURBODB_STATUS_OK ? error : NULL);
   if (cleanup != TURBODB_STATUS_OK) { t->owner.failed = true; return conn_error(error, cleanup, "relational command cleanup failed; rollback required"); }
@@ -646,7 +648,7 @@ static turbodb_status_t conn_open_prepared(tdsql_transaction *t, const tdsql_req
         status=orm_sql_runtime_open_evaluation(input->document,&t->owner,
             vstr_from_cstr(b->config.family_name),vec_data(&input->parameters),
             vec_size(&input->parameters),b->config.max_depth,b->config.max_recursive_iterations,
-            conn_evaluation(t->backend),&c->query,error);
+            conn_evaluation(t->backend,limits),&c->query,error);
     }
     if (status == TURBODB_STATUS_OK) status = conn_check_columns(c, error);
   }
@@ -747,7 +749,7 @@ static turbodb_status_t conn_set_bind(const conn_input *input, const sqlparser_n
   turbodb_status_t status = orm_sql_name_part(&text, &identifier, &reason);
   if (status != TURBODB_STATUS_OK) return conn_error(error, status, reason);
   orm_sql_session_variable variable;
-  if (text.len || !orm_sql_session_find(identifier,&variable))
+  if (text.len || !orm_sql_session_find_writable(identifier,&variable))
     return conn_error(error, TURBODB_STATUS_UNSUPPORTED, "unsupported SET system variable");
   /* Only bare @@transaction_* denotes the next transaction; bare names and
    * explicit SESSION/LOCAL assignments set the session default. */
@@ -831,7 +833,7 @@ static turbodb_status_t conn_isolation_convert(const turbodb_value_t *value, tur
   return conn_error(error,TURBODB_STATUS_SQL_ERROR,"transaction_isolation requires SERIALIZABLE or its integer ordinal 3");
 }
 static turbodb_status_t conn_set_evaluate(tdsql_transaction *t, const conn_input *input,
-    const conn_sql_control *control, bool *out, turbodb_error_t *error) {
+    const tdsql_limits *limits,const conn_sql_control *control,bool *out,turbodb_error_t *error) {
   const sqlparser_id root=control->value;
   orm_tidesdb_sql_budget *budget = &t->budget;
   vec_t offsets={0}, types={0}, slots={0}, values={0};
@@ -868,7 +870,7 @@ static turbodb_status_t conn_set_evaluate(tdsql_transaction *t, const conn_input
     if (status == TURBODB_STATUS_OK) status = orm_sql_work_zero(&values, inputs, sizeof(turbodb_value_t), _Alignof(turbodb_value_t), budget, &value_bytes, error);
     if (status == TURBODB_STATUS_OK) for (size_t i=0; i<inputs; ++i)
       *(turbodb_value_t *)vec_at(&values,i)=*(const turbodb_value_t *)vec_at_const(&input->parameters,*(const size_t *)vec_at_const(&slots,i));
-    orm_sql_evaluation evaluation=conn_evaluation(t->backend);
+    orm_sql_evaluation evaluation=conn_evaluation(t->backend,limits);
     evaluation.mode=ORM_SQL_EVALUATION_WRITE;
     evaluation.diagnostics=NULL;
     if (status == TURBODB_STATUS_OK) status = orm_tidesdb_sql_expr_run_open_evaluation(&program,
@@ -897,7 +899,8 @@ static void conn_set_result(conn_sql_control *control,bool result) {
     control->characteristics.access=result?SQLPARSER_READ_ONLY:SQLPARSER_READ_WRITE;
 }
 static turbodb_status_t conn_set_characteristics_prepare(tdsql_transaction *t, const conn_input *input,
-    const sqlparser_node *statement, conn_sql_characteristics *out, turbodb_error_t *error) {
+    const tdsql_limits *limits,const sqlparser_node *statement,
+    conn_sql_characteristics *out,turbodb_error_t *error) {
   conn_sql_control control={0};
   turbodb_status_t status=conn_set_bind(input,statement,&control,error);
   if (status==TURBODB_STATUS_OK && control.variable==ORM_SQL_SESSION_AUTOCOMMIT)
@@ -909,7 +912,7 @@ static turbodb_status_t conn_set_characteristics_prepare(tdsql_transaction *t, c
     status=orm_tidesdb_sql_budget_reserve(&t->budget,&amount,error);
   }
   bool result=false;
-  if (status==TURBODB_STATUS_OK) status=conn_set_evaluate(t,input,&control,&result,error);
+  if (status==TURBODB_STATUS_OK) status=conn_set_evaluate(t,input,limits,&control,&result,error);
   if (status==TURBODB_STATUS_OK) {
     conn_set_result(&control,result); *out=control.characteristics;
   }
@@ -930,7 +933,7 @@ static turbodb_status_t conn_set_prepare(tdsql_connection *b, const tdsql_reques
   status=orm_tidesdb_sql_budget_reserve(&t->budget,&amount,error);
   if (status==TURBODB_STATUS_OK) status=conn_input_parameters(t,request,input,error);
   bool result=false;
-  if (status==TURBODB_STATUS_OK) status=conn_set_evaluate(t,input,control,&result,error);
+  if (status==TURBODB_STATUS_OK) status=conn_set_evaluate(t,input,&request->limits,control,&result,error);
   turbodb_status_t cleanup=conn_input_close(t,input,status==TURBODB_STATUS_OK ? error : NULL);
   const turbodb_status_t ended=conn_statement_end(t,cleanup==TURBODB_STATUS_OK && status==TURBODB_STATUS_OK ? error : NULL);
   if (ended!=TURBODB_STATUS_OK) cleanup=ended;
@@ -1194,7 +1197,8 @@ turbodb_status_t TDSQL_CALL tdsql_connection_statement_prepare(tdsql_connection 
   if (metadata_limits.statement.value[ORM_SQL_BUDGET_WORK_BYTES] > remaining)
     metadata_limits.statement.value[ORM_SQL_BUDGET_WORK_BYTES] = remaining;
   if (status == TURBODB_STATUS_OK) status = orm_sql_prepared_open(input.document, request->sql,
-      owner, &metadata_limits, &request->limits, b->config.max_depth,
+      vstr_from_cstr(b->config.family_name), conn_evaluation(b,&request->limits), owner, &metadata_limits,
+      &request->limits, b->config.max_depth,b->config.max_recursive_iterations,
       sizeof(*statement), &statement->metadata, error);
   conn_input_discard(&input);
   turbodb_status_t cleanup = TURBODB_STATUS_OK;

@@ -461,6 +461,29 @@ static turbodb_status_t compound_explain_open(orm_sql_compound *run, turbodb_err
   if (status == TURBODB_STATUS_OK) run->scan = &run->explained;
   return status;
 }
+static turbodb_status_t compound_parameter_context(const compound_node *node,
+    vec_t *types,size_t *bytes,bool *usable,orm_tidesdb_sql_budget *budget,turbodb_error_t *error) {
+  if(node->demand!=ORM_SQL_QUERY_VALUES) return TURBODB_STATUS_OK;
+  const orm_sql_select *plan=compound_plan(node);
+  const size_t width=vec_size(&plan->columns);
+  turbodb_status_t status=TURBODB_STATUS_OK;
+  if(!types->initialized) {
+    status=orm_sql_work_zero(types,width,sizeof(orm_sql_type),_Alignof(orm_sql_type),budget,bytes,error);
+    if(status==TURBODB_STATUS_OK) *usable=true;
+  } else if(vec_size(types)!=width) {
+    *usable=false;
+  }
+  for(size_t i=0;status==TURBODB_STATUS_OK&&*usable&&i<width;++i) {
+    orm_sql_type *context=vec_at(types,i);
+    const orm_sql_type candidate=orm_tidesdb_sql_select_column_at(plan,i)->type;
+    if(context->kind==TURBODB_VALUE_NULL||
+        (candidate.kind==TURBODB_VALUE_DOUBLE&&
+          (context->kind==TURBODB_VALUE_INT64||context->kind==TURBODB_VALUE_UINT64)))
+      context->kind=candidate.kind;
+    context->nullable=context->nullable||candidate.nullable;
+  }
+  return status;
+}
 static turbodb_status_t compound_open(const orm_sql_query_scope *scope,
     orm_sql_catalog_store *owner, const turbodb_value_t *parameters, bool explain,
     const orm_sql_expr_query_sources *queries, const orm_sql_cte_shape *shape, orm_sql_cte_parts part,
@@ -476,25 +499,46 @@ static turbodb_status_t compound_open(const orm_sql_query_scope *scope,
   turbodb_status_t status = orm_tidesdb_sql_budget_reserve_capacity(out->budget,1,sizeof(*out),0,&out->metadata_bytes,error);
   if (status == TURBODB_STATUS_OK) status = shape ? compound_cte_tree(scope,shape,part,out,error) : compound_tree(scope,out,error);
   if (status == TURBODB_STATUS_OK) status = compound_demand(scope,out,error);
+  vec_t parameter_context={0}; size_t parameter_context_bytes=0; bool parameter_context_usable=false;
   for (size_t phase=COMPOUND_BIND_LEAVES;status==TURBODB_STATUS_OK && phase<COMPOUND_BIND_PHASES;++phase) {
-    for (size_t i = out->count; status == TURBODB_STATUS_OK && i; --i) {
-      compound_node *node = vec_at(&out->nodes,i-1);
-      if(node->link.leaf!=(phase==COMPOUND_BIND_LEAVES)) continue;
-      orm_sql_query_scope block = *scope; block.root = node->link.ast;
-      block.demand = node->demand;
-      status = node->link.leaf ? orm_sql_runtime_scope_open(&block,owner,parameters,explain,queries,&node->query,error) :
-          compound_tail(&block,parameters,out,node,queries,error);
-      if (status != TURBODB_STATUS_OK) break;
-      const orm_sql_select *plan = compound_plan(node);
-      const size_t width = node->demand == ORM_SQL_QUERY_VALUES ? vec_size(&plan->columns) : 1;
-      if(node->demand==ORM_SQL_QUERY_VALUES && !node->types.initialized)
-        status = orm_sql_work_zero(&node->types,width,sizeof(orm_sql_type),_Alignof(orm_sql_type),out->budget,&node->type_bytes,error);
-      for (size_t j = 0; status == TURBODB_STATUS_OK && node->demand==ORM_SQL_QUERY_VALUES && j < width; ++j)
-        *(orm_sql_type *)vec_at(&node->types,j) = orm_tidesdb_sql_select_column_at(plan,j)->type;
-      if (status == TURBODB_STATUS_OK) node->source = (orm_sql_row_source){out->budget,
-          node->demand==ORM_SQL_QUERY_VALUES ? vec_data_const(&node->types) : &compound_witness_type,width,node,compound_pull,false};
+    const size_t passes=phase==COMPOUND_BIND_LEAVES&&scope->output_parameters_pending?2:1;
+    for(size_t pass=0;status==TURBODB_STATUS_OK&&pass<passes;++pass) {
+      for (size_t i = out->count; status == TURBODB_STATUS_OK && i; --i) {
+        compound_node *node = vec_at(&out->nodes,i-1);
+        if(node->link.leaf!=(phase==COMPOUND_BIND_LEAVES)) continue;
+        orm_sql_query_scope block = *scope; block.root = node->link.ast;
+        block.demand = node->demand;
+        const bool pending=node->link.leaf&&scope->output_parameters_pending&&
+            scope->output_parameters_pending(&block,scope->parameter_context);
+        if(passes==2&&pending!=(pass==1)) continue;
+        if(pending&&parameter_context_usable) {
+          block.parameter_output_types=vec_data_const(&parameter_context);
+          block.parameter_output_count=vec_size(&parameter_context);
+          block.parameter_output_root=block.root;
+        } else {
+          block.parameter_output_types=NULL; block.parameter_output_count=0;
+          block.parameter_output_root=0;
+        }
+        status = node->link.leaf ? orm_sql_runtime_scope_open(&block,owner,parameters,explain,queries,&node->query,error) :
+            compound_tail(&block,parameters,out,node,queries,error);
+        if (status != TURBODB_STATUS_OK) break;
+        const orm_sql_select *plan = compound_plan(node);
+        const size_t width = node->demand == ORM_SQL_QUERY_VALUES ? vec_size(&plan->columns) : 1;
+        if(node->demand==ORM_SQL_QUERY_VALUES && !node->types.initialized)
+          status = orm_sql_work_zero(&node->types,width,sizeof(orm_sql_type),_Alignof(orm_sql_type),out->budget,&node->type_bytes,error);
+        for (size_t j = 0; status == TURBODB_STATUS_OK && node->demand==ORM_SQL_QUERY_VALUES && j < width; ++j)
+          *(orm_sql_type *)vec_at(&node->types,j) = orm_tidesdb_sql_select_column_at(plan,j)->type;
+        if (status == TURBODB_STATUS_OK) node->source = (orm_sql_row_source){out->budget,
+            node->demand==ORM_SQL_QUERY_VALUES ? vec_data_const(&node->types) : &compound_witness_type,width,node,compound_pull,false};
+        if(status==TURBODB_STATUS_OK&&scope->output_parameters_pending&&node->link.leaf&&!pending)
+          status=compound_parameter_context(node,&parameter_context,&parameter_context_bytes,
+              &parameter_context_usable,out->budget,error);
+      }
     }
   }
+  const turbodb_status_t context_released=orm_sql_work_release(&parameter_context,
+      parameter_context_bytes,out->budget,status==TURBODB_STATUS_OK?error:NULL);
+  if(status==TURBODB_STATUS_OK) status=context_released;
   if (status == TURBODB_STATUS_OK && explain) status = compound_explain_open(out,error);
   if (status != TURBODB_STATUS_OK) {
     const turbodb_status_t released = orm_tidesdb_sql_compound_close(out,NULL);

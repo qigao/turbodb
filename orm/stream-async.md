@@ -38,7 +38,7 @@ Subscription 的 `status()` / `error()` 读取。
 
 C++ 对应 `.open_async<Row>(shape, async_config)`，之后使用相同的 `.pipe()`。
 建连和事务控制保留同步入口；当前异步入口不处理事务、写命令或自动重试。
-Redis、TidesDB 等尚未实现异步查询的驱动返回 `ORM_STATUS_UNSUPPORTED`。
+TidesDB 等尚未实现异步查询的驱动返回 `ORM_STATUS_UNSUPPORTED`。
 
 ### MySQL / PostgreSQL 原生非阻塞 I/O
 

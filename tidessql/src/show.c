@@ -257,6 +257,33 @@ static void show_index_read(orm_sql_show_source *source, const orm_sql_table_sch
   source->values[SHOW_INDEX_EXPRESSION] = turbodb_null();
   if (++source->part == parts) { source->part = 0; ++source->position; }
 }
+static turbodb_status_t show_variable_value(orm_sql_show_source *source,
+    orm_sql_session_variable variable, turbodb_value_t *out,
+    turbodb_error_t *error) {
+  turbodb_value_t value=turbodb_null();
+  turbodb_status_t status=orm_sql_session_value(source->session,variable,true,
+      &value,error);
+  if(status!=TURBODB_STATUS_OK) return status;
+  if(value.kind==TURBODB_VALUE_TEXT) { *out=value; return TURBODB_STATUS_OK; }
+  if(value.kind==TURBODB_VALUE_NULL) {
+    *out=turbodb_text("NULL"); return TURBODB_STATUS_OK;
+  }
+  int written=-1;
+  if(value.kind==TURBODB_VALUE_INT64)
+    written=snprintf(source->default_text,sizeof(source->default_text),
+        "%" PRId64,value.data.int64_value);
+  else if(value.kind==TURBODB_VALUE_UINT64)
+    written=snprintf(source->default_text,sizeof(source->default_text),
+        "%" PRIu64,value.data.uint64_value);
+  else
+    return show_error(error,TURBODB_STATUS_INTERNAL_ERROR,
+        "SQL SHOW variable has an invalid display type");
+  if(written<0 || (size_t)written>=sizeof(source->default_text))
+    return show_error(error,TURBODB_STATUS_INTERNAL_ERROR,
+        "SQL SHOW variable display exceeds its fixed buffer");
+  *out=turbodb_text(source->default_text);
+  return TURBODB_STATUS_OK;
+}
 static turbodb_status_t show_read(orm_sql_show_source *source, const turbodb_value_t **out, turbodb_error_t *error) {
   turbodb_status_t status = orm_sql_store_ready(source->owner, error);
   if (status != TURBODB_STATUS_OK) return status;
@@ -267,7 +294,7 @@ static turbodb_status_t show_read(orm_sql_show_source *source, const turbodb_val
     if (source->position<ORM_SQL_SESSION_VARIABLE_COUNT) {
       const orm_sql_session_variable variable=(orm_sql_session_variable)source->position++;
       source->values[0]=turbodb_text_v(orm_sql_session_name(variable));
-      status=orm_sql_session_value(source->session,variable,true,
+      status=show_variable_value(source,variable,
           &source->values[1],error);
       if (status!=TURBODB_STATUS_OK) return status;
       *out=source->values; return TURBODB_STATUS_OK;

@@ -338,6 +338,7 @@ static turbodb_status_t from_join_condition(const sqlparser_document *document, 
   if (node->common) return TURBODB_STATUS_OK;
   const orm_sql_binding_scope scope = {.document=document,.schema=&node->schema,.parameter_types=vec_data_const(&plan->parameter_types),
     .parameter_offsets=vec_data_const(offsets),.parameter_count=vec_size(&plan->parameter_types),.budget=plan->budget,
+    .parameter_resolved=dependencies ? dependencies->parameter_resolved : NULL,
     .parameter_marker_count=plan->parameter_marker_count,
     .outer_schema=dependencies ? dependencies->outer_schema : NULL,
     .outer_qualifier=dependencies ? dependencies->outer_qualifier : (vstr){0},
@@ -551,6 +552,8 @@ static turbodb_status_t from_bind_schema(const sqlparser_document *document, sql
   for (size_t i = 0; status == TURBODB_STATUS_OK && i < total_parameters; ++i) {
     const orm_sql_type type=i<parameter_count?parameter_types[i]:
         dependencies->outer_schema->columns[i-parameter_count].type;
+    if(i<parameter_count&&dependencies&&dependencies->parameter_resolved&&
+        !dependencies->parameter_resolved[i]) continue;
     orm_sql_predicate validator;
     status = orm_tidesdb_sql_predicate_bind(ORM_SQL_IS_NULL,type,NULL,&validator,error);
     if (status == TURBODB_STATUS_OK) *(orm_sql_type *)vec_at(&plan.parameter_types,i) = type;

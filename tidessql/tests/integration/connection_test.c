@@ -63,6 +63,12 @@ static void score_is(int64_t expected) {
   check_equal(row.values[0].data.int64_value, expected);
   check_equal(next().state, TDSQL_DONE); close_result();
 }
+static void text_is(turbodb_value_t value, const char *expected) {
+  check_equal(value.kind, TURBODB_VALUE_TEXT);
+  check_equal(value.data.text_value.len, strlen(expected));
+  check_equal(memcmp(value.data.text_value.data, expected,
+      value.data.text_value.len), 0);
+}
 
 spec("TidesSQL direct connection contract") {
   before_each() {
@@ -166,6 +172,63 @@ spec("TidesSQL direct connection contract") {
     check_equal(execute("UPDATE items SET score=30 WHERE id=1"), TURBODB_STATUS_OK); score_is(30);
     check_equal(execute("ROLLBACK"), TURBODB_STATUS_OK); score_is(10);
     check_equal(execute("SET autocommit=ON"), TURBODB_STATUS_OK);
+  }
+  it("reports the bounded Connector/J initialization session metadata") {
+    const char *const sql=
+      "SELECT @@session.auto_increment_increment AS auto_increment_increment"
+      ",@@character_set_client AS character_set_client"
+      ",@@character_set_connection AS character_set_connection"
+      ",@@character_set_results AS character_set_results"
+      ",@@character_set_server AS character_set_server"
+      ",@@collation_server AS collation_server"
+      ",@@collation_connection AS collation_connection"
+      ",@@init_connect AS init_connect"
+      ",@@interactive_timeout AS interactive_timeout"
+      ",@@license AS license"
+      ",@@lower_case_table_names AS lower_case_table_names"
+      ",@@max_allowed_packet AS max_allowed_packet"
+      ",@@net_write_timeout AS net_write_timeout"
+      ",@@performance_schema AS performance_schema"
+      ",@@query_cache_size AS query_cache_size"
+      ",@@query_cache_type AS query_cache_type"
+      ",@@sql_mode AS sql_mode"
+      ",@@system_time_zone AS system_time_zone"
+      ",@@time_zone AS time_zone"
+      ",@@tx_isolation AS transaction_isolation"
+      ",@@wait_timeout AS wait_timeout";
+    tdsql_request input=request(sql);
+    input.limits.max_query_bytes=4096;
+    check_equal(tdsql_connection_query(connection,&input,&result,&error),
+        TURBODB_STATUS_OK);
+    check_equal(tdsql_result_columns(result),21u);
+    const tdsql_row row=next();
+    check_equal(row.state,TDSQL_ROW); check_equal(row.count,21u);
+    check_equal(row.values[0].kind,TURBODB_VALUE_UINT64);
+    check_equal(row.values[0].data.uint64_value,1u);
+    text_is(row.values[1],"utf8mb4"); text_is(row.values[2],"utf8mb4");
+    check_equal(row.values[3].kind,TURBODB_VALUE_NULL);
+    text_is(row.values[4],"utf8mb4");
+    text_is(row.values[5],"utf8mb4_bin"); text_is(row.values[6],"utf8mb4_bin");
+    text_is(row.values[7],"");
+    check_equal(row.values[8].kind,TURBODB_VALUE_NULL);
+    text_is(row.values[9],"Apache-2.0");
+    check_equal(row.values[10].kind,TURBODB_VALUE_UINT64);
+    check_equal(row.values[10].data.uint64_value,0u);
+    check_equal(row.values[11].kind,TURBODB_VALUE_UINT64);
+    check_equal(row.values[11].data.uint64_value,4096u);
+    check_equal(row.values[12].kind,TURBODB_VALUE_NULL);
+    check_equal(row.values[13].kind,TURBODB_VALUE_UINT64);
+    check_equal(row.values[13].data.uint64_value,0u);
+    check_equal(row.values[14].kind,TURBODB_VALUE_UINT64);
+    check_equal(row.values[14].data.uint64_value,0u);
+    text_is(row.values[15],"OFF");
+    text_is(row.values[16],"NO_BACKSLASH_ESCAPES,STRICT_TRANS_TABLES");
+    text_is(row.values[17],"UTC"); text_is(row.values[18],"+00:00");
+    text_is(row.values[19],"SERIALIZABLE");
+    check_equal(row.values[20].kind,TURBODB_VALUE_NULL);
+    check_equal(next().state,TDSQL_DONE); close_result();
+    check_equal(execute("SET sql_mode='ANSI'"),TURBODB_STATUS_UNSUPPORTED);
+    check_equal(execute("SET max_allowed_packet=8192"),TURBODB_STATUS_UNSUPPORTED);
   }
   it("preserves explicit savepoint rollback and finished handle lifetimes") {
     check_equal(tdsql_connection_begin(connection, &transaction, &error), TURBODB_STATUS_OK);
