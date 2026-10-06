@@ -9,7 +9,7 @@
 #include <string.h>
 #include <float.h>
 
-static size_t put_calls, fail_put, reserves, fail_reserve, resizes, fail_resize, gets, fail_get, news, fail_new;
+static size_t put_calls, fail_put, reserves, fail_reserve, resizes, fail_resize, get_calls, fail_get, news, fail_new;
 static size_t delete_calls, fail_delete;
 static bool fail_savepoint, fail_release, fail_rollback, fail_sort;
 static int fail_iterator;
@@ -28,7 +28,7 @@ static int probe_put(orm_tidesdb_transaction_t *tx, orm_tidesdb_column_family_t 
 }
 static int probe_get(orm_tidesdb_transaction_t *tx, orm_tidesdb_column_family_t *cf,
     const uint8_t *key, size_t key_size, uint8_t **data, size_t *size) {
-  return ++gets == fail_get ? ORM_TDB_ERR_IO : orm_tidesdb_txn_get(tx, cf, key, key_size, data, size);
+  return ++get_calls == fail_get ? ORM_TDB_ERR_IO : orm_tidesdb_txn_get(tx, cf, key, key_size, data, size);
 }
 static int probe_delete(orm_tidesdb_transaction_t *tx, orm_tidesdb_column_family_t *cf, const uint8_t *key, size_t size) {
   return ++delete_calls == fail_delete ? ORM_TDB_ERR_IO : orm_tidesdb_txn_delete(tx, cf, key, size);
@@ -127,7 +127,7 @@ static turbodb_error_t error;
 static turbodb_value_t rows[ROWS * COLUMNS];
 
 static void faults_clear(void) {
-  put_calls = fail_put = reserves = fail_reserve = resizes = fail_resize = gets = fail_get = news = fail_new = 0;
+  put_calls = fail_put = reserves = fail_reserve = resizes = fail_resize = get_calls = fail_get = news = fail_new = 0;
   delete_calls = fail_delete = 0;
   commit_fault = COMMIT_OK;
   fail_savepoint = fail_release = fail_rollback = fail_sort = false; fail_iterator = 0;
@@ -634,7 +634,7 @@ spec("TidesDB private first-index transaction") {
   }
   it("rejects inline metadata read failures without publishing definitions") {
     save(); faults_clear(); size_t affected=OUTPUT_SENTINEL;
-    check_equal(execute_sql(inline_sql,&affected),TURBODB_STATUS_OK); const size_t counts[]={gets,news,1}; restore();
+    check_equal(execute_sql(inline_sql,&affected),TURBODB_STATUS_OK); const size_t counts[]={get_calls,news,1}; restore();
     for(size_t phase=0;phase<3;++phase) for(size_t point=1;point<=counts[phase];++point) {
       next_statement(); faults_clear();
       if(phase==2) fail_iterator=FAIL_SEEK; else if(phase) fail_new=point; else fail_get=point;
@@ -800,7 +800,7 @@ spec("TidesDB private first-index transaction") {
   it("unwinds metadata reads and both scan passes without publishing partial state") {
     seed(); save(); faults_clear(); uint64_t id = 0;
     check_equal(build_on(&owner, unique_sql, &id), TURBODB_STATUS_OK);
-    const size_t get_count = gets, new_count = news; restore();
+    const size_t get_count = get_calls, new_count = news; restore();
     const uint64_t work = budget.used.value[ORM_SQL_BUDGET_WORK_BYTES];
     for (size_t point = 1; point <= get_count; ++point) {
       faults_clear(); fail_get = point; id = OUTPUT_SENTINEL;
@@ -1184,7 +1184,7 @@ spec("TidesDB private first-index transaction") {
   }
   it("propagates every indexed metadata and occupancy read failure without writes") {
     seed(); build_many(); check_equal(orm_tidesdb_sql_catalog_finish(&owner, true, &error), TURBODB_STATUS_OK); begin_owner(&owner);
-    save(); faults_clear(); check_equal(move_one(), TURBODB_STATUS_OK); const size_t count = gets; restore();
+    save(); faults_clear(); check_equal(move_one(), TURBODB_STATUS_OK); const size_t count = get_calls; restore();
     for (size_t point = 1; point <= count; ++point) {
       faults_clear(); fail_get = point;
       check_equal(move_one(), TURBODB_STATUS_DATASTORE_ERROR); check_equal(put_calls, 0u); check_equal(delete_calls, 0u);
@@ -1281,7 +1281,7 @@ spec("TidesDB private first-index transaction") {
   it("propagates DROP INDEX point read and iterator failures with no storage mutation") {
     seed(); build_many(); check_equal(orm_tidesdb_sql_catalog_finish(&owner, true, &error), TURBODB_STATUS_OK); begin_owner(&owner);
     save(); faults_clear(); uint64_t id = 0; check_equal(drop_on(&owner, "DROP INDEX ix ON items", &id), TURBODB_STATUS_OK);
-    const size_t read_count = gets, iterator_count = news; restore();
+    const size_t read_count = get_calls, iterator_count = news; restore();
     for (size_t phase = 0; phase < 3; ++phase) {
       const size_t count = phase == 2 ? FAIL_VALUE : phase ? iterator_count : read_count;
       for (size_t point = 1; point <= count; ++point) {
@@ -1660,7 +1660,7 @@ spec("TidesDB private first-index transaction") {
     seed(); build_many(); check_equal(orm_tidesdb_sql_catalog_finish(&owner, true, &error), TURBODB_STATUS_OK); begin_owner(&owner);
     const char *sql[] = {"TRUNCATE TABLE items", "DROP TABLE items"};
     for (size_t op = 0; op < 2; ++op) {
-      save(); faults_clear(); check_equal(clear_on(&owner, sql[op]), TURBODB_STATUS_OK); const size_t reads = gets, iterators = news; restore();
+      save(); faults_clear(); check_equal(clear_on(&owner, sql[op]), TURBODB_STATUS_OK); const size_t reads = get_calls, iterators = news; restore();
       for (size_t phase = 0; phase < 3; ++phase) for (size_t point = 1; point <= (phase == 2 ? FAIL_VALUE : phase ? iterators : reads); ++point) {
         faults_clear(); if (phase == 2) fail_iterator = (int)point; else if (phase) fail_new = point; else fail_get = point;
         check_equal(clear_on(&owner, sql[op]), TURBODB_STATUS_DATASTORE_ERROR);
@@ -1877,7 +1877,7 @@ spec("TidesDB private first-index transaction") {
     seed(); build_many(); check_equal(orm_tidesdb_sql_catalog_finish(&owner,true,&error),TURBODB_STATUS_OK); begin_owner(&owner); save();
     const char *sql[]={"ALTER TABLE items RENAME TO renamed","ALTER TABLE items RENAME COLUMN a TO amount"};
     for(size_t op=0;op<2;++op) {
-      faults_clear(); check_equal(alter_on(&owner,sql[op]),TURBODB_STATUS_OK); const size_t reads=gets, iterators=news; restore();
+      faults_clear(); check_equal(alter_on(&owner,sql[op]),TURBODB_STATUS_OK); const size_t reads=get_calls, iterators=news; restore();
       for(size_t phase=0;phase<3;++phase) {
         const size_t count=phase==0?reads:phase==1?iterators:FAIL_VALUE;
         for(size_t point=1;point<=count;++point) {
@@ -2060,7 +2060,7 @@ spec("TidesDB private first-index transaction") {
         "ALTER TABLE items ALTER a SET DEFAULT '0.5e1'"};
       for(size_t op=0;op<sizeof(sql)/sizeof(sql[0]);++op) {
         next_statement(); faults_clear(); check_equal(alter_on(&owner,sql[op]),TURBODB_STATUS_OK);
-        const size_t counts[]={gets,news,FAIL_VALUE}; restore();
+        const size_t counts[]={get_calls,news,FAIL_VALUE}; restore();
         for(size_t phase=0;phase<sizeof(counts)/sizeof(counts[0]);++phase) for(size_t point=1;point<=counts[phase];++point) {
           next_statement(); faults_clear(); const uint64_t work=budget.used.value[ORM_SQL_BUDGET_WORK_BYTES];
           if(!phase) fail_get=point; else if(phase==1) fail_new=point; else fail_iterator=(int)point;
@@ -2311,7 +2311,7 @@ spec("TidesDB private first-index transaction") {
     check_equal(orm_tidesdb_sql_catalog_finish(&owner,true,&error),TURBODB_STATUS_OK); begin_owner(&owner); save();
     for(size_t op=0;op<COLUMN_REWRITE_CASES;++op) {
       next_statement();
-      faults_clear(); check_equal(alter_on(&owner,column_rewrite_sql[op]),TURBODB_STATUS_OK); const size_t counts[]={gets,news,FAIL_VALUE}; restore();
+      faults_clear(); check_equal(alter_on(&owner,column_rewrite_sql[op]),TURBODB_STATUS_OK); const size_t counts[]={get_calls,news,FAIL_VALUE}; restore();
       for(size_t phase=0;phase<3;++phase) for(size_t point=1;point<=counts[phase];++point) {
         const uint64_t work=budget.used.value[ORM_SQL_BUDGET_WORK_BYTES]; faults_clear(); next_statement();
         if(!phase) fail_get=point; else if(phase==1) fail_new=point; else fail_iterator=(int)point;
@@ -2444,7 +2444,7 @@ spec("TidesDB private first-index transaction") {
     empty_column_indexes(); check_equal(orm_tidesdb_sql_catalog_finish(&owner,true,&error),TURBODB_STATUS_OK); begin_owner(&owner); save();
     const char *sql[]={"ALTER TABLE items ADD c BIGINT","ALTER TABLE items DROP a"};
     for(size_t op=0;op<2;++op) {
-      faults_clear(); check_equal(alter_on(&owner,sql[op]),TURBODB_STATUS_OK); const size_t counts[]={gets,news,FAIL_VALUE}; restore();
+      faults_clear(); check_equal(alter_on(&owner,sql[op]),TURBODB_STATUS_OK); const size_t counts[]={get_calls,news,FAIL_VALUE}; restore();
       for(size_t phase=0;phase<3;++phase) for(size_t point=1;point<=counts[phase];++point) {
         const uint64_t work=budget.used.value[ORM_SQL_BUDGET_WORK_BYTES]; faults_clear();
         if(!phase) fail_get=point; else if(phase==1) fail_new=point; else fail_iterator=(int)point;
@@ -2528,7 +2528,7 @@ spec("TidesDB private first-index transaction") {
     check_equal(lookup_open("SELECT id FROM items WHERE a<=>? AND b=?", params, 2), TURBODB_STATUS_OK);
     lookup_row(0); lookup_row(1); lookup_end();
     check_equal(lookup_open("SELECT id FROM items WHERE a=NULL AND b=7", NULL, 0), TURBODB_STATUS_OK);
-    check_true(lookup_query.as.select.source.lookup.empty); faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(gets, 0u);
+    check_true(lookup_query.as.select.source.lookup.empty); faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(get_calls, 0u);
   }
   it("normalizes integer equality probes exactly at signed and unsigned boundaries") {
     seed(); build_many();
@@ -2538,7 +2538,7 @@ spec("TidesDB private first-index transaction") {
       "SELECT id FROM items WHERE a=0 AND b=-1", "SELECT id FROM items WHERE id IS NULL"};
     for (size_t i = 0; i < sizeof(empty) / sizeof(empty[0]); ++i) {
       check_equal(lookup_open(empty[i], NULL, 0), TURBODB_STATUS_OK); check_true(lookup_query.as.select.source.lookup.empty);
-      faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(gets, 0u);
+      faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(get_calls, 0u);
     }
     const turbodb_value_t params[] = {turbodb_u64(0), turbodb_i64(7)};
     check_equal(lookup_open("SELECT id FROM items WHERE a=? AND b=?", params, 2), TURBODB_STATUS_OK); lookup_row(-1); lookup_end();
@@ -2601,7 +2601,7 @@ spec("TidesDB private first-index transaction") {
       "SELECT id FROM items WHERE b IN (-1,NULL)", "SELECT id FROM items WHERE a IN (NULL) OR a>9223372036854775807"};
     for (size_t i = 0; i < sizeof(empty)/sizeof(empty[0]); ++i) {
       check_equal(lookup_open(empty[i], NULL, 0), TURBODB_STATUS_OK);
-      check_true(lookup_query.as.select.source.lookup.empty); faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(gets, 0u);
+      check_true(lookup_query.as.select.source.lookup.empty); faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(get_calls, 0u);
     }
   }
   it("merges contained, adjacent and duplicate composite intervals without repeating rows") {
@@ -2657,12 +2657,12 @@ spec("TidesDB private first-index transaction") {
     faults_clear(); orm_sql_scan_row row = {0};
     check_equal(orm_tidesdb_sql_runtime_next(&lookup_query, &row, &error), TURBODB_STATUS_OK);
     check_equal(row.state, ORM_SQL_SCAN_ROW); check_equal(strcmp(row.values[4].data.text_value.data,"range"), 0);
-    check_equal(row.values[8].kind, TURBODB_VALUE_NULL); lookup_end(); check_equal(gets, 0u); check_equal(news, 0u);
+    check_equal(row.values[8].kind, TURBODB_VALUE_NULL); lookup_end(); check_equal(get_calls, 0u); check_equal(news, 0u);
     check_equal(lookup_open("SELECT id FROM items WHERE a IN (0,-9223372036854775808) LIMIT 0", NULL, 0), TURBODB_STATUS_OK);
-    faults_clear(); lookup_end(); check_equal(gets, 0u); check_equal(news, 0u);
+    faults_clear(); lookup_end(); check_equal(get_calls, 0u); check_equal(news, 0u);
     check_equal(lookup_open("SELECT id FROM items WHERE a IN (0,-9223372036854775808)", NULL, 0), TURBODB_STATUS_OK);
     lookup_row(INT64_MIN); faults_clear(); check_equal(orm_tidesdb_sql_runtime_cancel(&lookup_query, &error), TURBODB_STATUS_OK);
-    check_equal(orm_tidesdb_sql_runtime_close(&lookup_query, &error), TURBODB_STATUS_OK); check_equal(gets, 0u); check_equal(news, 0u);
+    check_equal(orm_tidesdb_sql_runtime_close(&lookup_query, &error), TURBODB_STATUS_OK); check_equal(get_calls, 0u); check_equal(news, 0u);
   }
   it("locks a seek failure between two disjoint ranges without publishing another row") {
     seed(); build_many();
@@ -2671,10 +2671,10 @@ spec("TidesDB private first-index transaction") {
     lookup_row(INT64_MIN); faults_clear(); fail_iterator = FAIL_SEEK;
     orm_sql_scan_row row = {.count=OUTPUT_SENTINEL};
     check_equal(orm_tidesdb_sql_runtime_next(&lookup_query, &row, &error), TURBODB_STATUS_DATASTORE_ERROR);
-    check_equal(row.count, OUTPUT_SENTINEL); check_true(owner.failed); check_equal(gets, 0u);
+    check_equal(row.count, OUTPUT_SENTINEL); check_true(owner.failed); check_equal(get_calls, 0u);
     faults_clear();
     check_equal(orm_tidesdb_sql_runtime_next(&lookup_query, &row, &error), TURBODB_STATUS_DATASTORE_ERROR);
-    check_equal(gets, 0u); check_equal(news, 0u);
+    check_equal(get_calls, 0u); check_equal(news, 0u);
     check_equal(orm_tidesdb_sql_runtime_close(&lookup_query, &error), TURBODB_STATUS_OK);
   }
   it("propagates multi-range ordering allocation failure and releases all plan storage") {
@@ -2758,7 +2758,7 @@ spec("TidesDB private first-index transaction") {
       "SELECT id FROM items WHERE a IS NULL AND b BETWEEN NULL AND 8"};
     for (size_t i = 0; i < sizeof(empty)/sizeof(empty[0]); ++i) {
       check_equal(lookup_open(empty[i], NULL, 0), TURBODB_STATUS_OK); check_true(lookup_query.as.select.source.lookup.empty);
-      faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(gets, 0u);
+      faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(get_calls, 0u);
     }
     const char *wide[] = {"SELECT id FROM items WHERE a<18446744073709551615 ORDER BY id",
       "SELECT id FROM items WHERE a<=18446744073709551615 ORDER BY id", "SELECT id FROM items WHERE a>=-9223372036854775808 ORDER BY id"};
@@ -2873,10 +2873,10 @@ spec("TidesDB private first-index transaction") {
     check_equal(orm_sql_runtime_execution_close(&lookup_query, &error), TURBODB_STATUS_OK);
     check_equal(orm_sql_runtime_execution_resume(&lookup_query, &error), TURBODB_STATUS_OK); lookup_row(9); lookup_end();
     check_equal(lookup_open("SELECT id FROM items WHERE a=0 AND b=7 LIMIT 0", NULL, 0), TURBODB_STATUS_OK);
-    faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(gets, 0u);
+    faults_clear(); lookup_end(); check_equal(news, 0u); check_equal(get_calls, 0u);
     check_equal(lookup_open("SELECT id FROM items WHERE a=0 AND b=7", NULL, 0), TURBODB_STATUS_OK); faults_clear();
     check_equal(orm_tidesdb_sql_runtime_cancel(&lookup_query, &error), TURBODB_STATUS_OK);
-    check_equal(orm_tidesdb_sql_runtime_close(&lookup_query, &error), TURBODB_STATUS_OK); check_equal(news, 0u); check_equal(gets, 0u);
+    check_equal(orm_tidesdb_sql_runtime_close(&lookup_query, &error), TURBODB_STATUS_OK); check_equal(news, 0u); check_equal(get_calls, 0u);
   }
   it("re-encodes a reusable query block from new parameters after the AST is destroyed") {
     seed(); build_many(); const char sql[] = "SELECT id FROM items WHERE a=? AND b=?";
@@ -2916,7 +2916,7 @@ spec("TidesDB private first-index transaction") {
         check_equal(row.state,ORM_SQL_SCAN_ROW);
         check_equal(row.count,op==2?2:op?ORM_SQL_SHOW_INDEX_COLUMNS:ORM_SQL_SHOW_COLUMNS);
       }
-      lookup_end(); check_equal(gets,0u); check_equal(news,0u); check_equal(reserves,0u); check_equal(resizes,0u);
+      lookup_end(); check_equal(get_calls,0u); check_equal(news,0u); check_equal(reserves,0u); check_equal(resizes,0u);
       check_equal(budget.used.value[ORM_SQL_BUDGET_READ_BYTES],reads);
       check_equal(put_calls,0u); check_equal(delete_calls,0u); check_equal(owner.active_sources,0u); faults_clear();
     }
@@ -2978,7 +2978,7 @@ spec("TidesDB private first-index transaction") {
     const char *sql[]={"SHOW COLUMNS FROM items","SHOW INDEX FROM items","SHOW CREATE TABLE items"};
     for(size_t op=0;op<sizeof(sql)/sizeof(sql[0]);++op) {
       next_statement(); faults_clear(); check_equal(lookup_open(sql[op],NULL,0),TURBODB_STATUS_OK);
-      const size_t counts[]={gets,news,FAIL_VALUE};
+      const size_t counts[]={get_calls,news,FAIL_VALUE};
       check_equal(orm_tidesdb_sql_runtime_close(&lookup_query,&error),TURBODB_STATUS_OK);
       for(size_t phase=0;phase<sizeof(counts)/sizeof(counts[0]);++phase) for(size_t point=1;point<=counts[phase];++point) {
         next_statement(); faults_clear();
@@ -3065,9 +3065,9 @@ spec("TidesDB private first-index transaction") {
         /* NEXT faults happen on the second pull, after the only matching row. */
         if (phase == 2 && point == FAIL_NEXT) lookup_row(-1);
         check_equal(orm_tidesdb_sql_runtime_next(&lookup_query, &row, &error), TURBODB_STATUS_DATASTORE_ERROR);
-        check_equal(row.count, OUTPUT_SENTINEL); const size_t reads = gets, iterators = news;
+        check_equal(row.count, OUTPUT_SENTINEL); const size_t reads = get_calls, iterators = news;
         check_equal(orm_tidesdb_sql_runtime_next(&lookup_query, &row, &error), TURBODB_STATUS_DATASTORE_ERROR);
-        check_equal(gets, reads); check_equal(news, iterators); check_true(owner.failed);
+        check_equal(get_calls, reads); check_equal(news, iterators); check_true(owner.failed);
         faults_clear(); check_equal(orm_tidesdb_sql_runtime_close(&lookup_query, &error), TURBODB_STATUS_OK);
         check_equal(orm_tidesdb_sql_catalog_finish(&owner, false, &error), TURBODB_STATUS_OK); begin_owner(&owner);
       }
@@ -3083,7 +3083,7 @@ spec("TidesDB private first-index transaction") {
     faults_clear(); fail_new = fail_get = 1; orm_sql_scan_row row = {0};
     check_equal(orm_tidesdb_sql_runtime_next(&lookup_query, &row, &error), TURBODB_STATUS_OK); check_equal(row.state, ORM_SQL_SCAN_ROW);
     check_equal(row.values[9].kind, TURBODB_VALUE_NULL); check_equal(row.values[10].kind, TURBODB_VALUE_NULL); lookup_end();
-    check_equal(gets, 0u); check_equal(news, 0u); check_equal(budget.used.value[ORM_SQL_BUDGET_READ_ROWS], reads); faults_clear();
+    check_equal(get_calls, 0u); check_equal(news, 0u); check_equal(budget.used.value[ORM_SQL_BUDGET_READ_ROWS], reads); faults_clear();
   }
   it("fails closed on touched orphan rows, wrong tuples and invalid unique owners") {
     seed(); build_many(); check_equal(orm_tidesdb_sql_catalog_finish(&owner, true, &error), TURBODB_STATUS_OK);
