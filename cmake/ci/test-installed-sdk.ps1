@@ -31,7 +31,11 @@ foreach ($path in @($source, $env:SALTS_ROOT, $env:SALTS_UTILS_ROOT, $env:TURBOD
   }
 }
 
-$toolchain = Join-Path $env:VCPKG_ROOT "scripts/buildsystems/vcpkg.cmake"
+$toolchain = $env:QIGAO_VCPKG_TOOLCHAIN_FILE
+if ([string]::IsNullOrWhiteSpace($toolchain)) {
+  $toolchain = Join-Path $env:VCPKG_ROOT "scripts/buildsystems/vcpkg.cmake"
+}
+$toolchain = [IO.Path]::GetFullPath($toolchain)
 if (-not (Test-Path -LiteralPath $toolchain -PathType Leaf)) {
   throw "vcpkg toolchain is missing: $toolchain"
 }
