@@ -1,11 +1,62 @@
 #include <cnet/cnet.h>
-#include <tinymock.h>
+#include <tinytest.h>
 
-TINYMOCk_MOCK(int, test_init, cnet_client *, const cnet_client_config *)
-TINYMOCk_MOCK(int, test_connect, cnet_client *, const cnet_connect_options *, cnet_connection *)
-TINYMOCk_MOCK(int, test_poll, cnet_client *, uint32_t, size_t *)
-TINYMOCk_MOCK(int, test_stop, cnet_client *, uint32_t)
-TINYMOCk_MOCK(int, test_destroy, cnet_client *)
+enum { MYSQL_TRANSPORT_FAKE_POLL_CAPACITY = 3u };
+
+typedef struct mysql_transport_fake_state {
+  int init_result;
+  int connect_result;
+  int poll_result;
+  int stop_result;
+  int destroy_result;
+  size_t init_calls;
+  size_t connect_calls;
+  size_t poll_calls;
+  size_t stop_calls;
+  size_t destroy_calls;
+  uint32_t poll_timeouts[MYSQL_TRANSPORT_FAKE_POLL_CAPACITY];
+  uint32_t stop_timeout;
+} mysql_transport_fake_state;
+
+static mysql_transport_fake_state transport_fake;
+
+static int test_init(cnet_client *client, const cnet_client_config *config) {
+  (void)client;
+  (void)config;
+  ++transport_fake.init_calls;
+  return transport_fake.init_result;
+}
+
+static int test_connect(cnet_client *client, const cnet_connect_options *options,
+                        cnet_connection *connection) {
+  (void)client;
+  (void)options;
+  (void)connection;
+  ++transport_fake.connect_calls;
+  return transport_fake.connect_result;
+}
+
+static int test_poll(cnet_client *client, uint32_t timeout_ms, size_t *processed) {
+  (void)client;
+  (void)processed;
+  if (transport_fake.poll_calls < MYSQL_TRANSPORT_FAKE_POLL_CAPACITY)
+    transport_fake.poll_timeouts[transport_fake.poll_calls] = timeout_ms;
+  ++transport_fake.poll_calls;
+  return transport_fake.poll_result;
+}
+
+static int test_stop(cnet_client *client, uint32_t timeout_ms) {
+  (void)client;
+  ++transport_fake.stop_calls;
+  transport_fake.stop_timeout = timeout_ms;
+  return transport_fake.stop_result;
+}
+
+static int test_destroy(cnet_client *client) {
+  (void)client;
+  ++transport_fake.destroy_calls;
+  return transport_fake.destroy_result;
+}
 
 /* Compile the real session with test-local transport admission/progress seams.
  * No mock hook or alternate implementation is added to the production API. */
@@ -34,30 +85,22 @@ spec("MySQL session transport failure ownership") {
         .password = "fixture", .database = "unit", .ca_file = "fixture-ca.pem",
         .server_name = "test.invalid", .timeout_ms = 25u};
     memset(&error, 0, sizeof(error));
-    mock_test_init_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-    mock_test_connect_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-    mock_test_poll_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-    mock_test_stop_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-    mock_test_destroy_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-  }
-
-  after_each() {
-    mock_test_init_verify();
-    mock_test_connect_verify();
-    mock_test_poll_verify();
-    mock_test_stop_verify();
-    mock_test_destroy_verify();
+    transport_fake = (mysql_transport_fake_state){
+        .init_result = SALTS_OK,
+        .connect_result = SALTS_OK,
+        .poll_result = SALTS_OK,
+        .stop_result = SALTS_OK,
+        .destroy_result = SALTS_OK};
   }
 
   it("admits async work without polling and advances with one zero timeout poll") {
     mysql_async_source source = {0};
     check_equal(mysql_session_start_async_source(&config, sql, sizeof(sql) - 1u,
         NULL, 0u, &bounds, &source, &error), MYSQL_SESSION_OK);
-    tinymock_mock_verify_never(&tinymock_test_poll);
-    mock_test_poll_expect(TINYMOCk_ANY, TINYMOCk_ARG((uint32_t)0u),
-                         TINYMOCk_ANY, TINYMOCk_RETURN(SALTS_OK));
+    check_equal(transport_fake.poll_calls, (size_t)0u);
     check_equal(mysql_session_async_next(&source).kind, MYSQL_ASYNC_WAIT);
-    tinymock_mock_verify_times(&tinymock_test_poll, 1u);
+    check_equal(transport_fake.poll_calls, (size_t)1u);
+    check_equal(transport_fake.poll_timeouts[0], (uint32_t)0u);
     mysql_session_async_destroy(&source);
     check_null(source.context);
   }
@@ -66,12 +109,12 @@ spec("MySQL session transport failure ownership") {
     mysql_async_source source = {0};
     check_equal(mysql_session_start_async_source(&config, sql, sizeof(sql) - 1u,
         NULL, 0u, &bounds, &source, &error), MYSQL_SESSION_OK);
-    mock_test_poll_set_default_return(TINYMOCk_RETURN(SALTS_EIO));
+    transport_fake.poll_result = SALTS_EIO;
     mysql_async_step step = mysql_session_async_next(&source);
     check_equal(step.kind, MYSQL_ASYNC_ERROR);
     check_equal(step.status, MYSQL_SESSION_IO);
     check_equal(mysql_session_async_next(&source).kind, MYSQL_ASYNC_ERROR);
-    tinymock_mock_verify_times(&tinymock_test_poll, 1u);
+    check_equal(transport_fake.poll_calls, (size_t)1u);
     mysql_session_async_destroy(&source);
   }
 
@@ -95,7 +138,7 @@ spec("MySQL session transport failure ownership") {
     check_equal(step.row[0], 42u);
     session->phase = MYSQL_PHASE_DONE;
     check_equal(mysql_session_async_next(&source).kind, MYSQL_ASYNC_DONE);
-    tinymock_mock_verify_never(&tinymock_test_poll);
+    check_equal(transport_fake.poll_calls, (size_t)0u);
     mysql_session_async_destroy(&source);
   }
 
@@ -106,20 +149,20 @@ spec("MySQL session transport failure ownership") {
     mysql_session_t *session = source.context;
     mysql_session_async_cancel(&source);
     session->client.impl = (void *)session; /* Mock a still-owned transport. */
-    mock_test_stop_set_default_return(TINYMOCk_RETURN(SALTS_ETIMEDOUT));
-    mock_test_destroy_set_default_return(TINYMOCk_RETURN(SALTS_EBUSY));
+    transport_fake.stop_result = SALTS_ETIMEDOUT;
+    transport_fake.destroy_result = SALTS_EBUSY;
     check_equal(mysql_session_async_close(&source, &error), MYSQL_SESSION_TIMEOUT);
     check_true(source.context == session);
     check_equal(error.stage, "async-close");
-    tinymock_mock_verify_times(&tinymock_test_destroy, 1u);
+    check_equal(transport_fake.destroy_calls, (size_t)1u);
     check_equal(mysql_session_async_next(&source).status, MYSQL_SESSION_INVALID_STATE);
     session->client.impl = NULL;
-    mock_test_stop_set_default_return(TINYMOCk_RETURN(SALTS_OK));
-    mock_test_destroy_set_default_return(TINYMOCk_RETURN(SALTS_OK));
+    transport_fake.stop_result = SALTS_OK;
+    transport_fake.destroy_result = SALTS_OK;
     check_equal(mysql_session_async_close(&source, &error), MYSQL_SESSION_OK);
     check_null(source.context);
     mysql_session_async_destroy(&source);
-    tinymock_mock_verify_times(&tinymock_test_destroy, 1u);
+    check_equal(transport_fake.destroy_calls, (size_t)2u);
   }
 
   it("rejects occupied async output and overflowing command lengths before transport admission") {
@@ -130,84 +173,80 @@ spec("MySQL session transport failure ownership") {
     source.context = NULL;
     check_equal(mysql_session_start_async_source(&config, sql, SIZE_MAX,
         NULL, 0u, &bounds, &source, &error), MYSQL_SESSION_INVALID);
-    tinymock_mock_verify_never(&tinymock_test_init);
+    check_equal(transport_fake.init_calls, (size_t)0u);
   }
 
   it("rejects missing TLS trust before initializing a client") {
     config.ca_file = "";
     check_equal(mysql_session_connect_and_ping(&config, &error), MYSQL_SESSION_INVALID);
     check_equal(error.stage, "config");
-    tinymock_mock_verify_never(&tinymock_test_init);
-    tinymock_mock_verify_never(&tinymock_test_connect);
-    tinymock_mock_verify_never(&tinymock_test_destroy);
+    check_equal(transport_fake.init_calls, (size_t)0u);
+    check_equal(transport_fake.connect_calls, (size_t)0u);
+    check_equal(transport_fake.destroy_calls, (size_t)0u);
   }
 
   it("does not close or destroy a client whose initialization failed") {
-    mock_test_init_set_default_return(TINYMOCk_RETURN(SALTS_ENOMEM));
+    transport_fake.init_result = SALTS_ENOMEM;
     check_equal(mysql_session_connect_and_ping(&config, &error), MYSQL_SESSION_IO);
     check_equal(error.cnet_status, SALTS_ENOMEM);
     check_equal(error.stage, "client-init");
-    tinymock_mock_verify_times(&tinymock_test_init, 1u);
-    tinymock_mock_verify_never(&tinymock_test_connect);
-    tinymock_mock_verify_never(&tinymock_test_stop);
-    tinymock_mock_verify_never(&tinymock_test_destroy);
+    check_equal(transport_fake.init_calls, (size_t)1u);
+    check_equal(transport_fake.connect_calls, (size_t)0u);
+    check_equal(transport_fake.stop_calls, (size_t)0u);
+    check_equal(transport_fake.destroy_calls, (size_t)0u);
   }
 
   it("releases an initialized client exactly once after connection admission fails") {
-    mock_test_connect_set_default_return(TINYMOCk_RETURN(SALTS_ENOBUFS));
+    transport_fake.connect_result = SALTS_ENOBUFS;
     check_equal(mysql_session_connect_and_ping(&config, &error), MYSQL_SESSION_IO);
     check_equal(error.cnet_status, SALTS_ENOBUFS);
     check_equal(error.stage, "connect");
-    tinymock_mock_verify_times(&tinymock_test_connect, 1u);
-    tinymock_mock_verify_never(&tinymock_test_poll);
-    tinymock_mock_verify_times(&tinymock_test_stop, 1u);
-    tinymock_mock_verify_times(&tinymock_test_destroy, 1u);
+    check_equal(transport_fake.connect_calls, (size_t)1u);
+    check_equal(transport_fake.poll_calls, (size_t)0u);
+    check_equal(transport_fake.stop_calls, (size_t)1u);
+    check_equal(transport_fake.destroy_calls, (size_t)1u);
   }
 
   it("preserves poll failure diagnostics while destroying the session") {
-    mock_test_poll_set_default_return(TINYMOCk_RETURN(SALTS_EIO));
+    transport_fake.poll_result = SALTS_EIO;
     check_equal(mysql_session_connect_and_ping(&config, &error), MYSQL_SESSION_IO);
     check_equal(error.cnet_status, SALTS_EIO);
     check_equal(error.stage, "poll");
-    tinymock_mock_verify_times(&tinymock_test_poll, 1u);
-    tinymock_mock_verify_times(&tinymock_test_stop, 1u);
-    tinymock_mock_verify_times(&tinymock_test_destroy, 1u);
+    check_equal(transport_fake.poll_calls, (size_t)1u);
+    check_equal(transport_fake.stop_calls, (size_t)1u);
+    check_equal(transport_fake.destroy_calls, (size_t)1u);
   }
 
   it("uses the remaining timeout in the final poll and then reports timeout") {
-    mock_test_poll_expect(TINYMOCk_ANY, TINYMOCk_ARG((uint32_t)10u),
-                         TINYMOCk_ANY, TINYMOCk_RETURN(SALTS_OK));
-    mock_test_poll_expect(TINYMOCk_ANY, TINYMOCk_ARG((uint32_t)10u),
-                         TINYMOCk_ANY, TINYMOCk_RETURN(SALTS_OK));
-    mock_test_poll_expect(TINYMOCk_ANY, TINYMOCk_ARG((uint32_t)5u),
-                         TINYMOCk_ANY, TINYMOCk_RETURN(SALTS_OK));
-    mock_test_stop_expect(TINYMOCk_ANY, TINYMOCk_ARG(config.timeout_ms),
-                         TINYMOCk_RETURN(SALTS_OK));
     check_equal(mysql_session_connect_and_ping(&config, &error), MYSQL_SESSION_TIMEOUT);
     check_equal(error.stage, "timeout");
-    tinymock_mock_verify_times(&tinymock_test_poll, 3u);
-    tinymock_mock_verify_times(&tinymock_test_destroy, 1u);
+    check_equal(transport_fake.poll_calls, (size_t)3u);
+    check_equal(transport_fake.poll_timeouts[0], (uint32_t)10u);
+    check_equal(transport_fake.poll_timeouts[1], (uint32_t)10u);
+    check_equal(transport_fake.poll_timeouts[2], (uint32_t)5u);
+    check_equal(transport_fake.stop_timeout, config.timeout_ms);
+    check_equal(transport_fake.destroy_calls, (size_t)1u);
   }
 
   it("attempts destroy even when stop reports a progress failure") {
-    mock_test_poll_set_default_return(TINYMOCk_RETURN(SALTS_EIO));
-    mock_test_stop_set_default_return(TINYMOCk_RETURN(SALTS_EIO));
+    transport_fake.poll_result = SALTS_EIO;
+    transport_fake.stop_result = SALTS_EIO;
     check_equal(mysql_session_connect_and_ping(&config, &error), MYSQL_SESSION_IO);
     check_equal(error.stage, "poll");
-    tinymock_mock_verify_times(&tinymock_test_stop, 1u);
-    tinymock_mock_verify_times(&tinymock_test_destroy, 1u);
+    check_equal(transport_fake.stop_calls, (size_t)1u);
+    check_equal(transport_fake.destroy_calls, (size_t)1u);
   }
 
   it("does not publish a transaction when its connection is rejected") {
     const size_t command_capacity = 4096u;
     mysql_transaction_session_t *transaction = NULL;
-    mock_test_connect_set_default_return(TINYMOCk_RETURN(SALTS_ENOBUFS));
+    transport_fake.connect_result = SALTS_ENOBUFS;
     check_equal(mysql_transaction_session_begin(&config, MYSQL_ISOLATION_READ_COMMITTED,
                     command_capacity, &transaction, &error), MYSQL_SESSION_IO);
     check_null(transaction);
     check_equal(error.stage, "connect");
-    tinymock_mock_verify_times(&tinymock_test_stop, 1u);
-    tinymock_mock_verify_times(&tinymock_test_destroy, 1u);
+    check_equal(transport_fake.stop_calls, (size_t)1u);
+    check_equal(transport_fake.destroy_calls, (size_t)1u);
   }
 
   it("rejects an overlong host URI before allocating transport resources") {
@@ -218,8 +257,8 @@ spec("MySQL session transport failure ownership") {
     config.host = host;
     check_equal(mysql_session_connect_and_ping(&config, &error), MYSQL_SESSION_INVALID);
     check_equal(error.stage, "uri");
-    tinymock_mock_verify_never(&tinymock_test_init);
-    tinymock_mock_verify_never(&tinymock_test_connect);
-    tinymock_mock_verify_never(&tinymock_test_destroy);
+    check_equal(transport_fake.init_calls, (size_t)0u);
+    check_equal(transport_fake.connect_calls, (size_t)0u);
+    check_equal(transport_fake.destroy_calls, (size_t)0u);
   }
 }

@@ -6,7 +6,8 @@
 
 客户端包含 `turbodb_mysql.h` 并链接 `TurboDB::MySQL`，不需要 ORM 头文件、
 `Orm::C` 或插件加载器。ORM 插件复用同一客户端库，不再编译自己的协议副本。
-本库使用已安装的 Salts（CNet、CSerde）及已有 OpenSSL 依赖。
+本库使用已安装的 Salts（Core、CNet、CSerde）。认证 token 使用
+Salts 的 SHA-1/SHA-256 接口，保持既有 MySQL 协议格式；网络 TLS 由 CNet 提供。
 
 可编译的 C/C++ 消费用法见 [C 测试](tests/session/mysql_client_test.c) 和
 [C++ 测试](tests/session/mysql_client_cpp_test.cpp)。二者只链接通用库和测试框架。

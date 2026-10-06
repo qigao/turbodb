@@ -232,6 +232,19 @@ void sqlp_check_window_call(sqlp_context *ctx, sqlparser_id call) {
   ctx->error.offset = name.offset;
 }
 
+void sqlp_check_interval_unit(sqlp_context *ctx, sqlparser_span unit) {
+  static const char *const names[] = {
+    "microsecond", "second", "minute", "hour", "day", "week", "month", "quarter", "year",
+    "second_microsecond", "minute_microsecond", "minute_second", "hour_microsecond", "hour_second",
+    "hour_minute", "day_microsecond", "day_second", "day_minute", "day_hour", "year_month"
+  };
+  if (ctx->error.status != SQLPARSER_OK) return;
+  for (size_t i = 0; i < sizeof(names)/sizeof(names[0]); ++i)
+    if (span_keyword(ctx->document,unit,names[i])) return;
+  sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"invalid MySQL interval unit");
+  ctx->error.offset=unit.offset;
+}
+
 sqlparser_scope sqlp_variable_scope(sqlp_context *ctx, sqlparser_span span) {
   static const struct { const char *text; sqlparser_scope scope; } scopes[] = {
     {"@@global", SQLPARSER_SCOPE_GLOBAL}, {"@@session", SQLPARSER_SCOPE_SESSION},
@@ -249,7 +262,10 @@ sqlparser_list sqlparser_statements(const sqlparser_document *document) {
   return document ? document->statements : (sqlparser_list){0};
 }
 sqlparser_dialect sqlparser_get_dialect(const sqlparser_document *document) {
-  return document ? document->dialect : SQLPARSER_DIALECT_UNKNOWN;
+  return sqlparser_get_options(document).dialect;
+}
+sqlparser_options sqlparser_get_options(const sqlparser_document *document) {
+  return document ? document->options : (sqlparser_options){SQLPARSER_DIALECT_UNKNOWN, false};
 }
 size_t sqlparser_node_count(const sqlparser_document *document) {
   return document ? vec_size(&document->nodes) : 0;

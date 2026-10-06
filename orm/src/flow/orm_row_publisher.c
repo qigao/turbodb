@@ -312,7 +312,7 @@ static cflow_step orm_row_publisher_resume_admitted(
       char message[ORM_C_ERROR_MESSAGE_CAPACITY];
       (void)snprintf(message, sizeof(message),
                      "row binding failed: databind=%d cserde=%d path=%s",
-                     (int)bind_status, (int)bind_error.source_status,
+                     (int)bind_status, (int)bind_error.endpoint_status,
                      bind_error.error.path);
       return orm_row_publisher_fail(
           state, orm_row_status_to_orm(bind_status), message);

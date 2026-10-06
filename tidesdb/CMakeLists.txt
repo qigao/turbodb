@@ -46,6 +46,11 @@ option(TIDESDB_WITH_SNAPPY "build with Snappy compression support" OFF)
 option(TIDESDB_WITH_LZ4 "build with LZ4 compression support" OFF)
 option(TIDESDB_WITH_ZSTD "build with Zstd compression support" ON)
 
+if(TIDESDB_WITH_ZSTD AND NOT MINGW AND (WIN32 OR NOT TIDESDB_ZSTD_TARGET))
+    # WAL fault tests reuse this target's link dependencies from a sibling tree.
+    find_package(zstd CONFIG REQUIRED GLOBAL)
+endif()
+
 # explicit link override per backend, for consumers who vendor a compression lib (FetchContent /
 # add_subdirectory) under a target name the auto-probe cannot guess. set to a CMake target or a raw
 # link item, e.g. -DTIDESDB_ZSTD_TARGET=zstd::libzstd_static or -DTIDESDB_ZSTD_TARGET=zstd-neon.
@@ -205,8 +210,9 @@ if(TIDESDB_WITH_ZSTD)
     target_compile_definitions(tidesdb PRIVATE TIDESDB_HAVE_ZSTD)
 endif()
 
-# link one compression backend, resolving its name in three steps so a vendored or system-provided
-# library both work. resolution order:
+# Explicit compression overrides and optional LZ4/Snappy backends retain the
+# upstream resolution order. The default zstd path uses the private SDK archive.
+# Resolution order for overrides and optional backends:
 #   1. an explicit override in TIDESDB_<X>_TARGET -- a CMake target or raw link item the consumer
 #      passes in. this is the escape hatch for a dependency built under a non-standard target name
 #      (e.g. a FetchContent build named zstd-neon-enabled) where name-probing cannot guess it.
@@ -216,30 +222,50 @@ endif()
 #   3. a bare -l<name> against a system/installed library (the historical fallback).
 # used by every POSIX platform branch below so the behavior is uniform, not Linux-only.
 function(_tidesdb_link_compression libname)
+    if(libname STREQUAL "zstd" AND NOT TIDESDB_ZSTD_TARGET)
+        _tidesdb_link_zstd()
+        return()
+    endif()
     string(TOUPPER ${libname} _up)
+    set(_scope PUBLIC)
+    if(libname STREQUAL "zstd")
+        set(_scope PRIVATE)
+    endif()
     if(TIDESDB_${_up}_TARGET)
-        target_link_libraries(tidesdb PUBLIC ${TIDESDB_${_up}_TARGET})
+        target_link_libraries(tidesdb ${_scope} ${TIDESDB_${_up}_TARGET})
         message(STATUS "tidesdb: linking ${libname} via TIDESDB_${_up}_TARGET=${TIDESDB_${_up}_TARGET}")
         return()
     endif()
     set(candidates "")
-    if(libname STREQUAL "zstd")
-        list(APPEND candidates
-                zstd::libzstd_static zstd::libzstd_shared zstd::libzstd
-                libzstd_static libzstd_shared libzstd zstd)
-    elseif(libname STREQUAL "snappy")
+    if(libname STREQUAL "snappy")
         list(APPEND candidates Snappy::snappy snappy)
     elseif(libname STREQUAL "lz4")
         list(APPEND candidates lz4::lz4 LZ4::lz4 lz4)
     endif()
     foreach(tgt IN LISTS candidates)
         if(TARGET ${tgt})
-            target_link_libraries(tidesdb PUBLIC ${tgt})
+            target_link_libraries(tidesdb ${_scope} ${tgt})
             message(STATUS "tidesdb: linking ${libname} via existing target ${tgt}")
             return()
         endif()
     endforeach()
-    target_link_libraries(tidesdb PUBLIC -l${libname})
+    target_link_libraries(tidesdb ${_scope} -l${libname})
+endfunction()
+
+function(_tidesdb_link_zstd)
+    # A static TidesDB archive still needs zstd at the final link. Keep that
+    # archive inside the SDK instead of asking consumers to find a private SDK.
+    target_link_libraries(tidesdb PRIVATE
+        $<BUILD_INTERFACE:zstd::libzstd_static>)
+    install(FILES "${zstd_DIR}/copyright"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/tidesdb/zstd")
+    if(NOT BUILD_SHARED_LIBS)
+        target_link_libraries(tidesdb PRIVATE
+            "$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/tidesdb/zstd${CMAKE_STATIC_LIBRARY_SUFFIX}>")
+        install(FILES $<TARGET_FILE:zstd::libzstd_static>
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/tidesdb"
+            RENAME "zstd${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    endif()
 endfunction()
 
 # link every compression backend enabled by the -DTIDESDB_WITH_* options through the resolver above
@@ -276,9 +302,6 @@ if(WIN32)
             find_package(Snappy CONFIG REQUIRED)
         endif()
     else()
-        if(TIDESDB_WITH_ZSTD)
-            find_package(zstd CONFIG REQUIRED)
-        endif()
         if(TIDESDB_WITH_SNAPPY)
             find_package(Snappy CONFIG REQUIRED)
         endif()
@@ -387,7 +410,7 @@ elseif(WIN32)
     # for windows, link against the enabled compression libraries and pthreads
     if(MINGW)
         if(TIDESDB_WITH_ZSTD)
-            target_link_libraries(tidesdb PUBLIC PkgConfig::ZSTD)
+            target_link_libraries(tidesdb PRIVATE PkgConfig::ZSTD)
         endif()
         if(TIDESDB_WITH_LZ4)
             target_link_libraries(tidesdb PUBLIC PkgConfig::LZ4)
@@ -398,10 +421,7 @@ elseif(WIN32)
         target_link_libraries(tidesdb PUBLIC pthread)
     else()
         if(TIDESDB_WITH_ZSTD)
-            # The shared qigao/vcpkg-cache registry pins zstd to a static-only
-            # port; link its exported target directly instead of preferring a
-            # shared build that the centralized port never produces.
-            target_link_libraries(tidesdb PUBLIC zstd::libzstd)
+            _tidesdb_link_zstd()
         endif()
         if(TIDESDB_WITH_SNAPPY)
             target_link_libraries(tidesdb PUBLIC Snappy::snappy)

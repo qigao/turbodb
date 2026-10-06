@@ -1,10 +1,24 @@
 #include <session_script.h>
 #include <salts_error.h>
+#define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include <tinymock.h>
 
-TINYMOCk_MOCK(int, script_execute,
-    const mysql_session_config_t *, const uint8_t *, size_t, size_t,
-    uint64_t *, mysql_session_error_t *)
+FunctionDecl(value, int, script_execute,
+    (const mysql_session_config_t *, config,
+     CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),
+    (const uint8_t *, sql, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),
+    (size_t, size, CMETA_PARAM_IN,
+     &cmeta_type_size, CMETA_ABI_SCALAR),
+    (size_t, limit, CMETA_PARAM_IN,
+     &cmeta_type_size, CMETA_ABI_SCALAR),
+    (uint64_t *, count, CMETA_PARAM_INOUT | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),
+    (mysql_session_error_t *, error,
+     CMETA_PARAM_INOUT | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+TINYMOCk_FUNCTION_DECLARE(script_execute);
 
 static mysql_session_config_t captured_config;
 static size_t captured_size;
@@ -33,6 +47,7 @@ spec("MySQL dbtools schema adapter") {
   static dbtool_apply_result result;
   static const dbtool_schema_driver_ops *ops;
   before_each() {
+    int returned = MYSQL_SESSION_OK;
     context = NULL;
     ops = dbtool_mysql_schema_driver();
     memset(&error, 0, sizeof(error));
@@ -40,11 +55,12 @@ spec("MySQL dbtools schema adapter") {
     memset(&injected_error, 0, sizeof(injected_error));
     memset(&captured_config, 0, sizeof(captured_config));
     captured_size = 0u;
-    mock_script_execute_set_default_return(TINYMOCk_RETURN(MYSQL_SESSION_OK));
+    TINYMOCk_FUNCTION_RESET(script_execute);
+    check_true(TINYMOCk_FUNCTION_SET_RETURN(script_execute, returned));
   }
   after_each() {
     ops->close(context);
-    mock_script_execute_verify();
+    TINYMOCk_FUNCTION_DESTROY(script_execute);
   }
 
   it("owns connection strings and forwards the complete script with verified TLS settings") {
@@ -63,7 +79,7 @@ spec("MySQL dbtools schema adapter") {
     check_equal(captured_config.timeout_ms, (uint32_t)5000u);
     check_equal(captured_size, sizeof(sql) - 1u);
     check_equal(result.statements, (uint64_t)3u);
-    tinymock_mock_verify_times(&tinymock_script_execute, 1u);
+    TINYMOCk_FUNCTION_VERIFY_TIMES(script_execute, 1u);
   }
 
   it("rejects missing TLS, malformed JSON and embedded NUL configuration without transport") {
@@ -75,7 +91,7 @@ spec("MySQL dbtools schema adapter") {
       check_null(context);
       check_null(strstr(error.message, "secret"));
     }
-    tinymock_mock_verify_never(&tinymock_script_execute);
+    TINYMOCk_FUNCTION_VERIFY_NEVER(script_execute);
   }
 
   it("rejects unknown fields and invalid numeric ranges") {
@@ -89,21 +105,25 @@ spec("MySQL dbtools schema adapter") {
       check_equal(ops->open(&context, &config, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
       check_null(context);
     }
-    tinymock_mock_verify_never(&tinymock_script_execute);
+    TINYMOCk_FUNCTION_VERIFY_NEVER(script_execute);
   }
 
   it("maps SQL, authentication and unsupported results without retaining partial success") {
     dbtool_connection_config config = {NULL, connection_json, 0u};
     check_equal(ops->open(&context, &config, &error), DBTOOL_STATUS_OK);
-    mock_script_execute_set_default_return(TINYMOCk_RETURN(MYSQL_SESSION_SQL_ERROR));
+    int returned = MYSQL_SESSION_SQL_ERROR;
+    check_true(TINYMOCk_FUNCTION_SET_RETURN(script_execute, returned));
     injected_error.server_error = 1064u;
     check_equal(ops->apply(context, "broken", 6u, &result, &error), DBTOOL_STATUS_SQL_ERROR);
     check_equal(error.native_code, 1064);
     check_equal(result.statements, (uint64_t)0u);
-    mock_script_execute_set_default_return(TINYMOCk_RETURN(MYSQL_SESSION_AUTH));
+    returned = MYSQL_SESSION_AUTH;
+    check_true(TINYMOCk_FUNCTION_SET_RETURN(script_execute, returned));
     check_equal(ops->apply(context, "broken", 6u, &result, &error), DBTOOL_STATUS_CONNECTION_ERROR);
-    mock_script_execute_set_default_return(TINYMOCk_RETURN(MYSQL_SESSION_UNSUPPORTED));
+    returned = MYSQL_SESSION_UNSUPPORTED;
+    check_true(TINYMOCk_FUNCTION_SET_RETURN(script_execute, returned));
     check_equal(ops->apply(context, "select 1", 8u, &result, &error), DBTOOL_STATUS_UNSUPPORTED);
+    TINYMOCk_FUNCTION_VERIFY_TIMES(script_execute, 3u);
   }
 
   it("rejects oversized and embedded NUL scripts before executing") {
@@ -112,6 +132,6 @@ spec("MySQL dbtools schema adapter") {
     check_equal(ops->open(&context, &config, &error), DBTOOL_STATUS_OK);
     check_equal(ops->apply(context, sql, sizeof(sql), &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
     check_equal(ops->apply(context, sql, SIZE_MAX, &result, &error), DBTOOL_STATUS_LIMIT_EXCEEDED);
-    tinymock_mock_verify_never(&tinymock_script_execute);
+    TINYMOCk_FUNCTION_VERIFY_NEVER(script_execute);
   }
 }

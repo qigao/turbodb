@@ -1,10 +1,14 @@
 #include <cflow/executor.h>
 #include <salts/thread.h>
+#define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include <tinymock.h>
 #include <stdatomic.h>
 #include <string.h>
 
-TINYMOCk_MOCK(int, rejected_post, cflow_executor *)
+FunctionDecl(value, int, rejected_post,
+    (void *, executor, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+TINYMOCk_FUNCTION_DECLARE(rejected_post);
 static int reject_post;
 static cflow_admission_status test_post(cflow_executor *executor,
                                         cflow_task_fn fn, void *user) {
@@ -95,7 +99,7 @@ spec("SQLite bounded async execution") {
     config = (orm_async_config_t){sizeof(config), &scheduler, 1u, TEST_TIMEOUT_TICKS};
     check_equal(orm_raw(connection, orm_view("select test_gate() as id"),
                         &query, &error), ORM_STATUS_OK);
-    mock_rejected_post_reset();
+    TINYMOCk_FUNCTION_RESET(rejected_post);
   }
   after_each() {
     atomic_store(&gate_released, 1);
@@ -106,7 +110,8 @@ spec("SQLite bounded async execution") {
     orm_query_destroy(query);
     orm_disconnect(connection);
     cflow_scheduler_destroy(&scheduler);
-    mock_rejected_post_verify();
+    TINYMOCk_FUNCTION_VERIFY_TIMES(rejected_post, reject_post ? 1u : 0u);
+    TINYMOCk_FUNCTION_DESTROY(rejected_post);
   }
 
   it("defers prepare until demand and returns WAIT while another thread runs SQLite") {
@@ -187,8 +192,8 @@ spec("SQLite bounded async execution") {
     check_equal(orm_sqlite_backend_open_async(owner, &query->plan,
         &connection->limits, &config, &cursor, &error), ORM_STATUS_OK);
     reject_post = 1;
-    mock_rejected_post_expect(TINYMOCk_ANY,
-                             TINYMOCk_RETURN(CFLOW_ADMISSION_FULL));
+    int rejected = CFLOW_ADMISSION_FULL;
+    check_true(TINYMOCk_FUNCTION_SET_RETURN(rejected_post, rejected));
     const orm_row_cursor_step step = cursor.ops->next(cursor.context, &row);
     check_equal(step.kind, ORM_ROW_CURSOR_ERROR);
     check_equal(step.status, ORM_STATUS_BUSY);

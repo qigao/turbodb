@@ -1,6 +1,6 @@
 #include "orm_runtime_internal.h"
 
-#include <tinymock.h>
+#include <tinytest.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,7 +22,28 @@ static orm_runtime_t *runtime;
 static orm_error_t error;
 static driver_fixture drivers[DRIVER_COUNT];
 
-TINYMOCk_MOCK(orm_status_t, create_gate, void *)
+typedef struct create_gate_script {
+  void *owners[3];
+  orm_status_t results[3];
+  size_t count;
+  size_t index;
+} create_gate_script;
+
+static create_gate_script gate_script;
+
+static orm_status_t create_gate(void *owner) {
+  const size_t index = gate_script.index++;
+  check_true(index < gate_script.count);
+  check_true(gate_script.owners[index] == owner);
+  return gate_script.results[index];
+}
+
+static void expect_create_gate(void *owner, orm_status_t result) {
+  check_true(gate_script.count < DRIVER_COUNT + 1u);
+  gate_script.owners[gate_script.count] = owner;
+  gate_script.results[gate_script.count] = result;
+  ++gate_script.count;
+}
 
 /* Keep real plugin admission, leases, cursors and cleanup; inject only the
  * driver factory outcome through the host's private binding for this test. */
@@ -47,8 +68,7 @@ static void connect_driver(size_t index, orm_status_t expected) {
   orm_config_t config;
   orm_config(&config);
   config.driver = orm_view(driver_ids[index]);
-  mock_create_gate_expect(TINYMOCk_ARG(drivers[index].original->self),
-                          TINYMOCk_RETURN(expected));
+  expect_create_gate(drivers[index].original->self, expected);
   check_equal(orm_runtime_connect(runtime, &config,
                                   &drivers[index].connection, &error), expected);
   if (expected == ORM_STATUS_OK)
@@ -78,14 +98,14 @@ static void check_row(size_t index) {
   orm_query_destroy(query);
 }
 
-spec("runtime driver coexistence with TinyMock") {
+spec("runtime driver coexistence") {
   before_each() {
     orm_runtime_config_t config;
     orm_runtime_config_init(&config);
     orm_error_init(&error);
     memset(drivers, 0, sizeof(drivers));
     runtime = NULL;
-    mock_create_gate_reset();
+    gate_script = (create_gate_script){0};
     check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
     for (size_t i = 0; i < DRIVER_COUNT; ++i) {
       const char *path = getenv(fixture_variables[i]);
@@ -118,7 +138,7 @@ spec("runtime driver coexistence with TinyMock") {
       orm_runtime_release(runtime);
       runtime = NULL;
     }
-    mock_create_gate_verify();
+    check_equal(gate_script.index, gate_script.count);
   }
 
   it("routes connections and rows to each registered driver") {
@@ -127,7 +147,7 @@ spec("runtime driver coexistence with TinyMock") {
     check_row(MYSQL);
     check_row(POSTGRESQL);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
-    tinymock_mock_verify_times(&tinymock_create_gate, 2u);
+    check_equal(gate_script.index, (size_t)2u);
   }
 
   it("keeps PostgreSQL usable across MySQL disconnect and reconnect") {
@@ -141,7 +161,7 @@ spec("runtime driver coexistence with TinyMock") {
     disconnect_driver(POSTGRESQL);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
     check_row(MYSQL);
-    tinymock_mock_verify_times(&tinymock_create_gate, 3u);
+    check_equal(gate_script.index, (size_t)3u);
   }
 
   it("isolates a failed MySQL connection and permits retry beside PostgreSQL") {
@@ -152,6 +172,6 @@ spec("runtime driver coexistence with TinyMock") {
     connect_driver(MYSQL, ORM_STATUS_OK);
     check_row(MYSQL);
     check_row(POSTGRESQL);
-    tinymock_mock_verify_times(&tinymock_create_gate, 3u);
+    check_equal(gate_script.index, (size_t)3u);
   }
 }

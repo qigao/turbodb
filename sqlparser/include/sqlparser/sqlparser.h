@@ -15,6 +15,11 @@ typedef uint32_t sqlparser_id;
 typedef enum sqlparser_dialect {
   SQLPARSER_DIALECT_UNKNOWN = -1, SQLPARSER_MYSQL, SQLPARSER_SQLITE
 } sqlparser_dialect;
+typedef struct sqlparser_options {
+  sqlparser_dialect dialect;
+  /* MySQL NO_BACKSLASH_ESCAPES; invalid with SQLITE. Zero keeps defaults. */
+  bool mysql_no_backslash_escapes;
+} sqlparser_options;
 enum { SQLPARSER_NONE = 0, SQLPARSER_ERROR_CAPACITY = 160 };
 
 typedef enum sqlparser_status {
@@ -55,8 +60,15 @@ typedef enum sqlparser_kind {
   SQLPARSER_DEFAULT_VALUE, SQLPARSER_TRUNCATE_TABLE,
   SQLPARSER_PREPARE, SQLPARSER_EXECUTE, SQLPARSER_DEALLOCATE,
   SQLPARSER_LOCK_TABLES, SQLPARSER_UNLOCK_TABLES, SQLPARSER_LOCK_TARGET,
-  SQLPARSER_WINDOW
+  SQLPARSER_WINDOW, SQLPARSER_INDEX_PART, SQLPARSER_WINDOW_DEFINITION,
+  SQLPARSER_WINDOW_FRAME, SQLPARSER_WINDOW_BOUNDARY
 } sqlparser_kind;
+
+typedef enum sqlparser_frame_unit { SQLPARSER_FRAME_ROWS, SQLPARSER_FRAME_RANGE } sqlparser_frame_unit;
+typedef enum sqlparser_boundary_kind {
+  SQLPARSER_BOUND_UNBOUNDED_PRECEDING, SQLPARSER_BOUND_PRECEDING,
+  SQLPARSER_BOUND_CURRENT_ROW, SQLPARSER_BOUND_FOLLOWING, SQLPARSER_BOUND_UNBOUNDED_FOLLOWING
+} sqlparser_boundary_kind;
 
 typedef enum sqlparser_operator {
   SQLPARSER_OP_NONE, SQLPARSER_OP_OR, SQLPARSER_OP_AND, SQLPARSER_OP_NOT,
@@ -70,7 +82,8 @@ typedef enum sqlparser_operator {
   SQLPARSER_OP_NOT_LIKE, SQLPARSER_OP_EXISTS, SQLPARSER_OP_CONCAT,
   SQLPARSER_OP_IS, SQLPARSER_OP_IS_NOT, SQLPARSER_OP_GLOB,
   SQLPARSER_OP_NOT_GLOB, SQLPARSER_OP_REGEXP, SQLPARSER_OP_NOT_REGEXP,
-  SQLPARSER_OP_MATCH, SQLPARSER_OP_NOT_MATCH, SQLPARSER_OP_XOR
+  SQLPARSER_OP_MATCH, SQLPARSER_OP_NOT_MATCH, SQLPARSER_OP_XOR,
+  SQLPARSER_OP_INTEGER_DIVIDE
 } sqlparser_operator;
 
 typedef enum sqlparser_join_kind {
@@ -116,8 +129,12 @@ typedef enum sqlparser_trigger_event {
 } sqlparser_trigger_event;
 typedef enum sqlparser_alter_action {
   SQLPARSER_RENAME_TABLE, SQLPARSER_RENAME_COLUMN, SQLPARSER_ADD_COLUMN, SQLPARSER_DROP_COLUMN,
-  SQLPARSER_SET_ENGINE, SQLPARSER_SET_COLUMN_DEFAULT, SQLPARSER_DROP_COLUMN_DEFAULT
+  SQLPARSER_SET_ENGINE, SQLPARSER_SET_COLUMN_DEFAULT, SQLPARSER_DROP_COLUMN_DEFAULT,
+  SQLPARSER_ADD_CONSTRAINT
 } sqlparser_alter_action;
+typedef enum sqlparser_column_position {
+  SQLPARSER_COLUMN_LAST, SQLPARSER_COLUMN_FIRST, SQLPARSER_COLUMN_AFTER
+} sqlparser_column_position;
 typedef enum sqlparser_reference_action {
   SQLPARSER_REFERENCE_DEFAULT, SQLPARSER_REFERENCE_NO_ACTION, SQLPARSER_REFERENCE_RESTRICT,
   SQLPARSER_REFERENCE_CASCADE, SQLPARSER_REFERENCE_SET_NULL, SQLPARSER_REFERENCE_SET_DEFAULT
@@ -140,7 +157,8 @@ typedef enum sqlparser_show_kind {
   SQLPARSER_SHOW_TRIGGERS, SQLPARSER_SHOW_EVENTS, SQLPARSER_SHOW_OPEN_TABLES,
   SQLPARSER_SHOW_COLUMNS, SQLPARSER_SHOW_INDEX, SQLPARSER_SHOW_STATUS,
   SQLPARSER_SHOW_CHARACTER_SET, SQLPARSER_SHOW_PROCEDURE_STATUS,
-  SQLPARSER_SHOW_FUNCTION_STATUS, SQLPARSER_SHOW_CREATE_TABLE
+  SQLPARSER_SHOW_FUNCTION_STATUS, SQLPARSER_SHOW_CREATE_TABLE,
+  SQLPARSER_SHOW_WARNINGS
 } sqlparser_show_kind;
 
 typedef enum sqlparser_lock_mode {
@@ -188,10 +206,21 @@ typedef struct sqlparser_node {
       sqlparser_id from, where, having, limit;
       bool distinct;
       bool calc_found_rows;
+      /* MySQL WINDOW declarations local to this SELECT query block. */
+      sqlparser_list windows;
     } select;
     struct { sqlparser_id left, right; bool all; sqlparser_list order_by; sqlparser_id limit; sqlparser_compound_kind kind; } compound;
     struct { sqlparser_id expression, alias; } projection;
-    struct { sqlparser_id name, query, alias; sqlparser_list arguments; sqlparser_id indexed_by, group; bool table_function, not_indexed; } table;
+    struct {
+      sqlparser_id name, query, alias;
+      sqlparser_list arguments;
+      sqlparser_id indexed_by, group;
+      bool table_function, not_indexed;
+      /* MySQL LATERAL derived table; query and alias are required. */
+      bool lateral;
+      /* MySQL derived-table column names, in query output order. */
+      sqlparser_list column_aliases;
+    } table;
     struct {
       sqlparser_join_kind kind;
       sqlparser_id left, right, condition;
@@ -207,12 +236,20 @@ typedef struct sqlparser_node {
       sqlparser_conflict conflict;
       bool default_values;
       bool low_priority;
+      /* MySQL ON DUPLICATE KEY UPDATE assignments; empty in SQLite. */
+      sqlparser_list duplicate_assignments;
+      /* Distinguishes an omitted target list from an explicit empty (). */
+      bool columns_specified;
+      /* MySQL VALUES/SET row alias and optional same-order column aliases. */
+      sqlparser_id row_alias;
+      sqlparser_list column_aliases;
     } insert;
     struct { sqlparser_list values; } row;
     struct { sqlparser_id name, value; sqlparser_scope scope; } assignment;
-    struct { sqlparser_id table, where, limit; sqlparser_list assignments, order_by; sqlparser_conflict conflict; sqlparser_id indexed_by; bool not_indexed, low_priority; } update;
+    /* alias is the optional single-table write target alias. */
+    struct { sqlparser_id table, alias, where, limit; sqlparser_list assignments, order_by; sqlparser_conflict conflict; sqlparser_id indexed_by; bool not_indexed, low_priority; } update;
     struct {
-      sqlparser_id table, where, limit;
+      sqlparser_id table, alias, where, limit;
       sqlparser_list order_by;
       sqlparser_id indexed_by;
       bool not_indexed, low_priority;
@@ -238,6 +275,8 @@ typedef struct sqlparser_node {
       bool full;
       sqlparser_id table;
       bool extended;
+      sqlparser_id limit;
+      bool count;
     } show;
     struct { sqlparser_id table; sqlparser_list elements; bool temporary, if_not_exists; sqlparser_list options; sqlparser_id query, like_table; } create_table;
     struct { sqlparser_id name, type; sqlparser_list constraints; } column;
@@ -245,12 +284,15 @@ typedef struct sqlparser_node {
     struct { sqlparser_id name; sqlparser_list arguments; bool is_unsigned, zerofill; } type;
     struct {
       sqlparser_constraint_kind kind;
+      /* For MySQL UNIQUE, name is the effective index name: an explicit
+       * index name wins over CONSTRAINT symbol; either may be absent. */
       sqlparser_id name, expression, table;
       sqlparser_list columns, referenced_columns;
       sqlparser_conflict conflict;
       bool descending, autoincrement;
       sqlparser_reference_options reference;
-      /* SQLite table keys retain ORDER/COLLATE terms alongside NAME columns. */
+      /* SQLite table keys and MySQL secondary table keys retain ORDER terms
+       * alongside NAME columns; SQLite expressions may also include COLLATE. */
       sqlparser_list key_terms;
       /* SQLite CONSTRAINT names immediately preceding this constraint. A
        * trailing group is a CONSTRAINT_DECLARATION, not an enforced constraint.
@@ -263,8 +305,14 @@ typedef struct sqlparser_node {
     struct { sqlparser_id expression, type; } cast;
     struct { sqlparser_id expression, name; } collate;
     struct { sqlparser_id name, value; } pragma;
+    /* columns contains INDEX_PART in MySQL, ORDER in SQLite. */
     struct { sqlparser_id name, table, where; sqlparser_list columns; bool unique, if_not_exists; } create_index;
-    struct { sqlparser_id name; bool if_exists; } drop_object;
+    /* MySQL column key (column, optional length) or functional key (expression).
+     * Exactly one of column/expression is set; length is a NUMBER source node. */
+    struct { sqlparser_id column, expression, length; bool descending; } index_part;
+    /* table is set only for MySQL DROP INDEX name ON table; SQLite uses name
+     * (possibly schema-qualified), optional IF EXISTS and no table. */
+    struct { sqlparser_id name; bool if_exists; sqlparser_id table; } drop_object;
     struct { sqlparser_id name, query; sqlparser_list columns; bool temporary, if_not_exists; sqlparser_view_check check; } create_view;
     struct { sqlparser_id file, schema; } attach;
     struct { sqlparser_list bindings; sqlparser_id body; bool recursive; } with;
@@ -282,7 +330,10 @@ typedef struct sqlparser_node {
     struct { sqlparser_conflict action; sqlparser_id message; } raise;
     struct { sqlparser_id statement; bool query_plan; sqlparser_explain_format format; } explain;
     struct { sqlparser_id target, into; } maintenance;
-    struct { sqlparser_alter_action action; sqlparser_id table, column, new_name, value; } alter;
+    /* ADD_COLUMN and ADD_CONSTRAINT store their tagged node in column;
+     * ADD_COLUMN alone also uses position/after. */
+    struct { sqlparser_alter_action action; sqlparser_id table, column, new_name, value;
+      sqlparser_column_position position; sqlparser_id after; } alter;
     /* MySQL parenthesized query: outer clauses never overwrite query's tail. */
     struct { sqlparser_id query; sqlparser_list order_by; sqlparser_id limit; } query_group;
     /* SQL-level prepared statements retain source text/variables without
@@ -290,7 +341,13 @@ typedef struct sqlparser_node {
     struct { sqlparser_id name, source; sqlparser_list parameters; } prepared;
     struct { sqlparser_list targets; } lock_tables;
     struct { sqlparser_id table, alias; sqlparser_lock_mode mode; } lock_target;
-    struct { sqlparser_id call, name; sqlparser_list partition_by, order_by; } window;
+    /* name is OVER name; base is the inheritance reference in OVER(base ...). */
+    struct { sqlparser_id call, name; sqlparser_list partition_by, order_by; sqlparser_id base, frame; } window;
+    struct { sqlparser_id name, base; sqlparser_list partition_by, order_by; sqlparser_id frame; } window_definition;
+    /* Zero end is the implicit CURRENT ROW of a single-bound frame. */
+    struct { sqlparser_frame_unit unit; sqlparser_id start, end; } frame;
+    /* Nonzero unit marks INTERVAL value unit; all text remains raw AST text. */
+    struct { sqlparser_boundary_kind kind; sqlparser_id value, unit; } boundary;
   } as;
 } sqlparser_node;
 
@@ -318,6 +375,18 @@ sqlparser_status sqlparser_parse(const char *sql, size_t length,
 sqlparser_status sqlparser_parse_dialect(const char *sql, size_t length,
     sqlparser_dialect dialect, const sqlparser_limits *limits,
     sqlparser_document **out, sqlparser_error *error);
+/* Same ownership/limits/error contract. NULL options selects default MySQL.
+ * Options are copied for this call; SQL SET statements never change them.
+ * Example: sqlparser_options options = {SQLPARSER_MYSQL, true};
+ * sqlparser_parse_with_options(sql, length, &options, NULL, &doc, &error);
+ * doc must initially be NULL and must be destroyed after successful use.
+ * Invalid dialect/mode combinations return INVALID_ARGUMENT. */
+sqlparser_status sqlparser_parse_with_options(const char *sql, size_t length,
+    const sqlparser_options *options, const sqlparser_limits *limits,
+    sqlparser_document **out, sqlparser_error *error);
+/* Document retains lexical options for interpreting its raw literal spans.
+ * NULL returns {DIALECT_UNKNOWN, false}; no ownership transfer or failure. */
+sqlparser_options sqlparser_get_options(const sqlparser_document *document);
 /* The immutable document retains its dialect; NULL yields DIALECT_UNKNOWN. */
 sqlparser_dialect sqlparser_get_dialect(const sqlparser_document *document);
 

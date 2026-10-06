@@ -1,12 +1,28 @@
 #include "orm_command_publisher.h"
 
-#include <tinymock.h>
+#include <tinytest.h>
 #include <string.h>
 
-/* TinyMock transports scalar/pointer values; the adapter preserves the real
- * driver's by-value result contract without changing production interfaces. */
-TINYMOCk_MOCK(orm_command_driver_result *, command_execute, void *)
-TINYMOCk_MOCK_VOID(command_destroy, void *)
+typedef struct command_fake_state {
+  orm_command_driver_result *result;
+  void *execute_context;
+  void *destroy_context;
+  size_t execute_calls;
+  size_t destroy_calls;
+} command_fake_state;
+
+static command_fake_state command_fake;
+
+static orm_command_driver_result *command_execute(void *context) {
+  ++command_fake.execute_calls;
+  command_fake.execute_context = context;
+  return command_fake.result;
+}
+
+static void command_destroy(void *context) {
+  ++command_fake.destroy_calls;
+  command_fake.destroy_context = context;
+}
 
 static orm_command_driver_result execute_result(void *context) {
   return *command_execute(context);
@@ -16,7 +32,7 @@ static const orm_command_driver_ops command_ops = {
     sizeof(orm_command_driver_ops), ORM_COMMAND_DRIVER_OPS_ABI_VERSION,
     execute_result, command_destroy};
 
-spec("ORM command Publisher with TinyMock") {
+spec("ORM command Publisher") {
   (void)ttest_config__;
   static cflow_publisher publisher;
   static orm_command_driver driver;
@@ -32,9 +48,7 @@ spec("ORM command Publisher with TinyMock") {
     orm_error_init(&error);
     memset(diagnostic, 0, sizeof(diagnostic));
     driver = (orm_command_driver){&command_ops, &native_result};
-    mock_command_execute_set_default_return(TINYMOCk_RETURN(&native_result));
-    mock_command_destroy_reset();
-    mock_command_destroy_expect(TINYMOCk_ARG(&native_result));
+    command_fake = (command_fake_state){.result = &native_result};
     check_equal(orm_command_publisher_init(&publisher, &driver, &error), ORM_STATUS_OK);
   }
 
@@ -43,9 +57,8 @@ spec("ORM command Publisher with TinyMock") {
       cflow_publisher_destroy(&publisher);
       publisher = (cflow_publisher){0};
     }
-    mock_command_execute_verify();
-    mock_command_destroy_verify();
-    tinymock_mock_verify_times(&tinymock_command_destroy, 1u);
+    check_equal(command_fake.destroy_calls, (size_t)1u);
+    check_true(command_fake.destroy_context == &native_result);
   }
 
   it("moves driver ownership without executing an unconsumed command") {
@@ -56,12 +69,11 @@ spec("ORM command Publisher with TinyMock") {
     check_null(terminal_error);
     cflow_publisher_destroy(&publisher);
     publisher = (cflow_publisher){0};
-    tinymock_mock_verify_never(&tinymock_command_execute);
+    check_equal(command_fake.execute_calls, (size_t)0u);
   }
 
   it("publishes the full affected-row count once and never executes again") {
     native_result.affected_rows = UINT64_MAX;
-    mock_command_execute_expect(TINYMOCk_ARG(&native_result), TINYMOCk_RETURN(&native_result));
     check_equal(cflow_publisher_resume(&publisher, NULL, &output).kind, CFLOW_STEP_VALUE_AND_DONE);
     check_equal(output.affected_rows, UINT64_MAX);
     check_equal(output.struct_size, sizeof(output));
@@ -69,7 +81,8 @@ spec("ORM command Publisher with TinyMock") {
     check_equal(cflow_publisher_resume(&publisher, NULL, &output).kind, CFLOW_STEP_DONE);
     cflow_publisher_cancel(&publisher);
     check_equal(cflow_publisher_resume(&publisher, NULL, &output).kind, CFLOW_STEP_DONE);
-    tinymock_mock_verify_times(&tinymock_command_execute, 1u);
+    check_equal(command_fake.execute_calls, (size_t)1u);
+    check_true(command_fake.execute_context == &native_result);
   }
 
   it("makes repeated cancellation terminal before any native execution") {
@@ -77,7 +90,7 @@ spec("ORM command Publisher with TinyMock") {
     cflow_publisher_cancel(&publisher);
     check_equal(cflow_publisher_poll_terminal(&publisher, NULL), CFLOW_PUBLISHER_DONE);
     check_equal(cflow_publisher_resume(&publisher, NULL, &output).kind, CFLOW_STEP_DONE);
-    tinymock_mock_verify_never(&tinymock_command_execute);
+    check_equal(command_fake.execute_calls, (size_t)0u);
   }
 
   it("rejects missing output storage without dispatch and retains the error") {
@@ -87,7 +100,7 @@ spec("ORM command Publisher with TinyMock") {
     check_not_null(terminal_error);
     check_not_null(strstr(terminal_error, "null command result storage"));
     check_equal(cflow_publisher_resume(&publisher, NULL, &output).kind, CFLOW_STEP_ERROR);
-    tinymock_mock_verify_never(&tinymock_command_execute);
+    check_equal(command_fake.execute_calls, (size_t)0u);
   }
 
   it("owns the native error text across buffer reuse cancellation and repeated resume") {
@@ -97,7 +110,6 @@ spec("ORM command Publisher with TinyMock") {
     native_result.status = ORM_STATUS_SQL_ERROR;
     native_result.message = diagnostic;
     output.affected_rows = UINT64_MAX;
-    mock_command_execute_expect(TINYMOCk_ARG(&native_result), TINYMOCk_RETURN(&native_result));
     cflow_step step = cflow_publisher_resume(&publisher, NULL, &output);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_equal(step.error, expected);
@@ -110,16 +122,17 @@ spec("ORM command Publisher with TinyMock") {
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_equal(step.error, expected);
     check_equal(output.affected_rows, UINT64_MAX);
-    tinymock_mock_verify_times(&tinymock_command_execute, 1u);
+    check_equal(command_fake.execute_calls, (size_t)1u);
+    check_true(command_fake.execute_context == &native_result);
   }
 
   it("supplies a status diagnostic when the native driver has no message") {
     native_result.status = ORM_STATUS_OUT_OF_MEMORY;
-    mock_command_execute_expect(TINYMOCk_ARG(&native_result), TINYMOCk_RETURN(&native_result));
     const cflow_step step = cflow_publisher_resume(&publisher, NULL, &output);
     check_equal(step.kind, CFLOW_STEP_ERROR);
     check_equal(step.error, orm_status_message(ORM_STATUS_OUT_OF_MEMORY));
-    tinymock_mock_verify_times(&tinymock_command_execute, 1u);
+    check_equal(command_fake.execute_calls, (size_t)1u);
+    check_true(command_fake.execute_context == &native_result);
   }
 
   it("rejects replacing a live Publisher without consuming the second driver") {
@@ -130,7 +143,7 @@ spec("ORM command Publisher with TinyMock") {
     check_true(second.ops == &command_ops);
     check_true(second.context == &second_result);
     check_equal(cflow_publisher_poll_terminal(&publisher, NULL), CFLOW_PUBLISHER_OPEN);
-    tinymock_mock_verify_never(&tinymock_command_execute);
+    check_equal(command_fake.execute_calls, (size_t)0u);
   }
 
   it("rejects incompatible driver ABI without transferring ownership") {
@@ -142,7 +155,7 @@ spec("ORM command Publisher with TinyMock") {
     check_false(cflow_publisher_valid(&rejected));
     check_true(candidate.ops == &invalid_ops);
     check_true(candidate.context == &native_result);
-    tinymock_mock_verify_never(&tinymock_command_execute);
-    tinymock_mock_verify_never(&tinymock_command_destroy);
+    check_equal(command_fake.execute_calls, (size_t)0u);
+    check_equal(command_fake.destroy_calls, (size_t)0u);
   }
 }

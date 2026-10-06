@@ -21,7 +21,7 @@ cmake_add_test(
   FOLDER "orm/tests/driver/cross_driver"
   TEST_NAME orm_runtime_coexistence
   SOURCES orm_runtime_coexistence_test.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyTest Salts::TinyMock
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyTest
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/runtime)
 set_target_properties(orm_runtime_coexistence_test PROPERTIES
    LINKER_LANGUAGE CXX)

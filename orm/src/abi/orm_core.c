@@ -236,7 +236,8 @@ static void orm_connection_end_native(orm_connection_t *connection,
   salts_mutex_lock(&connection->owner.mutex);
   if (!connection->native_active) abort();
   /* Record failure before making the slot available to another native call. */
-  if (status == ORM_STATUS_CONNECTION_ERROR && connection->failure == ORM_STATUS_OK)
+  if (status == ORM_STATUS_COMMIT_UNKNOWN ||
+      (status == ORM_STATUS_CONNECTION_ERROR && connection->failure == ORM_STATUS_OK))
     connection->failure = status;
   salts_mutex_unlock(&connection->owner.mutex);
   /* The admitted completion hold keeps the parent alive throughout the drain. */
@@ -680,8 +681,10 @@ static bool orm_sql_has_keyword(const unsigned char *sql, size_t size,
   size_t index = 0u;
   const size_t keyword_size = strlen(keyword);
   while (index < size) {
-    if (sql[index] == '\'' || sql[index] == '"') {
-      const unsigned char quote = sql[index++];
+    if (sql[index] == '\'' || sql[index] == '"' || sql[index] == '`' ||
+        sql[index] == '[') {
+      const unsigned char quote = sql[index] == '[' ? ']' : sql[index];
+      ++index;
       while (index < size) {
         if (sql[index++] != quote)
           continue;
@@ -723,6 +726,78 @@ static bool orm_sql_has_keyword(const unsigned char *sql, size_t size,
   return false;
 }
 
+static bool orm_sql_word_equal(const unsigned char *sql, size_t begin,
+                               size_t end, const char *word) {
+  const size_t word_size = strlen(word);
+  if (end - begin != word_size) return false;
+  for (size_t offset = 0u; offset < word_size; ++offset) {
+    if (tolower(sql[begin + offset]) != (unsigned char)word[offset])
+      return false;
+  }
+  return true;
+}
+
+static bool orm_with_returns_rows(const unsigned char *sql, size_t size,
+                                  size_t index) {
+  size_t depth = 0u;
+  while (index < size) {
+    if (sql[index] == '\'' || sql[index] == '"' || sql[index] == '`' ||
+        sql[index] == '[') {
+      const unsigned char quote = sql[index] == '[' ? ']' : sql[index];
+      ++index;
+      while (index < size) {
+        if (sql[index++] != quote) continue;
+        if (index < size && sql[index] == quote) {
+          ++index;
+          continue;
+        }
+        break;
+      }
+      continue;
+    }
+    if (index + 1u < size && sql[index] == '-' && sql[index + 1u] == '-') {
+      index += 2u;
+      while (index < size && sql[index] != '\n') ++index;
+      continue;
+    }
+    if (index + 1u < size && sql[index] == '/' && sql[index + 1u] == '*') {
+      index += 2u;
+      while (index + 1u < size &&
+             !(sql[index] == '*' && sql[index + 1u] == '/'))
+        ++index;
+      index = index + 1u < size ? index + 2u : size;
+      continue;
+    }
+    if (sql[index] == '(') {
+      ++depth;
+      ++index;
+      continue;
+    }
+    if (sql[index] == ')') {
+      if (depth != 0u) --depth;
+      ++index;
+      continue;
+    }
+    if (depth == 0u && isalpha(sql[index])) {
+      const size_t begin = index++;
+      while (index < size && (isalnum(sql[index]) || sql[index] == '_'))
+        ++index;
+      if (orm_sql_word_equal(sql, begin, index, "select") ||
+          orm_sql_word_equal(sql, begin, index, "values"))
+        return true;
+      if (orm_sql_word_equal(sql, begin, index, "insert") ||
+          orm_sql_word_equal(sql, begin, index, "replace") ||
+          orm_sql_word_equal(sql, begin, index, "update") ||
+          orm_sql_word_equal(sql, begin, index, "delete"))
+        return orm_sql_has_keyword(sql + index, size - index, "returning");
+      continue;
+    }
+    ++index;
+  }
+  /* The driver validates incomplete WITH statements before opening rows. */
+  return true;
+}
+
 bool orm_query_returns_rows(const orm_query_plan *plan) {
   const unsigned char *cursor;
   size_t remaining;
@@ -732,7 +807,9 @@ bool orm_query_returns_rows(const orm_query_plan *plan) {
     return false;
   cursor = (const unsigned char *)plan->raw_sql;
   remaining = tstr_len(plan->raw_sql);
-  while (remaining != 0u && isspace(*cursor)) {
+  /* Parenthesized query blocks still use a row Publisher. The driver validates
+   * parentheses and the rest of the SQL; this is only admission classification. */
+  while (remaining != 0u && (isspace(*cursor) || *cursor == '(')) {
     ++cursor;
     --remaining;
   }
@@ -743,7 +820,13 @@ bool orm_query_returns_rows(const orm_query_plan *plan) {
     --remaining;
   }
   keyword[size] = '\0';
-  return strcmp(keyword, "select") == 0 || strcmp(keyword, "with") == 0 ||
+  if (strcmp(keyword, "with") == 0)
+    return orm_with_returns_rows((const unsigned char *)plan->raw_sql,
+                                 tstr_len(plan->raw_sql),
+                                 (size_t)(cursor -
+                                     (const unsigned char *)plan->raw_sql));
+  return strcmp(keyword, "select") == 0 ||
+         strcmp(keyword, "show") == 0 ||
          strcmp(keyword, "pragma") == 0 || strcmp(keyword, "explain") == 0 ||
          orm_sql_has_keyword((const unsigned char *)plan->raw_sql,
                              tstr_len(plan->raw_sql), "returning");
@@ -1085,6 +1168,75 @@ release_query:
   if (native_held) orm_connection_end_native(connection, status);
 #endif
   return status;
+}
+
+static orm_status_t orm_execute_materialized(orm_query_t *query,
+    orm_transaction_t *transaction, orm_result_t **out_result, orm_error_t *error) {
+  if (out_result) *out_result = NULL;
+  if (!query || !out_result) {
+    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT, "invalid ORM materialized execution");
+    return ORM_STATUS_INVALID_ARGUMENT;
+  }
+  orm_status_t status;
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  bool transaction_held = false, native_held = false;
+  status = orm_owner_admit(&query->owner);
+  if (status != ORM_STATUS_OK) {
+    orm_error_set(error, status, "query cannot admit materialized execution");
+    return status;
+  }
+#endif
+  orm_connection_t *connection = query->connection;
+  if (!connection || (transaction && transaction->connection != connection)) {
+    status = ORM_STATUS_INVALID_STATE;
+    orm_error_set(error, status, "query and transaction do not share an active connection");
+    goto release;
+  }
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (transaction) {
+    status = orm_transaction_admit(transaction, error);
+    if (status != ORM_STATUS_OK) goto release;
+    transaction_held = true;
+  }
+  status = orm_connection_begin_native(connection, error);
+  if (status != ORM_STATUS_OK) goto release;
+  native_held = true;
+#else
+  if (transaction && transaction->state != ORM_TRANSACTION_ACTIVE) {
+    status = ORM_STATUS_INVALID_STATE;
+    orm_error_set(error, status, "ORM transaction is not active");
+    goto release;
+  }
+#endif
+  status = orm_result_execute_native(query, transaction ? NULL : &connection->backend,
+      transaction ? &transaction->backend : NULL, out_result, error);
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  if (status == ORM_STATUS_COMMIT_UNKNOWN) orm_connection_mark_unknown(connection);
+  else orm_connection_record_native_error(connection, status);
+#endif
+release:
+#if defined(ORM_NATIVE_OWNER_CANDIDATE)
+  /* Native callbacks may release all public handles. End the interval last:
+   * its hold keeps the parent alive through deferred child cleanup. */
+  if (transaction_held) orm_transaction_release_execution(transaction);
+  orm_query_release_execution(query);
+  if (native_held) orm_connection_end_native(connection, status);
+#endif
+  return status;
+}
+
+orm_status_t ORM_C_CALL orm_query_execute(orm_query_t *query,
+    orm_result_t **out_result, orm_error_t *error) {
+  return orm_execute_materialized(query, NULL, out_result, error);
+}
+orm_status_t ORM_C_CALL orm_query_execute_in_transaction(orm_query_t *query,
+    orm_transaction_t *transaction, orm_result_t **out_result, orm_error_t *error) {
+  if (!transaction || !query) {
+    if (out_result) *out_result = NULL;
+    orm_error_set(error, ORM_STATUS_INVALID_STATE, "query and transaction do not share an active connection");
+    return ORM_STATUS_INVALID_STATE;
+  }
+  return orm_execute_materialized(query, transaction, out_result, error);
 }
 
 uint32_t ORM_C_CALL orm_c_abi_version(void) { return ORM_C_ABI_VERSION; }

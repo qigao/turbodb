@@ -39,10 +39,24 @@ cmake_add_test(
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 
+cmake_add_test(
+  NAME orm_driver_interface_cpp_test
+  FOLDER "orm/tests/driver"
+  TEST_NAME orm_driver_interface_cpp
+  SOURCES orm_driver_interface_cpp_test.cpp
+  LIBS Salts::Plugin Salts::CFlow
+  DEFS ORM_C_STATIC
+  INCLUDES ${ORM_SOURCE_DIR}/include/orm)
+
 if(MSVC)
   target_compile_options(orm_driver_interface_test PRIVATE /WX)
+  target_compile_options(orm_driver_interface_cpp_test PRIVATE /WX)
 else()
   target_compile_options(orm_driver_interface_test PRIVATE -Werror)
+  # C keeps struct tags and functions in separate namespaces. The public ABI
+  # deliberately preserves historical pairs such as orm_config/struct
+  # orm_config, which are legal in C++ but trigger GCC's C++-specific warning.
+  target_compile_options(orm_driver_interface_cpp_test PRIVATE -Werror -Wno-shadow)
 endif()
 
 cmake_add_test(
@@ -102,7 +116,7 @@ if(WIN32)
 endif()
 
 # Qualify canonical Plugin loading/admission with real DSOs. These fixtures
-# publish only Plugin ABI 2 contracts; no TurboDB-private loader entry exists.
+# publish only Plugin ABI 4 contracts; no TurboDB-private loader entry exists.
 add_library(orm_plugin_no_query_fixture MODULE orm_module_no_entry_fixture.c)
 set_target_properties(
   orm_plugin_no_query_fixture

@@ -34,6 +34,8 @@ TurboDB is the **storage/data infrastructure layer**. It owns database-specific 
 | ORM | Optional database-facing object/record mapping |
 | Redis | Redis-native primitives and durable/ordered adapter support |
 | TidesDB | TidesDB integration |
+| sqlparser | MySQL/SQLite syntax parsing and AST |
+| TidesSQL | C SDK v1 for SQL execution over local TidesDB plus the optional `tidessqld` MySQL/TLS service; [SDK, daemon and module boundary](tidessql/readme.md) |
 | SQLite | Native driver support and standalone schema application |
 | PostgreSQL | Native driver support and standalone schema application |
 | dbtools | Explicit standalone database tools |
@@ -51,7 +53,7 @@ A single Lua `EVAL` atomically:
 2. advances `applied_index` / term / command-id metadata;
 3. appends the same command to a Redis Stream outbox.
 
-This is additive to the `tedis` API and does not change the ORM transaction contract.
+This is additive to the `tedis` API and is independent of the SQL-oriented ORM.
 
 ### Key ownership and cluster requirements
 
@@ -101,7 +103,7 @@ They are intentionally narrow:
 ### Build
 
 Windows development and Release use `win-dev-user` and `win-release-user`.
-Both build ORM, database drivers, and SQLite/PostgreSQL/MySQL tools:
+Both build ORM, database drivers, `tidessqld`, and SQLite/PostgreSQL/MySQL tools:
 
 ```powershell
 cmake --fresh --preset win-release-user
@@ -179,9 +181,9 @@ TurboDB consumes the latest published stable **Salts.Native** and **SaltsUtils.N
 
 The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient SDK; package selection happens before CMake and compatibility is enforced by exported targets and ABI/capability checks.
 
-Salts owns canonical CMeta reflection plus Plugin ABI 2 publication, loading, lifecycle, and leases. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
+Salts owns canonical CMeta reflection plus Plugin publication, loading, lifecycle, and leases. The plugin ABI epoch follows the installed Salts SDK and must match between host and modules. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
 
-The `TURBODB_BUILD_ORM` and `TURBODB_BUILD_DBTOOLS` switches select modules. ORM builds SQLite, PostgreSQL, MySQL, Redis and TidesDB drivers together; consumers choose which plugins to load at runtime. MongoDB is not included. The generic `Orm::C` target does not link database clients.
+The `TURBODB_BUILD_ORM`, `TURBODB_BUILD_REDIS` and `TURBODB_BUILD_DBTOOLS` switches select modules. ORM builds SQLite, PostgreSQL, MySQL and TidesDB drivers together; consumers choose which plugins to load at runtime. Redis remains an independently selectable native client because it does not provide the SQL contract required by the ORM. MongoDB is not included. The generic `Orm::C` target does not link database clients.
 
 ## Design principles
 

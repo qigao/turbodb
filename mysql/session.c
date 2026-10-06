@@ -939,14 +939,19 @@ static bool mysql_session_decode_server_error(
     return false;
   if (mysql_wire_decode_err_packet(
           payload, payload_size, session->client_capabilities,
-          &server_error) == MYSQL_WIRE_STATUS_OK &&
-      session->error != NULL) {
+          &server_error) != MYSQL_WIRE_STATUS_OK) {
+    mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+                            stage, "invalid prepared statement error packet");
+    return true;
+  }
+  if (session->error != NULL) {
     session->error->server_error = server_error.error_code;
     if (server_error.has_sql_state)
       memcpy(session->error->sql_state, server_error.sql_state,
              sizeof(server_error.sql_state));
   }
-  mysql_session_set_error(session, MYSQL_SESSION_PROTOCOL,
+  /* Server text can contain SQL or credentials; expose only structured fields. */
+  mysql_session_set_error(session, MYSQL_SESSION_SQL_ERROR,
                           stage, "server rejected prepared statement operation");
   return true;
 }
@@ -3243,6 +3248,124 @@ void mysql_transaction_session_destroy(
 }
 
 #if defined(MYSQL_ENABLE_FAULT_INJECTION)
+mysql_session_status_t mysql_transaction_session_test_open(
+    const mysql_session_config_t *config, size_t max_command_bytes,
+    mysql_transaction_session_t **out_transaction,
+    mysql_session_error_t *error) {
+  mysql_transaction_session_t *transaction = NULL;
+  mysql_session_status_t status;
+
+  if (out_transaction != NULL)
+    *out_transaction = NULL;
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  if (out_transaction == NULL ||
+      max_command_bytes == 0u ||
+      max_command_bytes > MYSQL_WIRE_PACKET_MAX_PAYLOAD) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "test-session-config");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "invalid test session request or command bound");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  transaction = (mysql_transaction_session_t *)calloc(
+      1u, sizeof(*transaction));
+  if (transaction == NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_IO;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "test-session-allocate");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "allocate MySQL test session");
+    }
+    return MYSQL_SESSION_IO;
+  }
+
+  transaction->max_command_bytes = max_command_bytes;
+  status = mysql_session_start(
+      &transaction->session, config, MYSQL_SESSION_ACTION_PING,
+      NULL, &transaction->session.owned_error,
+      MYSQL_SESSION_CONTROL_CAPACITY, max_command_bytes);
+  if (status != MYSQL_SESSION_OK) {
+    mysql_transaction_copy_error(transaction, error);
+    free(transaction);
+    return status;
+  }
+  status = mysql_session_progress_until(
+      &transaction->session, MYSQL_PHASE_DONE);
+  if (status != MYSQL_SESSION_OK ||
+      transaction->session.phase != MYSQL_PHASE_DONE) {
+    mysql_transaction_copy_error(transaction, error);
+    mysql_session_shutdown(&transaction->session, false);
+    free(transaction);
+    return status != MYSQL_SESSION_OK ? status : MYSQL_SESSION_PROTOCOL;
+  }
+
+  /* Reuse the transaction command machinery only inside the qualification
+   * binary. No BEGIN is sent, so the server owns the real autocommit state. */
+  transaction->session.config = NULL;
+  transaction->session.action = MYSQL_SESSION_ACTION_TRANSACTION;
+  transaction->session.phase = MYSQL_PHASE_TRANSACTION_READY;
+  transaction->session.transaction_active = true;
+  transaction->session.error = &transaction->session.owned_error;
+  memset(&transaction->session.owned_error, 0,
+         sizeof(transaction->session.owned_error));
+  *out_transaction = transaction;
+  return MYSQL_SESSION_OK;
+}
+
+void mysql_transaction_session_test_disconnect(
+    mysql_transaction_session_t *transaction) {
+  if (transaction == NULL)
+    return;
+  transaction->session.transaction_active = false;
+  mysql_transaction_session_destroy(transaction);
+}
+
+mysql_session_status_t mysql_transaction_session_test_execute_control(
+    mysql_transaction_session_t *transaction,
+    const uint8_t *sql, size_t sql_size,
+    mysql_session_error_t *error) {
+  mysql_session_status_t status;
+
+  if (error != NULL)
+    memset(error, 0, sizeof(*error));
+  if (transaction == NULL ||
+      !transaction->session.transaction_active ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY ||
+      transaction->session.action != MYSQL_SESSION_ACTION_TRANSACTION ||
+      sql == NULL || sql_size == 0u ||
+      sql_size >= transaction->max_command_bytes ||
+      memchr(sql, 0, sql_size) != NULL) {
+    if (error != NULL) {
+      error->status = MYSQL_SESSION_INVALID;
+      (void)snprintf(error->stage, sizeof(error->stage), "%s",
+                     "test-session-control");
+      (void)snprintf(error->message, sizeof(error->message), "%s",
+                     "invalid active MySQL test control command");
+    }
+    return MYSQL_SESSION_INVALID;
+  }
+
+  memset(&transaction->session.owned_error, 0,
+         sizeof(transaction->session.owned_error));
+  transaction->session.error = &transaction->session.owned_error;
+  transaction->session.transaction_step = MYSQL_TRANSACTION_STEP_SAVEPOINT;
+  mysql_session_send_control(&transaction->session, sql, sql_size);
+  status = mysql_session_progress_until(
+      &transaction->session, MYSQL_PHASE_TRANSACTION_READY);
+  if (status != MYSQL_SESSION_OK ||
+      transaction->session.phase != MYSQL_PHASE_TRANSACTION_READY) {
+    mysql_transaction_copy_error(transaction, error);
+    return status != MYSQL_SESSION_OK ? status : MYSQL_SESSION_PROTOCOL;
+  }
+  return MYSQL_SESSION_OK;
+}
+
 void mysql_transaction_session_test_drop_commit_ack(
     mysql_transaction_session_t *transaction, int enabled) {
   if (transaction == NULL)

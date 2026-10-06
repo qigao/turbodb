@@ -2,11 +2,18 @@
 
 #include <type_traits>
 
+static_assert(std::is_same<orm_value_t, turbodb_value_t>::value,
+              "ORM values must share the canonical DTO");
+static_assert(std::is_same<orm_error_t, turbodb_error_t>::value,
+              "ORM errors must share the canonical DTO");
+static_assert(std::is_same<orm_option_t, turbodb_option_t>::value,
+              "ORM options must share the canonical DTO");
+
 using driver_create_type = orm_status_t (ORM_DRIVER_CALL *)(
     void *, const orm_config_t *, const orm_driver_limits_v1 *,
     orm_driver_connection_v1 *, orm_error_t *);
 
-static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 3u,
+static_assert(ORM_DRIVER_INTERFACE_CONTRACT_VERSION == 4u,
               "TurboDb.Driver contract version drift");
 static_assert(std::is_standard_layout<TurboDb_Driver>::value,
               "Driver interface must keep C layout");

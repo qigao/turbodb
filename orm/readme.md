@@ -26,15 +26,13 @@ Row queries use `orm_query_open_flow`. Mutating or DDL queries use
 execution begins on the first unit of demand.
 
 The active cursor is the fact source. No second result matrix is built in the
-ORM. PostgreSQL uses libpq single-row mode, MongoDB uses its native cursor,
-Redis parses the network RESP array one owned row at a time, SQLite advances
-the prepared statement, and TidesDB advances its iterator.
+ORM. PostgreSQL uses libpq single-row mode, SQLite advances the prepared
+statement, and TidesDB advances its iterator.
 
 Each backend selects CSerde token kinds from its own native metadata. DataBind
 does not guess numeric or boolean values from arbitrary strings. PostgreSQL
-uses field OIDs; Redis uses the declared CMeta field kind for typeless RESP bulk
-strings. A malformed declared scalar fails the Publisher instead of being returned
-as text.
+uses field OIDs; a malformed declared scalar fails the Publisher instead of
+being returned as text.
 
 ## C API
 
@@ -55,12 +53,27 @@ The build no longer generates an `OrmConfig.cmake` package; `Orm::C` and
 
 ### Plugin architecture and ownership
 
-The runtime uses the installed `Salts::Plugin` implementation and its ABI 2
+The runtime uses the installed `Salts::Plugin` implementation and its current ABI
 contract. `SALTS_ROOT` and `SALTS_UTILS_ROOT` in the selected user preset select
 the SDKs. The build requires both `Salts::Plugin` and `Salts::PluginABI`; it does
 not compile a private copy of the loader. `Orm::DriverABI` publishes the ORM
 driver headers and their `Salts::PluginABI`, Core, CFlow and CSerde dependencies.
 It does not link the host loader or a native database library.
+
+`SALTS_PLUGIN_ABI_VERSION` selects the exact admission epoch, including the CMeta
+reflection layouts exposed by exports. The source SDK follows the installed Salts
+epoch; the host rejects mismatched modules before consuming their descriptors. There is no cross-epoch
+negotiation, retry or compatibility path. Rebuild the host and all modules with
+the same current Salts SDK, then deploy them together after active leases drain.
+Clean compiled objects when upgrading the SDK epoch; an incremental relink can
+retain descriptors compiled with the previous CMeta layout.
+An admission failure leaves the runtime registration unchanged. Rollback requires
+reverting and rebuilding the whole host/module deployment; do not mix epochs.
+This cutover uses the existing loader and ownership architecture, avoiding a
+second layout adapter or an alternate SDK lookup. Validate it with the C/C++
+interface, real-module admission, registry race and database plugin tests.
+The separate ORM Driver DTO ABI and database contract versions below retain
+their own meanings; Plugin epoch numbers do not renumber those DTOs.
 
 The ORM driver boundary accepts only Driver ABI 2 and `TurboDb.Driver` contract
 version 4. Rebuild and deploy the core and all drivers together; older plugins
@@ -83,10 +96,9 @@ table, including a nullable `open_async_cursor` callback.
 Each implementation directory declares its own sources in `CMakeLists.txt`.
 The repository root builds `orm/`, then `drivers/`, then `orm/tests/`.
 `orm/CMakeLists.txt` declares only the generic core, C++ facade and driver ABI.
-The `drivers/` dispatcher builds SQLite, PostgreSQL, MySQL, Redis and TidesDB
+The `drivers/` dispatcher builds SQLite, PostgreSQL, MySQL and TidesDB
 from their own directories. Native MySQL code belongs to the root `mysql/`
 library; its ORM adapter is in `drivers/mysql/`.
-MongoDB remains in `drivers/mongodb/` without being added to the build.
 The shared core owns no native database dependency; each plugin owns its
 native SDK links and install rule.
 The private test core recompiles the production target's source selection with
@@ -134,14 +146,14 @@ the database environment described below.
 
 ### 客户端按需使用驱动
 
-构建端提供完整的五个驱动；客户端链接 `Orm::C`（或 `Orm::Cpp`），只部署
+构建端提供完整的四个驱动；客户端链接 `Orm::C`（或 `Orm::Cpp`），只部署
 并显式加载需要的插件。一个 runtime 可以加载多个驱动；未加载的驱动不连接、
 不初始化，也不要求客户端链接其原生数据库库。选定插件使用的原生运行库仍需
 由客户端部署环境提供。
 
 插件文件名、`TurboDb.Driver` 契约及安装路径保持不变。每个插件拥有独立安装
 component：`OrmSqliteDriver`、`OrmPostgresqlDriver`、`OrmMysqlDriver`、
-`OrmRedisDriver`、`OrmTidesdbDriver`。这些 component 只选择插件产物，
+`OrmTidesdbDriver`。这些 component 只选择插件产物，
 不会自动打包 ORM、Salts 或数据库原生运行库。
 
 本次目录调整选择将具体数据库实现移出 ORM，保留公共契约与通用适配代码在
@@ -151,12 +163,12 @@ ORM 内。继续放在 `src/dbs/` 会让核心继续承担驱动构建职责；�
 
 迁移只涉及 CMake 源码引用：核心先定义，驱动随后定义，测试最后引用现有
 targets。驱动构建失败会直接终止构建，不产生自动降级路径。回退时应一起恢复
-目录和 CMake 引用，无须迁移数据库数据。验证覆盖五个插件构建、单驱动加载、
+目录和 CMake 引用，无须迁移数据库数据。验证覆盖四个插件构建、单驱动加载、
 多驱动共存的本地契约测试、核心 DLL 依赖检查及独立 E2E 构建。
 
 ### Runtime-loaded Drivers
 
-SQLite, PostgreSQL, MySQL, Redis, TidesDB, and MongoDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
+SQLite, PostgreSQL, MySQL and TidesDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
 The application loads an exact module path into an `orm_runtime_t`, then
 connects by the canonical Plugin manifest ID. Runtime loading does not scan
 directories, infer aliases, retry older ABIs, or fall back to a built-in
@@ -174,13 +186,13 @@ orm_runtime_create(&runtime_config, &runtime, &error);
 
 load.struct_size = sizeof(load);
 load.abi_version = ORM_RUNTIME_ABI_VERSION;
-load.module_path = orm_view("/absolute/path/to/turbodb_driver_redis");
-load.expected_driver_id = orm_view("redis");
+load.module_path = orm_view("/absolute/path/to/turbodb_driver_sqlite");
+load.expected_driver_id = orm_view("sqlite");
 orm_runtime_load_driver(runtime, &load, &error);
 
 orm_config(&config);
-config.driver = orm_view("redis");
-/* configure host/port/options */
+config.driver = orm_view("sqlite");
+/* configure filename/options */
 orm_runtime_connect(runtime, &config, &connection, &error);
 
 /* destroy all Publishers/queries/transactions, then disconnect first */
@@ -190,12 +202,6 @@ orm_runtime_release(runtime);
 ```
 
 The Driver keeps its Plugin lease while connection-owned native work is live.
-MongoDB's native process runtime is owned by the managed MongoDB Plugin:
-`mongoc_init()` runs from Plugin start and `mongoc_cleanup()` runs only after
-all Driver leases quiesce and before module unload. No process-global
-`atexit` callback is registered by the ORM adapter.
-Unsupported Redis transaction/raw-SQL operations remain explicit backend
-errors; they are not emulated by another database.
 
 ### Typed row Publisher
 
@@ -256,9 +262,7 @@ orm_query_destroy(command);
 ```
 
 Cancelling or destroying a command Publisher before demand prevents execution.
-After demand begins, backend-specific uncertainty rules apply; Redis mutation
-transport failures are reported as an unknown outcome and must not be retried
-blindly.
+After demand begins, backend-specific uncertainty rules apply.
 
 ### Ownership and limits
 
@@ -315,28 +319,18 @@ must outlive that Publisher.
   affected-row parsing; explicit transactions and savepoints. Field OIDs select
   supported scalar token kinds; arbitrary-precision and unknown types remain
   strings instead of being narrowed.
-- MongoDB: native row cursor and direct insert/update/delete commands;
-  transactions require a deployment that supports MongoDB sessions.
-- TidesDB: iterator-backed row Publisher, direct commands, and a
-  [bounded SQL frontend](../drivers/tidesdb/sql/readme.md) for parameterized
-  SELECT/INSERT/UPDATE/DELETE. Stateful ordering,
-  grouping and aggregation are not executed eagerly by the backend; express
-  them as bounded CFlow operators when pushdown cannot preserve semantics.
-  SELECT requires an explicit projection. Iterator scans are capped by
-  `max_scan_rows` and `max_scan_bytes`; transaction commit/rollback returns
-  `ORM_STATUS_BUSY` while a transaction row Publisher is open.
-- Redis: Redis Query Engine row Publisher and direct mutation commands. ORM-level
-  `MULTI/EXEC` remains unsupported because affected rows are unavailable until
-  commit; it requires a future commit-aware Publisher protocol. The additive
-  `tedis` `redis_lua_apply` API is instead a fixed Redis-native ordered-write
-  primitive for replicated state adapters: it commits one hash mutation,
-  applied-index metadata, and a Stream outbox entry atomically. It is not an
-  ORM transaction or an arbitrary-query escape hatch. SELECT is lazy at first
-  demand and does not materialize the complete RESP reply.
-  Projected CMeta scalar kinds drive strict conversion of RESP bulk strings;
-  non-canonical numeric or boolean representations fail at the cursor boundary.
-  Destroying a Publisher before completion disconnects that client so unread
-  response bytes cannot corrupt the next command.
+- TidesDB: the TidesSQL relational engine serves raw SQL and structured ORM
+  queries through row and command Publishers. Connections require explicit
+  `path` and `column_family`; use `sql_initialize=true` only to initialize a new
+  empty column family. Tables require explicit CREATE TABLE. The driver supports
+  SERIALIZABLE transactions and savepoints; live result cursors block transaction
+  completion. Query, scan and transaction budgets are enforced by TidesSQL.
+  The `sql_profile` selector and the ORMTDB KV format are not supported.
+  See the [TidesSQL contract](../tidessql/readme.md).
+
+MongoDB and Redis are intentionally not ORM backends: they do not implement the
+SQL contract expected by this layer. Use the independently selectable
+`TurboDB::Redis` client and its Redis-native APIs for Redis workloads.
 
 Backend options are validated at connection creation. Unknown options are
 rejected instead of silently enabling a fallback.
@@ -360,14 +354,14 @@ unchanged.
 
 ## Build and test
 
-ORM builds SQLite, PostgreSQL, MySQL, Redis and TidesDB drivers together.
-There are no per-database build switches. MongoDB sources remain in the tree,
-but its native driver and database-dependent tests are excluded from the build.
-`TURBODB_BUILD_ORM` and `TURBODB_BUILD_DBTOOLS` select the modules to build.
+ORM builds SQLite, PostgreSQL, MySQL and TidesDB drivers together.
+There are no per-database ORM build switches. `TURBODB_BUILD_ORM` and
+`TURBODB_BUILD_DBTOOLS` select the ORM and database-tool modules;
+`TURBODB_BUILD_REDIS` independently selects the standalone Redis client.
 The database tools always support SQLite and PostgreSQL. Enabling either module
 selects both vcpkg manifest features before toolchain initialization.
-Redis and TidesDB are built from their repository modules; Salts and SaltsUtils
-come from the installed SDKs selected by the preset.
+The standalone Redis client and TidesDB are built from their repository modules;
+Salts and SaltsUtils come from the installed SDKs selected by the preset.
 Native database libraries stay outside the generic `Orm::C` link interface.
 
 The root `mysql/` directory provides the standalone `TurboDB::MySQL` static
@@ -387,7 +381,7 @@ ctest --preset win-dev-user --output-on-failure
 `orm/tests/CMakeLists.txt` dispatches to `abi/`, `driver/`, `flow/`,
 `integration/`, and `ownership/`, each with its own `CMakeLists.txt`.
 Driver tests are further grouped into `mysql/`, `postgresql/`, `sqlite/`,
-`mongodb/`, and `cross_driver/`, each with its own `CMakeLists.txt`.
+`tidesdb/`, and `cross_driver/`, each with its own `CMakeLists.txt`.
 Generic driver and runtime tests remain directly under `driver/`.
 Database-specific flow and ABI tests also have their own subdirectories.
 Integration tests are split into `integration/sqlite/` and

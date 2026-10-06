@@ -200,6 +200,11 @@ typedef orm_status_t (*orm_backend_factory_context_v1)(
 
 bool orm_query_returns_rows(const orm_query_plan *plan);
 
+/* Core-only synchronous materialization. Caller holds query/transaction leases
+ * and the connection native interval through cursor disposal and decoding. */
+orm_status_t orm_result_execute_native(orm_query_t *query, orm_backend *database,
+    orm_transaction_backend *transaction, orm_result_t **out_result, orm_error_t *error);
+
 ORM_C_API void orm_error_set(orm_error_t *error, orm_status_t status,
                              const char *message);
 ORM_C_API bool orm_view_valid(vstr value, bool allow_empty);

@@ -6,6 +6,7 @@ option(BUILD_TESTS "Build test suite" ON)
 option(BUILD_E2E_TESTS "Build end-to-end tests against external databases" OFF)
 
 option(TURBODB_BUILD_ORM "Build ORM libraries and database drivers" ON)
+option(TURBODB_BUILD_REDIS "Build the standalone Redis client" ON)
 option(TURBODB_BUILD_DBTOOLS "Build standalone database tools" ON)
 option(TURBODB_BUILD_SQLPARSER "Build the standalone re2c/Lemon SQL parser" ON)
 option(TURBODB_BUILD_APP "Build the TurboDB Studio Windows desktop application" OFF)
@@ -21,11 +22,18 @@ if(TURBODB_BUILD_APP)
   endif()
 endif()
 
+option(TURBODB_BUILD_TIDESSQL "Build the TidesSQL execution engine" ${TURBODB_BUILD_ORM})
+option(TURBODB_BUILD_TIDESSQL_SERVER "Build the standalone tidessqld MySQL/TLS server" OFF)
+
 # The toolchain reads manifest features during project().
 set(VCPKG_MANIFEST_FEATURES "")
 if(TURBODB_BUILD_ORM OR
-   (TURBODB_BUILD_DBTOOLS AND (BUILD_TESTS OR BUILD_E2E_TESTS)))
+   (TURBODB_BUILD_DBTOOLS AND (BUILD_TESTS OR BUILD_E2E_TESTS)) OR
+   (TURBODB_BUILD_SQLPARSER AND BUILD_TESTS))
   list(APPEND VCPKG_MANIFEST_FEATURES sqlite)
+endif()
+if(TURBODB_BUILD_ORM OR
+   (TURBODB_BUILD_DBTOOLS AND (BUILD_TESTS OR BUILD_E2E_TESTS)))
   list(APPEND VCPKG_MANIFEST_FEATURES postgresql)
 endif()
 if(TURBODB_BUILD_APP)

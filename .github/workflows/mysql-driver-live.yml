@@ -5,55 +5,19 @@ on:
     branches: [master]
     paths:
       - "mysql/**"
-      - "drivers/mysql/**"
-      - "orm/tests/e2e/mysql/**"
-      - "dbtools/mysql/**"
-      - "dbtools/tests/mysql/**"
-      - "dbtools/CMakeLists.txt"
-      - "dbtools/src/**"
-      - "dbtools/tests/CMakeLists.txt"
-      - "orm/include/**"
-      - "orm/src/**"
-      - "orm/CMakeLists.txt"
-      - "orm/tests/CMakeLists.txt"
-      - "orm/tests/e2e/CMakeLists.txt"
-      - "orm/tests/support/**"
-      - "drivers/CMakeLists.txt"
-      - "drivers/schema/**"
+      - "dbtools/**"
+      - "orm/**"
+      - "tidessql/tests/protocol/fixtures/**"
       - "CMakeLists.txt"
-      - "CMakeOptions.cmake"
-      - "CMake*Presets.json"
-      - "presets/**"
-      - "cmake/**"
-      - ".github/actions/**"
-      - "vcpkg*.json"
       - ".github/workflows/mysql-driver-live.yml"
   push:
     branches: [master]
     paths:
       - "mysql/**"
-      - "drivers/mysql/**"
-      - "orm/tests/e2e/mysql/**"
-      - "dbtools/mysql/**"
-      - "dbtools/tests/mysql/**"
-      - "dbtools/CMakeLists.txt"
-      - "dbtools/src/**"
-      - "dbtools/tests/CMakeLists.txt"
-      - "orm/include/**"
-      - "orm/src/**"
-      - "orm/CMakeLists.txt"
-      - "orm/tests/CMakeLists.txt"
-      - "orm/tests/e2e/CMakeLists.txt"
-      - "orm/tests/support/**"
-      - "drivers/CMakeLists.txt"
-      - "drivers/schema/**"
+      - "dbtools/**"
+      - "orm/**"
+      - "tidessql/tests/protocol/fixtures/**"
       - "CMakeLists.txt"
-      - "CMakeOptions.cmake"
-      - "CMake*Presets.json"
-      - "presets/**"
-      - "cmake/**"
-      - ".github/actions/**"
-      - "vcpkg*.json"
       - ".github/workflows/mysql-driver-live.yml"
   workflow_dispatch:
 
@@ -121,50 +85,23 @@ jobs:
             "SELECT VERSION(); SELECT user,host,plugin FROM mysql.user WHERE user IN ('turbodb','nativeuser') ORDER BY user,host;" \
             | tee "$GITHUB_WORKSPACE/evidence/mysql/server.txt"
 
-          docker cp "$cid:/var/lib/mysql/ca.pem" "$RUNNER_TEMP/mysql-tls/ca.pem"
-          docker cp "$cid:/var/lib/mysql/ca-key.pem" "$RUNNER_TEMP/mysql-tls/ca-key.pem"
-
-          # MySQL's auto-generated server certificate has only a CN and no SAN.
-          # GmSSL intentionally requires DNS SubjectAltName for hostname verification,
-          # so issue a focused localhost server certificate from the container CA.
-          openssl genrsa -out "$RUNNER_TEMP/mysql-tls/server-key.pem" 2048
-          openssl req -new \
-            -key "$RUNNER_TEMP/mysql-tls/server-key.pem" \
-            -subj "/CN=localhost" \
-            -out "$RUNNER_TEMP/mysql-tls/server.csr"
-          cat > "$RUNNER_TEMP/mysql-tls/server-ext.cnf" <<'EOF'
-          basicConstraints=critical,CA:FALSE
-          keyUsage=critical,digitalSignature,keyEncipherment
-          extendedKeyUsage=serverAuth
-          subjectAltName=DNS:localhost
-          authorityKeyIdentifier=keyid,issuer
-          subjectKeyIdentifier=hash
-          EOF
-          openssl x509 -req \
-            -in "$RUNNER_TEMP/mysql-tls/server.csr" \
-            -CA "$RUNNER_TEMP/mysql-tls/ca.pem" \
-            -CAkey "$RUNNER_TEMP/mysql-tls/ca-key.pem" \
-            -CAcreateserial \
-            -days 1 \
-            -sha256 \
-            -extfile "$RUNNER_TEMP/mysql-tls/server-ext.cnf" \
-            -out "$RUNNER_TEMP/mysql-tls/server-cert.pem"
-
-          docker cp "$RUNNER_TEMP/mysql-tls/server-key.pem" "$cid:/var/lib/mysql/server-key.pem"
-          docker cp "$RUNNER_TEMP/mysql-tls/server-cert.pem" "$cid:/var/lib/mysql/server-cert.pem"
-          docker exec "$cid" sh -lc \
-            "chown mysql:mysql /var/lib/mysql/server-key.pem /var/lib/mysql/server-cert.pem && chmod 600 /var/lib/mysql/server-key.pem && chmod 644 /var/lib/mysql/server-cert.pem"
+          fixture="$GITHUB_WORKSPACE/tidessql/tests/protocol/fixtures"
+          docker cp "$fixture/p256-test-root-cert.pem" "$cid:/var/lib/mysql/ca.pem"
+          docker cp "$fixture/p256-test-server-cert.pem" "$cid:/var/lib/mysql/server-cert.pem"
+          docker cp "$fixture/p256-test-server-key.pem" "$cid:/var/lib/mysql/server-key.pem"
+          docker exec --user root "$cid" chown mysql:mysql \
+            /var/lib/mysql/ca.pem /var/lib/mysql/server-cert.pem /var/lib/mysql/server-key.pem
+          docker exec --user root "$cid" chmod 600 /var/lib/mysql/server-key.pem
           docker exec "$cid" mysql -uroot -prootpw -e "ALTER INSTANCE RELOAD TLS;"
 
-          cp "$RUNNER_TEMP/mysql-tls/ca.pem" "$GITHUB_WORKSPACE/evidence/mysql/ca.pem"
-          cp "$RUNNER_TEMP/mysql-tls/server-cert.pem" "$GITHUB_WORKSPACE/evidence/mysql/server-cert.pem"
+          cp "$fixture/p256-test-root-cert.pem" "$RUNNER_TEMP/mysql-tls/ca.pem"
+          cp "$fixture/p256-test-server-cert.pem" "$RUNNER_TEMP/mysql-tls/server-cert.pem"
+          openssl verify -CAfile "$RUNNER_TEMP/mysql-tls/ca.pem" \
+            -verify_hostname localhost "$RUNNER_TEMP/mysql-tls/server-cert.pem"
           subject="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
             -noout -subject -nameopt RFC2253)"
-          san="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
-            -noout -ext subjectAltName)"
-          server_name="localhost"
-          grep -F "DNS:localhost" <<<"$san"
-          printf 'certificate_subject=%s\n%s\nserver_name=%s\n' "$subject" "$san" "$server_name" \
+          server_name=localhost
+          printf 'certificate_subject=%s\nserver_name=%s\n' "$subject" "$server_name" \
             | tee "$GITHUB_WORKSPACE/evidence/mysql/tls.txt"
 
           {

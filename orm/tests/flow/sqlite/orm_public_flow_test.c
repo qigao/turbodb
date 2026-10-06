@@ -937,7 +937,7 @@ spec("ORM public reactive flow") {
     orm_disconnect(connection);
   }
 
-  it("materializes rows from a raw mutation with RETURNING") {
+  it("materializes raw mutations with RETURNING including CTEs") {
     orm_error_t error;
     orm_config_t connection_config;
     orm_option_t filename;
@@ -961,19 +961,50 @@ spec("ORM public reactive flow") {
     check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
     orm_result_destroy(result);
     orm_query_destroy(query);
-    result = NULL;
-    query = NULL;
-    check_equal(orm_raw(connection,
-                        orm_view("insert into returned values(7) returning id"),
-                        &query, &error),
-                ORM_STATUS_OK);
-    check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
-    check_equal(orm_result_get_int64(result, 0u, 0u, &value, &error),
-                ORM_STATUS_OK);
-    check_equal(value, (int64_t)7);
-
-    orm_result_destroy(result);
-    orm_query_destroy(query);
+    const char *statements[] = {
+      "insert into returned values(7) returning id",
+      "update returned set id=7 returning id",
+      "delete from returned returning id",
+      "with seed(id) as (select 7) insert into returned select id from seed returning id",
+      "with seed(id) as (select 7) update returned set id=(select id from seed) returning id",
+      "with seed(id) as (select 7) delete from returned where id in (select id from seed) returning id"
+    };
+    for (size_t i = 0; i < sizeof(statements) / sizeof(statements[0]); ++i) {
+      info("SQL: %s", statements[i]);
+      result = NULL;
+      query = NULL;
+      check_equal(orm_raw(connection, orm_view(statements[i]), &query, &error),
+                  ORM_STATUS_OK);
+      check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+      uint64_t rows = 0u;
+      check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+      check_equal(rows, UINT64_C(1));
+      check_equal(orm_result_get_int64(result, 0u, 0u, &value, &error),
+                  ORM_STATUS_OK);
+      check_equal(value, (int64_t)7);
+      orm_result_destroy(result);
+      orm_query_destroy(query);
+    }
+    const char *commands[] = {
+      "with seed(id) as (select 7) insert into returned select id as `returning` from seed",
+      "with seed(id) as (select 7) update returned set id=(select id as [returning] from seed)",
+      "with seed(id) as (select 7) delete from returned where id in (select id from seed) /* returning */"
+    };
+    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
+      info("SQL: %s", commands[i]);
+      result = NULL;
+      query = NULL;
+      check_equal(orm_raw(connection, orm_view(commands[i]), &query, &error),
+                  ORM_STATUS_OK);
+      check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+      uint64_t rows = 0u, affected = 0u;
+      check_equal(orm_result_row_count(result, &rows, &error), ORM_STATUS_OK);
+      check_equal(rows, UINT64_C(0));
+      check_equal(orm_result_affected_rows(result, &affected, &error), ORM_STATUS_OK);
+      check_equal(affected, UINT64_C(1));
+      orm_result_destroy(result);
+      orm_query_destroy(query);
+    }
     orm_disconnect(connection);
   }
 

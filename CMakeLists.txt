@@ -47,27 +47,44 @@ enable_testing()
 include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
+cmake_path(CONVERT "$ENV{SALTS_ROOT}" TO_CMAKE_PATH_LIST
+  _TURBODB_SALTS_ROOT NORMALIZE)
+cmake_path(CONVERT "$ENV{SALTS_UTILS_ROOT}" TO_CMAKE_PATH_LIST
+  _TURBODB_SALTS_UTILS_ROOT NORMALIZE)
 find_package(
   Salts
   CONFIG
   REQUIRED
   PATHS
-  "$ENV{SALTS_ROOT}"
+  "${_TURBODB_SALTS_ROOT}"
   NO_DEFAULT_PATH
   NO_CMAKE_FIND_ROOT_PATH)
 
-find_package(
-  SaltsUtils
-  CONFIG
-  REQUIRED
-  PATHS
-  "$ENV{SALTS_UTILS_ROOT}"
-  NO_DEFAULT_PATH
-  NO_CMAKE_FIND_ROOT_PATH)
+if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS OR TURBODB_BUILD_TIDESSQL_SERVER)
+  find_package(
+    SaltsUtils
+    CONFIG
+    REQUIRED
+    PATHS
+    "${_TURBODB_SALTS_UTILS_ROOT}"
+    NO_DEFAULT_PATH
+    NO_CMAKE_FIND_ROOT_PATH)
+endif()
+unset(_TURBODB_SALTS_ROOT)
+unset(_TURBODB_SALTS_UTILS_ROOT)
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(zstd CONFIG REQUIRED)
+
+add_library(turbodb_types INTERFACE)
+target_include_directories(turbodb_types INTERFACE
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_link_libraries(turbodb_types INTERFACE Salts::Core)
+cmake_config_target(turbodb_types ALIAS TurboDB::Types EXPORT_SET TurboDBTargets
+  EXPORT_NAME Types FOLDER types NO_VERSION)
+cmake_install_headers(FILES include/turbodb/types.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/turbodb)
 
 # Additional components
 if(CMAKE_CROSSCOMPILING)
@@ -82,13 +99,31 @@ if(TURBODB_BUILD_SQLPARSER)
   add_subdirectory(sqlparser)
 endif()
 
+if(TURBODB_BUILD_TIDESSQL AND NOT TURBODB_BUILD_SQLPARSER)
+  message(FATAL_ERROR "TidesSQL requires TURBODB_BUILD_SQLPARSER=ON")
+endif()
+if(TURBODB_BUILD_ORM AND NOT TURBODB_BUILD_TIDESSQL)
+  message(FATAL_ERROR "The TidesDB ORM driver requires TURBODB_BUILD_TIDESSQL=ON")
+endif()
+if(TURBODB_BUILD_TIDESSQL_SERVER AND NOT TURBODB_BUILD_TIDESSQL)
+  message(FATAL_ERROR "tidessqld requires TURBODB_BUILD_TIDESSQL=ON")
+endif()
+if(TURBODB_BUILD_ORM OR TURBODB_BUILD_TIDESSQL)
+  add_subdirectory(tidesdb)
+endif()
+if(TURBODB_BUILD_TIDESSQL)
+  add_subdirectory(tidessql)
+endif()
+
 if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS)
   add_subdirectory(drivers/schema)
 endif()
 
-if(TURBODB_BUILD_ORM)
+if(TURBODB_BUILD_REDIS)
   add_subdirectory(redis)
-  add_subdirectory(tidesdb)
+endif()
+
+if(TURBODB_BUILD_ORM)
   add_subdirectory(mysql)
   add_subdirectory(orm)
   add_subdirectory(drivers)
@@ -102,7 +137,8 @@ if(TURBODB_BUILD_DBTOOLS)
   add_subdirectory(dbtools)
 endif()
 
-if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS OR TURBODB_BUILD_SQLPARSER)
+if(TURBODB_BUILD_ORM OR TURBODB_BUILD_REDIS OR TURBODB_BUILD_DBTOOLS OR
+   TURBODB_BUILD_SQLPARSER OR TURBODB_BUILD_TIDESSQL_SERVER)
   include(CMakePackageConfigHelpers)
   configure_package_config_file(
     cmake/TurboDBConfig.cmake.in

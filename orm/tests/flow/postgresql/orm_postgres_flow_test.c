@@ -2,6 +2,7 @@
 #include "orm_text_token.h"
 #include "orm_async_wait.h"
 
+#define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include "tinymock.h"
 
 #include <locale.h>
@@ -23,10 +24,51 @@ typedef struct orm_postgres_test_result {
   const char *sqlstate;
 } orm_postgres_test_result;
 
-TINYMOCk_MOCK(int, orm_postgres_test_send_mock, void *, void *)
-TINYMOCk_MOCK(int, orm_postgres_test_single_row, void *)
-TINYMOCk_MOCK(void *, orm_postgres_test_next_result, void *)
-TINYMOCk_MOCK_VOID(orm_postgres_test_release_result, void *)
+FunctionDecl(value, int, orm_postgres_test_send_mock,
+    (void *, context, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),
+    (void *, request, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+FunctionDecl(value, int, orm_postgres_test_single_row,
+    (void *, context, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+FunctionDecl(value, void, orm_postgres_test_release_result,
+    (void *, result, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
+     &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
+TINYMOCk_FUNCTION_DECLARE(orm_postgres_test_send_mock);
+TINYMOCk_FUNCTION_DECLARE(orm_postgres_test_single_row);
+TINYMOCk_FUNCTION_DECLARE(orm_postgres_test_release_result);
+
+enum { ORM_POSTGRES_TEST_MAX_SCRIPTED_RESULTS = 8 };
+typedef struct orm_postgres_test_scripted_result {
+  void *expected_connection;
+  void *result;
+  bool check_connection;
+} orm_postgres_test_scripted_result;
+
+static orm_postgres_test_scripted_result orm_postgres_test_results[
+    ORM_POSTGRES_TEST_MAX_SCRIPTED_RESULTS];
+static void *orm_postgres_test_actual_connections[
+    ORM_POSTGRES_TEST_MAX_SCRIPTED_RESULTS];
+static void *orm_postgres_test_expected_releases[
+    ORM_POSTGRES_TEST_MAX_SCRIPTED_RESULTS];
+static size_t orm_postgres_test_result_count;
+static size_t orm_postgres_test_result_calls;
+static size_t orm_postgres_test_release_count;
+static void *orm_postgres_test_expected_send_context;
+static void *orm_postgres_test_expected_send_request;
+static void *orm_postgres_test_expected_single_context;
+static size_t orm_postgres_test_expected_send_count;
+static size_t orm_postgres_test_expected_single_count;
+
+static void *orm_postgres_test_next_result(void *connection) {
+  const size_t call = orm_postgres_test_result_calls++;
+  if (call >= ORM_POSTGRES_TEST_MAX_SCRIPTED_RESULTS ||
+      call >= orm_postgres_test_result_count)
+    return NULL;
+  orm_postgres_test_actual_connections[call] = connection;
+  return orm_postgres_test_results[call].result;
+}
 
 typedef struct postgres_async_fixture {
   orm_async_wait wait;
@@ -140,26 +182,96 @@ static const orm_postgres_result_ops orm_postgres_test_result_ops = {
     orm_postgres_test_result_sqlstate};
 
 static void orm_postgres_test_reset_mocks(void) {
-  mock_orm_postgres_test_send_mock_reset();
-  mock_orm_postgres_test_single_row_reset();
-  mock_orm_postgres_test_next_result_reset();
-  mock_orm_postgres_test_release_result_reset();
+  TINYMOCk_FUNCTION_RESET(orm_postgres_test_send_mock);
+  TINYMOCk_FUNCTION_RESET(orm_postgres_test_single_row);
+  TINYMOCk_FUNCTION_RESET(orm_postgres_test_release_result);
+  orm_postgres_test_result_count = 0u;
+  orm_postgres_test_result_calls = 0u;
+  orm_postgres_test_release_count = 0u;
+  orm_postgres_test_expected_send_context = NULL;
+  orm_postgres_test_expected_send_request = NULL;
+  orm_postgres_test_expected_single_context = NULL;
+  orm_postgres_test_expected_send_count = 0u;
+  orm_postgres_test_expected_single_count = 0u;
 }
 
 static void orm_postgres_test_verify_mocks(void) {
-  mock_orm_postgres_test_send_mock_verify();
-  mock_orm_postgres_test_single_row_verify();
-  mock_orm_postgres_test_next_result_verify();
-  mock_orm_postgres_test_release_result_verify();
+  TINYMOCk_FUNCTION_VERIFY_TIMES(orm_postgres_test_send_mock,
+                                 orm_postgres_test_expected_send_count);
+  if (orm_postgres_test_expected_send_count != 0u) {
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_postgres_test_send_mock, 0u, "context",
+        orm_postgres_test_expected_send_context));
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_postgres_test_send_mock, 0u, "request",
+        orm_postgres_test_expected_send_request));
+  }
+  TINYMOCk_FUNCTION_VERIFY_TIMES(orm_postgres_test_single_row,
+                                 orm_postgres_test_expected_single_count);
+  if (orm_postgres_test_expected_single_count != 0u)
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_postgres_test_single_row, 0u, "context",
+        orm_postgres_test_expected_single_context));
+  check_equal(orm_postgres_test_result_calls,
+              orm_postgres_test_result_count);
+  for (size_t i = 0u; i < orm_postgres_test_result_count; ++i)
+    if (orm_postgres_test_results[i].check_connection)
+      check_true(orm_postgres_test_actual_connections[i] ==
+                 orm_postgres_test_results[i].expected_connection);
+  TINYMOCk_FUNCTION_VERIFY_TIMES(orm_postgres_test_release_result,
+                                 orm_postgres_test_release_count);
+  for (size_t i = 0u; i < orm_postgres_test_release_count; ++i)
+    check_true(TINYMOCk_FUNCTION_ARG_POINTER_EQUAL(
+        orm_postgres_test_release_result, i, "result",
+        orm_postgres_test_expected_releases[i]));
+  TINYMOCk_FUNCTION_DESTROY(orm_postgres_test_send_mock);
+  TINYMOCk_FUNCTION_DESTROY(orm_postgres_test_single_row);
+  TINYMOCk_FUNCTION_DESTROY(orm_postgres_test_release_result);
+}
+
+static void orm_postgres_test_expect_send(
+    void *connection, orm_postgres_query_request *request, int returned) {
+  check_equal(orm_postgres_test_expected_send_count, (size_t)0u);
+  check_true(TINYMOCk_FUNCTION_SET_RETURN(
+      orm_postgres_test_send_mock, returned));
+  orm_postgres_test_expected_send_context = connection;
+  orm_postgres_test_expected_send_request = request;
+  orm_postgres_test_expected_send_count = 1u;
+}
+
+static void orm_postgres_test_expect_next_impl(
+    void *connection, bool check_connection, void *result) {
+  check_less(orm_postgres_test_result_count,
+             (size_t)ORM_POSTGRES_TEST_MAX_SCRIPTED_RESULTS);
+  orm_postgres_test_results[orm_postgres_test_result_count++] =
+      (orm_postgres_test_scripted_result){connection, result,
+                                          check_connection};
+}
+
+static void orm_postgres_test_expect_next(void *connection, void *result) {
+  orm_postgres_test_expect_next_impl(connection, true, result);
+}
+
+static void orm_postgres_test_expect_next_any(void *result) {
+  orm_postgres_test_expect_next_impl(NULL, false, result);
+}
+
+static void orm_postgres_test_expect_release(void *result) {
+  check_less(orm_postgres_test_release_count,
+             (size_t)ORM_POSTGRES_TEST_MAX_SCRIPTED_RESULTS);
+  orm_postgres_test_expected_releases[orm_postgres_test_release_count++] =
+      result;
 }
 
 static void orm_postgres_test_expect_start(
     void *connection, orm_postgres_query_request *request) {
-  mock_orm_postgres_test_send_mock_expect(
-      TINYMOCk_ARG(connection), TINYMOCk_ARG((void *)request),
-      TINYMOCk_RETURN(1));
-  mock_orm_postgres_test_single_row_expect(
-      TINYMOCk_ARG(connection), TINYMOCk_RETURN(1));
+  int success = 1;
+  orm_postgres_test_expect_send(connection, request, success);
+  check_equal(orm_postgres_test_expected_single_count, (size_t)0u);
+  check_true(TINYMOCk_FUNCTION_SET_RETURN(
+      orm_postgres_test_single_row, success));
+  orm_postgres_test_expected_single_context = connection;
+  orm_postgres_test_expected_single_count = 1u;
 }
 
 static void orm_postgres_test_check_token(cserde_reader *reader,
@@ -322,22 +434,13 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&first));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&second));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&terminal));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)NULL));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&first));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&second));
-    mock_orm_postgres_test_release_result_expect(
-        TINYMOCk_ARG((void *)&terminal));
+    orm_postgres_test_expect_next(&connection_token, &first);
+    orm_postgres_test_expect_next(&connection_token, &second);
+    orm_postgres_test_expect_next(&connection_token, &terminal);
+    orm_postgres_test_expect_next(&connection_token, NULL);
+    orm_postgres_test_expect_release(&first);
+    orm_postgres_test_expect_release(&second);
+    orm_postgres_test_expect_release(&terminal);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
                                           &error),
@@ -368,9 +471,7 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)NULL));
+    orm_postgres_test_expect_next(&connection_token, NULL);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                           &config, &error),
@@ -418,15 +519,11 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&runtime_error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&row));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&terminal));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&row));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&terminal));
+    orm_postgres_test_expect_next(&connection_token, &row);
+    orm_postgres_test_expect_next(&connection_token, &terminal);
+    orm_postgres_test_expect_next(&connection_token, NULL);
+    orm_postgres_test_expect_release(&row);
+    orm_postgres_test_expect_release(&terminal);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                           &config, &error), ORM_STATUS_OK);
@@ -491,15 +588,11 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&runtime_error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&row));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&terminal));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&row));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&terminal));
+    orm_postgres_test_expect_next(&connection_token, &row);
+    orm_postgres_test_expect_next(&connection_token, &terminal);
+    orm_postgres_test_expect_next(&connection_token, NULL);
+    orm_postgres_test_expect_release(&row);
+    orm_postgres_test_expect_release(&terminal);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                           &config, &error), ORM_STATUS_OK);
@@ -554,18 +647,13 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&runtime_error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&first));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&second));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&terminal));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&first));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&second));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&terminal));
+    orm_postgres_test_expect_next(&connection_token, &first);
+    orm_postgres_test_expect_next(&connection_token, &second);
+    orm_postgres_test_expect_next(&connection_token, &terminal);
+    orm_postgres_test_expect_next(&connection_token, NULL);
+    orm_postgres_test_expect_release(&first);
+    orm_postgres_test_expect_release(&second);
+    orm_postgres_test_expect_release(&terminal);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                           &config, &error), ORM_STATUS_OK);
@@ -610,14 +698,11 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&runtime_error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&row));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&fatal));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&row));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&fatal));
+    orm_postgres_test_expect_next(&connection_token, &row);
+    orm_postgres_test_expect_next(&connection_token, &fatal);
+    orm_postgres_test_expect_next(&connection_token, NULL);
+    orm_postgres_test_expect_release(&row);
+    orm_postgres_test_expect_release(&fatal);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                           &config, &error), ORM_STATUS_OK);
@@ -665,12 +750,9 @@ spec("ORM PostgreSQL single-row cursor") {
       orm_error_init(&runtime_error);
       orm_postgres_test_reset_mocks();
       orm_postgres_test_expect_start(&connection_token, &request);
-      mock_orm_postgres_test_next_result_expect(
-          TINYMOCk_ARG((void *)&connection_token),
-          TINYMOCk_RETURN((void *)&fatal));
-      mock_orm_postgres_test_next_result_expect(
-          TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
-      mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&fatal));
+      orm_postgres_test_expect_next(&connection_token, &fatal);
+      orm_postgres_test_expect_next(&connection_token, NULL);
+      orm_postgres_test_expect_release(&fatal);
 
       check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                             &config, &error), ORM_STATUS_OK);
@@ -707,12 +789,9 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&runtime_error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&command));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&command));
+    orm_postgres_test_expect_next(&connection_token, &command);
+    orm_postgres_test_expect_next(&connection_token, NULL);
+    orm_postgres_test_expect_release(&command);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                           &config, &error), ORM_STATUS_OK);
@@ -746,12 +825,9 @@ spec("ORM PostgreSQL single-row cursor") {
     orm_error_init(&runtime_error);
     orm_postgres_test_reset_mocks();
     orm_postgres_test_expect_start(&connection_token, &request);
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token),
-        TINYMOCk_RETURN((void *)&command));
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&command));
+    orm_postgres_test_expect_next(&connection_token, &command);
+    orm_postgres_test_expect_next(&connection_token, NULL);
+    orm_postgres_test_expect_release(&command);
 
     check_equal(orm_postgres_cursor_start(&cursor, &driver, &request,
                                           &config, &error), ORM_STATUS_OK);
@@ -786,11 +862,9 @@ static void postgres_check_failure(const char *sqlstate, int token,
   orm_error_init(&error); orm_error_init(&runtime_error);
   orm_postgres_test_reset_mocks();
   orm_postgres_test_expect_start(&token, &request);
-  mock_orm_postgres_test_next_result_expect(
-      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)&fatal));
-  mock_orm_postgres_test_next_result_expect(
-      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)NULL));
-  mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&fatal));
+  orm_postgres_test_expect_next(&token, &fatal);
+  orm_postgres_test_expect_next(&token, NULL);
+  orm_postgres_test_expect_release(&fatal);
   check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
                                        &error), ORM_STATUS_OK);
   const orm_row_cursor_step step = cursor.ops->next(cursor.context, &reader);
@@ -819,8 +893,7 @@ static void postgres_check_eof(int token, orm_status_t expected) {
   orm_error_init(&error); orm_error_init(&runtime_error);
   orm_postgres_test_reset_mocks();
   orm_postgres_test_expect_start(&token, &request);
-  mock_orm_postgres_test_next_result_expect(
-      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)NULL));
+  orm_postgres_test_expect_next(&token, NULL);
   check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
                                        &error), ORM_STATUS_OK);
   const orm_row_cursor_step step = cursor.ops->next(cursor.context, &reader);
@@ -843,8 +916,7 @@ static void postgres_check_send_failure(int token, orm_status_t expected) {
       1u, 1u, 64u, NULL, NULL, NULL);
   orm_row_cursor cursor = {0};
   orm_error_init(&error); orm_postgres_test_reset_mocks();
-  mock_orm_postgres_test_send_mock_expect(
-      TINYMOCk_ARG((void *)&token), TINYMOCk_ARG((void *)&request), TINYMOCk_RETURN(0));
+  orm_postgres_test_expect_send(&token, &request, 0);
   check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
                                        &error), expected);
   check_equal(error.status, expected);
@@ -881,11 +953,9 @@ static void postgres_check_completion(orm_postgres_result_status result_status) 
   cserde_token value = {0}; cserde_status decoded = CSERDE_OK;
   orm_error_init(&error); orm_error_init(&runtime_error);
   orm_postgres_test_reset_mocks(); orm_postgres_test_expect_start(&token, &request);
-  mock_orm_postgres_test_next_result_expect(
-      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)&result));
-  mock_orm_postgres_test_next_result_expect(
-      TINYMOCk_ARG((void *)&token), TINYMOCk_RETURN((void *)NULL));
-  mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&result));
+  orm_postgres_test_expect_next(&token, &result);
+  orm_postgres_test_expect_next(&token, NULL);
+  orm_postgres_test_expect_release(&result);
   check_equal(orm_postgres_cursor_start(&cursor, &driver, &request, &config,
                                        &error), ORM_STATUS_OK);
   /* A completed command is a known result, even if EOF arrives after loss. */
@@ -990,12 +1060,10 @@ static void postgres_check_cancel_error(const char *sqlstate, int connection_tok
   orm_postgres_test_reset_mocks();
   orm_postgres_test_expect_start(&connection_token, &request);
   if (sqlstate != NULL) {
-    mock_orm_postgres_test_next_result_expect(
-        TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)&result));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&result));
+    orm_postgres_test_expect_next(&connection_token, &result);
+    orm_postgres_test_expect_release(&result);
   }
-  mock_orm_postgres_test_next_result_expect(
-      TINYMOCk_ARG((void *)&connection_token), TINYMOCk_RETURN((void *)NULL));
+  orm_postgres_test_expect_next(&connection_token, NULL);
   const orm_status_t started = orm_postgres_cursor_start(&cursor, &driver, &request,
                                                         &config, &error);
   if (started == ORM_STATUS_OK) {
@@ -1073,7 +1141,7 @@ spec("PostgreSQL asynchronous cursor ownership") {
     cursor.ops->cancel(cursor.context);
     cursor.ops->cancel(cursor.context);
     check_equal(fixture.aborted, 1);
-    tinymock_mock_verify_never(&tinymock_orm_postgres_test_next_result);
+    check_equal(orm_postgres_test_result_calls, (size_t)0u);
   }
   it("reads ready results and releases a fully consumed query without aborting") {
     cserde_reader reader = {0};
@@ -1081,13 +1149,13 @@ spec("PostgreSQL asynchronous cursor ownership") {
     fixture.ready = 1;
     orm_postgres_test_result terminal = {0};
     terminal.status = ORM_POSTGRES_RESULT_TUPLES_DONE;
-    mock_orm_postgres_test_next_result_expect(TINYMOCk_ANY, TINYMOCk_RETURN((void *)&terminal));
-    mock_orm_postgres_test_release_result_expect(TINYMOCk_ARG((void *)&terminal));
-    mock_orm_postgres_test_next_result_expect(TINYMOCk_ANY, TINYMOCk_RETURN((void *)NULL));
+    orm_postgres_test_expect_next_any(&terminal);
+    orm_postgres_test_expect_release(&terminal);
+    orm_postgres_test_expect_next_any(NULL);
     check_equal(cursor.ops->next(cursor.context, &reader).kind, ORM_ROW_CURSOR_DONE);
     check_equal(cursor.ops->next(cursor.context, &reader).kind, ORM_ROW_CURSOR_DONE);
     check_equal(fixture.aborted, 0);
-    tinymock_mock_verify_times(&tinymock_orm_postgres_test_next_result, 2u);
+    check_equal(orm_postgres_test_result_calls, (size_t)2u);
   }
   it("reports the deadline without performing a blocking result read") {
     cserde_reader reader = {0};
@@ -1098,6 +1166,6 @@ spec("PostgreSQL asynchronous cursor ownership") {
     check_equal(step.status, ORM_STATUS_CONNECTION_ERROR);
     cursor.ops->cancel(cursor.context);
     check_equal(fixture.aborted, 1);
-    tinymock_mock_verify_never(&tinymock_orm_postgres_test_next_result);
+    check_equal(orm_postgres_test_result_calls, (size_t)0u);
   }
 }

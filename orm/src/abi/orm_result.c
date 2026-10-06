@@ -401,7 +401,7 @@ static orm_status_t orm_result_materialize_rows(
   return status;
 }
 
-static orm_status_t orm_result_execute(
+orm_status_t orm_result_execute_native(
     orm_query_t *query, orm_backend *database,
     orm_transaction_backend *transaction, orm_result_t **out_result,
     orm_error_t *error) {
@@ -439,31 +439,6 @@ static orm_status_t orm_result_execute(
   *out_result = result;
   orm_error_set(error, ORM_STATUS_OK, NULL);
   return ORM_STATUS_OK;
-}
-
-orm_status_t ORM_C_CALL orm_query_execute(orm_query_t *query,
-                                         orm_result_t **out_result,
-                                         orm_error_t *error) {
-  return orm_result_execute(
-      query, query != NULL && query->connection != NULL
-                 ? &query->connection->backend
-                 : NULL,
-      NULL, out_result, error);
-}
-
-orm_status_t ORM_C_CALL orm_query_execute_in_transaction(
-    orm_query_t *query, orm_transaction_t *transaction,
-    orm_result_t **out_result, orm_error_t *error) {
-  if (out_result != NULL)
-    *out_result = NULL;
-  if (query == NULL || transaction == NULL ||
-      transaction->state != ORM_TRANSACTION_ACTIVE ||
-      query->connection != transaction->connection)
-    return orm_result_fail(
-        error, ORM_STATUS_INVALID_STATE,
-        "query and transaction do not share an active connection");
-  return orm_result_execute(query, NULL, &transaction->backend, out_result,
-                            error);
 }
 
 static orm_status_t orm_result_get_count(const orm_result_t *result,

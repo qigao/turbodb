@@ -22,9 +22,10 @@ SQLite 以 [SQL 语法文档](https://www.sqlite.org/lang.html)核查规则，
 | --- | --- | --- | --- |
 | CTE 与嵌套查询 | 支持普通/递归 CTE、WITH SELECT / UPDATE / DELETE，以及 INSERT / REPLACE 的查询部分携带 WITH | 支持查询 CTE 和 WITH 前缀写入；MATERIALIZED 提示未实现 | [MySQL WITH](https://dev.mysql.com/doc/refman/8.4/en/with.html)、[SQLite WITH](https://www.sqlite.org/lang_with.html) |
 | 保存点 | 支持创建、回滚和释放；RELEASE 必须含 SAVEPOINT | 支持创建、回滚和释放；RELEASE 可省略 SAVEPOINT | [MySQL 保存点](https://dev.mysql.com/doc/refman/8.4/en/savepoint.html)、[SQLite 保存点](https://www.sqlite.org/lang_savepoint.html) |
-| 冲突后更新 | ON DUPLICATE KEY UPDATE 未实现 | ON CONFLICT … DO UPDATE / NOTHING 未实现；现有 INSERT OR 策略不是 UPSERT | [MySQL 冲突更新](https://dev.mysql.com/doc/refman/8.4/en/insert-on-duplicate.html)、[SQLite UPSERT](https://sqlite.org/lang_upsert.html) |
+| 冲突后更新 | 支持解析 VALUES / SET / SELECT 后的 ON DUPLICATE KEY UPDATE；VALUES/SET 支持 `AS row_alias [(column_alias,...)]`，分别保存在 `insert.row_alias`、`insert.column_aliases` 和 `insert.duplicate_assignments` | ON CONFLICT … DO UPDATE / NOTHING 未实现；现有 INSERT OR 策略不是 UPSERT | [MySQL 冲突更新](https://dev.mysql.com/doc/refman/8.4/en/insert-on-duplicate.html)、[SQLite UPSERT](https://sqlite.org/lang_upsert.html) |
+| INSERT 忽略错误 | 支持 `INSERT [LOW_PRIORITY] IGNORE`，AST 使用 `insert.conflict=IGNORE` | 支持 `INSERT OR IGNORE` | [MySQL INSERT](https://dev.mysql.com/doc/refman/8.4/en/insert.html)、[SQLite INSERT](https://sqlite.org/lang_insert.html) |
 | 写入返回行 | 不声明支持 RETURNING | RETURNING 子句未实现 | [SQLite RETURNING](https://www.sqlite.org/lang_returning.html) |
-| 窗口查询 | 支持基础 OVER（分区、排序及命名引用）；WINDOW 声明和窗口帧未实现 | OVER / WINDOW 子句未实现 | [MySQL 窗口函数](https://dev.mysql.com/doc/refman/8.4/en/window-functions.html)、[SQLite 窗口函数](https://www.sqlite.org/windowfunctions.html) |
+| 窗口查询 | 支持 OVER（分区、排序、命名引用及继承）、WINDOW 声明及 ROWS/RANGE 帧 | OVER / WINDOW 子句未实现 | [MySQL 窗口函数](https://dev.mysql.com/doc/refman/8.4/en/window-functions.html)、[SQLite 窗口函数](https://www.sqlite.org/windowfunctions.html) |
 | DELETE 排序及条数限制 | 支持单表 ORDER BY / LIMIT | 可通过构建开关启用，默认关闭；触发器内禁止 | [MySQL DELETE](https://dev.mysql.com/doc/refman/8.4/en/delete.html)、[SQLite DELETE](https://sqlite.org/lang_delete.html) |
 
 证据分为三层：官网定义合法写法；grammar / lexer 决定本模块接受范围；
@@ -38,21 +39,90 @@ MySQL 另有固定 8.4.0 官方来源的 [mysql-spec 语料](mysql-spec/README.m
 
 | 类别 | 支持内容 |
 | --- | --- |
-| 查询 | SELECT、DISTINCT、别名、限定名、星号、函数、子查询、WITH [RECURSIVE] CTE、UNION / UNION ALL、括号查询及分层 ORDER BY / LIMIT、JOIN / INNER / LEFT / RIGHT / CROSS / NATURAL JOIN、ON / USING、WHERE、GROUP BY、HAVING、ORDER BY、LIMIT / OFFSET；SQL_CALC_FOUND_ROWS；基础 OVER 窗口调用 |
+| 查询 | SELECT、DISTINCT、别名、限定名、星号、函数、子查询、WITH [RECURSIVE] CTE、UNION / INTERSECT / EXCEPT（默认或显式 DISTINCT、ALL）、括号查询及分层 ORDER BY / LIMIT、JOIN / INNER / LEFT / RIGHT / CROSS、NATURAL [INNER / LEFT / RIGHT [OUTER]] JOIN、ON / USING、WHERE、GROUP BY、HAVING、ORDER BY、LIMIT / OFFSET；SQL_CALC_FOUND_ROWS；基础 OVER 窗口调用 |
 | 表达式 | 数字、字符串、NULL、布尔值、`?`、`@变量` / `@@变量`、算术、比较、`<=>`、位运算、NOT / AND / XOR / OR、用户变量 := 赋值、BETWEEN、IN、LIKE / ESCAPE、IS NULL、EXISTS、CASE、CAST、COLLATE、DEFAULT(列名) |
-| 写入 | INSERT / REPLACE 多行 VALUES、空行、INSERT SET、INSERT SELECT；VALUES 和 INSERT / REPLACE / UPDATE 赋值中的 DEFAULT；INSERT / REPLACE 查询部分的 WITH；WITH 前缀 UPDATE / DELETE；UPDATE / DELETE 的 WHERE、ORDER BY 和 LIMIT；LOW_PRIORITY；两种多表 DELETE 形式（不允许 ORDER BY / LIMIT） |
+| 写入 | INSERT / REPLACE 多行 VALUES、空行、INSERT SET、INSERT SELECT；`INSERT [LOW_PRIORITY] IGNORE`、`UPDATE [LOW_PRIORITY] [IGNORE]`；VALUES 和 INSERT / REPLACE / UPDATE 赋值中的 DEFAULT；INSERT / REPLACE 查询部分的 WITH；WITH 前缀 UPDATE / DELETE；UPDATE / DELETE 的 WHERE、ORDER BY 和 LIMIT；两种多表 DELETE 形式（不允许 ORDER BY / LIMIT） |
 | 事务 | BEGIN [WORK]；START TRANSACTION 的 READ ONLY / WRITE、WITH CONSISTENT SNAPSHOT；COMMIT / ROLLBACK 的 AND [NO] CHAIN、[NO] RELEASE；SET TRANSACTION 隔离级别及读写模式；SAVEPOINT、ROLLBACK [WORK] TO [SAVEPOINT]、RELEASE SAVEPOINT；LOCK / UNLOCK TABLE[S] |
-| 设置与查询 | SET 赋值及 GLOBAL / SESSION / LOCAL 作用域、系统变量的 DEFAULT；SET NAMES / SET CHARACTER SET（含 DEFAULT）；SHOW DATABASES / TABLES / TABLE STATUS / VARIABLES / COLLATION / TRIGGERS / EVENTS / OPEN TABLES / COLUMNS / INDEX / STATUS / CHARACTER SET / PROCEDURE STATUS / FUNCTION STATUS / CREATE TABLE，及各形式适用的修饰符、数据库、作用域和过滤条件 |
-| 基础 DDL | CREATE [TEMPORARY] TABLE [IF NOT EXISTS]、列类型和参数、UNSIGNED / ZEROFILL、ON UPDATE 时间戳、列约束、主键 / 唯一键 / 索引 / 外键 / CHECK、ENGINE / CHARSET / COLLATE 选项；CREATE TABLE … [AS] SELECT；DROP [TEMPORARY] TABLE [IF EXISTS]；CREATE TABLE LIKE、TRUNCATE TABLE、ALTER TABLE ENGINE / ALTER COLUMN SET或DROP DEFAULT；CREATE VIEW 的 WITH [LOCAL或CASCADED] CHECK OPTION、DROP VIEW |
+| 设置与查询 | SET 赋值及 GLOBAL / SESSION / LOCAL 作用域、系统变量的 DEFAULT；SET NAMES / SET CHARACTER SET（含 DEFAULT）；SHOW DATABASES / TABLES / TABLE STATUS / VARIABLES / COLLATION / TRIGGERS / EVENTS / OPEN TABLES / COLUMNS / INDEX / STATUS / CHARACTER SET / PROCEDURE STATUS / FUNCTION STATUS / CREATE TABLE / WARNINGS / COUNT(*) WARNINGS，及各形式适用的修饰符、数据库、作用域、过滤条件和 WARNINGS LIMIT |
+| 基础 DDL | CREATE [TEMPORARY] TABLE [IF NOT EXISTS]、列类型和参数、UNSIGNED / ZEROFILL、ON UPDATE 时间戳、列约束、主键 / 唯一键 / 索引 / 外键（可选索引名及 MATCH、ON DELETE / ON UPDATE 动作）/ CHECK、ENGINE / CHARSET / COLLATE 选项；CREATE TABLE … [AS] SELECT；DROP [TEMPORARY] TABLE [IF EXISTS] 多目标及尾随 RESTRICT / CASCADE；CREATE TABLE LIKE、TRUNCATE TABLE、ALTER TABLE ENGINE / ALTER COLUMN SET或DROP DEFAULT / RENAME表或列 / ADD或DROP COLUMN / ADD FOREIGN KEY；CREATE VIEW 的 WITH [LOCAL或CASCADED] CHECK OPTION、DROP VIEW |
 | 计划与维护 | EXPLAIN / DESCRIBE / DESC（含 FORMAT=TRADITIONAL / JSON / TREE）包装已支持的 SELECT、INSERT、REPLACE、UPDATE、DELETE（含合法位置的 CTE）；单表 ANALYZE TABLE |
 | 预处理语句 | PREPARE 名称 FROM 字符串或用户变量；EXECUTE 名称 [USING 用户变量列表]；DEALLOCATE / DROP PREPARE 名称 |
 
+MySQL CAST 支持 `SIGNED [INTEGER]`、`UNSIGNED [INTEGER]`、`DOUBLE [PRECISION]` 数值目标写法，包含
+大小写及词间注释。依据 [MySQL CAST](https://dev.mysql.com/doc/refman/8.4/en/cast-functions.html)，
+SIGNED/UNSIGNED 的可选后缀只能是 INTEGER，DOUBLE 的可选后缀只能是 PRECISION。
+保持既有 CAST/TYPE AST，`type.name` 指向首词，TYPE span 包含完整目标文本；
+无新增公开节点或 token。FLOAT[(p)]、REAL 等目标保持通用 type 产生式，精度范围
+由执行层验证。SQLite 的任意多词类型名不变。
+解析接受不代表执行支持，执行层须自行验证目标及转换语义。
+
+独立 `CREATE [UNIQUE] INDEX name ON table (...)` 已支持 MySQL 列键、整数长度前缀键、
+带括号表达式键，以及每项 ASC/DESC。依据
+[MySQL CREATE INDEX](https://dev.mysql.com/doc/refman/8.4/en/create-index.html)，
+不接受 SQLite 的 IF NOT EXISTS/WHERE，也不接受裸表达式键、限定索引名或限定列键。
+`create_index.columns` 在 MySQL 下包含 `SQLPARSER_INDEX_PART`：column 与 expression
+恰好一个非零，前缀长度保存在 length；SQLite 继续使用原有 ORDER 节点。
+新 kind 追加到枚举末尾，既有 kind 值不变；AST 消费者须处理或明确拒绝新节点。
+此阶段不支持 USING、FULLTEXT/SPATIAL、索引选项和 ALGORITHM/LOCK。
+CREATE TABLE 内联 KEY/INDEX/UNIQUE 的列键也支持 ASC/DESC：`constraint.columns`
+保持 NAME 列表，`constraint.key_terms` 保存对应 ORDER 节点及方向。省略方向按 ASC。
+MySQL UNIQUE 同时给出 `CONSTRAINT symbol` 和 `index_name` 时，`constraint.name`
+保留有效索引名：index_name 优先，其次为 symbol；两者省略时为 NONE。
+MySQL 列定义的裸 `KEY` 生成 PRIMARY_KEY 约束，与 `PRIMARY KEY` 等价。
+表级 `FOREIGN KEY` 支持可选索引名、MATCH FULL / PARTIAL / SIMPLE，以及
+ON DELETE / ON UPDATE 的 RESTRICT、CASCADE、SET NULL、NO ACTION、SET DEFAULT 动作；
+两类动作可按任意顺序各出现一次。MATCH 及动作均原样保存在 AST，供执行层决定语义。
+同一外键结构也用于 `ALTER TABLE table ADD [CONSTRAINT [symbol]] FOREIGN KEY ...`；
+ALTER 节点以 `SQLPARSER_ADD_CONSTRAINT` 标识，并在按 action 标记的
+`as.alter.column` 槽位保存约束节点，以保持公开节点布局不变。
+MySQL 的列级 inline `REFERENCES` 只保留引用目标，不接受引用动作；这与服务端将其
+解析但忽略、仅对独立 `FOREIGN KEY` 接受引用定义的行为一致。
+内联键尚不支持前缀长度或表达式；表级 PRIMARY KEY 方向仍未开放。
+解析保留原文与结构；键类型、重复列、仅含列名的函数键、表达式合法性等由执行层校验。
+TidesDB 关系 profile 已开放 I64/U64/DOUBLE 列键的 CREATE [UNIQUE] INDEX 和 DROP INDEX；
+解析器接受的语法范围大于执行层，具体限制见 [TidesDB SQL](../tidessql/readme.md)。
+TidesDB 消费者也已接入 `SET [SESSION|LOCAL] TRANSACTION` 的 READ ONLY/READ WRITE、
+SERIALIZABLE 及组合，区分下一事务与会话作用域；GLOBAL 和其他隔离继续明确拒绝。
+该接入复用已有 AST，没有新增 parser 语法或公开字段。
+MySQL SET 的系统变量值位置也接受裸 ON（OFF 沿用非保留标识符），保留为既有 NAME 节点；
+ON 在 SELECT、INSERT 值及 JOIN 中的关键词规则不变，用户变量赋值不接受裸 ON。
+TidesDB 消费者已接入单项 SESSION/LOCAL autocommit 设置，支持符号值、DEFAULT、参数
+及已有纯表达式，0→1 成功提交后才更新模式。单项 SET 也支持 transaction_read_only
+和 transaction_isolation 的会话/下一事务作用域，复用已有 assignment.scope 与 VARIABLE
+AST 区分裸名称和无作用域 @@；隔离仅 SERIALIZABLE，未实现通用变量或多项 SET。
+消费者又复用既有 VARIABLE/SHOW AST 接入 autocommit、transaction_read_only 和
+transaction_isolation 的会话读取，以及 SHOW VARIABLES [LIKE ...]；随后复用 SHOW
+过滤 AST 接入 TABLES/COLUMNS/VARIABLES 的 LIKE/WHERE 和 INDEX 的 WHERE。
+消费者的 WHERE 标量、参数及字符比较范围不等同于完整服务器语义；范围及验证
+见 [TidesDB SQL](../tidessql/readme.md)。解析器本身不拥有会话状态。
+
+独立 `DROP INDEX name ON table` 按 [MySQL DROP INDEX](https://dev.mysql.com/doc/refman/8.4/en/drop-index.html)
+解析，AST 使用既有 `SQLPARSER_DROP_INDEX`，`drop_object.table` 保存 MySQL 表名。
+SQLite 保持 `DROP INDEX [IF EXISTS] [schema.]name`，table 为 NONE；两种形式按调用方言区分。
+MySQL 不接受 IF EXISTS 或限定索引名，目前也不支持 ALGORITHM/LOCK。
+`PRIMARY` 必须引用后才可解析，执行层是否允许删除由存储主键协议决定。
+
 关键字不区分大小写。反引号用于标识符，单双引号用于字符串，支持重复引号
-及字符串中的反斜杠转义。`||` 按 OR 解析；本模块没有可变 `sql_mode`，
-不支持 `ANSI_QUOTES`、`NO_BACKSLASH_ESCAPES`、`PIPES_AS_CONCAT`、`IGNORE_SPACE`。
+及默认的字符串反斜杠转义。`sqlparser_parse_with_options()` 可在解析前显式设置
+`sqlparser_options.mysql_no_backslash_escapes=true`，采用 MySQL `NO_BACKSLASH_ESCAPES`
+规则；SQLite 配合该选项返回 INVALID_ARGUMENT。选项按调用复制，
+`sqlparser_get_options()` 可从文档取回词法模式，原有 parse/parse_dialect 默认行为不变。
+字符串 span 仍保留原始文本，不做解码。`||` 按 OR 解析；本模块没有可变 `sql_mode`，
+SQL 中的 SET 不影响后续词法。不支持 `ANSI_QUOTES`、`PIPES_AS_CONCAT`、`IGNORE_SPACE`。
 这些模式会改变词法或运算符含义，详见 [MySQL SQL Modes](https://dev.mysql.com/doc/refman/8.4/en/sql-mode.html)。
 表达式优先级采用 [MySQL 文档的运算符层级](https://dev.mysql.com/doc/refman/8.4/en/operator-precedence.html)，
 比较高于 BETWEEN，显式 JOIN 高于逗号分隔的表引用。
+MySQL 的 `DIV` 与 `* / % MOD` 同级且左结合，以追加的
+`SQLPARSER_OP_INTEGER_DIVIDE` 表示，既有 operator 值不变；`/` 仍为
+`SQLPARSER_OP_DIVIDE`，`%` 和中缀 `MOD` 均为 `SQLPARSER_OP_MODULO`。
+`MOD(expr,expr)` 保留为普通 CALL，函数名原文及两个参数原样进入 AST；
+拒绝错误参数数、DISTINCT/ALL、星号和 OVER，也不把 `%` 当作函数名。
+依据 [MySQL 算术运算符](https://dev.mysql.com/doc/refman/8.4/en/arithmetic-functions.html)
+及 [8.4.0 语法源](https://github.com/mysql/mysql-server/blob/mysql-8.4.0/sql/sql_yacc.yy)。
+SQLite 的 `DIV`、`MOD` 保持普通名称，函数调用仍按通用语法解析，中缀写法不接受；
+SQLite 的 `/`、`%` 保持原有 AST。解析器不判定数值类型、求值或产生除零告警，
+AST 消费者须处理新运算符或明确拒绝；TidesDB 已接入整数 DIV/取模和 DOUBLE
+除法/取模，类型、除零告警及严格写入边界见 [SQL 执行层说明](../tidessql/readme.md)。
 标识符允许非 ASCII 字节；输入编码及字符集有效性由调用方保证。
 
 按 [MySQL 名称规则](https://dev.mysql.com/doc/refman/8.4/en/identifiers.html)，
@@ -86,17 +156,28 @@ COUNT、BIT_AND、CAST、SUM 等特殊函数名紧接 `(` 时识别为函数 tok
 [`DEFAULT(列名)`](https://dev.mysql.com/doc/refman/8.4/en/miscellaneous-functions.html#function_default)
 是表达式，参数限于单个列名（可限定、可引用），允许参与运算；不接受任意表达式或参数列表。
 列是否有可用的默认值、系统变量的类型/作用域与实际默认值由执行层检查。
+INSERT AST 的 `columns_specified` 明确记录目标列括号是否出现，因此省略列清单与
+显式空清单 `()` 可由执行层分别处理；`columns` 仍只保存实际列名节点。
 
 CTE 复用双方言的 WITH / CTE AST；同一查询层只能有一个 WITH，多个绑定用逗号分隔，
 子查询可嵌套 WITH。MySQL INSERT 的 WITH 位于查询部分，不接受 SQLite 的前置 WITH INSERT。
-CTE 查询体目前限于已支持的 SELECT / UNION 子集；不校验递归引用、名称作用域或列数匹配。
+CTE 查询体目前限于已支持的 SELECT / 集合操作子集；不校验递归引用、名称作用域或列数匹配。
+
+MySQL 查询支持 `UNION`、`INTERSECT`、`EXCEPT` 的默认 DISTINCT、显式 DISTINCT 及 ALL。
+依据[官方集合语法](https://dev.mysql.com/doc/refman/8.4/en/set-operations.html)，INTERSECT
+优先于 UNION/EXCEPT，后两者同级并从左向右组合；括号可改变组合顺序，各层保留自己的
+ORDER BY/LIMIT。AST 仍使用 `SQLPARSER_UNION` 的 `as.compound`，操作由 `kind` 区分，
+`all` 保存重复模式，不改节点 ABI。INTERSECT/EXCEPT 按
+[MySQL 8.4 保留字](https://dev.mysql.com/doc/refman/8.4/en/keywords.html)处理，用作标识符须引用。
+SQLite 保持全部集合操作同级、从左向右，INTERSECT/EXCEPT 不接受 ALL/DISTINCT 修饰词。
+这里只解析语法，不实现集合执行、结果类型转换、collation 或递归成员准入。
 
 支持 [MySQL 括号查询表达式](https://dev.mysql.com/doc/refman/8.4/en/parenthesized-query-expressions.html)，
 包括嵌套括号、UNION 操作数、CTE、派生表、INSERT / REPLACE 查询部分、建表查询和 EXPLAIN。
 例如 `(SELECT a FROM t LIMIT 7) ORDER BY a LIMIT 4` 保留两层查询尾部，
 内层 LIMIT 不会被外层覆盖；UNION 的全局尾部也独立于各操作数。
 标量子查询、普通表达式括号及 IN 表达式列表保持各自含义；`IN ((SELECT …))` 表示子查询。
-这里只扩展已支持的 SELECT / UNION 查询体，TABLE、VALUES ROW、INTO 等其他形式仍未实现。
+这里只扩展已支持的 SELECT / 集合操作查询体，TABLE、VALUES ROW、INTO 等其他形式仍未实现。
 
 [`CREATE TABLE … [AS] SELECT`](https://dev.mysql.com/doc/refman/8.4/en/create-table-select.html)
 可带已有的列定义和表选项，也可省略列定义；选项必须位于查询之前。
@@ -115,8 +196,8 @@ ANALYZE、FOR CONNECTION、
 [`DROP VIEW`](https://dev.mysql.com/doc/refman/8.4/en/drop-view.html) 支持单个名称和 IF EXISTS。
 OR REPLACE、ALGORITHM、DEFINER、SQL SECURITY、多视图删除等扩展未实现。
 
-这不是 MySQL 服务端的完整语法或语义校验器。MySQL 模式的窗口帧、WINDOW 声明、存储程序、其他 ALTER 动作、
-高级执行计划选项、完整外键动作、其他表选项等未列出的扩展返回语法错误。
+这不是 MySQL 服务端的完整语法或语义校验器。MySQL 模式的 GROUPS/EXCLUDE 帧扩展、存储程序、其他 ALTER 动作、
+高级执行计划选项、其他外键选项、其他表选项等未列出的扩展返回语法错误。
 版本注释 `/*! ... */` 和优化器提示 `/*+ ... */` 明确拒绝，避免静默忽略其语义。
 普通 `/* ... */`、`# ...`、后接空白的 `-- ...` 注释被跳过。
 不访问数据库，不解析绑定参数的值，不校验表是否存在、列类型、聚合合法性或权限。
@@ -124,6 +205,7 @@ OR REPLACE、ALGORITHM、DEFINER、SQL SECURITY、多视图删除等扩展未实
 依据 [SHOW](https://dev.mysql.com/doc/refman/8.4/en/show.html)，COLUMNS / FIELDS 可带
 EXTENDED、FULL、FROM / IN 和 LIKE / WHERE；INDEX / INDEXES / KEYS 可带 EXTENDED 和 WHERE，
 不能带 FULL 或 LIKE。SHOW CREATE TABLE 只保存目标表，不接受过滤条件。
+SHOW WARNINGS 保存可选 LIMIT 节点；SHOW COUNT(*) WARNINGS 通过 `show.count` 区分。
 
 [事务结束选项](https://dev.mysql.com/doc/refman/8.4/en/commit.html)中的 AND CHAIN 与 RELEASE
 不能同时启用。[SET TRANSACTION](https://dev.mysql.com/doc/refman/8.4/en/set-transaction.html)
@@ -133,8 +215,14 @@ READ LOCAL、WRITE 模式；MySQL 8.4 不再接受旧的 LOW_PRIORITY WRITE 表�
 
 [CREATE TABLE LIKE](https://dev.mysql.com/doc/refman/8.4/en/create-table-like.html)支持带括号和
 不带括号的源表；[TRUNCATE](https://dev.mysql.com/doc/refman/8.4/en/truncate-table.html)保持独立
-DDL 节点。[ALTER TABLE](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html)目前只新增单个
-ENGINE 或 ALTER [COLUMN] SET / DROP DEFAULT 动作，不支持多动作列表。
+DDL 节点。[ALTER TABLE](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html)支持单个
+ENGINE、ALTER [COLUMN] SET / DROP DEFAULT、RENAME [TO|AS] 新表名、
+RENAME COLUMN 旧列名 TO 新列名、ADD [COLUMN] 列定义或 DROP [COLUMN] 列名动作，
+ADD 支持 FIRST/AFTER 列位置，不支持多动作列表。MySQL 列改名必须含 COLUMN，
+SQLite 保留可省略 COLUMN 的规则；MySQL 表改名可省略 TO 或使用 AS。
+rename AST 使用已有 action/table/column/new_name 字段，value 保持空；原有字段含义不变。
+RENAME、ADD 在 MySQL 模式按保留关键字识别，作为标识符时须用反引号。
+ADD 使用已有 COLUMN 定义节点；DROP 的 column 字段为 NAME 节点。
 [ZEROFILL](https://dev.mysql.com/doc/refman/8.4/en/numeric-type-attributes.html)与显式 UNSIGNED
 分别记录；其隐含 unsigned 语义由执行层推导。ON UPDATE 的
 [当前时间戳](https://dev.mysql.com/doc/refman/8.4/en/timestamp-initialization.html)及官方同义形式
@@ -149,14 +237,40 @@ ENGINE 或 ALTER [COLUMN] SET / DROP DEFAULT 动作，不支持多动作列表�
 高于 OR，用户变量 := 最低且右结合；赋值表达式使用 ASSIGNMENT 节点。
 [多表 DELETE](https://dev.mysql.com/doc/refman/8.4/en/delete.html)分开保存目标列表与 JOIN 来源，
 拒绝 ORDER BY / LIMIT；LOW_PRIORITY 是独立标志，不改变 AST 中的查询和赋值结构。
+单表 UPDATE / DELETE 支持目标表别名；`as.update.alias` / `as.delete_stmt.alias` 保存 NAME，
+MySQL 接受 `AS alias` 与裸别名。解析层不决定别名声明后的名称可见性，由绑定层执行。
 
 [基础窗口调用](https://dev.mysql.com/doc/refman/8.4/en/window-functions-usage.html)支持内置窗口/
-可窗口化聚合函数后的 OVER()、PARTITION BY / ORDER BY，以及 OVER 名称引用。
-函数与窗口定义分别保留，窗口排序不覆盖 SELECT 排序；拒绝普通函数的 OVER。
-WINDOW 声明、括号内窗口继承、ROWS / RANGE 帧、NULL 处理修饰符尚未实现，
+可窗口化聚合函数后的 OVER()、PARTITION BY / ORDER BY、OVER 名称引用、括号内窗口继承及
+WINDOW 声明。`select.windows` 按文本顺序保存 WINDOW_DEFINITION 节点，其名称、父名称、
+分区和排序分别位于 `window_definition.name/base/partition_by/order_by`；函数直接引用保留
+`window.name`，括号内继承保留 `window.base`。列表与名称归 AST 文档所有，消费者须重新编译。
+窗口排序不覆盖 SELECT 排序；拒绝普通函数的 OVER。NULL 处理修饰符尚未实现，
 不检查函数参数签名、引用窗口是否存在或窗口函数是否位于合法执行位置。
+[窗口帧](https://dev.mysql.com/doc/refman/8.4/en/window-functions-frames.html)支持 ROWS/RANGE、
+单边起点及 BETWEEN 双边形式，保存在 `window.frame` 或 `window_definition.frame`。
+WINDOW_FRAME 的 `frame.unit/start/end` 保存单位和边界 ID；省略 end 的语义为 CURRENT ROW。
+WINDOW_BOUNDARY 的 `boundary.kind/value/unit` 保存方向、数值常量/marker 或 INTERVAL 表达式、
+以及时间单位 NAME。数值偏移要求无符号字面量或 marker，单边形式不接受 FOLLOWING。
+INTERVAL 表达式和 MySQL 的 20 种时间单位保留为 AST，不转换成执行时长度。
+例如 `SELECT RANK() OVER(ORDER BY id ROWS BETWEEN ? PRECEDING AND CURRENT ROW) FROM t`。
+边界方向合法性、非负整数/数值类型、RANGE 的 ORDER BY 要求和显式帧的继承限制归消费者校验；
+解析成功不代表消费方已提供窗口帧计算。节点与文本归文档所有，公开 AST 扩展要求重新编译消费者。
 [视图 CHECK OPTION](https://dev.mysql.com/doc/refman/8.4/en/create-view.html)保存省略、
 默认、LOCAL 和 CASCADED 四种状态，不验证视图可更新性。
+
+MySQL 普通及 LATERAL 派生表支持 `(query) [AS] alias (x,y)`，列清单按顺序保存在
+`as.table.column_aliases`，TABLE span 包含清单的右括号。清单要求非空、非限定的标识符；
+SQLite 和物理表别名不接受该形式。Parser 不推导查询输出宽度，等宽和唯一名称由执行器
+绑定时验证。公共 TABLE AST 增加该字段，消费模块须同步重编译。
+依据：[MySQL derived tables](https://dev.mysql.com/doc/refman/8.4/en/derived-tables.html)。
+
+MySQL `LATERAL (query) [AS] alias` 在 TABLE 节点中保留 `as.table.lateral`，
+可用于逗号来源和 JOIN 两侧，查询可以含 WITH、UNION 或括号查询。关键字大小写不敏感，
+必须提供标识符别名；引用依赖方向和 JOIN 类型的合法性由消费方 Binder 校验。
+SQLite 模式不接受该派生表语法，`lateral` 仍作为普通标识符；MySQL 中同名标识符须引用。
+语义依据：[MySQL LATERAL derived tables](https://dev.mysql.com/doc/refman/8.4/en/lateral-derived-tables.html)。
+AST 字段扩展要求消费方与解析器库一同重新编译；解析成功不表示存储驱动已支持执行。
 
 ### SQLite 模式
 
@@ -169,7 +283,7 @@ SQLite 规则以 [SQLite 3.50.4 的语法源](https://github.com/sqlite/sqlite/b
 | 查询 | 基础 SELECT、子查询、JOIN、NATURAL INNER / CROSS / 外连接、带 ON / USING 的逗号连接、括号表组、表值函数、INDEXED BY / NOT INDEXED、GROUP BY / HAVING、ORDER BY / LIMIT；UNION / UNION ALL / INTERSECT / EXCEPT；VALUES；WITH [RECURSIVE] CTE |
 | 表达式 | 公共算术、比较、CASE、CAST、COLLATE；`==`、连接符 `\|\|`、IS / IS NOT / IS [NOT] DISTINCT FROM、ISNULL / NOTNULL / NOT NULL、GLOB / REGEXP / MATCH、空 IN 列表、IN 表名 / 表值函数、RAISE |
 | 词法 | 双引号、反引号和方括号标识符；单引号字符串不做反斜杠转义；十六进制整数、数字分隔下划线、`X'00ff'` BLOB；`?` / `?NNN` / `:name` / `@name` / `$name` 参数，含 `$ns::name(suffix)` |
-| 写入 | INSERT / REPLACE INTO VALUES / SELECT、INSERT OR ROLLBACK / ABORT / FAIL / IGNORE / REPLACE、DEFAULT VALUES、UPDATE OR 冲突策略、UPDATE / DELETE 的 INDEXED BY / NOT INDEXED；WITH 前缀的 INSERT / UPDATE / DELETE |
+| 写入 | INSERT / REPLACE INTO VALUES / SELECT、INSERT OR ROLLBACK / ABORT / FAIL / IGNORE / REPLACE、DEFAULT VALUES、UPDATE OR 冲突策略、UPDATE / DELETE 的 `AS` 目标别名和 INDEXED BY / NOT INDEXED；WITH 前缀的 INSERT / UPDATE / DELETE |
 | 事务 | BEGIN [DEFERRED / IMMEDIATE / EXCLUSIVE] [TRANSACTION]、COMMIT / END / ROLLBACK [TRANSACTION]、SAVEPOINT、RELEASE、ROLLBACK TO |
 | 建表 | CREATE [TEMP / TEMPORARY] TABLE、无类型列及多词/带引号类型名、CREATE TABLE AS 查询、命名列约束及表约束、表级 PRIMARY KEY / UNIQUE 的 ASC / DESC / COLLATE、REFERENCES 的 ON DELETE / ON UPDATE / MATCH 和 DEFERRABLE / INITIALLY、约束 ON CONFLICT、列级及表级主键 AUTOINCREMENT、列 COLLATE、WITHOUT ROWID / STRICT；DROP TABLE |
 | 扩展 DDL | CREATE VIRTUAL TABLE；CREATE [TEMP] TRIGGER / DROP TRIGGER、BEFORE / AFTER / INSTEAD OF、UPDATE OF、WHEN 和语句体；ALTER TABLE 的 RENAME TO、RENAME COLUMN、ADD COLUMN、DROP COLUMN |
@@ -258,14 +372,14 @@ SQLite 的 INSERT VALUES 保留 `as.insert.query` 指向 `SQLPARSER_VALUES`，
 
 **MED：AST 兼容性。** 消费方应与库一起重新编译，并适配以下新增内容：
 
-- SHOW 的 table / extended；TRANSACTION 的 chain / release / access / isolation / scope / consistent_snapshot。
+- SHOW 的 table / extended / limit / count；TRANSACTION 的 chain / release / access / isolation / scope / consistent_snapshot。
   CHOICE_UNSPECIFIED 与 CHOICE_NO 不同；SET_TRANSACTION 使用 TRANSACTION 节点，默认 scope 表示下一事务。
 - CREATE_TABLE 的 like_table；TYPE 的 zerofill；CONSTRAINT 的 ON_UPDATE；ALTER 的新动作及 value；
   TRUNCATE_TABLE 使用 maintenance.target。MySQL CURRENT_TIMESTAMP 及同义形式现在保存为 CALL。
 - PREPARE / EXECUTE / DEALLOCATE 的 prepared.name / source / parameters；LOCK_TABLES 的目标链及
   LOCK_TARGET 的 table / alias / mode；UNLOCK_TABLES 无载荷。
 - SELECT.calc_found_rows；CREATE_VIEW.check；EXPLAIN.format；WINDOW.call / name / partition_by / order_by。
-- 写入的 low_priority；多表 DELETE 的 targets / from，目标为 NAME 或带限定名的 STAR，
+- 写入的 low_priority；单表 UPDATE / DELETE 的 alias；多表 DELETE 的 targets / from，目标为 NAME 或带限定名的 STAR，
   单表字段 table 在多表形式中为空。ASSIGNMENT 也可能作为表达式出现，XOR 是新的 BINARY 运算符。
 
 既有枚举值保留；新节点和字段均不携带文档外借用指针。解析只生成状态描述，遇到语法、
@@ -283,6 +397,9 @@ MySQL 裸 `DEFAULT` 保存为新增的 `SQLPARSER_DEFAULT_VALUE` 原子节点，
 新增语句分别使用 virtual_table、trigger、explain、maintenance、alter 成员。
 EXPLAIN 包装 statement；触发器 steps 是独立语句链，不混入顶层列表；
 ALTER 的 ADD COLUMN 用 column 指向列定义，其余动作用 column / new_name 表示名称。
+MySQL ADD 的 position 为 COLUMN_LAST（默认）、COLUMN_FIRST 或 COLUMN_AFTER，
+AFTER 的目标名称在 after 节点中。SQLite 不产生位置操作；例如 `BIGINT FIRST`
+在 SQLite 中仍是多词类型名。AST 新增字段后，使用公开头文件的调用方需重新编译。
 虚拟表参数是 `SQLPARSER_MODULE_ARGUMENT` 原文节点；无括号时列表为空，
 空括号保留一个空参数，与 SQLite 的模块参数分割方式一致。
 
@@ -456,7 +573,8 @@ ON 状态剩余语法拒绝分别是 `comments/basic-comments.sql`（嵌套块�
 `sqlparser/mysql-spec` 保存固定 MySQL 8.4.0 来源和 385 条原文 SQL 片段，
 由 `sqlparser_mysql_corpus_test` 使用显式 MySQL 方言逐条解析。原生语法错误、
 执行错误与本地语法缺口分别记录；已知差异不会被包装成完整兼容。
-本轮接受 298、拒绝 87，包含 77 条缺失语法与 10 条误接收；其中 10 条误接收是
-**HIGH** 级语法合法性判断偏差，涉及内置函数名紧接左括号作表名。
+当前接受 365、拒绝 20：官方语法应接受的 365 条全部接受，官方标记
+`ER_PARSE_ERROR` 的 20 条全部拒绝，missing_syntax 与 over_accept 均为 0。
+这只验证语法分类，不表示 AST 含义或数据库执行语义与 MySQL 完全等价。
 来源、许可、分类契约和重建步骤见 [mysql-spec/README.md](mysql-spec/README.md)。
 结果写入 `<build>/sqlparser/tests/mysql-spec-results.tsv`，不覆盖原有 SQLite 语料报告。

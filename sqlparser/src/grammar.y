@@ -10,7 +10,7 @@
  SEMI ID QID DOT COMMA ALL DISTINCT UNION SELECT AS FROM NATURAL JOIN LP RP
  INNER CROSS LEFT RIGHT OUTER ON USING WHERE HAVING GROUP BY ORDER ASC DESC
  LIMIT OFFSET NUMBER STRING NULL BOOLEAN PARAMETER VARIABLE EXISTS CASE END
- WHEN THEN ELSE INSERT REPLACE INTO VALUES SET UPDATE DELETE WORK BEGIN START
+ WHEN THEN ELSE INSERT REPLACE INTO VALUES SET UPDATE DELETE DUPLICATE WORK BEGIN START
  TRANSACTION COMMIT ROLLBACK SESSION GLOBAL LOCAL NAMES CHARACTER FULL SHOW
  DATABASES TABLES TABLE STATUS VARIABLES COLLATION TEMPORARY IF CREATE DROP
  UNSIGNED PRIMARY KEY UNIQUE AUTO_INCREMENT DEFAULT REFERENCES CHECK CONSTRAINT
@@ -19,12 +19,13 @@
  WITH RECURSIVE GLOB REGEXP MATCH ISNULL NOTNULL AUTOINCREMENT CONFLICT ABORT
  FAIL IGNORE WITHOUT ROWID STRICT VIRTUAL ANY TRIGGER BEFORE AFTER INSTEAD OF
  FOR EACH ROW RAISE EXPLAIN QUERY PLAN ANALYZE REINDEX VACUUM ALTER RENAME COLUMN
- ADD CASCADE RESTRICT NO ACTION DEFERRABLE INITIALLY INDEXED MYSQL_FUNCTION MYSQL_CALC_FOUND_ROWS
- SCALAR_QUERY PAREN_QUERY TRIGGERS EVENTS OPEN COLUMNS FIELDS KEYS INDEXES
+ ADD CASCADE RESTRICT NO ACTION PARTIAL SIMPLE DEFERRABLE INITIALLY INDEXED MYSQL_FUNCTION MYSQL_CALC_FOUND_ROWS
+ SCALAR_QUERY PAREN_QUERY MYSQL_EMPTY_JOIN TRIGGERS EVENTS OPEN COLUMNS FIELDS KEYS INDEXES
  PROCEDURE FUNCTION EXTENDED CHAIN READ WRITE ONLY CONSISTENT SNAPSHOT
  ISOLATION LEVEL REPEATABLE COMMITTED UNCOMMITTED SERIALIZABLE TRUNCATE ZEROFILL CURRENT_TIMESTAMP
- PREPARE EXECUTE DEALLOCATE XOR ASSIGN LOW_PRIORITY LOCK UNLOCK
- OPTION CASCADED FORMAT TRADITIONAL JSON TREE OVER PARTITION.
+ PREPARE EXECUTE DEALLOCATE XOR ASSIGN LOW_PRIORITY LOCK UNLOCK WARNINGS COUNT
+ OPTION CASCADED FORMAT TRADITIONAL JSON TREE OVER PARTITION FIRST LATERAL
+ WINDOW ROWS RANGE CURRENT UNBOUNDED PRECEDING FOLLOWING INTERVAL DIV MYSQL_MOD.
 %token_type {sqlparser_span}
 %default_type {sqlparser_id}
 %extra_context {sqlp_context *ctx}
@@ -46,6 +47,16 @@
 #define SP(N) sqlp_span(ctx,N)
 #define COVER(A,B) sqlp_cover(A,B)
 #define FINISH(N,T) sqlp_finish(ctx,N,T)
+static inline bool sqlp_cast_word(sqlp_context *ctx, sqlparser_span span,
+    const char *word, size_t length) {
+  const char *text=sqlparser_text(ctx->document,span);
+  if (!text || span.length!=length) return false;
+  for (size_t i=0;i<length;++i) {
+    const char upper=text[i]>='a' && text[i]<='z' ? text[i]-('a'-'A') : text[i];
+    if (upper!=word[i]) return false;
+  }
+  return true;
+}
 }
 %syntax_error {
   sqlp_error(ctx, SQLPARSER_SYNTAX_ERROR,"unexpected SQL token or end of input");
@@ -61,18 +72,25 @@
  EXCLUSIVE FAIL IGNORE IMMEDIATE KEY LIKE GLOB REGEXP MATCH OFFSET PRAGMA RECURSIVE RELEASE
  REPLACE ROLLBACK SAVEPOINT TEMPORARY VIEW WITH WITHOUT IF STRICT ROWID VIRTUAL
  TRIGGER BEFORE AFTER INSTEAD OF FOR EACH ROW EXPLAIN QUERY PLAN ANALYZE REINDEX
- VACUUM RENAME COLUMN CASCADE RESTRICT NO ACTION INITIALLY RAISE.
+ VACUUM RENAME COLUMN CASCADE RESTRICT NO ACTION INITIALLY RAISE PARTIAL SIMPLE.
 %wildcard ANY.
 %else
 // MySQL SAVEPOINT and VIEW are nonreserved in identifier positions.
 %fallback ID SAVEPOINT VIEW TRIGGERS EVENTS OPEN COLUMNS FIELDS INDEXES
  FUNCTION EXTENDED CHAIN NO ONLY CONSISTENT SNAPSHOT ISOLATION LEVEL
  REPEATABLE COMMITTED UNCOMMITTED SERIALIZABLE TRUNCATE PREPARE EXECUTE DEALLOCATE
- FORMAT TRADITIONAL JSON TREE.
+ FORMAT TRADITIONAL JSON TREE FIRST AFTER CASCADE RESTRICT MATCH ACTION FULL PARTIAL SIMPLE DUPLICATE WARNINGS.
 %endif
 
 %ifndef SQLITE
 %right ASSIGN.
+// Prefer UNIQUE KEY as one column attribute over UNIQUE followed by bare KEY.
+%right UNIQUE KEY.
+// MySQL resolves SELECT ... JOIN t ON as a join condition. Consequently an
+// INSERT SELECT with ON DUPLICATE after an unconditioned JOIN needs a WHERE
+// clause, matching the ambiguity documented by MySQL.
+%nonassoc MYSQL_EMPTY_JOIN.
+%nonassoc ON.
 %endif
 %left OR.
 %ifndef SQLITE
@@ -97,7 +115,7 @@
 %left BITAND.
 %left LSHIFT RSHIFT.
 %left PLUS MINUS.
-%left STAR SLASH MOD.
+%left STAR SLASH MOD DIV MYSQL_MOD.
 %right NEGATE BITNOT.
 %right ESCAPE.
 %left COLLATE.
@@ -191,15 +209,29 @@ query(A) ::= WITH(T) recursive_opt(R) ctes(C) compound(B) order_by(O) limit(L). 
   A=FINISH(NODE(WITH,.as.with={C,sqlp_query_tail(ctx,B,O,L),R}),T);
 }
 
+%ifdef SQLITE
 compound(A) ::= select(B). { A=B; }
+compound(A) ::= compound(B) UNION union_all(U) select(C). {
+  A=NODE(UNION,.span=COVER(SP(B),SP(C)),.as.compound={B,C,U});
+}
+%else
+compound(A) ::= intersect(B). { A=B; }
+intersect(A) ::= select(B). { A=B; }
+intersect(A) ::= intersect(B) INTERSECT union_all(U) select(C). {
+  A=NODE(UNION,.span=COVER(SP(B),SP(C)),.as.compound={B,C,U,{0},0,SQLPARSER_COMPOUND_INTERSECT});
+}
+compound(A) ::= compound(B) UNION union_all(U) intersect(C). {
+  A=NODE(UNION,.span=COVER(SP(B),SP(C)),.as.compound={B,C,U});
+}
+compound(A) ::= compound(B) EXCEPT union_all(U) intersect(C). {
+  A=NODE(UNION,.span=COVER(SP(B),SP(C)),.as.compound={B,C,U,{0},0,SQLPARSER_COMPOUND_EXCEPT});
+}
+%endif
 %ifndef SQLITE
 select(A) ::= LP(T) query(B) RP(E). [PAREN_QUERY] {
   A=NODE(QUERY_GROUP,.span=COVER(T,E),.as.query_group={B,{0},0});
 }
 %endif
-compound(A) ::= compound(B) UNION union_all(U) select(C). {
-  A=NODE(UNION,.span=COVER(SP(B),SP(C)),.as.compound={B,C,U});
-}
 %type union_all {bool}
 union_all(A) ::= . { A=false; }
 %ifndef SQLITE
@@ -223,8 +255,8 @@ select_options(A) ::= select_options(B) ALL. {
   A=B; A.all=true;
 }
 select_options(A) ::= select_options(B) MYSQL_CALC_FOUND_ROWS. { A=B; A.calc_found_rows=true; }
-select(A) ::= SELECT(T) select_options(D) projections(P) from(F) where(W) group_by(G) having(H). {
-  A=FINISH(NODE(SELECT,.as.select={P,G,{0},F,W,H,0,D.distinct,D.calc_found_rows}),T);
+select(A) ::= SELECT(T) select_options(D) projections(P) from(F) where(W) group_by(G) having(H) window_definitions(N). {
+  A=FINISH(NODE(SELECT,.as.select={P,G,{0},F,W,H,0,D.distinct,D.calc_found_rows,N}),T);
 }
 %endif
 %type projections {sqlparser_list}
@@ -259,6 +291,12 @@ joined_tables(A) ::= joined_tables(B) outer_join_op(J) table_ref(C) required_joi
 }
 joined_tables(A) ::= joined_tables(B) NATURAL JOIN table_ref(C). {
   A=NODE(JOIN,.span=COVER(SP(B),SP(C)),.as.join={SQLPARSER_JOIN_NATURAL,B,C,0,{0},true});
+}
+joined_tables(A) ::= joined_tables(B) NATURAL INNER JOIN table_ref(C). {
+  A=NODE(JOIN,.span=COVER(SP(B),SP(C)),.as.join={SQLPARSER_JOIN_NATURAL,B,C,0,{0},true});
+}
+joined_tables(A) ::= joined_tables(B) NATURAL outer_join_op(J) table_ref(C). {
+  A=NODE(JOIN,.span=COVER(SP(B),SP(C)),.as.join={.kind=J,.left=B,.right=C,.natural=true});
 }
 %else
 // SQLite joins, including commas, bind left-to-right.
@@ -307,7 +345,27 @@ expr(A) ::= expr(B) in_op(N) name(C) LP arguments(D) RP(E). [IN] {
   A=NODE(IN,.span=COVER(SP(B),E),.as.in={.value=B,.negated=N,.table=NODE(TABLE,.span=COVER(SP(C),E),.as.table={.name=C,.arguments=D,.table_function=true})});
 }
 %endif
+%ifdef SQLITE
 table_ref(A) ::= LP(T) query(B) RP alias(C). { A=FINISH(NODE(TABLE,.as.table={0,B,C}),T); }
+%else
+table_ref(A) ::= LP(T) query(B) RP alias(C) derived_columns(D). {
+  if(D.count && !C) sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"derived column list requires a table alias");
+  A=FINISH(NODE(TABLE,.as.table={.query=B,.alias=C,.column_aliases=D}),T);
+}
+%type derived_columns {sqlparser_list}
+%type derived_column_names {sqlparser_list}
+derived_columns(A) ::= . { A=EMPTY; }
+derived_columns(A) ::= LP derived_column_names(B) RP. { A=B; }
+derived_column_names(A) ::= ident(B). { A=LIST(EMPTY,AT(NAME,B)); }
+derived_column_names(A) ::= derived_column_names(B) COMMA ident(C). { A=LIST(B,AT(NAME,C)); }
+%endif
+%ifndef SQLITE
+table_ref(A) ::= LATERAL(T) LP query(B) RP lateral_alias(C) derived_columns(D). {
+  A=FINISH(NODE(TABLE,.as.table={.query=B,.alias=C,.lateral=true,.column_aliases=D}),T);
+}
+lateral_alias(A) ::= ident(B). { A=AT(NAME,B); }
+lateral_alias(A) ::= AS ident(B). { A=AT(NAME,B); }
+%endif
 %type inner_join_op {sqlparser_join_kind}
 %type outer_join_op {sqlparser_join_kind}
 inner_join_op(A) ::= JOIN. { A=SQLPARSER_JOIN_INNER; }
@@ -319,7 +377,11 @@ outer ::= .
 outer ::= OUTER.
 %type join_condition {sqlp_join_condition}
 %type required_join_condition {sqlp_join_condition}
+%ifdef SQLITE
 join_condition(A) ::= . { A=(sqlp_join_condition){0}; }
+%else
+join_condition(A) ::= . [MYSQL_EMPTY_JOIN] { A=(sqlp_join_condition){0}; }
+%endif
 join_condition(A) ::= required_join_condition(B). { A=B; }
 required_join_condition(A) ::= ON expr(B). { A=(sqlp_join_condition){.on=B}; }
 required_join_condition(A) ::= USING LP names(B) RP. { A=(sqlp_join_condition){.using_columns=B}; }
@@ -382,9 +444,33 @@ mysql_timestamp(A) ::= CURRENT_TIMESTAMP(T) LP NUMBER(N) RP(E). {
   A=NODE(CALL,.span=COVER(T,E),.as.call={AT(NAME,T),LIST(EMPTY,AT(NUMBER,N)),false});
 }
 %endif
+%ifdef SQLITE
 expr(A) ::= CAST(T) LP expr(B) AS type(C) RP(E). {
   A=NODE(CAST,.span=COVER(T,E),.as.cast={B,C});
 }
+%else
+expr(A) ::= CAST(T) LP expr(B) AS mysql_cast_type(C) RP(E). {
+  A=NODE(CAST,.span=COVER(T,E),.as.cast={B,C});
+}
+mysql_cast_type(A) ::= type(B). { A=B; }
+mysql_cast_type(A) ::= UNSIGNED(T). {
+  A=NODE(TYPE,.span=T,.as.type={AT(NAME,T),EMPTY,false,false});
+}
+mysql_cast_type(A) ::= UNSIGNED(T) ident(I). {
+  if (!sqlp_cast_word(ctx,I,"INTEGER",sizeof("INTEGER")-1))
+    sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"UNSIGNED CAST permits only INTEGER suffix");
+  A=NODE(TYPE,.span=COVER(T,I),.as.type={AT(NAME,T),EMPTY,false,false});
+}
+mysql_cast_type(A) ::= ident(T) ident(I). {
+  const bool signed_type=sqlp_cast_word(ctx,T,"SIGNED",sizeof("SIGNED")-1) &&
+      sqlp_cast_word(ctx,I,"INTEGER",sizeof("INTEGER")-1);
+  const bool double_type=sqlp_cast_word(ctx,T,"DOUBLE",sizeof("DOUBLE")-1) &&
+      sqlp_cast_word(ctx,I,"PRECISION",sizeof("PRECISION")-1);
+  if (!signed_type && !double_type)
+    sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"numeric CAST target has invalid suffix");
+  A=NODE(TYPE,.span=COVER(T,I),.as.type={AT(NAME,T),EMPTY,false,false});
+}
+%endif
 %type collation_name {sqlparser_span}
 collation_name(A) ::= ident(B). { A=B; }
 %ifdef SQLITE
@@ -399,6 +485,18 @@ call_name(A) ::= name(B). { A=B; }
 %ifndef SQLITE
 // A function token is callable but cannot name an unqualified table or column.
 call_name(A) ::= MYSQL_FUNCTION(B). { A=AT(NAME,B); }
+call_name(A) ::= COUNT(B). { A=AT(NAME,B); }
+// MySQL retains the deprecated VALUES(column) function for duplicate-key
+// assignments. It is represented as an ordinary CALL so consumers can choose
+// whether to implement or reject its context-dependent value semantics.
+call_name(A) ::= VALUES(B). { A=AT(NAME,B); }
+// MOD is a reserved operator keyword with a two-expression function form.
+// Keep it separate from '%' and generic calls to reject malformed arguments.
+expr(A) ::= MYSQL_MOD(T) LP expr(B) COMMA expr(C) RP(E). {
+  sqlparser_id name=AT(NAME,T);
+  sqlparser_list arguments=LIST(LIST(EMPTY,B),C);
+  A=NODE(CALL,.span=COVER(T,E),.as.call={name,arguments,false});
+}
 %endif
 expr(A) ::= call_expression(B). { A=B; }
 call_expression(A) ::= call_name(B) LP distinct(D) arguments(C) RP(E). {
@@ -411,14 +509,68 @@ call_expression(A) ::= call_name(B) LP STAR(C) RP(E). {
 %type window_partition {sqlparser_list}
 window_partition(A) ::= . { A=EMPTY; }
 window_partition(A) ::= PARTITION BY exprs(B). { A=B; }
-expr(A) ::= call_expression(B) OVER LP window_partition(P) order_by(O) RP(E). {
+%type window_base {sqlparser_id}
+window_base(A) ::= . { A=0; }
+window_base(A) ::= ident(B). { A=AT(NAME,B); }
+%type window_definitions {sqlparser_list}
+window_definitions(A) ::= . { A=EMPTY; }
+window_definitions(A) ::= WINDOW window_declarations(B). { A=B; }
+%type window_declarations {sqlparser_list}
+window_declarations(A) ::= window_declaration(B). { A=LIST(EMPTY,B); }
+window_declarations(A) ::= window_declarations(B) COMMA window_declaration(C). { A=LIST(B,C); }
+window_declaration(A) ::= ident(N) AS LP window_base(B) window_partition(P) order_by(O) window_frame(F) RP(E). {
+  A=NODE(WINDOW_DEFINITION,.span=COVER(N,E),.as.window_definition={AT(NAME,N),B,P,O,F});
+}
+expr(A) ::= call_expression(B) OVER LP window_base(N) window_partition(P) order_by(O) window_frame(F) RP(E). {
   sqlp_check_window_call(ctx,B);
-  A=NODE(WINDOW,.span=COVER(SP(B),E),.as.window={B,0,P,O});
+  A=NODE(WINDOW,.span=COVER(SP(B),E),.as.window={B,0,P,O,N,F});
 }
 expr(A) ::= call_expression(B) OVER ident(N). {
   sqlp_check_window_call(ctx,B);
   A=NODE(WINDOW,.span=COVER(SP(B),N),.as.window={B,AT(NAME,N),{0},{0}});
 }
+%type window_units {sqlp_frame_units}
+window_units(A) ::= ROWS(T). { A=(sqlp_frame_units){SQLPARSER_FRAME_ROWS,T}; }
+window_units(A) ::= RANGE(T). { A=(sqlp_frame_units){SQLPARSER_FRAME_RANGE,T}; }
+window_frame(A) ::= . { A=0; }
+window_frame(A) ::= window_units(U) window_extent(B). {
+  A=NODE(WINDOW_FRAME,.span=COVER(U.span,SP(B.end?B.end:B.start)),.as.frame={U.unit,B.start,B.end});
+}
+%type window_extent {sqlp_frame_extent}
+window_extent(A) ::= window_start(B). { A=(sqlp_frame_extent){B,0}; }
+window_extent(A) ::= BETWEEN window_boundary(B) AND window_boundary(C). { A=(sqlp_frame_extent){B,C}; }
+window_start(A) ::= UNBOUNDED(T) PRECEDING(E). {
+  A=NODE(WINDOW_BOUNDARY,.span=COVER(T,E),.as.boundary={SQLPARSER_BOUND_UNBOUNDED_PRECEDING,0,0});
+}
+window_start(A) ::= CURRENT(T) ROW(E). {
+  A=NODE(WINDOW_BOUNDARY,.span=COVER(T,E),.as.boundary={SQLPARSER_BOUND_CURRENT_ROW,0,0});
+}
+window_start(A) ::= window_distance(B) PRECEDING(E). {
+  A=NODE(WINDOW_BOUNDARY,.span=COVER(SP(B),E),.as.boundary={SQLPARSER_BOUND_PRECEDING,B,0});
+}
+window_start(A) ::= INTERVAL(T) expr(B) ident(U) PRECEDING(E). {
+  sqlp_check_interval_unit(ctx,U);
+  A=NODE(WINDOW_BOUNDARY,.span=COVER(T,E),.as.boundary={SQLPARSER_BOUND_PRECEDING,B,AT(NAME,U)});
+}
+window_boundary(A) ::= window_start(B). { A=B; }
+window_boundary(A) ::= UNBOUNDED(T) FOLLOWING(E). {
+  A=NODE(WINDOW_BOUNDARY,.span=COVER(T,E),.as.boundary={SQLPARSER_BOUND_UNBOUNDED_FOLLOWING,0,0});
+}
+window_boundary(A) ::= window_distance(B) FOLLOWING(E). {
+  A=NODE(WINDOW_BOUNDARY,.span=COVER(SP(B),E),.as.boundary={SQLPARSER_BOUND_FOLLOWING,B,0});
+}
+window_boundary(A) ::= INTERVAL(T) expr(B) ident(U) FOLLOWING(E). {
+  sqlp_check_interval_unit(ctx,U);
+  A=NODE(WINDOW_BOUNDARY,.span=COVER(T,E),.as.boundary={SQLPARSER_BOUND_FOLLOWING,B,AT(NAME,U)});
+}
+window_distance(A) ::= NUMBER(B). { A=AT(NUMBER,B); }
+window_distance(A) ::= PARAMETER(B). { A=AT(PARAMETER,B); }
+ident(A) ::= CURRENT(B). { A=B; }
+ident(A) ::= UNBOUNDED(B). { A=B; }
+ident(A) ::= PRECEDING(B). { A=B; }
+ident(A) ::= FOLLOWING(B). { A=B; }
+// Preserve the existing MySQL identifier admission while sharing the frame token.
+ident(A) ::= ROW(B). { A=B; }
 %endif
 expr(A) ::= NOT(T) expr(B). { A=NODE(UNARY,.span=COVER(T,SP(B)),.as.unary={SQLPARSER_OP_NOT,B}); }
 expr(A) ::= MINUS(T) expr(B). [NEGATE] { A=NODE(UNARY,.span=COVER(T,SP(B)),.as.unary={SQLPARSER_OP_NEGATE,B}); }
@@ -441,6 +593,10 @@ expr(A) ::= expr(B) MINUS expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.
 expr(A) ::= expr(B) STAR expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_MULTIPLY,B,C,0}); }
 expr(A) ::= expr(B) SLASH expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_DIVIDE,B,C,0}); }
 expr(A) ::= expr(B) MOD expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_MODULO,B,C,0}); }
+%ifndef SQLITE
+expr(A) ::= expr(B) MYSQL_MOD expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_MODULO,B,C,0}); }
+expr(A) ::= expr(B) DIV expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_INTEGER_DIVIDE,B,C,0}); }
+%endif
 expr(A) ::= expr(B) BITAND expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_BIT_AND,B,C,0}); }
 expr(A) ::= expr(B) BITOR expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_BIT_OR,B,C,0}); }
 expr(A) ::= expr(B) LSHIFT expr(C). { A=NODE(BINARY,.span=COVER(SP(B),SP(C)),.as.binary={SQLPARSER_OP_SHIFT_LEFT,B,C,0}); }
@@ -501,44 +657,80 @@ insert_op(A) ::= REPLACE(T). { A=(sqlp_insert_head){T,true}; }
 %type low_priority {bool}
 low_priority(A) ::= . { A=false; }
 low_priority(A) ::= LOW_PRIORITY. { A=true; }
-insert_op(A) ::= INSERT(T) low_priority(P). { A=(sqlp_insert_head){T,false,0,P}; }
+%type mysql_ignore {bool}
+mysql_ignore(A) ::= . { A=false; }
+mysql_ignore(A) ::= IGNORE. { A=true; }
+insert_op(A) ::= INSERT(T) low_priority(P) mysql_ignore(I). {
+  A=(sqlp_insert_head){T,false,I?SQLPARSER_CONFLICT_IGNORE:SQLPARSER_CONFLICT_DEFAULT,P};
+}
 insert_op(A) ::= REPLACE(T) low_priority(P). { A=(sqlp_insert_head){T,true,0,P}; }
 %endif
 %ifndef SQLITE
 into ::= .
 %endif
 into ::= INTO.
+%ifdef SQLITE
 %type columns {sqlparser_list}
 columns(A) ::= . { A=EMPTY; }
 columns(A) ::= LP names(B) RP. { A=B; }
+%endif
+%type insert_columns {sqlp_insert_columns}
+insert_columns(A) ::= . { A=(sqlp_insert_columns){EMPTY,false}; }
+insert_columns(A) ::= LP names(B) RP. { A=(sqlp_insert_columns){B,true}; }
 %ifndef SQLITE
-columns(A) ::= LP RP. { A=EMPTY; }
+insert_columns(A) ::= LP RP. { A=(sqlp_insert_columns){EMPTY,true}; }
 %endif
 %ifndef SQLITE
-dml(A) ::= insert_op(R) into object_name(T) columns(C) VALUES rows(V). {
-  A=FINISH(NODE(INSERT,.as.insert={T,0,C,V,{0},R.replace,R.conflict,.low_priority=R.low_priority}),R.span);
+dml(A) ::= insert_op(R) into object_name(T) insert_columns(C) VALUES rows(V) mysql_insert_alias(I) mysql_duplicate(D). {
+  A=FINISH(NODE(INSERT,.as.insert={T,0,C.list,V,{0},R.replace,R.conflict,
+    .low_priority=R.low_priority,.duplicate_assignments=D,
+    .columns_specified=C.specified,.row_alias=I.row,
+    .column_aliases=I.columns}),R.span);
 }
 %endif
 %ifdef SQLITE
-dml(A) ::= insert_op(R) into object_name(T) columns(C) query(Q). {
-  A=FINISH(NODE(INSERT,.as.insert={T,Q,C,{0},{0},R.replace,R.conflict}),R.span);
+dml(A) ::= insert_op(R) into object_name(T) insert_columns(C) query(Q). {
+  A=FINISH(NODE(INSERT,.as.insert={T,Q,C.list,{0},{0},R.replace,R.conflict,
+    .columns_specified=C.specified}),R.span);
 }
 %else
 // Shift '(' before choosing a column list or a parenthesized query.
-dml(A) ::= insert_op(R) into object_name(T) query(Q). {
-  A=FINISH(NODE(INSERT,.as.insert={T,Q,{0},{0},{0},R.replace,.low_priority=R.low_priority}),R.span);
+dml(A) ::= insert_op(R) into object_name(T) query(Q) mysql_duplicate(D). {
+  A=FINISH(NODE(INSERT,.as.insert={T,Q,{0},{0},{0},R.replace,
+    .conflict=R.conflict,.low_priority=R.low_priority,.duplicate_assignments=D,
+    .columns_specified=false}),R.span);
 }
-dml(A) ::= insert_op(R) into object_name(T) LP names(C) RP query(Q). {
-  A=FINISH(NODE(INSERT,.as.insert={T,Q,C,{0},{0},R.replace,.low_priority=R.low_priority}),R.span);
+dml(A) ::= insert_op(R) into object_name(T) LP names(C) RP query(Q) mysql_duplicate(D). {
+  A=FINISH(NODE(INSERT,.as.insert={T,Q,C,{0},{0},R.replace,
+    .conflict=R.conflict,.low_priority=R.low_priority,.duplicate_assignments=D,
+    .columns_specified=true}),R.span);
 }
-dml(A) ::= insert_op(R) into object_name(T) LP RP query(Q). {
-  A=FINISH(NODE(INSERT,.as.insert={T,Q,{0},{0},{0},R.replace,.low_priority=R.low_priority}),R.span);
+dml(A) ::= insert_op(R) into object_name(T) LP RP query(Q) mysql_duplicate(D). {
+  A=FINISH(NODE(INSERT,.as.insert={T,Q,{0},{0},{0},R.replace,
+    .conflict=R.conflict,.low_priority=R.low_priority,.duplicate_assignments=D,
+    .columns_specified=true}),R.span);
 }
 %endif
 %ifndef SQLITE
-dml(A) ::= insert_op(R) into object_name(T) SET assignments(S). {
-  A=FINISH(NODE(INSERT,.as.insert={T,0,{0},{0},S,R.replace,.low_priority=R.low_priority}),R.span);
+dml(A) ::= insert_op(R) into object_name(T) SET assignments(S) mysql_insert_alias(I) mysql_duplicate(D). {
+  A=FINISH(NODE(INSERT,.as.insert={T,0,{0},{0},S,R.replace,
+    .conflict=R.conflict,.low_priority=R.low_priority,.duplicate_assignments=D,
+    .row_alias=I.row,.column_aliases=I.columns}),R.span);
 }
+%type mysql_insert_alias {sqlp_insert_alias}
+mysql_insert_alias(A) ::= . { A=(sqlp_insert_alias){0}; }
+mysql_insert_alias(A) ::= AS ident(R). { A=(sqlp_insert_alias){AT(NAME,R),EMPTY}; }
+mysql_insert_alias(A) ::= AS ident(R) LP mysql_insert_alias_names(C) RP. {
+  A=(sqlp_insert_alias){AT(NAME,R),C};
+}
+%type mysql_insert_alias_names {sqlparser_list}
+mysql_insert_alias_names(A) ::= ident(B). { A=LIST(EMPTY,AT(NAME,B)); }
+mysql_insert_alias_names(A) ::= mysql_insert_alias_names(B) COMMA ident(C). {
+  A=LIST(B,AT(NAME,C));
+}
+%type mysql_duplicate {sqlparser_list}
+mysql_duplicate(A) ::= . { A=EMPTY; }
+mysql_duplicate(A) ::= ON DUPLICATE KEY UPDATE assignments(B). { A=B; }
 %endif
 %type rows {sqlparser_list}
 rows(A) ::= row(B). { A=LIST(EMPTY,B); }
@@ -560,19 +752,31 @@ assignments(A) ::= assignment(B). { A=LIST(EMPTY,B); }
 assignments(A) ::= assignments(B) COMMA assignment(C). { A=LIST(B,C); }
 assignment(A) ::= name(B) EQ write_value(C). { A=NODE(ASSIGNMENT,.span=COVER(SP(B),SP(C)),.as.assignment={B,C,SQLPARSER_SCOPE_DEFAULT}); }
 write_value(A) ::= expr(B). { A=B; }
+write_alias(A) ::= . { A=0; }
+write_alias(A) ::= AS ident(B). { A=AT(NAME,B); }
+%ifdef SQLITE
+write_alias(A) ::= AS INDEXED(B). { A=AT(NAME,B); }
+write_alias(A) ::= AS STRING(B). { A=AT(NAME,B); }
+%else
+write_alias(A) ::= ident(B). { A=AT(NAME,B); }
+%endif
 %ifndef SQLITE
 // A bare DEFAULT is a complete assignment value, never an expression operand.
 write_value(A) ::= default_keyword(B). { A=B; }
 default_keyword(A) ::= DEFAULT(B). { A=AT(DEFAULT_VALUE,B); }
 %endif
 %ifndef SQLITE
-update_delete(A) ::= UPDATE(T) low_priority(P) object_name(B) SET assignments(C) where(W) order_by(O) limit(L). {
-  A=FINISH(NODE(UPDATE,.as.update={B,W,L,C,O,.low_priority=P}),T);
+update_delete(A) ::= UPDATE(T) low_priority(P) mysql_ignore(I) object_name(B) write_alias(Q) SET assignments(C) where(W) order_by(O) limit(L). {
+  A=FINISH(NODE(UPDATE,.as.update={.table=B,.alias=Q,.where=W,.limit=L,
+    .assignments=C,.order_by=O,
+    .conflict=I?SQLPARSER_CONFLICT_IGNORE:SQLPARSER_CONFLICT_DEFAULT,
+    .low_priority=P}),T);
 }
 %type mysql_delete_head {sqlp_write_head}
 mysql_delete_head(A) ::= DELETE(T) low_priority(P). { A=(sqlp_write_head){T,P}; }
-update_delete(A) ::= mysql_delete_head(T) FROM object_name(B) where(W) order_by(O) limit(L). {
-  A=FINISH(NODE(DELETE,.as.delete_stmt={B,W,L,O,.low_priority=T.low_priority}),T.span);
+update_delete(A) ::= mysql_delete_head(T) FROM object_name(B) write_alias(Q) where(W) order_by(O) limit(L). {
+  A=FINISH(NODE(DELETE,.as.delete_stmt={.table=B,.alias=Q,.where=W,.limit=L,
+    .order_by=O,.low_priority=T.low_priority}),T.span);
 }
 %type delete_targets {sqlparser_list}
 delete_targets(A) ::= delete_target(B). { A=LIST(EMPTY,B); }
@@ -586,13 +790,16 @@ update_delete(A) ::= mysql_delete_head(T) delete_targets(B) FROM tables(F) where
   A=FINISH(NODE(DELETE,.as.delete_stmt={.where=W,.low_priority=T.low_priority,.targets=B,.from=F}),T.span);
 }
 %else
-update_delete(A) ::= UPDATE(T) update_conflict(F) object_name(B) index_hint(I) SET assignments(C) where(W) write_order(O) write_limit(L). {
+update_delete(A) ::= UPDATE(T) update_conflict(F) object_name(B) write_alias(Q) index_hint(I) SET assignments(C) where(W) write_order(O) write_limit(L). {
   if (O.count && !L) sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"SQLite UPDATE ORDER BY requires LIMIT");
-  A=FINISH(NODE(UPDATE,.as.update={B,W,L,C,O,F,I.name,I.not_indexed}),T);
+  A=FINISH(NODE(UPDATE,.as.update={.table=B,.alias=Q,.where=W,.limit=L,
+    .assignments=C,.order_by=O,.conflict=F,.indexed_by=I.name,
+    .not_indexed=I.not_indexed}),T);
 }
-update_delete(A) ::= DELETE(T) FROM object_name(B) index_hint(I) where(W) write_order(O) write_limit(L). {
+update_delete(A) ::= DELETE(T) FROM object_name(B) write_alias(Q) index_hint(I) where(W) write_order(O) write_limit(L). {
   if (O.count && !L) sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"SQLite DELETE ORDER BY requires LIMIT");
-  A=FINISH(NODE(DELETE,.as.delete_stmt={B,W,L,O,I.name,I.not_indexed}),T);
+  A=FINISH(NODE(DELETE,.as.delete_stmt={.table=B,.alias=Q,.where=W,.limit=L,
+    .order_by=O,.indexed_by=I.name,.not_indexed=I.not_indexed}),T);
 }
 %type write_order {sqlparser_list}
 %ifdef SQLITE_ENABLE_UPDATE_DELETE_LIMIT
@@ -715,8 +922,18 @@ command(A) ::= SET(T) scope(S) TRANSACTION transaction_characteristics(O). {
 %type set_assignments {sqlparser_list}
 set_assignments(A) ::= set_assignment(B). { A=LIST(EMPTY,B); }
 set_assignments(A) ::= set_assignments(B) COMMA set_assignment(C). { A=LIST(B,C); }
-set_assignment(A) ::= scope(S) name(B) EQ write_value(C). { A=NODE(ASSIGNMENT,.span=COVER(SP(B),SP(C)),.as.assignment={B,C,S}); }
+%type set_value {sqlparser_id}
+set_value(A) ::= write_value(B). { A=B; }
+set_value(A) ::= ON(B). { A=AT(NAME,B); }
+set_assignment(A) ::= scope(S) name(B) EQ set_value(C). { A=NODE(ASSIGNMENT,.span=COVER(SP(B),SP(C)),.as.assignment={B,C,S}); }
 set_assignment(A) ::= VARIABLE(B) EQ expr(C). { A=NODE(ASSIGNMENT,.span=COVER(B,SP(C)),.as.assignment={AT(VARIABLE,B),C,SQLPARSER_SCOPE_DEFAULT}); }
+set_assignment(A) ::= VARIABLE(B) EQ ON(C). {
+  if (ctx->error.status == SQLPARSER_OK && (B.length < 2 || sqlparser_text(ctx->document,B)[1] != '@')) {
+    sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"ON cannot be assigned to a MySQL user variable");
+    ctx->error.offset=C.offset;
+  }
+  A=NODE(ASSIGNMENT,.span=COVER(B,C),.as.assignment={AT(VARIABLE,B),AT(NAME,C),SQLPARSER_SCOPE_DEFAULT});
+}
 set_assignment(A) ::= VARIABLE(B) EQ DEFAULT(C). {
   if (ctx->error.status == SQLPARSER_OK && (B.length < 2 || sqlparser_text(ctx->document,B)[1] != '@')) {
     sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"DEFAULT cannot be assigned to a MySQL user variable");
@@ -724,7 +941,7 @@ set_assignment(A) ::= VARIABLE(B) EQ DEFAULT(C). {
   }
   A=NODE(ASSIGNMENT,.span=COVER(B,C),.as.assignment={AT(VARIABLE,B),AT(DEFAULT_VALUE,C),SQLPARSER_SCOPE_DEFAULT});
 }
-set_assignment(A) ::= VARIABLE(B) DOT ident(N) EQ write_value(C). {
+set_assignment(A) ::= VARIABLE(B) DOT ident(N) EQ set_value(C). {
   sqlparser_scope scope=sqlp_variable_scope(ctx,B);
   A=NODE(ASSIGNMENT,.span=COVER(B,SP(C)),.as.assignment={AT(NAME,N),C,scope});
 }
@@ -792,6 +1009,12 @@ command(A) ::= SHOW(T) show_extended(E) show_indexes show_from object_name(N) da
 command(A) ::= SHOW(T) CREATE TABLE object_name(N). {
   A=FINISH(NODE(SHOW,.as.show={.kind=SQLPARSER_SHOW_CREATE_TABLE,.table=N}),T);
 }
+command(A) ::= SHOW(T) WARNINGS limit(L). {
+  A=FINISH(NODE(SHOW,.as.show={.kind=SQLPARSER_SHOW_WARNINGS,.limit=L}),T);
+}
+command(A) ::= SHOW(T) COUNT LP STAR RP WARNINGS(E). {
+  A=FINISH(NODE(SHOW,.as.show={.kind=SQLPARSER_SHOW_WARNINGS,.count=true}),COVER(T,E));
+}
 %endif
 
 %type temporary {bool}
@@ -855,6 +1078,15 @@ mysql_like_table(A) ::= LP LIKE object_name(B) RP. { A=B; }
 command(A) ::= TRUNCATE(T) table_opt object_name(N). { A=FINISH(NODE(TRUNCATE_TABLE,.as.maintenance={N,0}),T); }
 table_opt ::= .
 table_opt ::= TABLE.
+command(A) ::= ALTER(T) TABLE object_name(N) RENAME mysql_rename_to object_name(B). {
+  A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_RENAME_TABLE,.table=N,.new_name=B}),T);
+}
+mysql_rename_to ::= .
+mysql_rename_to ::= TO.
+mysql_rename_to ::= AS.
+command(A) ::= ALTER(T) TABLE object_name(N) RENAME COLUMN ident(B) TO ident(C). {
+  A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_RENAME_COLUMN,.table=N,.column=AT(NAME,B),.new_name=AT(NAME,C)}),T);
+}
 command(A) ::= ALTER(T) TABLE object_name(N) ENGINE equals charset(B). {
   A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_SET_ENGINE,.table=N,.value=B}),T);
 }
@@ -866,12 +1098,30 @@ command(A) ::= ALTER(T) TABLE object_name(N) ALTER mysql_column_opt ident(C) DRO
 }
 mysql_column_opt ::= .
 mysql_column_opt ::= COLUMN.
+command(A) ::= ALTER(T) TABLE object_name(N) ADD mysql_column_opt column_definition(C). {
+  A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_ADD_COLUMN,.table=N,.column=C}),T);
+}
+command(A) ::= ALTER(T) TABLE object_name(N) ADD mysql_column_opt column_definition(C) FIRST. {
+  A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_ADD_COLUMN,.table=N,.column=C,.position=SQLPARSER_COLUMN_FIRST}),T);
+}
+command(A) ::= ALTER(T) TABLE object_name(N) ADD mysql_column_opt column_definition(C) AFTER ident(B). {
+  A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_ADD_COLUMN,.table=N,.column=C,.position=SQLPARSER_COLUMN_AFTER,.after=AT(NAME,B)}),T);
+}
+command(A) ::= ALTER(T) TABLE object_name(N) ADD mysql_foreign_key(C). {
+  A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_ADD_CONSTRAINT,.table=N,.column=C}),T);
+}
+command(A) ::= ALTER(T) TABLE object_name(N) DROP mysql_column_opt ident(C). {
+  A=FINISH(NODE(ALTER_TABLE,.as.alter={.action=SQLPARSER_DROP_COLUMN,.table=N,.column=AT(NAME,C)}),T);
+}
 mysql_alter_default(A) ::= literal(B). { A=B; }
 mysql_alter_default(A) ::= mysql_timestamp(B). { A=B; }
 mysql_alter_default(A) ::= MINUS(T) NUMBER(B). { A=NODE(UNARY,.span=COVER(T,B),.as.unary={SQLPARSER_OP_NEGATE,AT(NUMBER,B)}); }
 mysql_alter_default(A) ::= PLUS(T) NUMBER(B). { A=NODE(UNARY,.span=COVER(T,B),.as.unary={SQLPARSER_OP_POSITIVE,AT(NUMBER,B)}); }
 mysql_alter_default(A) ::= LP expr(B) RP. { A=B; }
-command(A) ::= DROP(T) temporary(U) TABLE if_exists(E) names(B). {
+mysql_drop_behavior ::= .
+mysql_drop_behavior ::= RESTRICT.
+mysql_drop_behavior ::= CASCADE.
+command(A) ::= DROP(T) temporary(U) TABLE if_exists(E) names(B) mysql_drop_behavior. {
   A=FINISH(NODE(DROP_TABLE,.as.drop_table={B,U,E}),T);
 }
 %else
@@ -954,6 +1204,7 @@ column_constraint(A) ::= NOT(T) NULL conflict_clause(C). { A=FINISH(NODE(CONSTRA
 column_constraint(A) ::= NULL(T). { A=NODE(CONSTRAINT,.span=T,.as.constraint={SQLPARSER_NULLABLE,0,0,0,{0}}); }
 %ifndef SQLITE
 column_constraint(A) ::= PRIMARY(T) KEY conflict_clause(C). { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_PRIMARY_KEY,0,0,0,{0},{0},C}),T); }
+column_constraint(A) ::= KEY(T) conflict_clause(C). { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_PRIMARY_KEY,0,0,0,{0},{0},C}),T); }
 %else
 column_constraint(A) ::= PRIMARY(T) KEY direction(D) conflict_clause(C) autoincrement(U). { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_PRIMARY_KEY,0,0,0,{0},{0},C,D,U}),T); }
 %type autoincrement {bool}
@@ -968,7 +1219,34 @@ default_value(A) ::= mysql_timestamp(B). { A=B; }
 %endif
 column_constraint(A) ::= DEFAULT(T) default_value(B). { A=NODE(CONSTRAINT,.span=COVER(T,SP(B)),.as.constraint={SQLPARSER_DEFAULT,0,B,0,{0}}); }
 %ifndef SQLITE
-column_constraint(A) ::= REFERENCES(T) object_name(B) LP names(C) RP. { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_REFERENCES,0,0,B,C}),T); }
+%type mysql_reference_actions {sqlparser_reference_options}
+%type mysql_reference_action {sqlparser_reference_action}
+%type mysql_reference_match {sqlparser_id}
+mysql_reference_match(A) ::= . { A=0; }
+mysql_reference_match(A) ::= MATCH FULL(B). { A=AT(NAME,B); }
+mysql_reference_match(A) ::= MATCH PARTIAL(B). { A=AT(NAME,B); }
+mysql_reference_match(A) ::= MATCH SIMPLE(B). { A=AT(NAME,B); }
+mysql_reference_actions(A) ::= . { A=(sqlparser_reference_options){0}; }
+mysql_reference_actions(A) ::= mysql_reference_actions(B) ON DELETE mysql_reference_action(D). {
+  A=B;
+  if (A.on_delete != SQLPARSER_REFERENCE_DEFAULT)
+    sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"duplicate ON DELETE reference action");
+  else A.on_delete=D;
+}
+mysql_reference_actions(A) ::= mysql_reference_actions(B) ON UPDATE mysql_reference_action(U). {
+  A=B;
+  if (A.on_update != SQLPARSER_REFERENCE_DEFAULT)
+    sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"duplicate ON UPDATE reference action");
+  else A.on_update=U;
+}
+mysql_reference_action(A) ::= RESTRICT. { A=SQLPARSER_REFERENCE_RESTRICT; }
+mysql_reference_action(A) ::= CASCADE. { A=SQLPARSER_REFERENCE_CASCADE; }
+mysql_reference_action(A) ::= SET NULL. { A=SQLPARSER_REFERENCE_SET_NULL; }
+mysql_reference_action(A) ::= NO ACTION. { A=SQLPARSER_REFERENCE_NO_ACTION; }
+mysql_reference_action(A) ::= SET DEFAULT. { A=SQLPARSER_REFERENCE_SET_DEFAULT; }
+column_constraint(A) ::= REFERENCES(T) object_name(B) LP names(C) RP. {
+  A=FINISH(NODE(CONSTRAINT,.as.constraint={.kind=SQLPARSER_REFERENCES,.table=B,.columns=C}),T);
+}
 %endif
 column_constraint(A) ::= CHECK(T) LP expr(B) RP. { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_CHECK,0,B,0,{0}}),T); }
 default_value(A) ::= literal(B). { A=B; }
@@ -981,29 +1259,67 @@ default_value(A) ::= LP expr(B) RP. { A=B; }
 default_value(A) ::= MINUS(T) STRING(B). { A=NODE(UNARY,.span=COVER(T,B),.as.unary={SQLPARSER_OP_NEGATE,AT(STRING,B)}); }
 default_value(A) ::= PLUS(T) STRING(B). { A=NODE(UNARY,.span=COVER(T,B),.as.unary={SQLPARSER_OP_POSITIVE,AT(STRING,B)}); }
 %endif
-key_opt ::= .
 %ifndef SQLITE
+key_opt ::= . [UNIQUE]
 key_opt ::= KEY.
+table_unique_opt ::= .
+table_unique_opt ::= KEY.
+table_unique_opt ::= INDEX.
+%else
+key_opt ::= .
 %endif
 %ifndef SQLITE
 constraint_name(A) ::= . { A=0; }
+constraint_name(A) ::= CONSTRAINT. { A=0; }
 constraint_name(A) ::= CONSTRAINT ident(B). { A=AT(NAME,B); }
 index_name(A) ::= . { A=0; }
 index_name(A) ::= ident(B). { A=AT(NAME,B); }
 %endif
 %ifndef SQLITE
 table_constraint(A) ::= constraint_name(N) PRIMARY(T) KEY LP names(B) RP conflict_clause(C). { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_PRIMARY_KEY,N,0,0,B,{0},C}),T); }
-table_constraint(A) ::= constraint_name(N) UNIQUE(T) key_opt index_name(I) LP names(B) RP conflict_clause(C). { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_UNIQUE,N?N:I,0,0,B,{0},C}),T); }
-table_constraint(A) ::= INDEX(T) index_name(N) LP names(B) RP. { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_INDEX,N,0,0,B}),T); }
-table_constraint(A) ::= KEY(T) index_name(N) LP names(B) RP. { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_INDEX,N,0,0,B}),T); }
+%type mysql_table_keys {sqlp_key_columns}
+mysql_table_keys(A) ::= mysql_table_key(B). { A=sqlp_append_key(ctx,(sqlp_key_columns){0},B); }
+mysql_table_keys(A) ::= mysql_table_keys(B) COMMA mysql_table_key(C). { A=sqlp_append_key(ctx,B,C); }
+mysql_table_key(A) ::= object_name(N) direction(D). { A=FINISH(NODE(ORDER,.as.order={N,D}),SP(N)); }
+table_constraint(A) ::= constraint_name(N) UNIQUE(T) table_unique_opt index_name(I) LP mysql_table_keys(B) RP conflict_clause(C). { A=FINISH(NODE(CONSTRAINT,.as.constraint={.kind=SQLPARSER_UNIQUE,.name=I?I:N,.columns=B.names,.conflict=C,.key_terms=B.terms}),T); }
+table_constraint(A) ::= INDEX(T) index_name(N) LP mysql_table_keys(B) RP. { A=FINISH(NODE(CONSTRAINT,.as.constraint={.kind=SQLPARSER_INDEX,.name=N,.columns=B.names,.key_terms=B.terms}),T); }
+table_constraint(A) ::= KEY(T) index_name(N) LP mysql_table_keys(B) RP. { A=FINISH(NODE(CONSTRAINT,.as.constraint={.kind=SQLPARSER_INDEX,.name=N,.columns=B.names,.key_terms=B.terms}),T); }
 table_constraint(A) ::= constraint_name(N) CHECK(T) LP expr(B) RP. { A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_CHECK,N,B,0,{0}}),T); }
-table_constraint(A) ::= constraint_name(N) FOREIGN(T) KEY LP names(C) RP REFERENCES object_name(R) LP names(D) RP. {
-  A=FINISH(NODE(CONSTRAINT,.as.constraint={SQLPARSER_FOREIGN_KEY,N,0,R,C,D}),T);
+%type mysql_foreign_key {sqlparser_id}
+mysql_foreign_key(A) ::= constraint_name(N) FOREIGN(T) KEY index_name(I) LP names(C) RP REFERENCES object_name(R) LP names(D) RP mysql_reference_match(M) mysql_reference_actions(O). {
+  (void)I; O.match=M; A=FINISH(NODE(CONSTRAINT,.as.constraint={.kind=SQLPARSER_FOREIGN_KEY,.name=N,.table=R,
+      .columns=C,.referenced_columns=D,.reference=O}),T);
 }
+table_constraint(A) ::= mysql_foreign_key(B). { A=B; }
 %endif
 %type table_options {sqlparser_list}
 table_options(A) ::= . { A=EMPTY; }
 %ifndef SQLITE
+%type mysql_index_unique {bool}
+%type mysql_index_parts {sqlparser_list}
+mysql_index_unique(A) ::= . { A=false; }
+mysql_index_unique(A) ::= UNIQUE. { A=true; }
+mysql_index_parts(A) ::= mysql_index_part(B). { A=LIST(EMPTY,B); }
+mysql_index_parts(A) ::= mysql_index_parts(B) COMMA mysql_index_part(C). { A=LIST(B,C); }
+mysql_index_part(A) ::= ident(N) direction(D). {
+  A=NODE(INDEX_PART,.span=N,.as.index_part={.column=AT(NAME,N),.descending=D});
+}
+mysql_index_part(A) ::= ident(N) LP NUMBER(L) RP(E) direction(D). {
+  const char *length=sqlparser_text(ctx->document,L);
+  for (size_t i=0; i<L.length; ++i) if (length[i]<'0' || length[i]>'9') {
+    sqlp_error(ctx,SQLPARSER_SYNTAX_ERROR,"index prefix length requires an unsigned decimal integer"); break;
+  }
+  A=NODE(INDEX_PART,.span=COVER(N,E),.as.index_part={.column=AT(NAME,N),.length=AT(NUMBER,L),.descending=D});
+}
+mysql_index_part(A) ::= LP(T) expr(B) RP(E) direction(D). {
+  A=NODE(INDEX_PART,.span=COVER(T,E),.as.index_part={.expression=B,.descending=D});
+}
+command(A) ::= CREATE(T) mysql_index_unique(U) INDEX ident(N) ON object_name(B) LP mysql_index_parts(C) RP. {
+  A=FINISH(NODE(CREATE_INDEX,.as.create_index={.name=AT(NAME,N),.table=B,.columns=C,.unique=U}),T);
+}
+command(A) ::= DROP(T) INDEX ident(N) ON object_name(B). {
+  A=FINISH(NODE(DROP_INDEX,.as.drop_object={.name=AT(NAME,N),.table=B}),T);
+}
 table_options(A) ::= mysql_required_table_options(B). { A=B; }
 table_option(A) ::= ENGINE(T) equals charset(B). {
   A=NODE(ASSIGNMENT,.span=COVER(T,SP(B)),.as.assignment={AT(NAME,T),B,SQLPARSER_SCOPE_DEFAULT});
@@ -1035,8 +1351,9 @@ conflict_action(A) ::= IGNORE. { A=SQLPARSER_CONFLICT_IGNORE; }
 conflict_action(A) ::= REPLACE. { A=SQLPARSER_CONFLICT_REPLACE; }
 conflict_clause(A) ::= ON CONFLICT conflict_action(B). { A=B; }
 insert_op(A) ::= INSERT(T) OR conflict_action(C). { A=(sqlp_insert_head){T,false,C}; }
-dml(A) ::= insert_op(R) into object_name(T) columns(C) DEFAULT VALUES. {
-  A=FINISH(NODE(INSERT,.as.insert={T,0,C,{0},{0},R.replace,R.conflict,true}),R.span);
+dml(A) ::= insert_op(R) into object_name(T) insert_columns(C) DEFAULT VALUES. {
+  A=FINISH(NODE(INSERT,.as.insert={T,0,C.list,{0},{0},R.replace,R.conflict,true,
+    .columns_specified=C.specified}),R.span);
 }
 %type key_columns {sqlp_key_columns}
 key_columns(A) ::= key_column(B). { A=sqlp_append_key(ctx,(sqlp_key_columns){0},B); }
@@ -1085,6 +1402,7 @@ reference_actions(A) ::= . { A=(sqlparser_reference_options){0}; }
 reference_actions(A) ::= reference_actions(B) ON DELETE reference_action(C). { A=B; A.on_delete=C; }
 reference_actions(A) ::= reference_actions(B) ON UPDATE reference_action(C). { A=B; A.on_update=C; }
 reference_actions(A) ::= reference_actions(B) MATCH ident(C). { A=B; A.match=AT(NAME,C); }
+reference_actions(A) ::= reference_actions(B) MATCH FULL(C). { A=B; A.match=AT(NAME,C); }
 reference_action(A) ::= SET NULL. { A=SQLPARSER_REFERENCE_SET_NULL; }
 reference_action(A) ::= SET DEFAULT. { A=SQLPARSER_REFERENCE_SET_DEFAULT; }
 reference_action(A) ::= CASCADE. { A=SQLPARSER_REFERENCE_CASCADE; }

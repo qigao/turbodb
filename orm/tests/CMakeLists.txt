@@ -4,6 +4,10 @@ find_package(PostgreSQL REQUIRED)
 get_target_property(ORM_SOURCE_DIR turbo_orm SOURCE_DIR)
 get_target_property(ORM_MYSQL_SOURCE_DIR turbodb_mysql SOURCE_DIR)
 
+# All ORM contract tests can include the public shared DTOs, including those
+# that compile a driver translation unit without linking the ORM runtime.
+link_libraries(TurboDB::Types)
+
 set(ORM_INTERNAL_TEST_LIBRARY turbo_orm)
 if(BUILD_TESTS)
   add_subdirectory(architecture)
