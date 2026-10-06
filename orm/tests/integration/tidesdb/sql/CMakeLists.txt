@@ -18,6 +18,9 @@ cmake_add_test(
   LIBS turbo_orm Salts::CFlow Salts::TinyTest
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 add_dependencies(orm_tidesdb_sql_relational_test orm_tidesdb_driver)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(orm_tidesdb_sql_relational_test PRIVATE m)
+endif()
 # Each case closes its native database; the complete suite now exceeds one minute.
 set_tests_properties(orm_tidesdb_sql_relational PROPERTIES TIMEOUT 120
   ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
