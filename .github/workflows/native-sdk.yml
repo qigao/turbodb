@@ -116,8 +116,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
+          set "TURBODB_CANONICAL_VCPKG_ROOT=%VCPKG_ROOT%"
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%TURBODB_CANONICAL_VCPKG_ROOT%"
           cmake --preset ci-windows-release -DTURBODB_MYSQL_CONNECTOR_J_JAR="%CONNECTOR_J_JAR%"
           if errorlevel 1 exit /b 1
           cmake --build --preset ci-windows-release --parallel 4
@@ -156,8 +158,10 @@ jobs:
         if: matrix.rid == 'windows-x64'
         shell: cmd
         run: |
+          set "TURBODB_CANONICAL_VCPKG_ROOT=%VCPKG_ROOT%"
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%TURBODB_CANONICAL_VCPKG_ROOT%"
           pwsh -NoProfile -File .\cmake\ci\test-installed-sdk.ps1 -Rid windows-x64 -SdkRoot "%GITHUB_WORKSPACE%\build\stage\sdk\windows-x64"
           if errorlevel 1 exit /b 1
       - uses: actions/upload-artifact@v4
