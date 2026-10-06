@@ -213,10 +213,15 @@ spec("TidesSQL MySQL server existing client end to end") {
         else if(step.kind==MYSQL_ASYNC_ERROR) { second_status=step.status; second_done=true; }
       }
     }
-    check_equal(server.accepted,UINT64_C(2)); check_equal(server.active,2u);
-    check_equal(server.transport_failures,UINT64_C(0)); check_equal(server.protocol_failures,UINT64_C(0));
+    info("sessions: first=%d second=%d active=%zu transport=%llu protocol=%llu network=%d",
+      (int)first_status,(int)second_status,server.active,
+      (unsigned long long)server.transport_failures,(unsigned long long)server.protocol_failures,
+      server.network_failure);
     check_equal(first_status,MYSQL_SESSION_OK); check_equal(second_status,MYSQL_SESSION_OK);
     check_true(first_done); check_true(second_done); check_true(first_row); check_true(second_row);
+    check_equal(server.accepted,UINT64_C(2));
+    check_equal(server.active,2u);
+    check_equal(server.transport_failures,UINT64_C(0)); check_equal(server.protocol_failures,UINT64_C(0));
   }
   it("bounds shutdown when an accepted client stops before TLS negotiation") {
     start_client_until_accepted();

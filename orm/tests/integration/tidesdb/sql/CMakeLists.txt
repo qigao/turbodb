@@ -21,8 +21,8 @@ add_dependencies(orm_tidesdb_sql_relational_test orm_tidesdb_driver)
 if(UNIX AND NOT APPLE)
   target_link_libraries(orm_tidesdb_sql_relational_test PRIVATE m)
 endif()
-# Each case closes its native database; the complete suite now exceeds one minute.
-set_tests_properties(orm_tidesdb_sql_relational PROPERTIES TIMEOUT 120
+# Per-case native database teardown makes the full suite exceed two minutes on macOS.
+set_tests_properties(orm_tidesdb_sql_relational PROPERTIES TIMEOUT 240
   ENVIRONMENT "ORM_TIDESDB_PLUGIN=$<TARGET_FILE:orm_tidesdb_driver>")
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_relational PROPERTIES ENVIRONMENT_MODIFICATION "${ORM_TEST_RUNTIME_PATH}")

@@ -82,8 +82,8 @@ cmake_add_test(
   LIBS TidesDB::tidesdb TurboDB::TidesSQL
     Salts::CSTL Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_sql_runtime_test PROPERTIES LINKER_LANGUAGE CXX)
-# Each case closes a native database; the full suite also includes fault matrices.
-set_tests_properties(orm_tidesdb_sql_runtime PROPERTIES TIMEOUT 90)
+# Per-case native database close and fault matrices need headroom on macOS runners.
+set_tests_properties(orm_tidesdb_sql_runtime PROPERTIES TIMEOUT 180)
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_runtime PROPERTIES ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
@@ -108,7 +108,8 @@ cmake_add_test(
   LIBS TidesDB::tidesdb TurboDB::TidesSQL
     Salts::CSTL Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_sql_index_store_test PROPERTIES LINKER_LANGUAGE CXX)
-set_tests_properties(orm_tidesdb_sql_index_store PROPERTIES TIMEOUT 60)
+# This suite repeatedly closes and reopens durable stores during fault sweeps.
+set_tests_properties(orm_tidesdb_sql_index_store PROPERTIES TIMEOUT 120)
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_index_store PROPERTIES ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
