@@ -16,12 +16,6 @@
         "sqlite3"
       ]
     },
-    "mongodb": {
-      "description": "Build the optional runtime-loaded MongoDB ORM Driver",
-      "dependencies": [
-        "mongo-c-driver"
-      ]
-    },
     "postgresql": {
       "description": "Build the optional PostgreSQL ORM backend",
       "dependencies": [
@@ -43,22 +37,5 @@
       ]
     }
   },
-  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01",
-  "overrides": [
-    {
-      "name": "mongo-c-driver",
-      "version": "2.3.1",
-      "port-version": 2
-    },
-    {
-      "name": "libbson",
-      "version": "2.3.1",
-      "port-version": 0
-    },
-    {
-      "name": "utf8proc",
-      "version": "2.11.3",
-      "port-version": 0
-    }
-  ]
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
 }

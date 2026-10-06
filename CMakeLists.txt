@@ -120,8 +120,11 @@ if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS)
   add_subdirectory(drivers/schema)
 endif()
 
-if(TURBODB_BUILD_ORM)
+if(TURBODB_BUILD_REDIS)
   add_subdirectory(redis)
+endif()
+
+if(TURBODB_BUILD_ORM)
   add_subdirectory(mysql)
   add_subdirectory(orm)
   add_subdirectory(drivers)
@@ -135,8 +138,8 @@ if(TURBODB_BUILD_DBTOOLS)
   add_subdirectory(dbtools)
 endif()
 
-if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS OR TURBODB_BUILD_SQLPARSER OR
-   TURBODB_BUILD_TIDESSQL_SERVER)
+if(TURBODB_BUILD_ORM OR TURBODB_BUILD_REDIS OR TURBODB_BUILD_DBTOOLS OR
+   TURBODB_BUILD_SQLPARSER OR TURBODB_BUILD_TIDESSQL_SERVER)
   include(CMakePackageConfigHelpers)
   configure_package_config_file(
     cmake/TurboDBConfig.cmake.in

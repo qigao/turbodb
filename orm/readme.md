@@ -26,8 +26,8 @@ Row queries use `orm_query_open_flow`. Mutating or DDL queries use
 execution begins on the first unit of demand.
 
 The active cursor is the fact source. No second result matrix is built in the
-ORM. PostgreSQL uses libpq single-row mode, MongoDB uses its native cursor,
-SQLite advances the prepared statement, and TidesDB advances its iterator.
+ORM. PostgreSQL uses libpq single-row mode, SQLite advances the prepared
+statement, and TidesDB advances its iterator.
 
 Each backend selects CSerde token kinds from its own native metadata. DataBind
 does not guess numeric or boolean values from arbitrary strings. PostgreSQL
@@ -99,7 +99,6 @@ The repository root builds `orm/`, then `drivers/`, then `orm/tests/`.
 The `drivers/` dispatcher builds SQLite, PostgreSQL, MySQL and TidesDB
 from their own directories. Native MySQL code belongs to the root `mysql/`
 library; its ORM adapter is in `drivers/mysql/`.
-MongoDB remains in `drivers/mongodb/` without being added to the build.
 The shared core owns no native database dependency; each plugin owns its
 native SDK links and install rule.
 The private test core recompiles the production target's source selection with
@@ -169,7 +168,7 @@ targets。驱动构建失败会直接终止构建，不产生自动降级路径�
 
 ### Runtime-loaded Drivers
 
-SQLite, PostgreSQL, MySQL, TidesDB, and MongoDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
+SQLite, PostgreSQL, MySQL and TidesDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
 The application loads an exact module path into an `orm_runtime_t`, then
 connects by the canonical Plugin manifest ID. Runtime loading does not scan
 directories, infer aliases, retry older ABIs, or fall back to a built-in
@@ -203,10 +202,6 @@ orm_runtime_release(runtime);
 ```
 
 The Driver keeps its Plugin lease while connection-owned native work is live.
-MongoDB's native process runtime is owned by the managed MongoDB Plugin:
-`mongoc_init()` runs from Plugin start and `mongoc_cleanup()` runs only after
-all Driver leases quiesce and before module unload. No process-global
-`atexit` callback is registered by the ORM adapter.
 
 ### Typed row Publisher
 
@@ -324,8 +319,6 @@ must outlive that Publisher.
   affected-row parsing; explicit transactions and savepoints. Field OIDs select
   supported scalar token kinds; arbitrary-precision and unknown types remain
   strings instead of being narrowed.
-- MongoDB: native row cursor and direct insert/update/delete commands;
-  transactions require a deployment that supports MongoDB sessions.
 - TidesDB: iterator-backed row Publisher, direct commands, and a
   [bounded SQL frontend](../tidessql/readme.md) for parameterized
   SELECT/INSERT/UPDATE/DELETE. Stateful ordering,
@@ -335,9 +328,9 @@ must outlive that Publisher.
   `max_scan_rows` and `max_scan_bytes`; transaction commit/rollback returns
   `ORM_STATUS_BUSY` while a transaction row Publisher is open.
 
-Redis is intentionally not an ORM backend: it does not implement the SQL
-contract expected by this layer. Use the standalone `TurboDB::Redis` client and
-its Redis-native APIs instead.
+MongoDB and Redis are intentionally not ORM backends: they do not implement the
+SQL contract expected by this layer. Use the independently selectable
+`TurboDB::Redis` client and its Redis-native APIs for Redis workloads.
 
 Backend options are validated at connection creation. Unknown options are
 rejected instead of silently enabling a fallback.
@@ -362,9 +355,9 @@ unchanged.
 ## Build and test
 
 ORM builds SQLite, PostgreSQL, MySQL and TidesDB drivers together.
-There are no per-database build switches. MongoDB sources remain in the tree,
-but its native driver and database-dependent tests are excluded from the build.
-`TURBODB_BUILD_ORM` and `TURBODB_BUILD_DBTOOLS` select the modules to build.
+There are no per-database ORM build switches. `TURBODB_BUILD_ORM` and
+`TURBODB_BUILD_DBTOOLS` select the ORM and database-tool modules;
+`TURBODB_BUILD_REDIS` independently selects the standalone Redis client.
 The database tools always support SQLite and PostgreSQL. Enabling either module
 selects both vcpkg manifest features before toolchain initialization.
 The standalone Redis client and TidesDB are built from their repository modules;
@@ -388,7 +381,7 @@ ctest --preset win-dev-user --output-on-failure
 `orm/tests/CMakeLists.txt` dispatches to `abi/`, `driver/`, `flow/`,
 `integration/`, and `ownership/`, each with its own `CMakeLists.txt`.
 Driver tests are further grouped into `mysql/`, `postgresql/`, `sqlite/`,
-`mongodb/`, and `cross_driver/`, each with its own `CMakeLists.txt`.
+`tidesdb/`, and `cross_driver/`, each with its own `CMakeLists.txt`.
 Generic driver and runtime tests remain directly under `driver/`.
 Database-specific flow and ABI tests also have their own subdirectories.
 Integration tests are split into `integration/sqlite/` and

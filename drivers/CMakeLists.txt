@@ -5,5 +5,3 @@ add_subdirectory(sqlite)
 add_subdirectory(postgresql)
 add_subdirectory(tidesdb)
 add_subdirectory(mysql)
-
-# MongoDB is retained as source only.

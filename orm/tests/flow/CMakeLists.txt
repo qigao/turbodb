@@ -46,7 +46,6 @@ if(WIN32)
 endif()
 
 add_subdirectory(command)
-add_subdirectory(mongodb)
 add_subdirectory(postgresql)
 add_subdirectory(sqlite)
 add_subdirectory(tidesdb)

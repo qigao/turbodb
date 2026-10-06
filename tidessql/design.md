@@ -7507,8 +7507,8 @@ prepared DML、结构化查询/更新与事务回滚链路。日志为
 用例以测试内固定上限脚本保存多次返回值，避免引入无界队列。旧
 `TINYMOCk_MOCK*`/`TINYMOCk_ARG`/`TINYMOCk_RETURN` 调用已清空。Windows Release
 all-target 构建及 `install-win-release-user` 均成功；安装结果保留独立 `tedis` 客户端，
-但 ORM driver 仅包含 SQLite、PostgreSQL、TidesDB、MySQL。MongoDB 仍为既有
-source-only 范围，Linux/sanitizer 及外部 MySQL/PostgreSQL 服务端差分测试由其独立环境执行。
+但 ORM driver 仅包含 SQLite、PostgreSQL、TidesDB、MySQL；MongoDB 与 Redis
+均不属于 SQL ORM driver。Linux/sanitizer 及外部 MySQL/PostgreSQL 服务端差分测试由其独立环境执行。
 
 当前复验集合不再包含已删除的 Redis ORM contract target：
 
