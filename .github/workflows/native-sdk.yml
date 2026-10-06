@@ -37,7 +37,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: Install macOS host tools
         if: runner.os == 'macOS'
-        run: brew install ninja maven
+        run: brew install autoconf ninja maven
       - name: Build bundled Lemon host tool
         if: matrix.rid == 'android-arm64-v8a'
         shell: bash

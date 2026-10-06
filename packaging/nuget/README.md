@@ -4,7 +4,7 @@
 
 每个平台的安装树位于 `sdk/linux-x64`、`sdk/linux-arm64`、`sdk/macos-arm64`、`sdk/windows-x64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 的 `bin/tidessqld[.exe]` 提供独立 MySQL/TLS 服务并另含 dbtools；Android 只发布库。
 
-CI 和发布流程始终以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新稳定版本，通过 `--no-cache --force-evaluate` 重新解析，不锁定版本、不生成依赖锁文件。每个安装树的 `turbodb-sdk-manifest.txt` 仅记录实际构建版本供诊断，不参与后续版本选择。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll`、`libpq.dll`、`ssl.dll` 和 `crypto.dll`；后两者是 libpq 的传递运行时，不是 MySQL/TidesSQL 的构建接口。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
+CI 和发布流程始终以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新稳定版本，通过 `--no-cache --force-evaluate` 重新解析，不锁定版本、不生成依赖锁文件。每个安装树的 `turbodb-sdk-manifest.txt` 仅记录实际构建版本供诊断，不参与后续版本选择。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`；libpq 不含 SSL，TLS 由 Salts::CNet 提供。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
 
 消费项目也应直接声明 `Salts.Native`、`SaltsUtils.Native` 的 `PackageReference Version="*"`，并在 restore 时使用 `--no-cache --force-evaluate`。NuGet 发布包中的传递依赖不能保证每次都选择最新版本，直接浮动引用才表达这一要求，参见 [NuGet 依赖解析规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution)。
 

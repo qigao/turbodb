@@ -26,11 +26,9 @@ _LEGACY_CRYPTO_PREFIXES = (
 
 _WINDOWS_RUNTIME_DLLS = {
     "cnet.dll",
-    "crypto.dll",
     "libpq.dll",
     "salts.dll",
     "sqlite3.dll",
-    "ssl.dll",
     "tedis.dll",
     "turbo_orm.dll",
 }

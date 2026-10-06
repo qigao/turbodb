@@ -7,7 +7,6 @@ target_include_directories(tidessql_mysql_wire PUBLIC
 target_link_libraries(tidessql_mysql_wire PUBLIC TurboDB::Types)
 cmake_config_target(tidessql_mysql_wire NO_INSTALL FOLDER "tidessql/server/mysql")
 
-find_package(GmSSL CONFIG REQUIRED)
 add_library(tidessql_mysql_frontend STATIC
   registry.c dispatch.c password.c authenticate.c frontend.c server.c)
 target_include_directories(tidessql_mysql_frontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -57,11 +57,11 @@ if ($tidessqld) {
 
 # Keep this list to the runtime closure of the shipped SQLite and PostgreSQL
 # drivers. Copying the entire vcpkg bin directory leaks unrelated tools and
-# libraries into the SDK. libpq requires the BoringSSL runtime DLLs; the
-# MySQL/TidesSQL implementation and public SDK continue to use bundled GmSSL.
+# libraries into the SDK. TLS and authentication digests use Salts; libpq is
+# built without its own SSL provider.
 if ($Rid -eq "windows-x64") {
   $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/x64-windows/bin"
-  foreach ($runtimeDll in @("crypto.dll", "libpq.dll", "sqlite3.dll", "ssl.dll")) {
+  foreach ($runtimeDll in @("libpq.dll", "sqlite3.dll")) {
     $source = Join-Path $vcpkgBin $runtimeDll
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
       throw "required Windows driver runtime is missing: $source"

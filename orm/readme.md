@@ -53,16 +53,16 @@ The build no longer generates an `OrmConfig.cmake` package; `Orm::C` and
 
 ### Plugin architecture and ownership
 
-The runtime uses the installed `Salts::Plugin` implementation and its ABI 4
+The runtime uses the installed `Salts::Plugin` implementation and its current ABI
 contract. `SALTS_ROOT` and `SALTS_UTILS_ROOT` in the selected user preset select
 the SDKs. The build requires both `Salts::Plugin` and `Salts::PluginABI`; it does
 not compile a private copy of the loader. `Orm::DriverABI` publishes the ORM
 driver headers and their `Salts::PluginABI`, Core, CFlow and CSerde dependencies.
 It does not link the host loader or a native database library.
 
-Plugin ABI 4 is an exact admission epoch, including the CMeta reflection layouts
-exposed by exports. The SDK rejects other Plugin epochs at compile time; the
-host rejects old modules before consuming their descriptors. There is no ABI 3
+`SALTS_PLUGIN_ABI_VERSION` selects the exact admission epoch, including the CMeta
+reflection layouts exposed by exports. The source SDK follows the installed Salts
+epoch; the host rejects mismatched modules before consuming their descriptors. There is no cross-epoch
 negotiation, retry or compatibility path. Rebuild the host and all modules with
 the same current Salts SDK, then deploy them together after active leases drain.
 Clean compiled objects when upgrading the SDK epoch; an incremental relink can

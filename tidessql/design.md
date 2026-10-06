@@ -1,5 +1,11 @@
 # TidesDB SQL 执行层设计
 
+2026-10-06 rebase 决策：保留 `master` 的 Salts 摘要接口、无 SSL libpq 和随构建
+SDK 匹配的 Plugin ABI epoch；TidesSQL 服务端保留 GmSSL 密码验证实现。公开导出
+不再解析或打包 GmSSL 开发文件，Windows 只暂存 libpq/sqlite3 的 vcpkg DLL。
+这取代下文历史阶段记录中的客户端直接 GmSSL 链接、随包 GmSSL 和固定 ABI 4
+准入描述；SQL、认证报文、密码记录格式和插件加载时的精确 ABI 校验保持原契约。
+
 ## MySQL 远程接入与共享数据库
 
 总任务 [#204](https://github.com/qigao/turbodb/issues/204) 将远程服务拆成

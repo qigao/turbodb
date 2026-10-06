@@ -33,8 +33,9 @@ static orm_runtime_t *open_runtime(orm_error_t *error) {
 }
 
 static orm_connection_t *open_generation(
-    orm_runtime_t *runtime, const char *path, orm_error_t *error) {
-  orm_option_t options[2];
+    orm_runtime_t *runtime, const char *path, bool initialize, orm_error_t *error) {
+  enum { GENERATION_OPTION_COUNT = 3 };
+  orm_option_t options[GENERATION_OPTION_COUNT];
   orm_config_t config;
   orm_connection_t *connection = NULL;
 
@@ -42,9 +43,11 @@ static orm_connection_t *open_generation(
   options[0] = (orm_option_t){orm_view("path"), orm_view(path)};
   options[1] =
       (orm_option_t){orm_view("column_family"), orm_view("provider")};
+  options[2] = (orm_option_t){orm_view("sql_initialize"),
+                            orm_view(initialize ? "true" : "false")};
   config.driver = orm_view("tidesdb");
   config.options = options;
-  config.option_count = 2u;
+  config.option_count = GENERATION_OPTION_COUNT;
   check_equal(orm_runtime_connect(runtime, &config, &connection, error),
               ORM_STATUS_OK);
   check_not_null(connection);
@@ -56,12 +59,21 @@ static void seed_generation(
   orm_error_t error;
   orm_connection_t *connection;
   orm_query_t *query = NULL;
+  orm_result_t *result = NULL;
   cflow_publisher source = {0};
   orm_command_result_t command = ORM_COMMAND_RESULT_INIT;
   cflow_step step;
 
   orm_error_init(&error);
-  connection = open_generation(runtime, path, &error);
+  connection = open_generation(runtime, path, true, &error);
+  /* Each generation owns an explicitly initialized relational catalog. */
+  check_equal(orm_raw(connection,
+                      orm_view("CREATE TABLE people(id BIGINT PRIMARY KEY,score BIGINT)"),
+                      &query, &error), ORM_STATUS_OK);
+  check_equal(orm_query_execute(query, &result, &error), ORM_STATUS_OK);
+  orm_result_destroy(result);
+  orm_query_destroy(query);
+  query = NULL;
   check_equal(orm_insert(connection, orm_view("people"), &query, &error),
               ORM_STATUS_OK);
   check_equal(orm_query_set(query, orm_view("id"), orm_i64(1), &error),
@@ -195,7 +207,7 @@ spec("TidesDB staged generation publication") {
     check_equal(active.generation_size, 8u);
     check_equal(memcmp(active.generation, "g-000001", 8u), 0);
 
-    old_connection = open_generation(runtime, g1_path, &error);
+    old_connection = open_generation(runtime, g1_path, false, &error);
     check_equal(read_generation_connection(old_connection), 11L);
 
     published = publish_generation(runtime, root, "g-000002", &error);
@@ -211,7 +223,7 @@ spec("TidesDB staged generation publication") {
 
     join_path(resolved_path, sizeof(resolved_path),
               generations, active.generation);
-    new_connection = open_generation(runtime, resolved_path, &error);
+    new_connection = open_generation(runtime, resolved_path, false, &error);
     check_equal(read_generation_connection(new_connection), 22L);
 
     orm_disconnect(new_connection);

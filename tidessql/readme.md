@@ -1,5 +1,11 @@
 # TidesSQL 执行引擎
 
+2026-10-06 与 `master` 合并后的依赖契约：MySQL 客户端摘要使用 Salts API，
+服务端密码验证继续直接使用 GmSSL；公开 SDK 不导出或附带 GmSSL 开发包。
+PostgreSQL 使用无 SSL 的 libpq，TLS 由 CNet 提供。Plugin ABI epoch 跟随构建时
+安装的 Salts SDK，宿主与模块必须匹配。下文分阶段记录中的 GmSSL SDK 打包、
+libpq SSL DLL 和固定 Plugin ABI 4 描述是合并前的历史状态。
+
 `sqlparser` 与 `tidessql` 是根目录下两个模块：前者提供 MySQL/SQLite 方言的
 AST，后者负责语义绑定、表达式与查询执行、Catalog、关系记录、索引、事务预算
 和原生 TidesDB 存储适配。解析器接受某种语法不表示执行引擎已经实现其语义；

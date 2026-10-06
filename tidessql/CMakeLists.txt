@@ -32,6 +32,7 @@ cmake_config_package(PACKAGE TidesSQL EXPORT_SET TidesSQLTargets NAMESPACE Turbo
   CONFIG_TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/TidesSQLConfig.cmake.in
   VERSION 1.3.0 COMPATIBILITY SameMajorVersion)
 
+find_package(GmSSL CONFIG REQUIRED)
 add_subdirectory(server/mysql)
 if(TURBODB_BUILD_TIDESSQL_SERVER)
   add_subdirectory(server/daemon)

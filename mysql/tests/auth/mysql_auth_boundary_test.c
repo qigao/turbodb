@@ -5,7 +5,7 @@
 spec("MySQL authentication boundaries") {
   (void)ttest_config__;
 
-  it("preserves the independent SHA-256 and SHA-1 protocol vectors with GmSSL") {
+  it("preserves the independent SHA-256 and SHA-1 protocol vectors with Salts") {
     const uint8_t nonce[MYSQL_AUTH_NONCE_BYTES] = {
       '1','2','3','4','5','6','7','8','9','0','1','2','3','4','5','6','7','8','9','0'};
     const uint8_t sha2[32] = {
