@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-foreach ($name in @("GITHUB_WORKSPACE", "TURBODB_CI_PKG_ROOT", "VCPKG_ROOT", "VCPKG_INSTALLED_DIR")) {
+foreach ($name in @("GITHUB_WORKSPACE", "TURBODB_CI_PKG_ROOT", "VCPKG_ROOT")) {
   if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
     throw "$name is required"
   }
@@ -14,7 +14,11 @@ foreach ($name in @("GITHUB_WORKSPACE", "TURBODB_CI_PKG_ROOT", "VCPKG_ROOT", "VC
 
 $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
 $packageRoot = [IO.Path]::GetFullPath($env:TURBODB_CI_PKG_ROOT)
-$vcpkgInstalledDir = [IO.Path]::GetFullPath($env:VCPKG_INSTALLED_DIR)
+$vcpkgInstalledDir = if ([string]::IsNullOrWhiteSpace($env:VCPKG_INSTALLED_DIR)) {
+  Join-Path $workspace "vcpkg_installed"
+} else {
+  [IO.Path]::GetFullPath($env:VCPKG_INSTALLED_DIR)
+}
 $source = Join-Path $workspace "packaging/tests/installed-consumer"
 $build = Join-Path $workspace "build/installed-consumer-$Rid"
 $triplet = if ($Rid -eq "windows-x64") { "x64-windows" } else { "x64-linux" }
