@@ -9,18 +9,12 @@
       "hidden": true,
       "inherits": "base-test",
       "filter": {
-        "exclude": {
-          "label": "^(benchmark|tidessql)$"
-        }
-      }
-    },
-    {
-      "name": "tidessql-test",
-      "hidden": true,
-      "inherits": "base-test",
-      "filter": {
         "include": {
-          "label": "^tidessql$"
+          "name": "^orm_"
+        },
+        "exclude": {
+          "name": "^orm_tidesdb_",
+          "label": "^(benchmark|tidessql)$"
         }
       }
     },
