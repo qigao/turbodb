@@ -76,3 +76,6 @@ if(TURBODB_MYSQL_CONNECTOR_J_JAR)
       "${TIDESSQL_TEST_RUNTIME_PATH};PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::CNet>;PATH=path_list_prepend:$<TARGET_FILE_DIR:Salts::TomlParser>")
   endif()
 endif()
+
+get_property(tidessql_tests DIRECTORY PROPERTY TESTS)
+set_property(TEST ${tidessql_tests} APPEND PROPERTY LABELS tidessql)

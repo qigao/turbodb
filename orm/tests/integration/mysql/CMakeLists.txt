@@ -27,7 +27,7 @@ endif()
 
 set_tests_properties(
   orm_mysql_tidessqld_e2e
-  PROPERTIES LABELS integration RUN_SERIAL TRUE TIMEOUT 90)
+  PROPERTIES LABELS "integration;tidessql" RUN_SERIAL TRUE TIMEOUT 90)
 if(WIN32)
   set_tests_properties(
     orm_mysql_tidessqld_e2e

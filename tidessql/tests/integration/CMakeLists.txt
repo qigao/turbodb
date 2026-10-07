@@ -114,3 +114,6 @@ set_tests_properties(orm_tidesdb_sql_index_store PROPERTIES TIMEOUT 120)
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_index_store PROPERTIES ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
+
+get_property(tidessql_tests DIRECTORY PROPERTY TESTS)
+set_property(TEST ${tidessql_tests} APPEND PROPERTY LABELS tidessql)

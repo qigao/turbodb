@@ -6,3 +6,6 @@ set_tests_properties(tidessql_sdk_cpp PROPERTIES TIMEOUT 30)
 if(WIN32)
   set_tests_properties(tidessql_sdk_cpp PROPERTIES ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
+
+get_property(tidessql_tests DIRECTORY PROPERTY TESTS)
+set_property(TEST ${tidessql_tests} APPEND PROPERTY LABELS tidessql)
