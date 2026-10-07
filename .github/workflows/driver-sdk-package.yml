@@ -1,4 +1,4 @@
-name: Native build and tests
+name: ORM CI
 
 on:
   pull_request:
@@ -62,3 +62,255 @@ jobs:
     if: >-
       github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'release: publish TurboDB package')
     uses: ./.github/workflows/native-sdk.yml
+
+  mysql-cnet-live:
+    name: MySQL 8.0.40 CNet TLS/auth/ping
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      mysql:
+        image: mysql:8.0.40
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+          MYSQL_DATABASE: turbodb
+          MYSQL_USER: turbodb
+          MYSQL_PASSWORD: turbodbpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -prootpw"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-native
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
+
+      - name: Prepare MySQL auth users and TLS fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mysql-tls" "$GITHUB_WORKSPACE/evidence/mysql"
+          cid="$(docker ps --filter ancestor=mysql:8.0.40 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+
+          docker exec "$cid" mysql -uroot -prootpw -e \
+            "CREATE DATABASE IF NOT EXISTS turbodb_b; CREATE USER IF NOT EXISTS 'nativeuser'@'%' IDENTIFIED WITH mysql_native_password BY 'nativepass'; GRANT ALL ON turbodb.* TO 'nativeuser'@'%'; GRANT ALL ON turbodb_b.* TO 'turbodb'@'%'; GRANT ALL ON turbodb_b.* TO 'nativeuser'@'%'; FLUSH PRIVILEGES;"
+
+          docker exec "$cid" mysql -uroot -prootpw -e \
+            "DROP TABLE IF EXISTS turbodb.m3_probe; CREATE TABLE turbodb.m3_probe(s BIGINT NOT NULL, u BIGINT UNSIGNED NOT NULL, txt VARCHAR(32) NOT NULL, decv DECIMAL(10,2) NOT NULL); INSERT INTO turbodb.m3_probe VALUES (-42,18446744073709551615,'hello',123.45); DROP TABLE IF EXISTS turbodb.m4_command; CREATE TABLE turbodb.m4_command(s BIGINT NOT NULL PRIMARY KEY, txt VARCHAR(64) NOT NULL); INSERT INTO turbodb.m4_command VALUES (-7,'seed'); DROP TABLE IF EXISTS turbodb.m4_txn; CREATE TABLE turbodb.m4_txn(s BIGINT NOT NULL PRIMARY KEY, txt VARCHAR(64) NOT NULL); INSERT INTO turbodb.m4_txn VALUES (-9,'seed'); DROP TABLE IF EXISTS turbodb.m4_commit_unknown; CREATE TABLE turbodb.m4_commit_unknown(s BIGINT NOT NULL PRIMARY KEY, n BIGINT NOT NULL); INSERT INTO turbodb.m4_commit_unknown VALUES (-11,0); DROP TABLE IF EXISTS turbodb.m4_driver; CREATE TABLE turbodb.m4_driver(s BIGINT NOT NULL PRIMARY KEY, n BIGINT NOT NULL); INSERT INTO turbodb.m4_driver VALUES (-13,0); DROP TABLE IF EXISTS turbodb_b.m4_driver; CREATE TABLE turbodb_b.m4_driver(s BIGINT NOT NULL PRIMARY KEY, n BIGINT NOT NULL); INSERT INTO turbodb_b.m4_driver VALUES (-13,100); DROP TABLE IF EXISTS turbodb.structured_items; CREATE TABLE turbodb.structured_items(id BIGINT NOT NULL PRIMARY KEY, s BIGINT NOT NULL, note VARCHAR(32) NULL); DROP TABLE IF EXISTS turbodb_b.structured_items; CREATE TABLE turbodb_b.structured_items(id BIGINT NOT NULL PRIMARY KEY, s BIGINT NOT NULL, note VARCHAR(32) NULL); DROP TABLE IF EXISTS turbodb.m5_values; CREATE TABLE turbodb.m5_values(id BIGINT NOT NULL PRIMARY KEY, n_null BIGINT NULL, u BIGINT UNSIGNED NOT NULL, b BLOB NOT NULL, decv DECIMAL(20,6) NOT NULL, d DATE NOT NULL, t TIME(6) NOT NULL, dt DATETIME(6) NOT NULL); INSERT INTO turbodb.m5_values VALUES (1,NULL,18446744073709551615,X'007FFF',1234567890123.456789,'2026-09-28','12:34:56.123456','2026-09-28 12:34:56.654321'); DROP TABLE IF EXISTS turbodb.m5_constraint; CREATE TABLE turbodb.m5_constraint(id BIGINT NOT NULL PRIMARY KEY, note VARCHAR(32) NOT NULL); INSERT INTO turbodb.m5_constraint VALUES (1,'seed'); DROP TABLE IF EXISTS turbodb.m5_disconnect; CREATE TABLE turbodb.m5_disconnect(id BIGINT NOT NULL PRIMARY KEY, n BIGINT NOT NULL); INSERT INTO turbodb.m5_disconnect VALUES (1,0);"
+          docker exec "$cid" mysql -uroot -prootpw -Nse \
+            "SELECT VERSION(); SELECT user,host,plugin FROM mysql.user WHERE user IN ('turbodb','nativeuser') ORDER BY user,host;" \
+            | tee "$GITHUB_WORKSPACE/evidence/mysql/server.txt"
+
+          fixture="$GITHUB_WORKSPACE/tidessql/tests/protocol/fixtures"
+          docker cp "$fixture/p256-test-root-cert.pem" "$cid:/var/lib/mysql/ca.pem"
+          docker cp "$fixture/p256-test-server-cert.pem" "$cid:/var/lib/mysql/server-cert.pem"
+          docker cp "$fixture/p256-test-server-key.pem" "$cid:/var/lib/mysql/server-key.pem"
+          docker exec --user root "$cid" chown mysql:mysql \
+            /var/lib/mysql/ca.pem /var/lib/mysql/server-cert.pem /var/lib/mysql/server-key.pem
+          docker exec --user root "$cid" chmod 600 /var/lib/mysql/server-key.pem
+          docker exec "$cid" mysql -uroot -prootpw -e "ALTER INSTANCE RELOAD TLS;"
+
+          cp "$fixture/p256-test-root-cert.pem" "$RUNNER_TEMP/mysql-tls/ca.pem"
+          cp "$fixture/p256-test-server-cert.pem" "$RUNNER_TEMP/mysql-tls/server-cert.pem"
+          openssl verify -CAfile "$RUNNER_TEMP/mysql-tls/ca.pem" \
+            -verify_hostname localhost "$RUNNER_TEMP/mysql-tls/server-cert.pem"
+          subject="$(openssl x509 -in "$RUNNER_TEMP/mysql-tls/server-cert.pem" \
+            -noout -subject -nameopt RFC2253)"
+          server_name=localhost
+          printf 'certificate_subject=%s\nserver_name=%s\n' "$subject" "$server_name" \
+            | tee "$GITHUB_WORKSPACE/evidence/mysql/tls.txt"
+
+          {
+            echo "ORM_MYSQL_HOST=127.0.0.1"
+            echo "ORM_MYSQL_PORT=3306"
+            echo "ORM_MYSQL_USER=turbodb"
+            echo "ORM_MYSQL_PASSWORD=turbodbpass"
+            echo "ORM_MYSQL_DATABASE=turbodb"
+            echo "ORM_MYSQL_DATABASE_B=turbodb_b"
+            echo "ORM_MYSQL_CA_FILE=$RUNNER_TEMP/mysql-tls/ca.pem"
+            echo "ORM_MYSQL_SERVER_NAME=$server_name"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and run MySQL live tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux-e2e
+          cmake --build --preset ci-linux-e2e --parallel 4
+          export TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO
+          TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO="$(python3 -c 'import json,os; print(json.dumps({"host":os.environ["ORM_MYSQL_HOST"],"port":int(os.environ["ORM_MYSQL_PORT"]),"username":os.environ["ORM_MYSQL_USER"],"password":os.environ["ORM_MYSQL_PASSWORD"],"database":os.environ["ORM_MYSQL_DATABASE"],"ca_file":os.environ["ORM_MYSQL_CA_FILE"],"server_name":os.environ["ORM_MYSQL_SERVER_NAME"]}))')"
+          ctest --preset ci-linux-e2e -R '^orm_mysql_(driver_live|live)$' --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/evidence/mysql/tests.xml"
+
+      - name: Test mysql_native_password authentication
+        shell: bash
+        env:
+          ORM_MYSQL_USER: nativeuser
+          ORM_MYSQL_PASSWORD: nativepass
+        run: |
+          ctest --preset ci-linux-e2e -R '^orm_mysql_live$' --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/evidence/mysql/native-auth.xml"
+
+      - name: Keep MySQL test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-cnet-live-${{ github.sha }}
+          path: evidence/mysql/
+          if-no-files-found: warn
+
+  validation-parity:
+    name: PostgreSQL 17.6 + SQLite ValidationPlan parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17.6-alpine3.22
+        env:
+          POSTGRES_DB: turbodb
+          POSTGRES_USER: turbodb
+          POSTGRES_PASSWORD: turbodb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U turbodb -d turbodb"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout exact TurboDB head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-native
+
+      - name: Install Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Configure PostgreSQL 17 direct TLS fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          tls="$RUNNER_TEMP/postgres-tls"
+          mkdir -p "$tls"
+
+          openssl genrsa -out "$tls/ca.key" 2048
+          openssl req -x509 -new -key "$tls/ca.key" -sha256 -days 1 \
+            -subj "/CN=TurboDB PostgreSQL Test CA" -out "$tls/ca.pem"
+
+          openssl genrsa -out "$tls/server.key" 2048
+          openssl req -new -key "$tls/server.key" -subj "/CN=localhost" \
+            -out "$tls/server.csr"
+          cat > "$tls/server.ext" <<'EOF'
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth
+          subjectAltName=DNS:localhost
+          authorityKeyIdentifier=keyid,issuer
+          subjectKeyIdentifier=hash
+          EOF
+          openssl x509 -req -in "$tls/server.csr" \
+            -CA "$tls/ca.pem" -CAkey "$tls/ca.key" -CAcreateserial \
+            -days 1 -sha256 -extfile "$tls/server.ext" -out "$tls/server.crt"
+
+          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
+            -subj "/CN=TurboDB Wrong CA" \
+            -keyout "$tls/wrong-ca.key" -out "$tls/wrong-ca.pem"
+
+          container="$(docker ps --filter ancestor=postgres:17.6-alpine3.22 \
+            --format '{{.ID}}' | head -n1)"
+          test -n "$container"
+          pgdata="$(docker exec "$container" sh -c 'printf %s "$PGDATA"')"
+          test -n "$pgdata"
+
+          docker cp "$tls/server.crt" "$container:$pgdata/server.crt"
+          docker cp "$tls/server.key" "$container:$pgdata/server.key"
+          docker exec "$container" chown postgres:postgres \
+            "$pgdata/server.crt" "$pgdata/server.key"
+          docker exec "$container" chmod 600 "$pgdata/server.key"
+          docker exec -u postgres "$container" sh -ceu '
+            {
+              echo "ssl = on"
+              echo "ssl_cert_file = '\''server.crt'\''"
+              echo "ssl_key_file = '\''server.key'\''"
+            } >> "$PGDATA/postgresql.conf"
+            {
+              echo "hostssl all turbodb 0.0.0.0/0 scram-sha-256"
+              echo "hostssl all turbodb ::/0 scram-sha-256"
+              cat "$PGDATA/pg_hba.conf"
+            } > "$PGDATA/pg_hba.conf.new"
+            mv "$PGDATA/pg_hba.conf.new" "$PGDATA/pg_hba.conf"
+          '
+          docker restart "$container" >/dev/null
+          for _ in $(seq 1 30); do
+            if docker exec "$container" pg_isready -U turbodb -d turbodb >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec "$container" pg_isready -U turbodb -d turbodb
+
+          nohup openssl s_server -accept 55432 \
+            -cert "$tls/server.crt" -key "$tls/server.key" \
+            -alpn h2 -www >"$tls/wrong-alpn.log" 2>&1 &
+          echo $! > "$tls/wrong-alpn.pid"
+
+          echo "TURBODB_PG_TLS_PORT=5432" >> "$GITHUB_ENV"
+          echo "TURBODB_PG_TLS_WRONG_ALPN_PORT=55432" >> "$GITHUB_ENV"
+          echo "TURBODB_PG_TLS_CA=$tls/ca.pem" >> "$GITHUB_ENV"
+          echo "TURBODB_PG_TLS_WRONG_CA=$tls/wrong-ca.pem" >> "$GITHUB_ENV"
+
+      - name: Restore published Salts SDK pair
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid linux-x64
+
+      - name: Build and run cross-Driver ValidationPlan parity
+        shell: bash
+        env:
+          TURBODB_DBTOOLS_PG_TEST_CONNINFO: "host=127.0.0.1 port=5432 dbname=turbodb user=turbodb password=turbodb"
+          TURBODB_ORM_PGSQL_TEST_CONNINFO: "host=127.0.0.1 port=5432 dbname=turbodb user=turbodb password=turbodb"
+        run: |
+          set -euo pipefail
+          evidence="$GITHUB_WORKSPACE/evidence/sql-validation-parity"
+          mkdir -p "$evidence"
+
+          cmake --preset ci-linux-e2e
+
+          cmake --build --preset ci-linux-e2e --parallel 4
+
+          ctest --preset ci-linux-e2e -R '^(orm_sql_validation_parity|orm_postgres_live|orm_postgres_direct_tls_live|orm_postgres_direct_tls_binding_mismatch|orm_owner_postgres|orm_owner_postgres_loss)$' \
+            --output-on-failure --output-junit "$evidence/tests.xml" 2>&1 | tee "$evidence/ctest.log"
+
+      - name: Keep PostgreSQL test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-validation-parity-${{ github.sha }}
+          path: evidence/sql-validation-parity/
+          if-no-files-found: warn
