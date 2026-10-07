@@ -163,9 +163,15 @@ static void stop_server_executor(void) {
 static mysql_session_status_t execute(
     const char *sql, const mysql_stmt_value_t *values, size_t value_count,
     mysql_session_command_result_t *result, mysql_session_error_t *client_error) {
-  return mysql_session_execute_prepared(
+  const mysql_session_status_t status = mysql_session_execute_prepared(
       &client, (const uint8_t *)sql, strlen(sql), values, value_count,
       TEST_BUFFER_BYTES, result, client_error);
+  if (status != MYSQL_SESSION_OK && client_error != NULL)
+    info("command=%s status=%d stage=%s cnet=%d native=%d server=%u message=%s",
+         sql, (int)status, client_error->stage, client_error->cnet_status,
+         client_error->cnet_native_status, (unsigned)client_error->server_error,
+         client_error->message);
+  return status;
 }
 
 static bool read_score(int64_t id, int64_t *score, mysql_session_error_t *client_error) {

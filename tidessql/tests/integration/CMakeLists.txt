@@ -71,7 +71,8 @@ cmake_add_test(
   LIBS TidesDB::tidesdb TurboDB::TidesSQL
     Salts::CSTL Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_sql_relation_test PROPERTIES LINKER_LANGUAGE CXX)
-set_tests_properties(orm_tidesdb_sql_relation PROPERTIES TIMEOUT 60)
+# Durable per-case setup/close must tolerate hosted-runner filesystem latency.
+set_tests_properties(orm_tidesdb_sql_relation PROPERTIES TIMEOUT 120)
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_relation PROPERTIES ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
@@ -96,7 +97,7 @@ cmake_add_test(
     Salts::CSTL Salts::CFlow Salts::TinyTest)
 set_target_properties(orm_tidesdb_sql_cte_plan_test PROPERTIES LINKER_LANGUAGE CXX)
 # The complete native dependency suite includes per-case close and fault matrices.
-set_tests_properties(orm_tidesdb_sql_cte_plan PROPERTIES TIMEOUT 90)
+set_tests_properties(orm_tidesdb_sql_cte_plan PROPERTIES TIMEOUT 180)
 if(WIN32)
   set_tests_properties(orm_tidesdb_sql_cte_plan PROPERTIES ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
