@@ -23,7 +23,7 @@ typedef struct race_worker {
 static struct {
   cmeta_mutex_t mutex;
   cmeta_cond_t changed;
-  size_t ready, done, launched;
+  size_t ready, start, done, launched;
   bool stop;
   race_kind kind;
   race_worker workers[WORKERS];
@@ -129,7 +129,7 @@ static void worker_main(void *arg) {
   if (worker->prepared != ORM_TDB_SUCCESS) fixture.stop = true;
   ++fixture.ready;
   cmeta_cond_broadcast(&fixture.changed);
-  const bool proceed = wait_locked(&fixture.ready, WORKERS, true) && !fixture.stop;
+  const bool proceed = wait_locked(&fixture.start, 1u, true) && !fixture.stop;
   cmeta_mutex_unlock(&fixture.mutex);
   if (proceed) {
     worker->attempted = true;
@@ -228,7 +228,7 @@ static void run_race(race_kind kind) {
      * writers commit; it must retain the complete pre-commit snapshot. */
     begin_reader();
     verify_old_snapshot();
-    fixture.ready = 0; fixture.done = 0; fixture.stop = false;
+    fixture.ready = 0; fixture.start = 0; fixture.done = 0; fixture.stop = false;
     memset(fixture.workers, 0, sizeof(fixture.workers));
     for (size_t i = 0; i < WORKERS; ++i) {
       fixture.workers[i].id = i;
@@ -236,6 +236,13 @@ static void run_race(race_kind kind) {
           worker_main, &fixture.workers[i]), 0);
       ++fixture.launched;
     }
+    /* Release every prepared worker from the coordinator so the last worker
+     * does not start committing while its peers are still waking up. */
+    cmeta_mutex_lock(&fixture.mutex);
+    if (wait_locked(&fixture.ready, WORKERS, true) && !fixture.stop)
+      fixture.start = 1u;
+    cmeta_cond_broadcast(&fixture.changed);
+    cmeta_mutex_unlock(&fixture.mutex);
     join_workers();
     check_false(fixture.stop);
     verify_old_snapshot();
