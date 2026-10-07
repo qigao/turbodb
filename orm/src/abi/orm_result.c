@@ -188,7 +188,7 @@ static orm_status_t orm_result_copy_column_name(
       return orm_result_fail(error, ORM_STATUS_LIMIT_EXCEEDED,
                              "ORM result column metadata exceeds byte limit");
     const void *name_data =
-        token->value.slice.size != 0u ? token->value.slice.data : "";
+        token->value.slice.size != 0u ? (const void *)token->value.slice.data : "";
     tstr owned =
         tstr_new_len(name_data, token->value.slice.size);
     if (owned == NULL)
