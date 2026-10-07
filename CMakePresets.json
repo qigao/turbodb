@@ -3,8 +3,7 @@
     "include": [
         "presets/BuildPresets.json",
         "presets/TestPresets.json",
-        "presets/AndroidPresets.json",
-        "presets/CiPresets.json"
+        "presets/AndroidPresets.json"
     ],
     "configurePresets": [
         {
@@ -33,6 +32,136 @@
                 "dev-linux-ninja",
                 "pkg-vcpkg"
             ]
+        },
+        {
+            "name": "ci-native-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "VCPKG_MANIFEST_MODE": true,
+                "VCPKG_APPLOCAL_DEPS": false,
+                "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
+                "BUILD_TESTS": true,
+                "BUILD_E2E_TESTS": false,
+                "BUILD_EXAMPLES": false,
+                "TURBODB_BUILD_ORM": true,
+                "TURBODB_BUILD_DBTOOLS": true,
+                "TIDESDB_BUILD_TESTS": false,
+                "TIDESDB_WITH_SNAPPY": false,
+                "TIDESDB_WITH_LZ4": false
+            }
+        },
+        {
+            "name": "ci-windows-base",
+            "hidden": true,
+            "inherits": [
+                "ci-native-base",
+                "Msvc",
+                "flags-msvc",
+                "ISWindows"
+            ],
+            "binaryDir": "${sourceDir}/build/ci-windows-release",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "environment": {
+                "PATH": "${sourceDir}/build/ci-windows-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{QIGAO_VCPKG_WINDOWS_TRIPLET}/bin${pathListSep}$env{SALTS_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$penv{PATH}"
+            },
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "$env{QIGAO_VCPKG_WINDOWS_TRIPLET}",
+                "VCPKG_HOST_TRIPLET": "$env{QIGAO_VCPKG_WINDOWS_HOST_TRIPLET}",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/$env{QIGAO_VCPKG_WINDOWS_TRIPLET}",
+                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/$env{QIGAO_VCPKG_WINDOWS_TRIPLET}/tools/pkgconf/pkgconf.exe",
+                "TURBODB_BUILD_TIDESSQL_SERVER": true
+            }
+        },
+        {
+            "name": "ci-linux-base",
+            "hidden": true,
+            "inherits": [
+                "ci-native-base",
+                "Gcc",
+                "flags-gnu",
+                "ISLinux"
+            ],
+            "binaryDir": "${sourceDir}/build/ci-linux-release",
+            "environment": {
+                "LD_LIBRARY_PATH": "${sourceDir}/build/ci-linux-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            },
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "x64-linux",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
+                "TURBODB_BUILD_TIDESSQL_SERVER": true
+            }
+        },
+        {
+            "name": "ci-linux-arm64-base",
+            "hidden": true,
+            "inherits": [
+                "flags-gnu-arm64",
+                "ci-linux-base"
+            ],
+            "binaryDir": "${sourceDir}/build/ci-linux-arm64-release",
+            "environment": {
+                "LD_LIBRARY_PATH": "${sourceDir}/build/ci-linux-arm64-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/arm64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            },
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "arm64-linux",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-linux"
+            }
+        },
+        {
+            "name": "ci-macos-arm64-base",
+            "hidden": true,
+            "inherits": [
+                "ci-native-base",
+                "GccMac",
+                "flags-darwin",
+                "ISMac"
+            ],
+            "binaryDir": "${sourceDir}/build/ci-macos-arm64-release",
+            "environment": {
+                "DYLD_LIBRARY_PATH": "${sourceDir}/build/ci-macos-arm64-release/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/arm64-osx/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{DYLD_LIBRARY_PATH}"
+            },
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "arm64-osx",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-osx",
+                "TURBODB_BUILD_TIDESSQL_SERVER": true
+            }
+        },
+        {
+            "name": "ci-linux-e2e-base",
+            "hidden": true,
+            "inherits": "ci-linux-base",
+            "binaryDir": "${sourceDir}/build/ci-linux-e2e",
+            "environment": {
+                "LD_LIBRARY_PATH": "${sourceDir}/build/ci-linux-e2e/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+            },
+            "cacheVariables": {
+                "BUILD_TESTS": false,
+                "BUILD_E2E_TESTS": true,
+                "TURBODB_BUILD_TIDESSQL_SERVER": false
+            }
+        },
+        {
+            "name": "ci-android-base",
+            "hidden": true,
+            "inherits": "ci-native-base",
+            "binaryDir": "${sourceDir}/build/ci-android-release",
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "Android",
+                "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+                "VCPKG_TARGET_TRIPLET": "arm64-android",
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-android",
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_PLATFORM": "android-26",
+                "ANDROID_STL": "c++_shared",
+                "BUILD_TESTS": false,
+                "TURBODB_BUILD_DBTOOLS": false
+            }
         }
     ]
 }

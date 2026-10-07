@@ -1,8 +1,8 @@
 #include "redis_io.h"
 
 #include "redis_io_internal.h"
-#include "salts_error.h"
-#include "salts_thread.h"
+#include "cmeta_error.h"
+#include "cmeta_thread.h"
 
 #include <cflow/executor.h>
 #include <salts/clock.h>
@@ -56,8 +56,8 @@ struct redis_io_runtime_impl {
   size_t attached_publishers;
   size_t active_publisher_operations;
   int bridge_error;
-  salts_mutex_t gate;
-  salts_cond_t changed;
+  cmeta_mutex_t gate;
+  cmeta_cond_t changed;
   bool bridge_live;
   bool backend_live;
   bool driver_live;
@@ -154,24 +154,24 @@ static int redis_io_schedule_bridge(redis_io_runtime_impl *impl) {
   bool post = false;
   int status;
   if (impl == NULL) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (!impl->driver_live || !impl->bridge_live) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_ECANCELED;
   }
   if (!impl->bridge_scheduled) {
     impl->bridge_scheduled = true;
     post = !impl->bridge_running;
   }
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   if (!post) return SALTS_OK;
   status = redis_io_post_bridge(impl);
   if (status == SALTS_OK) return SALTS_OK;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   impl->bridge_scheduled = false;
   impl->bridge_error = status;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
   return impl->bridge_error;
 }
 
@@ -185,14 +185,14 @@ static void redis_io_bridge_operation_release(void *user) {
   redis_io_publisher_slot *slot = operation != NULL ? operation->publisher : NULL;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   if (impl == NULL) return;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   slot->operation_owned = false;
   slot->acknowledge_pending = false;
   slot->target_actor = NULL;
   slot->target_request_id = 0u;
   slot->bridge_request_id = 0u;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
 }
 
 static void redis_io_bridge_completion(void *user, cflow_io_request_id request_id,
@@ -203,13 +203,13 @@ static void redis_io_bridge_completion(void *user, cflow_io_request_id request_i
   redis_io_publisher_slot *slot = operation != NULL ? operation->publisher : NULL;
   (void)lease_id;
   if (impl == NULL || slot == NULL || completion == NULL) return;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (slot->runtime == impl && slot->operation_owned) {
     slot->bridge_request_id = request_id;
     slot->target_completion = *completion;
     slot->acknowledge_pending = true;
   }
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   (void)redis_io_schedule_bridge(impl);
 }
 
@@ -224,16 +224,16 @@ static int redis_io_bridge_submit(void *backend_user, cflow_io_actor *actor,
   size_t index;
   (void)lease_id;
   if (impl == NULL || actor == NULL || request_id == 0u || native == NULL) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (!slot->attached || impl->closing || impl->destroying || slot->operation_owned) {
     int status = slot->operation_owned ? SALTS_EBUSY : SALTS_ECANCELED;
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return status;
   }
   for (index = 0u; index < impl->publisher_capacity; ++index) {
     if (impl->retiring_sockets[index].active &&
         impl->retiring_sockets[index].identity == native->socket) {
-      salts_mutex_unlock(&impl->gate);
+      cmeta_mutex_unlock(&impl->gate);
       return SALTS_EBUSY;
     }
   }
@@ -243,16 +243,16 @@ static int redis_io_bridge_submit(void *backend_user, cflow_io_actor *actor,
   slot->target_request_id = request_id;
   slot->bridge_request_id = 0u;
   slot->operation_owned = true;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   operation = (cflow_io_operation){&slot->operation, redis_io_bridge_operation_release};
   submitted = cflow_io_actor_try_submit(&impl->bridge, slot->bridge_lease_id, &operation);
   if (submitted.status != CFLOW_IO_SUBMIT_ACCEPTED) {
-    salts_mutex_lock(&impl->gate);
+    cmeta_mutex_lock(&impl->gate);
     slot->operation_owned = false;
     slot->target_actor = NULL;
     slot->target_request_id = 0u;
-    salts_cond_broadcast(&impl->changed);
-    salts_mutex_unlock(&impl->gate);
+    cmeta_cond_broadcast(&impl->changed);
+    cmeta_mutex_unlock(&impl->gate);
     switch (submitted.status) {
     case CFLOW_IO_SUBMIT_FULL:
     case CFLOW_IO_SUBMIT_LEASE_IN_USE:
@@ -263,9 +263,9 @@ static int redis_io_bridge_submit(void *backend_user, cflow_io_actor *actor,
       return SALTS_EINVAL;
     }
   }
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   slot->bridge_request_id = submitted.request_id;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   return SALTS_OK;
 }
 
@@ -275,13 +275,13 @@ static int redis_io_bridge_cancel(void *backend_user, cflow_io_request_id reques
   cflow_io_request_id bridge_request_id;
   cflow_io_cancel_status cancelled;
   if (impl == NULL || request_id == 0u) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (!slot->attached || !slot->operation_owned || slot->target_request_id != request_id) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_ENOENT;
   }
   bridge_request_id = slot->bridge_request_id;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   if (bridge_request_id == 0u) return SALTS_EBUSY;
   cancelled = cflow_io_actor_try_cancel(&impl->bridge, bridge_request_id);
   switch (cancelled) {
@@ -303,17 +303,17 @@ static void redis_io_bridge_driver_task(void *user) {
   bool repost = false;
   size_t index;
   if (impl == NULL) return;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   impl->bridge_scheduled = false;
   impl->bridge_running = true;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   redis_io_runtime_enter_callback();
   for (index = 0u; index < impl->publisher_capacity; ++index) {
     cflow_io_request_id request_id = 0u;
     cflow_io_request_id target_request_id = 0u;
     cflow_io_actor *target_actor = NULL;
     cflow_io_completion target_completion = {0};
-    salts_mutex_lock(&impl->gate);
+    cmeta_mutex_lock(&impl->gate);
     if (impl->publishers[index].acknowledge_pending) {
       request_id = impl->publishers[index].bridge_request_id;
       target_request_id = impl->publishers[index].target_request_id;
@@ -321,47 +321,47 @@ static void redis_io_bridge_driver_task(void *user) {
       target_completion = impl->publishers[index].target_completion;
       impl->publishers[index].acknowledge_pending = false;
     }
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     if (request_id != 0u) {
       cflow_io_ack_status acknowledged = cflow_io_actor_acknowledge(&impl->bridge, request_id);
       if (acknowledged == CFLOW_IO_ACK_BUSY) {
-        salts_mutex_lock(&impl->gate);
+        cmeta_mutex_lock(&impl->gate);
         impl->publishers[index].acknowledge_pending = true;
         impl->bridge_scheduled = true;
-        salts_mutex_unlock(&impl->gate);
+        cmeta_mutex_unlock(&impl->gate);
       } else if (acknowledged == CFLOW_IO_ACK_RELEASED) {
         cflow_io_complete_status completed =
             cflow_io_actor_complete(target_actor, target_request_id, &target_completion);
         if (completed != CFLOW_IO_COMPLETE_ACCEPTED) {
-          salts_mutex_lock(&impl->gate);
+          cmeta_mutex_lock(&impl->gate);
           if (impl->bridge_error == SALTS_OK) impl->bridge_error = SALTS_EPROTO;
-          salts_mutex_unlock(&impl->gate);
+          cmeta_mutex_unlock(&impl->gate);
         }
       } else {
-        salts_mutex_lock(&impl->gate);
+        cmeta_mutex_lock(&impl->gate);
         if (impl->bridge_error == SALTS_OK) impl->bridge_error = SALTS_EPROTO;
-        salts_mutex_unlock(&impl->gate);
+        cmeta_mutex_unlock(&impl->gate);
       }
     }
   }
   ran = cflow_io_actor_run_ready(&impl->bridge, REDIS_IO_BRIDGE_STEPS);
   redis_io_runtime_leave_callback();
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (ran.status == CFLOW_IO_RUN_INVALID_ARGUMENT) impl->bridge_error = SALTS_EINVAL;
   else if (ran.status == CFLOW_IO_RUN_BUSY) impl->bridge_scheduled = true;
   if (ran.progressed == REDIS_IO_BRIDGE_STEPS) impl->bridge_scheduled = true;
   impl->bridge_running = false;
   repost = impl->bridge_scheduled && impl->bridge_live;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
   if (repost) {
     int status = redis_io_post_bridge(impl);
     if (status != SALTS_OK) {
-      salts_mutex_lock(&impl->gate);
+      cmeta_mutex_lock(&impl->gate);
       impl->bridge_scheduled = false;
       impl->bridge_error = status;
-      salts_cond_broadcast(&impl->changed);
-      salts_mutex_unlock(&impl->gate);
+      cmeta_cond_broadcast(&impl->changed);
+      cmeta_mutex_unlock(&impl->gate);
     }
   }
 }
@@ -369,12 +369,12 @@ static void redis_io_bridge_driver_task(void *user) {
 static void redis_io_bridge_driver_cancel(void *user) {
   redis_io_runtime_impl *impl = (redis_io_runtime_impl *)user;
   if (impl == NULL) return;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   impl->bridge_scheduled = false;
   impl->bridge_running = false;
   impl->bridge_error = SALTS_ECANCELED;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
 }
 
 static void redis_io_publisher_driver_task(void *user) {
@@ -384,32 +384,32 @@ static void redis_io_publisher_driver_task(void *user) {
   void *drive_user = NULL;
   bool repost = false;
   if (impl == NULL) return;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (slot->attached) {
     slot->scheduled = false;
     slot->running = true;
     drive = slot->drive;
     drive_user = slot->drive_user;
   }
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   if (drive != NULL) {
     redis_io_runtime_enter_callback();
     drive(drive_user);
     redis_io_runtime_leave_callback();
   }
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   slot->running = false;
   repost = slot->attached && slot->scheduled && !impl->destroying;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
   if (repost) {
     int status = redis_io_post_publisher(slot);
     if (status != SALTS_OK) {
-      salts_mutex_lock(&impl->gate);
+      cmeta_mutex_lock(&impl->gate);
       slot->scheduled = false;
       slot->schedule_error = status;
-      salts_cond_broadcast(&impl->changed);
-      salts_mutex_unlock(&impl->gate);
+      cmeta_cond_broadcast(&impl->changed);
+      cmeta_mutex_unlock(&impl->gate);
     }
   }
 }
@@ -418,12 +418,12 @@ static void redis_io_publisher_driver_cancel(void *user) {
   redis_io_publisher_slot *slot = (redis_io_publisher_slot *)user;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   if (impl == NULL) return;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   slot->scheduled = false;
   slot->running = false;
   slot->schedule_error = SALTS_ECANCELED;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
 }
 
 int redis_io_runtime_init(redis_io_runtime *runtime, const redis_io_runtime_config *config) {
@@ -453,8 +453,8 @@ int redis_io_runtime_init(redis_io_runtime *runtime, const redis_io_runtime_conf
     return SALTS_ENOMEM;
   }
   impl->publisher_capacity = config->publisher_capacity;
-  salts_mutex_init(&impl->gate);
-  salts_cond_init(&impl->changed);
+  cmeta_mutex_init(&impl->gate);
+  cmeta_cond_init(&impl->changed);
   if (!cflow_executor_serial_init_with_capacity(&impl->driver, driver_capacity)) {
     status = SALTS_ENOMEM;
     goto failed;
@@ -488,8 +488,8 @@ failed:
     (void)cflow_executor_shutdown(&impl->driver);
     cflow_executor_destroy(&impl->driver);
   }
-  salts_cond_destroy(&impl->changed);
-  salts_mutex_destroy(&impl->gate);
+  cmeta_cond_destroy(&impl->changed);
+  cmeta_mutex_destroy(&impl->gate);
   free(impl->retiring_sockets);
   free(impl->publishers);
   free(impl);
@@ -508,15 +508,15 @@ int redis_io_runtime_attach_publisher(redis_io_runtime *runtime, redis_io_runtim
   if (impl == NULL || publisher == NULL || publisher->slot != NULL || publisher->generation != 0u ||
       drive == NULL || backend == NULL || backend_user == NULL)
     return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (impl->closing || impl->destroying) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_ECANCELED;
   }
   for (index = 0u; index < impl->publisher_capacity; ++index)
     if (!impl->publishers[index].attached) break;
   if (index == impl->publisher_capacity) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_ENOBUFS;
   }
   {
@@ -536,7 +536,7 @@ int redis_io_runtime_attach_publisher(redis_io_runtime *runtime, redis_io_runtim
     *backend = (cflow_io_backend_ops){redis_io_bridge_submit, redis_io_bridge_cancel};
     *backend_user = slot;
   }
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   return SALTS_OK;
 }
 
@@ -546,24 +546,24 @@ int redis_io_runtime_schedule_publisher(redis_io_runtime_publisher *publisher) {
   bool post = false;
   int status;
   if (impl == NULL) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (!redis_io_publisher_matches(publisher, slot) || impl->closing || impl->destroying) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_ECANCELED;
   }
   if (!slot->scheduled) {
     slot->scheduled = true;
     post = !slot->running;
   }
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   if (!post) return SALTS_OK;
   status = redis_io_post_publisher(slot);
   if (status == SALTS_OK) return SALTS_OK;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   slot->scheduled = false;
   slot->schedule_error = status;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
   return status;
 }
 
@@ -573,23 +573,23 @@ int redis_io_runtime_wait_publisher_idle(redis_io_runtime_publisher *publisher, 
   uint64_t started;
   if (impl == NULL || timeout_ns == 0u) return SALTS_EINVAL;
   if (redis_io_runtime_in_callback()) return SALTS_EBUSY;
-  started = salts_hrtime();
-  salts_mutex_lock(&impl->gate);
+  started = cmeta_hrtime();
+  cmeta_mutex_lock(&impl->gate);
   while (redis_io_publisher_matches(publisher, slot) && (slot->scheduled || slot->running)) {
-    uint64_t now = salts_hrtime();
+    uint64_t now = cmeta_hrtime();
     if (now - started >= timeout_ns) {
-      salts_mutex_unlock(&impl->gate);
+      cmeta_mutex_unlock(&impl->gate);
       return SALTS_ETIMEDOUT;
     }
-    (void)salts_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - (now - started));
+    (void)cmeta_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - (now - started));
   }
   if (!redis_io_publisher_matches(publisher, slot)) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_EINVAL;
   }
   {
     int status = slot->schedule_error;
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return status;
   }
 }
@@ -598,13 +598,13 @@ int redis_io_runtime_detach_publisher(redis_io_runtime_publisher *publisher) {
   redis_io_publisher_slot *slot = publisher != NULL ? (redis_io_publisher_slot *)publisher->slot : NULL;
   redis_io_runtime_impl *impl = slot != NULL ? slot->runtime : NULL;
   if (impl == NULL) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (!redis_io_publisher_matches(publisher, slot)) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_EINVAL;
   }
   if (slot->scheduled || slot->running || slot->operation_owned) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_EBUSY;
   }
   slot->attached = false;
@@ -614,8 +614,8 @@ int redis_io_runtime_detach_publisher(redis_io_runtime_publisher *publisher) {
   if (impl->attached_publishers != 0u) --impl->attached_publishers;
   publisher->slot = NULL;
   publisher->generation = 0u;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
   return SALTS_OK;
 }
 
@@ -623,25 +623,25 @@ int redis_io_runtime_publisher_started(redis_io_runtime *runtime) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   int status;
   if (impl == NULL) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (impl->closing || impl->active_publisher_operations == impl->publisher_capacity) {
     status =
         impl->active_publisher_operations == impl->publisher_capacity ? SALTS_ENOBUFS : SALTS_ECANCELED;
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return status;
   }
   ++impl->active_publisher_operations;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   return SALTS_OK;
 }
 
 void redis_io_runtime_publisher_finished(redis_io_runtime *runtime) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   if (impl == NULL) return;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (impl->active_publisher_operations != 0u) --impl->active_publisher_operations;
-  salts_cond_broadcast(&impl->changed);
-  salts_mutex_unlock(&impl->gate);
+  cmeta_cond_broadcast(&impl->changed);
+  cmeta_mutex_unlock(&impl->gate);
 }
 
 void redis_io_runtime_enter_callback(void) { ++redis_io_callback_depth; }
@@ -657,25 +657,25 @@ int redis_io_runtime_wait_idle(redis_io_runtime *runtime, uint64_t timeout_ns) {
   uint64_t started;
   if (impl == NULL || timeout_ns == 0u) return SALTS_EINVAL;
   if (redis_io_runtime_in_callback()) return SALTS_EBUSY;
-  started = salts_hrtime();
+  started = cmeta_hrtime();
   for (;;) {
-    uint64_t now = salts_hrtime();
+    uint64_t now = cmeta_hrtime();
     int status;
     if (now - started >= timeout_ns) return SALTS_ETIMEDOUT;
     if (!cflow_executor_wait_idle(&impl->driver)) return SALTS_EIO;
-    salts_mutex_lock(&impl->gate);
+    cmeta_mutex_lock(&impl->gate);
     if (redis_io_runtime_idle_locked(impl)) {
       status = impl->bridge_error;
-      salts_mutex_unlock(&impl->gate);
+      cmeta_mutex_unlock(&impl->gate);
       return status;
     }
-    now = salts_hrtime();
+    now = cmeta_hrtime();
     if (now - started >= timeout_ns) {
-      salts_mutex_unlock(&impl->gate);
+      cmeta_mutex_unlock(&impl->gate);
       return SALTS_ETIMEDOUT;
     }
-    (void)salts_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - (now - started));
-    salts_mutex_unlock(&impl->gate);
+    (void)cmeta_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - (now - started));
+    cmeta_mutex_unlock(&impl->gate);
   }
 }
 
@@ -686,7 +686,7 @@ int redis_io_runtime_forget_socket(redis_io_runtime *runtime, uintptr_t closed_s
   if (impl == NULL) return SALTS_EINVAL;
   status = cflow_io_native_backend_forget_socket(&impl->backend, closed_socket);
   if (status != SALTS_OK && status != SALTS_ENOENT) return status;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   for (index = 0u; index < impl->publisher_capacity; ++index) {
     if (impl->retiring_sockets[index].active &&
         impl->retiring_sockets[index].identity == closed_socket) {
@@ -694,7 +694,7 @@ int redis_io_runtime_forget_socket(redis_io_runtime *runtime, uintptr_t closed_s
       break;
     }
   }
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   return SALTS_OK;
 }
 
@@ -703,16 +703,16 @@ int redis_io_runtime_retire_socket(redis_io_runtime *runtime, uintptr_t socket_i
   size_t available = SIZE_MAX;
   size_t index;
   if (impl == NULL) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   for (index = 0u; index < impl->publisher_capacity; ++index) {
     if (impl->publishers[index].operation_owned &&
         impl->publishers[index].operation.native.socket == socket_identity) {
-      salts_mutex_unlock(&impl->gate);
+      cmeta_mutex_unlock(&impl->gate);
       return SALTS_EBUSY;
     }
     if (impl->retiring_sockets[index].active) {
       if (impl->retiring_sockets[index].identity == socket_identity) {
-        salts_mutex_unlock(&impl->gate);
+        cmeta_mutex_unlock(&impl->gate);
         return SALTS_EBUSY;
       }
     } else if (available == SIZE_MAX) {
@@ -720,12 +720,12 @@ int redis_io_runtime_retire_socket(redis_io_runtime *runtime, uintptr_t socket_i
     }
   }
   if (available == SIZE_MAX) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_ENOBUFS;
   }
   impl->retiring_sockets[available].identity = socket_identity;
   impl->retiring_sockets[available].active = true;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   return SALTS_OK;
 }
 
@@ -734,25 +734,25 @@ int redis_io_runtime_forget_socket_wait(redis_io_runtime *runtime, uintptr_t clo
   uint64_t started;
   if (redis_io_impl(runtime) == NULL || timeout_ns == 0u) return SALTS_EINVAL;
   if (redis_io_runtime_in_callback()) return SALTS_EBUSY;
-  started = salts_hrtime();
+  started = cmeta_hrtime();
   for (;;) {
     int status = redis_io_runtime_forget_socket(runtime, closed_socket);
     if (status != SALTS_EBUSY) return status;
-    if (salts_hrtime() - started >= timeout_ns) return SALTS_ETIMEDOUT;
-    salts_thread_yield();
+    if (cmeta_hrtime() - started >= timeout_ns) return SALTS_ETIMEDOUT;
+    cmeta_thread_yield();
   }
 }
 
 int redis_io_runtime_close(redis_io_runtime *runtime) {
   redis_io_runtime_impl *impl = redis_io_impl(runtime);
   if (impl == NULL) return SALTS_EINVAL;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (impl->attached_publishers != 0u || impl->active_publisher_operations != 0u) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_EBUSY;
   }
   impl->closing = true;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   return SALTS_OK;
 }
 
@@ -761,14 +761,14 @@ int redis_io_runtime_destroy(redis_io_runtime *runtime) {
   int status;
   if (impl == NULL) return SALTS_EINVAL;
   if (redis_io_runtime_in_callback()) return SALTS_EBUSY;
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   if (!impl->closing || impl->destroying || impl->attached_publishers != 0u ||
       impl->active_publisher_operations != 0u) {
-    salts_mutex_unlock(&impl->gate);
+    cmeta_mutex_unlock(&impl->gate);
     return SALTS_EBUSY;
   }
   impl->destroying = true;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   if (impl->bridge_live) {
     status = cflow_io_actor_close(&impl->bridge);
     if (status != SALTS_OK && status != SALTS_EALREADY) goto failed;
@@ -800,16 +800,16 @@ int redis_io_runtime_destroy(redis_io_runtime *runtime) {
     cflow_executor_destroy(&impl->driver);
     impl->driver_live = false;
   }
-  salts_cond_destroy(&impl->changed);
-  salts_mutex_destroy(&impl->gate);
+  cmeta_cond_destroy(&impl->changed);
+  cmeta_mutex_destroy(&impl->gate);
   free(impl->retiring_sockets);
   free(impl->publishers);
   free(impl);
   runtime->impl = NULL;
   return SALTS_OK;
 failed:
-  salts_mutex_lock(&impl->gate);
+  cmeta_mutex_lock(&impl->gate);
   impl->destroying = false;
-  salts_mutex_unlock(&impl->gate);
+  cmeta_mutex_unlock(&impl->gate);
   return status;
 }

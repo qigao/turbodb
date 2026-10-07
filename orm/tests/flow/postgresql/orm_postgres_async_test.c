@@ -2,16 +2,16 @@
 #define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include <tinymock.h>
 
-FunctionDecl(value, int, test_consume,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, test_consume,
     (void *, connection, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
-FunctionDecl(value, int, test_flush,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, test_flush,
     (void *, connection, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
-FunctionDecl(value, int, test_busy,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, test_busy,
     (void *, connection, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
-FunctionDecl(value, int, test_nonblocking,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, test_nonblocking,
     (void *, connection, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),
     (int, enabled, CMETA_PARAM_IN));

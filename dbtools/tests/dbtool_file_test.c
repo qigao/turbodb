@@ -7,7 +7,7 @@
 #include "tinytest.h"
 
 static int oversized_stat(void *context, const char *path,
-                          salts_fs_stat_t *out) {
+                          cmeta_fs_stat_t *out) {
   (void)context;
   (void)path;
   memset(out, 0, sizeof(*out));
@@ -16,7 +16,7 @@ static int oversized_stat(void *context, const char *path,
   return 0;
 }
 
-static salts_file_t unexpected_open(void *context, const char *path,
+static cmeta_file_t unexpected_open(void *context, const char *path,
                                     int flags, int mode) {
   (void)context;
   (void)path;
@@ -25,7 +25,7 @@ static salts_file_t unexpected_open(void *context, const char *path,
   return SALTS_INVALID_FILE;
 }
 
-static int unexpected_read(void *context, salts_file_t file, char *data,
+static int unexpected_read(void *context, cmeta_file_t file, char *data,
                            size_t size) {
   (void)context;
   (void)file;
@@ -34,7 +34,7 @@ static int unexpected_read(void *context, salts_file_t file, char *data,
   return -1;
 }
 
-static int unexpected_close(void *context, salts_file_t file) {
+static int unexpected_close(void *context, cmeta_file_t file) {
   (void)context;
   (void)file;
   return -1;

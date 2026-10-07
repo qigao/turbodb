@@ -1,7 +1,7 @@
 #include "redis_lua_apply_batch.h"
 #include "redis_lua_apply_batch_compact.h"
 
-#include "salts_error.h"
+#include "cmeta_error.h"
 
 #include <inttypes.h>
 #include <limits.h>

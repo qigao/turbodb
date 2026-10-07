@@ -2,7 +2,7 @@
 #include "../redis_lua_apply_batch_compact.h"
 
 #include "tinytest.h"
-#include "salts_error.h"
+#include "cmeta_error.h"
 
 #include <stdint.h>
 #include <stdlib.h>

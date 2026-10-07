@@ -384,24 +384,24 @@ static const TurboDb_Driver_vtable fixture_driver_vtable = {
 static TurboDb_Driver fixture_driver = {
     &fixture_module, &fixture_driver_vtable};
 
-static const salts_plugin_export fixture_exports[] = {{
-    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+static const cmeta_plugin_export fixture_exports[] = {{
+    .struct_size = CMETA_PLUGIN_EXPORT_SIZE,
+    .kind = CMETA_PLUGIN_EXPORT_INTERFACE,
     .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
     .capabilities = FIXTURE_CAPABILITIES,
     .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
     .contract_id = ORM_DRIVER_INTERFACE_CONTRACT_ID,
     .value.interface = {&TurboDb_Driver_interface_meta, &fixture_driver}}};
 
-static const salts_plugin_manifest fixture_manifest = {
-    .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
-    .abi_version = SALTS_PLUGIN_ABI_VERSION,
+static const cmeta_plugin_manifest fixture_manifest = {
+    .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,
+    .abi_version = CMETA_PLUGIN_ABI_VERSION,
     .plugin_id = fixture_id,
     .version = {1u, 0u, 0u},
     .exports = fixture_exports,
     .export_count = 1u};
 
-SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
-salts_plugin_query(uint32_t host_abi) {
-  return host_abi == SALTS_PLUGIN_ABI_VERSION ? &fixture_manifest : NULL;
+CMETA_PLUGIN_QUERY_EXPORT const cmeta_plugin_manifest *CMETA_PLUGIN_CALL
+cmeta_plugin_query(uint32_t host_abi) {
+  return host_abi == CMETA_PLUGIN_ABI_VERSION ? &fixture_manifest : NULL;
 }

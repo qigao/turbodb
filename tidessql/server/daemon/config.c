@@ -1,7 +1,7 @@
 #include "config.h"
 #include <gmssl/hex.h>
 #include <gmssl/mem.h>
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <toml.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -233,8 +233,8 @@ static turbodb_status_t parse_server(const toml_table_t *root, tidessqld_config 
     status = config_error(error, TURBODB_STATUS_INVALID_ARGUMENT,
                           "server host must be a numeric IPv4 or IPv6 address");
   if (status == TURBODB_STATUS_OK &&
-      (!salts_fs_path_is_absolute(config->server.certificate_file) ||
-       !salts_fs_path_is_absolute(config->server.private_key_file)))
+      (!cmeta_fs_path_is_absolute(config->server.certificate_file) ||
+       !cmeta_fs_path_is_absolute(config->server.private_key_file)))
     status = config_error(error, TURBODB_STATUS_INVALID_ARGUMENT,
                           "TLS paths must be absolute");
   return status;
@@ -263,7 +263,7 @@ static turbodb_status_t parse_databases(const toml_table_t *root, tidessqld_conf
         TIDESSQLD_MAX_NAME_BYTES, true, &database->column_family, error);
     if (status == TURBODB_STATUS_OK) status = boolean_value(table, "initialize", true,
                                                             &database->initialize, error);
-    if (status == TURBODB_STATUS_OK && !salts_fs_path_is_absolute(database->path))
+    if (status == TURBODB_STATUS_OK && !cmeta_fs_path_is_absolute(database->path))
       status = config_error(error, TURBODB_STATUS_INVALID_ARGUMENT,
                             "database path must be absolute");
     for (int j = 0; status == TURBODB_STATUS_OK && j < i; ++j) {
@@ -350,9 +350,9 @@ static turbodb_status_t parse_accounts(const toml_table_t *root, tidessqld_confi
 
 static turbodb_status_t validate_relationships(const tidessqld_config *config,
                                                turbodb_error_t *error) {
-  salts_fs_stat_t file = {0};
-  if (salts_fs_stat(config->server.certificate_file, &file) != 0 || !file.is_file ||
-      salts_fs_stat(config->server.private_key_file, &file) != 0 || !file.is_file)
+  cmeta_fs_stat_t file = {0};
+  if (cmeta_fs_stat(config->server.certificate_file, &file) != 0 || !file.is_file ||
+      cmeta_fs_stat(config->server.private_key_file, &file) != 0 || !file.is_file)
     return config_error(error, TURBODB_STATUS_INVALID_ARGUMENT,
                         "TLS certificate and private key must be readable files");
   for (size_t i = 0; i < config->account_count; ++i) {
@@ -435,16 +435,16 @@ void tidessqld_config_destroy(tidessqld_config *config) {
 
 turbodb_status_t tidessqld_config_load(const char *path, tidessqld_config **out,
                                        turbodb_error_t *error) {
-  if (!path || !out || *out || !salts_fs_path_is_absolute(path))
+  if (!path || !out || *out || !cmeta_fs_path_is_absolute(path))
     return config_error(error, TURBODB_STATUS_INVALID_ARGUMENT,
                         "absolute config path and empty output are required");
-  salts_fs_stat_t info = {0};
-  if (salts_fs_stat(path, &info) != 0 || !info.is_file)
+  cmeta_fs_stat_t info = {0};
+  if (cmeta_fs_stat(path, &info) != 0 || !info.is_file)
     return config_error(error, TURBODB_STATUS_INVALID_ARGUMENT, "config file is not readable");
   if (info.size == 0 || info.size > TIDESSQLD_CONFIG_MAX_BYTES)
     return config_error(error, TURBODB_STATUS_LIMIT_EXCEEDED, "config file size is invalid");
-  salts_fs_buf_t bytes = {0};
-  if (salts_fs_read_file(path, &bytes) != 0)
+  cmeta_fs_buf_t bytes = {0};
+  if (cmeta_fs_read_file(path, &bytes) != 0)
     return config_error(error, TURBODB_STATUS_INVALID_ARGUMENT, "read config file");
   turbodb_status_t status = TURBODB_STATUS_OK;
   tstr input = NULL;
@@ -459,7 +459,7 @@ turbodb_status_t tidessqld_config_load(const char *path, tidessqld_config **out,
     input = tstr_dup_len(bytes.base, bytes.len);
     if (!input) status = config_error(error, TURBODB_STATUS_OUT_OF_MEMORY, "copy config file");
   }
-  salts_fs_buf_free(&bytes);
+  cmeta_fs_buf_free(&bytes);
   char parse_error[TIDESSQLD_ERROR_TEXT] = {0};
   if (status == TURBODB_STATUS_OK) {
     root = toml_parse(input, parse_error, sizeof(parse_error));

@@ -708,7 +708,7 @@ static orm_status_t orm_postgres_wait_bridge_channel_binding(
     orm_postgres_direct_tls_bridge *bridge, uint32_t timeout_ms,
     uint8_t *output, size_t capacity, size_t *out_size,
     orm_error_t *error) {
-  const uint64_t started_ms = salts_monotonic_ms();
+  const uint64_t started_ms = cmeta_monotonic_ms();
 
   if (out_size == NULL)
     return ORM_STATUS_INVALID_ARGUMENT;
@@ -737,7 +737,7 @@ static orm_status_t orm_postgres_wait_bridge_channel_binding(
     }
 
     if (timeout_ms != 0u &&
-        salts_monotonic_ms() - started_ms >= timeout_ms) {
+        cmeta_monotonic_ms() - started_ms >= timeout_ms) {
       orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
                     "PostgreSQL TLS channel-binding wait timed out");
       return ORM_STATUS_CONNECTION_ERROR;
@@ -748,7 +748,7 @@ static orm_status_t orm_postgres_wait_bridge_channel_binding(
 static orm_status_t orm_postgres_connect_poll(
     PGconn *connection, orm_postgres_direct_tls_bridge *bridge,
     int bridge_active, uint32_t timeout_ms, orm_error_t *error) {
-  const uint64_t started_ms = salts_monotonic_ms();
+  const uint64_t started_ms = cmeta_monotonic_ms();
   PostgresPollingStatusType poll_status;
 
   if (connection == NULL)
@@ -773,11 +773,11 @@ static orm_status_t orm_postgres_connect_poll(
         return ORM_STATUS_CONNECTION_ERROR;
       }
     } else {
-      salts_sleep_ms(1u);
+      cmeta_sleep_ms(1u);
     }
 
     if (timeout_ms != 0u &&
-        salts_monotonic_ms() - started_ms >= timeout_ms) {
+        cmeta_monotonic_ms() - started_ms >= timeout_ms) {
       orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
                     "PostgreSQL connection timed out");
       return ORM_STATUS_CONNECTION_ERROR;

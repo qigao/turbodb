@@ -1,6 +1,6 @@
 #include "redis_pool.h"
 
-#include "salts_error.h"
+#include "cmeta_error.h"
 #include "tstr.h"
 
 #include <limits.h>

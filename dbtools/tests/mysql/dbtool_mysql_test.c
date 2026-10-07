@@ -1,9 +1,9 @@
 #include <session_script.h>
-#include <salts_error.h>
+#include <cmeta_error.h>
 #define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include <tinymock.h>
 
-FunctionDecl(value, int, script_execute,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, script_execute,
     (const mysql_session_config_t *, config,
      CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),

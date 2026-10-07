@@ -4,13 +4,13 @@
 #include "catalog_store.h"
 #include <tinytest.h>
 #include <stdlib.h>
-#include <salts_process.h>
-#include <salts_error.h>
+#include <cmeta_process.h>
+#include <cmeta_error.h>
 #include <signal.h>
 
 enum { SQL_CLOSE_CHILD_TIMEOUT_MS=10000, SQL_CLOSE_CHILD_OUTPUT_BYTES=64*1024, SQL_CLOSE_CHILD_FAILED=70 };
 static const char *program_path;
-static salts_process_t *child_process;
+static cmeta_process_t *child_process;
 
 typedef enum commit_probe { COMMIT_NORMAL, COMMIT_CONFLICT, COMMIT_AFTER_SUCCESS } commit_probe;
 static commit_probe commit_mode;
@@ -194,7 +194,7 @@ spec("TidesDB relational ORM owner failures") {
     commits = rollbacks = allocations = 0;
   }
   after_each() {
-    salts_process_destroy(child_process); child_process=NULL;
+    cmeta_process_destroy(child_process); child_process=NULL;
     commit_mode = COMMIT_NORMAL; rollback_failure = rollback_failure_before = get_failure = false; fail_allocation = 0;
     fail_point=POINT_NONE; reserve_failure=false; fail_put_call=0;
     fail_render_append=0; render_allocation_failure=false;
@@ -746,18 +746,18 @@ spec("TidesDB relational ORM owner failures") {
       const char *const modes[]={"before","after"};
       for(size_t i=0;i<sizeof(modes)/sizeof(modes[0]);++i) {
         const char *args[]={"--sql-close-child",modes[i],directory,NULL};
-        salts_process_options_t options; salts_process_options_init(&options);
+        cmeta_process_options_t options; cmeta_process_options_init(&options);
         options.program=program_path; options.args=args; options.cwd=directory;
         options.flags=SALTS_PROCESS_CAPTURE_STDERR | SALTS_PROCESS_CAPTURE_STDOUT; options.timeout_ms=SQL_CLOSE_CHILD_TIMEOUT_MS;
         options.max_output_bytes=SQL_CLOSE_CHILD_OUTPUT_BYTES;
-        check_equal(salts_process_spawn(&options,&child_process),SALTS_OK);
-        salts_process_result_t stopped={0}; check_equal(salts_process_wait(child_process,&stopped),SALTS_OK);
+        check_equal(cmeta_process_spawn(&options,&child_process),SALTS_OK);
+        cmeta_process_result_t stopped={0}; check_equal(cmeta_process_wait(child_process,&stopped),SALTS_OK);
         char output[SQL_CLOSE_CHILD_OUTPUT_BYTES]={0}; size_t total=0;
         for(size_t channel=0;channel<2;++channel)
           while(total<sizeof(output)-1) {
             size_t count=0;
-            const int status=channel ? salts_process_read_stdout(child_process,output+total,sizeof(output)-1-total,&count) :
-                salts_process_read_stderr(child_process,output+total,sizeof(output)-1-total,&count);
+            const int status=channel ? cmeta_process_read_stdout(child_process,output+total,sizeof(output)-1-total,&count) :
+                cmeta_process_read_stderr(child_process,output+total,sizeof(output)-1-total,&count);
             total+=count; if(status==SALTS_EOF || !count) break; check_equal(status,SALTS_OK);
           }
 #ifdef _WIN32
@@ -767,7 +767,7 @@ spec("TidesDB relational ORM owner failures") {
         check_equal(stopped.state,SALTS_PROCESS_SIGNALED); check_equal(stopped.term_signal,SIGABRT);
 #endif
         check_not_null(strstr(output,"SQL session rollback during connection destroy failed"));
-        salts_process_destroy(child_process); child_process=NULL;
+        cmeta_process_destroy(child_process); child_process=NULL;
         connect_database(false); score_is(10); disconnect_database();
       }
       connect_database(false);

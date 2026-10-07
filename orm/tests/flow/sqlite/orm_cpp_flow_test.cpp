@@ -175,7 +175,7 @@ spec("ORM thin C++ CFlow facade") {
       for (int attempt = 0; attempt < max_pumps && observer.count < expected && !observer.failed;
            ++attempt) {
         (void)cflow_scheduler_advance(&scheduler.native, 1u);
-        salts_sleep_ms(1u);
+        cmeta_sleep_ms(1u);
       }
       check_equal(observer.count, expected);
       check_equal(observer.last_id, expected == 1 ? 7 : 11);

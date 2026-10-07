@@ -3,7 +3,7 @@
 
 #include <cmeta/struct.h>
 #include <sqlite3.h>
-#include <salts_cmeta_data.h>
+#include <cmeta_cmeta_data.h>
 #include <tstr.h>
 #include "tinytest.h"
 
@@ -241,16 +241,16 @@ static void orm_sqlite_test_sink_done(void *context) {
 spec("ORM SQLite CFlow cursor") {
   before_each() {
     /* DLL-imported data addresses are not C static initializer constants on MSVC. */
-    orm_sqlite_test_owned_string_data.storage_type = &salts_tstr_cmeta_type;
-    orm_sqlite_test_owned_string_data.buffer_ops = &salts_tstr_cmeta_buffer_ops;
-    orm_sqlite_test_owned_bytes_data.storage_type = &salts_tstr_cmeta_type;
-    orm_sqlite_test_owned_bytes_data.buffer_ops = &salts_tstr_cmeta_buffer_ops;
+    orm_sqlite_test_owned_string_data.storage_type = &cmeta_tstr_cmeta_type;
+    orm_sqlite_test_owned_string_data.buffer_ops = &cmeta_tstr_cmeta_buffer_ops;
+    orm_sqlite_test_owned_bytes_data.storage_type = &cmeta_tstr_cmeta_type;
+    orm_sqlite_test_owned_bytes_data.buffer_ops = &cmeta_tstr_cmeta_buffer_ops;
     /* tstr's owned identity is not a generic char-pointer reflection identity. */
     orm_sqlite_test_canonical_text_layout = *StructMeta(orm_sqlite_test_text_row);
     memcpy(orm_sqlite_test_canonical_text_fields,
            orm_sqlite_test_canonical_text_layout.fields,
            sizeof(orm_sqlite_test_canonical_text_fields));
-    orm_sqlite_test_canonical_text_fields[1].type = &salts_tstr_cmeta_type;
+    orm_sqlite_test_canonical_text_fields[1].type = &cmeta_tstr_cmeta_type;
     orm_sqlite_test_canonical_text_layout.fields = orm_sqlite_test_canonical_text_fields;
   }
 

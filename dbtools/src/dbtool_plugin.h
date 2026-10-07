@@ -5,9 +5,9 @@
 #include <salts/plugin.h>
 
 typedef struct dbtool_plugin {
-  salts_plugin_registry registry;
-  salts_plugin_ref ref;
-  salts_plugin_lease lease;
+  cmeta_plugin_registry registry;
+  cmeta_plugin_ref ref;
+  cmeta_plugin_lease lease;
   const dbtool_schema_driver_ops *ops;
   bool started;
   bool stopping;

@@ -5,7 +5,7 @@
 #include <stdatomic.h>
 #include <string.h>
 
-FunctionDecl(value, int, rejected_post,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, rejected_post,
     (void *, executor, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
 TINYMOCk_FUNCTION_DECLARE(rejected_post);
@@ -29,14 +29,14 @@ static void sqlite_gate(sqlite3_context *context, int count,
   (void)values;
   atomic_store(&gate_owner_thread, on_test_owner);
   atomic_fetch_add(&gate_entered, 1);
-  while (!atomic_load(&gate_released)) salts_sleep_ms(1u);
+  while (!atomic_load(&gate_released)) cmeta_sleep_ms(1u);
   sqlite3_result_int(context, 7);
 }
 
 static int await_gate(void) {
   for (unsigned attempt = 0; attempt < TEST_WAIT_ATTEMPTS; ++attempt) {
     if (atomic_load(&gate_entered)) return 1;
-    salts_sleep_ms(1u);
+    cmeta_sleep_ms(1u);
   }
   return 0;
 }
@@ -47,7 +47,7 @@ static orm_row_cursor_step await_step(orm_row_cursor *cursor,
   for (unsigned attempt = 0; attempt < TEST_WAIT_ATTEMPTS; ++attempt) {
     step = cursor->ops->next(cursor->context, row);
     if (step.kind != ORM_ROW_CURSOR_WAIT) return step;
-    salts_sleep_ms(1u);
+    cmeta_sleep_ms(1u);
   }
   return step;
 }

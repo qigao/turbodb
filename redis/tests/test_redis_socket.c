@@ -1,7 +1,7 @@
 #include "../redis_socket.h"
 
 #include "tinytest.h"
-#include "salts_error.h"
+#include "cmeta_error.h"
 
 #include <stdint.h>
 

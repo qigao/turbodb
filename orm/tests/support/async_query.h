@@ -75,7 +75,7 @@ static orm_status_t orm_test_async_query(orm_connection_t *connection, orm_error
       if (!cflow_subscription_request(&subscription, 2u)) goto cleanup;
       second_requested = 1;
     }
-    salts_sleep_ms(POLL_TICKS);
+    cmeta_sleep_ms(POLL_TICKS);
   }
   if (observer.done && !observer.failed && observer.count == 2 && observer.sum == 18)
     status = ORM_STATUS_OK;

@@ -7,7 +7,7 @@
 
 struct orm_runtime_driver_extension {
   orm_runtime_t *runtime;
-  salts_plugin_lease plugin_lease;
+  cmeta_plugin_lease plugin_lease;
 };
 
 static const uint8_t runtime_bundle[ORM_DRIVER_BUNDLE_ID_BYTES] =
@@ -44,7 +44,7 @@ static orm_status_t runtime_begin_load(
     orm_runtime_t *runtime, const char *path, orm_error_t *error) {
   orm_status_t status = ORM_STATUS_OK;
   const char *message = NULL;
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
     status = ORM_STATUS_INVALID_STATE;
     message = "runtime is closed";
@@ -65,7 +65,7 @@ static orm_status_t runtime_begin_load(
     runtime->load_active = 1u;
     ++runtime->pending_operations;
   }
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return runtime_result(error, status, message);
 }
 
@@ -90,37 +90,37 @@ static orm_status_t runtime_copy_path(orm_runtime_t *runtime,
   return ORM_STATUS_OK;
 }
 
-static salts_plugin_status runtime_discard_plugin(
-    orm_runtime_t *runtime, salts_plugin_ref ref, int started) {
-  salts_plugin_status status;
+static cmeta_plugin_status runtime_discard_plugin(
+    orm_runtime_t *runtime, cmeta_plugin_ref ref, int started) {
+  cmeta_plugin_status status;
   bool quiescent = false;
-  if (!salts_plugin_ref_valid(ref)) return SALTS_PLUGIN_OK;
+  if (!cmeta_plugin_ref_valid(ref)) return CMETA_PLUGIN_OK;
   if (started) {
-    status = salts_plugin_registry_request_stop(&runtime->plugins, ref);
-    if (status != SALTS_PLUGIN_OK && status != SALTS_PLUGIN_ALREADY)
+    status = cmeta_plugin_registry_request_stop(&runtime->plugins, ref);
+    if (status != CMETA_PLUGIN_OK && status != CMETA_PLUGIN_ALREADY)
       return status;
-    status = salts_plugin_registry_poll_quiescent(
+    status = cmeta_plugin_registry_poll_quiescent(
         &runtime->plugins, ref, &quiescent);
-    if (status != SALTS_PLUGIN_OK)
+    if (status != CMETA_PLUGIN_OK)
       return status;
     if (!quiescent)
-      return SALTS_PLUGIN_BUSY;
+      return CMETA_PLUGIN_BUSY;
   }
-  return salts_plugin_registry_unload(&runtime->plugins, ref);
+  return cmeta_plugin_registry_unload(&runtime->plugins, ref);
 }
 
 orm_status_t ORM_C_CALL
 orm_runtime_load_driver(orm_runtime_t *runtime,
                         const orm_driver_load_config_t *config,
                         orm_error_t *error) {
-  salts_plugin_ref plugin = {0};
-  salts_plugin_lease admission = {0};
-  const salts_plugin_manifest *manifest = NULL;
-  const salts_plugin_export *entry = NULL;
+  cmeta_plugin_ref plugin = {0};
+  cmeta_plugin_lease admission = {0};
+  const cmeta_plugin_manifest *manifest = NULL;
+  const cmeta_plugin_export *entry = NULL;
   TurboDb_Driver *binding = NULL;
   int started = 0;
   orm_status_t status;
-  salts_plugin_status plugin_status;
+  cmeta_plugin_status plugin_status;
 
   if (runtime == NULL || config == NULL ||
       config->struct_size < sizeof(*config) ||
@@ -142,9 +142,9 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   }
 
   plugin_status =
-      salts_plugin_registry_load(&runtime->plugins, path, &plugin);
-  if (plugin_status != SALTS_PLUGIN_OK) {
-    status = plugin_status == SALTS_PLUGIN_UNSUPPORTED_ABI
+      cmeta_plugin_registry_load(&runtime->plugins, path, &plugin);
+  if (plugin_status != CMETA_PLUGIN_OK) {
+    status = plugin_status == CMETA_PLUGIN_UNSUPPORTED_ABI
                  ? runtime_result(error, ORM_STATUS_ABI_MISMATCH,
                                   "driver Plugin ABI mismatch")
                  : runtime_plugin_status(
@@ -152,16 +152,16 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     goto fail_reserved;
   }
 
-  plugin_status = salts_plugin_registry_start(&runtime->plugins, plugin);
-  if (plugin_status != SALTS_PLUGIN_OK) {
+  plugin_status = cmeta_plugin_registry_start(&runtime->plugins, plugin);
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(plugin_status, error, "start driver Plugin");
     goto fail_plugin;
   }
   started = 1;
 
-  plugin_status = salts_plugin_registry_acquire(
+  plugin_status = cmeta_plugin_registry_acquire(
       &runtime->plugins, plugin, &admission, &manifest);
-  if (plugin_status != SALTS_PLUGIN_OK) {
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "acquire driver Plugin admission lease");
     goto fail_plugin;
@@ -185,15 +185,15 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     goto fail_admission;
   }
 
-  plugin_status = salts_plugin_manifest_find_export(
+  plugin_status = cmeta_plugin_manifest_find_export(
       manifest, ORM_DRIVER_PLUGIN_EXPORT_ID, &entry);
-  if (plugin_status != SALTS_PLUGIN_OK) {
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "find TurboDb.Driver export");
     goto fail_admission;
   }
 
-  if (entry->kind == SALTS_PLUGIN_EXPORT_INTERFACE &&
+  if (entry->kind == CMETA_PLUGIN_EXPORT_INTERFACE &&
       entry->contract_id != NULL &&
       strcmp(entry->contract_id, ORM_DRIVER_INTERFACE_CONTRACT_ID) == 0 &&
       entry->contract_version != ORM_DRIVER_INTERFACE_CONTRACT_VERSION) {
@@ -201,7 +201,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
                             "TurboDb.Driver contract version mismatch");
     goto fail_admission;
   }
-  if (entry->kind == SALTS_PLUGIN_EXPORT_INTERFACE &&
+  if (entry->kind == CMETA_PLUGIN_EXPORT_INTERFACE &&
       entry->contract_id != NULL &&
       strcmp(entry->contract_id, ORM_DRIVER_INTERFACE_CONTRACT_ID) == 0 &&
       entry->contract_version == ORM_DRIVER_INTERFACE_CONTRACT_VERSION &&
@@ -214,11 +214,11 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     goto fail_admission;
   }
 
-  plugin_status = salts_plugin_export_require_interface(
+  plugin_status = cmeta_plugin_export_require_interface(
       entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
       ORM_DRIVER_INTERFACE_CONTRACT_VERSION, 0u,
       TurboDb_Driver_interface());
-  if (plugin_status != SALTS_PLUGIN_OK) {
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "admit TurboDb.Driver interface");
     goto fail_admission;
@@ -275,18 +275,18 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   }
 
   plugin_status =
-      salts_plugin_registry_release(&runtime->plugins, &admission);
-  if (plugin_status != SALTS_PLUGIN_OK) {
+      cmeta_plugin_registry_release(&runtime->plugins, &admission);
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "release driver admission lease");
     goto fail_plugin;
   }
 
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN ||
       runtime->load_active == 0u ||
       runtime->pending_operations == 0u) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     status = runtime_result(error, ORM_STATUS_INVALID_STATE,
                             "runtime load reservation was lost");
     goto fail_plugin;
@@ -295,7 +295,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
           runtime,
           (orm_driver_bytes_v1){canonical_snapshot.text,
                                 canonical_snapshot.size})) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     status = runtime_result(error, ORM_STATUS_DRIVER_ALREADY_REGISTERED,
                             "driver ID is already registered");
     goto fail_plugin;
@@ -315,22 +315,22 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   ++runtime->driver_count;
   --runtime->pending_operations;
   runtime->load_active = 0u;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 
 fail_admission:
-  if (salts_plugin_lease_valid(admission)) {
-    const salts_plugin_status release_status =
-        salts_plugin_registry_release(&runtime->plugins, &admission);
-    if (release_status != SALTS_PLUGIN_OK)
+  if (cmeta_plugin_lease_valid(admission)) {
+    const cmeta_plugin_status release_status =
+        cmeta_plugin_registry_release(&runtime->plugins, &admission);
+    if (release_status != CMETA_PLUGIN_OK)
       status = runtime_plugin_status(
           release_status, error, "release failed driver admission lease");
   }
 fail_plugin:
   {
-    const salts_plugin_status discard_status =
+    const cmeta_plugin_status discard_status =
         runtime_discard_plugin(runtime, plugin, started);
-    if (discard_status != SALTS_PLUGIN_OK)
+    if (discard_status != CMETA_PLUGIN_OK)
       status = runtime_plugin_status(
           discard_status, error, "discard failed driver Plugin");
   }
@@ -362,13 +362,13 @@ orm_runtime_driver_acquire_extension(
   enum { EXTENSION_TEXT_CAPACITY = 256 };
   char export_text[EXTENSION_TEXT_CAPACITY];
   char contract_text[EXTENSION_TEXT_CAPACITY];
-  salts_plugin_ref plugin = {0};
-  salts_plugin_lease lease = {0};
-  const salts_plugin_manifest *manifest = NULL;
-  const salts_plugin_export *entry = NULL;
+  cmeta_plugin_ref plugin = {0};
+  cmeta_plugin_lease lease = {0};
+  const cmeta_plugin_manifest *manifest = NULL;
+  const cmeta_plugin_export *entry = NULL;
   orm_runtime_driver_extension_t *extension = NULL;
   orm_status_t status;
-  salts_plugin_status plugin_status;
+  cmeta_plugin_status plugin_status;
 
   if (out_extension != NULL) *out_extension = NULL;
   if (out_binding != NULL) *out_binding = NULL;
@@ -387,21 +387,21 @@ orm_runtime_driver_acquire_extension(
       "invalid driver extension contract ID", error);
   if (status != ORM_STATUS_OK) return status;
 
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
   orm_runtime_driver *driver = runtime_find_driver(runtime, id);
   if (driver == NULL) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
   }
   if (runtime->extension_count >= runtime->config.max_pending_operations ||
       runtime->refs == UINT32_MAX) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "runtime extension budget is full");
   }
@@ -409,28 +409,28 @@ orm_runtime_driver_acquire_extension(
   ++runtime->dependents;
   ++runtime->refs;
   plugin = driver->plugin;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
 
-  plugin_status = salts_plugin_registry_acquire(
+  plugin_status = cmeta_plugin_registry_acquire(
       &runtime->plugins, plugin, &lease, &manifest);
-  if (plugin_status != SALTS_PLUGIN_OK) {
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "acquire Driver extension Plugin lease");
     runtime_drop_extension(runtime);
     return status;
   }
 
-  plugin_status = salts_plugin_manifest_find_export(
+  plugin_status = cmeta_plugin_manifest_find_export(
       manifest, export_text, &entry);
-  if (plugin_status != SALTS_PLUGIN_OK) {
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "find Driver extension export");
     goto fail;
   }
 
-  plugin_status = salts_plugin_export_require_interface(
+  plugin_status = cmeta_plugin_export_require_interface(
       entry, contract_text, contract_version, 0u, interface_desc);
-  if (plugin_status != SALTS_PLUGIN_OK) {
+  if (plugin_status != CMETA_PLUGIN_OK) {
     status = runtime_plugin_status(
         plugin_status, error, "admit Driver extension interface");
     goto fail;
@@ -455,9 +455,9 @@ orm_runtime_driver_acquire_extension(
 
 fail:
   {
-    const salts_plugin_status release_status =
-        salts_plugin_registry_release(&runtime->plugins, &lease);
-    if (release_status != SALTS_PLUGIN_OK)
+    const cmeta_plugin_status release_status =
+        cmeta_plugin_registry_release(&runtime->plugins, &lease);
+    if (release_status != CMETA_PLUGIN_OK)
       status = runtime_plugin_status(
           release_status, error, "release failed Driver extension lease");
   }
@@ -473,10 +473,10 @@ orm_runtime_driver_release_extension(
                           "invalid Driver extension lease");
 
   orm_runtime_t *runtime = extension->runtime;
-  const salts_plugin_status plugin_status =
-      salts_plugin_registry_release(&runtime->plugins,
+  const cmeta_plugin_status plugin_status =
+      cmeta_plugin_registry_release(&runtime->plugins,
                                     &extension->plugin_lease);
-  if (plugin_status != SALTS_PLUGIN_OK)
+  if (plugin_status != CMETA_PLUGIN_OK)
     return runtime_plugin_status(
         plugin_status, error, "release Driver extension Plugin lease");
 
@@ -494,15 +494,15 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
   if (runtime == NULL || out_info == NULL || !runtime_id_valid(id))
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid driver info request");
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
   orm_runtime_driver *driver = runtime_find_driver(runtime, id);
   if (driver == NULL) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
   }
@@ -516,7 +516,7 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
   out_info->execution_models = driver->execution_models;
   memcpy(out_info->bundle_id, driver->bundle_id,
          sizeof(out_info->bundle_id));
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
@@ -530,22 +530,22 @@ orm_runtime_driver_storage_info(
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid driver storage info request");
 
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
 
   orm_runtime_driver *driver = runtime_find_driver(runtime, id);
   if (driver == NULL) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
   }
 
   *out_storage = driver->storage;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 

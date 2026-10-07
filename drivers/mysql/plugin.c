@@ -51,9 +51,9 @@ static const TurboDb_Driver_vtable mysql_driver_vtable = {
 static TurboDb_Driver mysql_driver = {
     &mysql_driver_identity, &mysql_driver_vtable};
 
-static const salts_plugin_export mysql_exports[] = {{
-    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+static const cmeta_plugin_export mysql_exports[] = {{
+    .struct_size = CMETA_PLUGIN_EXPORT_SIZE,
+    .kind = CMETA_PLUGIN_EXPORT_INTERFACE,
     .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
     .capabilities = ORM_MYSQL_DRIVER_CAPABILITIES,
     .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
@@ -61,24 +61,24 @@ static const salts_plugin_export mysql_exports[] = {{
     .value.interface = {
         &TurboDb_Driver_interface_meta, &mysql_driver}},
     {
-    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+    .struct_size = CMETA_PLUGIN_EXPORT_SIZE,
+    .kind = CMETA_PLUGIN_EXPORT_INTERFACE,
     .contract_version = DBTOOL_SCHEMA_CONTRACT_VERSION,
     .export_id = DBTOOL_SCHEMA_EXPORT_ID,
     .contract_id = DBTOOL_SCHEMA_CONTRACT_ID,
     .value.interface = {&TurboDb_SchemaApply_interface_meta, &dbtool_mysql_schema}}};
 
-static const salts_plugin_manifest mysql_manifest = {
-    .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
-    .abi_version = SALTS_PLUGIN_ABI_VERSION,
+static const cmeta_plugin_manifest mysql_manifest = {
+    .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,
+    .abi_version = CMETA_PLUGIN_ABI_VERSION,
     .plugin_id = "mysql",
     .version = {1u, 0u, 0u},
     .exports = mysql_exports,
     .export_count = sizeof(mysql_exports) / sizeof(mysql_exports[0])};
 
-SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
-salts_plugin_query(uint32_t host_abi) {
-  return host_abi == SALTS_PLUGIN_ABI_VERSION
+CMETA_PLUGIN_QUERY_EXPORT const cmeta_plugin_manifest *CMETA_PLUGIN_CALL
+cmeta_plugin_query(uint32_t host_abi) {
+  return host_abi == CMETA_PLUGIN_ABI_VERSION
              ? &mysql_manifest
              : NULL;
 }

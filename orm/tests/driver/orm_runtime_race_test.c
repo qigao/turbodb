@@ -117,10 +117,10 @@ static int race_wait_entered(
   if (!race_marker_path(
           entered, sizeof(entered), driver, phase, "entered"))
     return 0;
-  const uint64_t started = salts_monotonic_ms();
-  while (salts_monotonic_ms() - started < timeout_ms) {
+  const uint64_t started = cmeta_monotonic_ms();
+  while (cmeta_monotonic_ms() - started < timeout_ms) {
     if (race_marker_exists(entered)) return 1;
-    salts_sleep_ms(1u);
+    cmeta_sleep_ms(1u);
   }
   return race_marker_exists(entered);
 }
@@ -137,7 +137,7 @@ spec("runtime close and admission serialization") {
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
-    salts_thread_t worker_thread = NULL;
+    cmeta_thread_t worker_thread = NULL;
     race_worker worker;
     memset(&worker, 0, sizeof(worker));
 
@@ -147,7 +147,7 @@ spec("runtime close and admission serialization") {
     worker.load = load_config();
 
     check_true(race_arm("race", RACE_GATE_INITIALIZE));
-    check_equal(salts_thread_create(&worker_thread, load_worker, &worker),
+    check_equal(cmeta_thread_create(&worker_thread, load_worker, &worker),
                 0);
     check_true(race_wait_entered("race", RACE_GATE_INITIALIZE, RACE_TIMEOUT_MS));
     orm_driver_info_t info;
@@ -158,8 +158,8 @@ spec("runtime close and admission serialization") {
                 ORM_STATUS_BUSY);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
     check_true(race_release("race", RACE_GATE_INITIALIZE));
-    check_equal(salts_thread_join(&worker_thread), 0);
-    salts_thread_destroy(&worker_thread);
+    check_equal(cmeta_thread_join(&worker_thread), 0);
+    cmeta_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
 
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
@@ -170,7 +170,7 @@ spec("runtime close and admission serialization") {
     orm_runtime_config_t config;
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
-    salts_thread_t worker_thread = NULL;
+    cmeta_thread_t worker_thread = NULL;
     race_worker worker;
     memset(&worker, 0, sizeof(worker));
 
@@ -184,13 +184,13 @@ spec("runtime close and admission serialization") {
     worker.connect.driver = orm_view("race");
 
     check_true(race_arm("race", RACE_GATE_CONNECT));
-    check_equal(salts_thread_create(&worker_thread, connect_worker, &worker),
+    check_equal(cmeta_thread_create(&worker_thread, connect_worker, &worker),
                 0);
     check_true(race_wait_entered("race", RACE_GATE_CONNECT, RACE_TIMEOUT_MS));
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
     check_true(race_release("race", RACE_GATE_CONNECT));
-    check_equal(salts_thread_join(&worker_thread), 0);
-    salts_thread_destroy(&worker_thread);
+    check_equal(cmeta_thread_join(&worker_thread), 0);
+    cmeta_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
     check_not_null(worker.connection);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
@@ -281,7 +281,7 @@ spec("runtime close and admission serialization") {
     orm_runtime_t *runtime = NULL;
     orm_error_t error;
     orm_driver_info_t info;
-    salts_thread_t worker_thread = NULL;
+    cmeta_thread_t worker_thread = NULL;
     race_worker worker;
     memset(&worker, 0, sizeof(worker));
 
@@ -295,7 +295,7 @@ spec("runtime close and admission serialization") {
     worker.connect.driver = orm_view("race");
 
     check_true(race_arm("race", RACE_GATE_FINALIZE));
-    check_equal(salts_thread_create(&worker_thread, close_worker, &worker),
+    check_equal(cmeta_thread_create(&worker_thread, close_worker, &worker),
                 0);
     check_true(race_wait_entered("race", RACE_GATE_FINALIZE, RACE_TIMEOUT_MS));
 
@@ -312,8 +312,8 @@ spec("runtime close and admission serialization") {
                 ORM_STATUS_INVALID_STATE);
 
     check_true(race_release("race", RACE_GATE_FINALIZE));
-    check_equal(salts_thread_join(&worker_thread), 0);
-    salts_thread_destroy(&worker_thread);
+    check_equal(cmeta_thread_join(&worker_thread), 0);
+    cmeta_thread_destroy(&worker_thread);
     check_equal(worker.status, ORM_STATUS_OK);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
 

@@ -34,7 +34,7 @@ spec("schema Plugin admission and ownership") {
   it("rejects a module with no schema export") {
     check_equal(dbtool_plugin_load(&plugin, DBTOOL_MISSING_FIXTURE, "sqlite", &error),
                 DBTOOL_STATUS_UNSUPPORTED);
-    check_equal(error.native_code, (int)SALTS_PLUGIN_UNKNOWN_EXPORT);
+    check_equal(error.native_code, (int)CMETA_PLUGIN_UNKNOWN_EXPORT);
   }
 
   it("rejects a different Plugin ABI without retrying another ABI") {
@@ -46,7 +46,7 @@ spec("schema Plugin admission and ownership") {
   it("rejects an incompatible schema contract version") {
     check_equal(dbtool_plugin_load(&plugin, DBTOOL_CONTRACT_FIXTURE, "sqlite", &error),
                 DBTOOL_STATUS_UNSUPPORTED);
-    check_equal(error.native_code, (int)SALTS_PLUGIN_INCOMPATIBLE_CONTRACT);
+    check_equal(error.native_code, (int)CMETA_PLUGIN_INCOMPATIBLE_CONTRACT);
   }
 
   it("rejects missing operations before opening a connection") {
@@ -60,15 +60,15 @@ spec("schema Plugin admission and ownership") {
     const dbtool_connection_config config = {":memory:", NULL, 50u};
     const char sql[] = "begin; create table example(id integer); commit;";
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
-    salts_plugin_lifecycle_info info;
+    cmeta_plugin_lifecycle_info info;
     void *context = NULL;
     check_equal(dbtool_plugin_load(&plugin, DBTOOL_SCHEMA_FIXTURE, "sqlite", &error),
                 DBTOOL_STATUS_OK);
     check_equal(plugin.ops->open(&context, &config, &error), DBTOOL_STATUS_OK);
-    check_equal(salts_plugin_registry_get_lifecycle(&plugin.registry, plugin.ref, &info),
-                SALTS_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_get_lifecycle(&plugin.registry, plugin.ref, &info),
+                CMETA_PLUGIN_OK);
     check_equal(info.active_leases, (size_t)1u);
-    check_equal(salts_plugin_registry_unload(&plugin.registry, plugin.ref), SALTS_PLUGIN_BUSY);
+    check_equal(cmeta_plugin_registry_unload(&plugin.registry, plugin.ref), CMETA_PLUGIN_BUSY);
     check_equal(plugin.ops->apply(context, sql, sizeof(sql) - 1u, &result, &error),
                 DBTOOL_STATUS_OK);
     check_equal(result.statements, (uint64_t)3u);
@@ -86,22 +86,22 @@ spec("schema Plugin admission and ownership") {
   }
 
   it("preserves closing state until an outstanding lease is released") {
-    salts_plugin_lease borrower = {0};
-    const salts_plugin_manifest *manifest = NULL;
+    cmeta_plugin_lease borrower = {0};
+    const cmeta_plugin_manifest *manifest = NULL;
     check_equal(dbtool_plugin_load(&plugin, DBTOOL_SCHEMA_FIXTURE, "sqlite", &error),
                 DBTOOL_STATUS_OK);
-    check_equal(salts_plugin_registry_acquire(&plugin.registry, plugin.ref,
-                                             &borrower, &manifest), SALTS_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_acquire(&plugin.registry, plugin.ref,
+                                             &borrower, &manifest), CMETA_PLUGIN_OK);
     check_equal(dbtool_plugin_close(&plugin, &error), DBTOOL_STATUS_INTERNAL_ERROR);
-    check_equal(error.native_code, (int)SALTS_PLUGIN_BUSY);
+    check_equal(error.native_code, (int)CMETA_PLUGIN_BUSY);
     check_not_null(plugin.registry.impl);
     check_null(plugin.ops);
-    check_equal(salts_plugin_registry_release(&plugin.registry, &borrower), SALTS_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_release(&plugin.registry, &borrower), CMETA_PLUGIN_OK);
     check_equal(dbtool_plugin_close(&plugin, &error), DBTOOL_STATUS_OK);
   }
 
   it("reports a missing module without publishing operations") {
-    char missing[SALTS_PLUGIN_PATH_MAX + 1u];
+    char missing[CMETA_PLUGIN_PATH_MAX + 1u];
     const int length = snprintf(missing, sizeof(missing), "%s.missing", DBTOOL_SCHEMA_FIXTURE);
     check_true(length > 0 && (size_t)length < sizeof(missing));
     check_equal(dbtool_plugin_load(&plugin, missing, "sqlite", &error),
@@ -113,8 +113,8 @@ spec("schema Plugin admission and ownership") {
   it("finishes closing a module whose stop was already requested") {
     check_equal(dbtool_plugin_load(&plugin, DBTOOL_SCHEMA_FIXTURE, "sqlite", &error),
                 DBTOOL_STATUS_OK);
-    check_equal(salts_plugin_registry_request_stop(&plugin.registry, plugin.ref),
-                SALTS_PLUGIN_OK);
+    check_equal(cmeta_plugin_registry_request_stop(&plugin.registry, plugin.ref),
+                CMETA_PLUGIN_OK);
     check_equal(dbtool_plugin_close(&plugin, &error), DBTOOL_STATUS_OK);
     check_null(plugin.registry.impl);
   }

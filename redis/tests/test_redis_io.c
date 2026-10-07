@@ -2,7 +2,7 @@
 #include "../redis_io_internal.h"
 
 #include "tinytest.h"
-#include "salts_error.h"
+#include "cmeta_error.h"
 
 #include <stdint.h>
 

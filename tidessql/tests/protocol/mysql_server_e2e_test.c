@@ -47,8 +47,8 @@ static cnet_client_config transport_config(void) {
 static void close_client_and_drain_server(void) {
   if(source.context) check_equal(mysql_session_async_close(&source,&client_error),MYSQL_SESSION_OK);
   if(second_source.context) check_equal(mysql_session_async_close(&second_source,&client_error),MYSQL_SESSION_OK);
-  const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-  while(server.initialized && server.active && salts_monotonic_ms()<deadline) {
+  const uint64_t deadline=cmeta_monotonic_ms()+TEST_TIMEOUT_MS;
+  while(server.initialized && server.active && cmeta_monotonic_ms()<deadline) {
     size_t events=0;
     check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
   }
@@ -64,8 +64,8 @@ static void start_client_until_accepted(void) {
     .max_command_bytes=TEST_BUFFER_BYTES};
   check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
     &source,&client_error),MYSQL_SESSION_OK);
-  const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-  while(server.active==0 && salts_monotonic_ms()<deadline) {
+  const uint64_t deadline=cmeta_monotonic_ms()+TEST_TIMEOUT_MS;
+  while(server.active==0 && cmeta_monotonic_ms()<deadline) {
     const mysql_async_step step=mysql_session_async_next(&source);
     check_false(step.kind==MYSQL_ASYNC_ERROR);
     size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
@@ -119,8 +119,8 @@ spec("TidesSQL MySQL server existing client end to end") {
     check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
       &source,&client_error),MYSQL_SESSION_OK);
     bool metadata=false,row=false,done=false; size_t columns=0,row_size=0;
-    const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-    while(!done && salts_monotonic_ms()<deadline) {
+    const uint64_t deadline=cmeta_monotonic_ms()+TEST_TIMEOUT_MS;
+    while(!done && cmeta_monotonic_ms()<deadline) {
       size_t events=0;
       check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
       const mysql_async_step step=mysql_session_async_next(&source);
@@ -145,8 +145,8 @@ spec("TidesSQL MySQL server existing client end to end") {
     check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
       &source,&client_error),MYSQL_SESSION_OK);
     mysql_async_step terminal={0};
-    const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-    while(terminal.kind!=MYSQL_ASYNC_ERROR && salts_monotonic_ms()<deadline) {
+    const uint64_t deadline=cmeta_monotonic_ms()+TEST_TIMEOUT_MS;
+    while(terminal.kind!=MYSQL_ASYNC_ERROR && cmeta_monotonic_ms()<deadline) {
       size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
       terminal=mysql_session_async_next(&source);
     }
@@ -165,8 +165,8 @@ spec("TidesSQL MySQL server existing client end to end") {
     check_equal(mysql_session_start_async_source(&client,query,sizeof(query)-1,NULL,0,&limits,
       &source,&client_error),MYSQL_SESSION_OK);
     mysql_async_step terminal={0};
-    const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-    while(terminal.kind!=MYSQL_ASYNC_ERROR && salts_monotonic_ms()<deadline) {
+    const uint64_t deadline=cmeta_monotonic_ms()+TEST_TIMEOUT_MS;
+    while(terminal.kind!=MYSQL_ASYNC_ERROR && cmeta_monotonic_ms()<deadline) {
       size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
       terminal=mysql_session_async_next(&source);
     }
@@ -186,8 +186,8 @@ spec("TidesSQL MySQL server existing client end to end") {
       &source,&client_error),MYSQL_SESSION_OK);
     bool first_ready=false;
     mysql_session_status_t first_status=MYSQL_SESSION_OK;
-    const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-    while(!first_ready && first_status==MYSQL_SESSION_OK && salts_monotonic_ms()<deadline) {
+    const uint64_t deadline=cmeta_monotonic_ms()+TEST_TIMEOUT_MS;
+    while(!first_ready && first_status==MYSQL_SESSION_OK && cmeta_monotonic_ms()<deadline) {
       size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
       const mysql_async_step step=mysql_session_async_next(&source);
       if(step.kind==MYSQL_ASYNC_METADATA) first_ready=true;
@@ -198,7 +198,7 @@ spec("TidesSQL MySQL server existing client end to end") {
       &second_source,&client_error),MYSQL_SESSION_OK);
     bool first_done=false,second_done=false,first_row=false,second_row=false;
     mysql_session_status_t second_status=MYSQL_SESSION_OK;
-    while((!first_done || !second_done) && salts_monotonic_ms()<deadline) {
+    while((!first_done || !second_done) && cmeta_monotonic_ms()<deadline) {
       size_t events=0; check_equal(tdsql_mysql_server_poll(&server,1,&events,&error),TURBODB_STATUS_OK);
       if(!first_done) {
         const mysql_async_step step=mysql_session_async_next(&source);
@@ -232,8 +232,8 @@ spec("TidesSQL MySQL server existing client end to end") {
   }
   it("expires an accepted client that stalls before TLS negotiation") {
     start_client_until_accepted();
-    const uint64_t deadline=salts_monotonic_ms()+TEST_TIMEOUT_MS;
-    while(server.active && salts_monotonic_ms()<deadline) {
+    const uint64_t deadline=cmeta_monotonic_ms()+TEST_TIMEOUT_MS;
+    while(server.active && cmeta_monotonic_ms()<deadline) {
       size_t events=0;
       check_equal(tdsql_mysql_server_poll(&server,10,&events,&error),TURBODB_STATUS_OK);
     }

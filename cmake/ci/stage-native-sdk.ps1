@@ -60,7 +60,7 @@ if ($tidessqld) {
 # libraries into the SDK. TLS and authentication digests use Salts; libpq is
 # built without its own SSL provider.
 if ($Rid -eq "windows-x64") {
-  $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/x64-windows/bin"
+  $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/$env:QIGAO_VCPKG_WINDOWS_TRIPLET/bin"
   foreach ($runtimeDll in @("libpq.dll", "sqlite3.dll")) {
     $source = Join-Path $vcpkgBin $runtimeDll
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

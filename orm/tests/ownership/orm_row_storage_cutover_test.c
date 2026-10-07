@@ -2,7 +2,7 @@
 #define TINYTEST_NO_MAIN
 #include "orm_internal.h"
 #include <cmeta/struct.h>
-#include <salts_cmeta_data.h>
+#include <cmeta_cmeta_data.h>
 #include <data_bind.h>
 #include <tinytest.h>
 #include <stdio.h>
@@ -21,12 +21,12 @@ static cflow_publisher source;
 static bool row_buffer_zero(const void *object) {
   const RowBuffer *buffer = (const RowBuffer *)object;
   return buffer != NULL && buffer->tag == ROW_ZERO_TAG &&
-         salts_tstr_cmeta_buffer_ops.is_zero(&buffer->text);
+         cmeta_tstr_cmeta_buffer_ops.is_zero(&buffer->text);
 }
 static cmeta_status row_buffer_init(void *object) {
   RowBuffer *buffer = (RowBuffer *)object;
   if (buffer == NULL) return CMETA_INVALID_ARGUMENT;
-  const cmeta_status status = salts_tstr_cmeta_buffer_ops.init_zero(&buffer->text);
+  const cmeta_status status = cmeta_tstr_cmeta_buffer_ops.init_zero(&buffer->text);
   if (status == CMETA_OK) buffer->tag = ROW_ZERO_TAG;
   return status;
 }
@@ -39,28 +39,28 @@ static cmeta_status row_buffer_assign(void *object, const unsigned char *data,
     ++injected_failures;
     return CMETA_OUT_OF_MEMORY;
   }
-  const cmeta_status status = salts_tstr_cmeta_buffer_ops.assign(
+  const cmeta_status status = cmeta_tstr_cmeta_buffer_ops.assign(
       &buffer->text, data, size, max_bytes);
-  if (!salts_tstr_cmeta_buffer_ops.is_zero(&buffer->text)) ++allocations;
+  if (!cmeta_tstr_cmeta_buffer_ops.is_zero(&buffer->text)) ++allocations;
   return status;
 }
 static void row_buffer_restore(void *object) {
   RowBuffer *buffer = (RowBuffer *)object;
   if (buffer == NULL) return;
-  if (!salts_tstr_cmeta_buffer_ops.is_zero(&buffer->text)) ++releases;
-  salts_tstr_cmeta_buffer_ops.restore_zero(&buffer->text);
+  if (!cmeta_tstr_cmeta_buffer_ops.is_zero(&buffer->text)) ++releases;
+  cmeta_tstr_cmeta_buffer_ops.restore_zero(&buffer->text);
   buffer->tag = ROW_ZERO_TAG;
 }
 static cmeta_status row_buffer_read(const void *object, const unsigned char **data,
                                     size_t *size) {
   const RowBuffer *buffer = (const RowBuffer *)object;
   if (buffer == NULL || buffer->tag != ROW_ZERO_TAG) return CMETA_INVALID_ARGUMENT;
-  return salts_tstr_cmeta_buffer_ops.read(&buffer->text, data, size);
+  return cmeta_tstr_cmeta_buffer_ops.read(&buffer->text, data, size);
 }
 static void row_buffer_move(void *destination, void *source_) {
   RowBuffer *to = (RowBuffer *)destination;
   RowBuffer *from = (RowBuffer *)source_;
-  salts_tstr_cmeta_buffer_ops.move(&to->text, &from->text);
+  cmeta_tstr_cmeta_buffer_ops.move(&to->text, &from->text);
   to->tag = from->tag = ROW_ZERO_TAG;
 }
 static void row_move(void *destination, void *source_) {
@@ -113,7 +113,7 @@ static const unsigned char second_payload[] = {'C', 'D'};
 
 static void set_payload_kind(cmeta_data_kind kind) {
   /* Imported Salts addresses are bound at runtime, including on Windows. */
-  payload_data = salts_tstr_cmeta_data;
+  payload_data = cmeta_tstr_cmeta_data;
   payload_data.kind = kind;
   payload_data.stable_id = kind == CMETA_DATA_STRING ? "orm.cutover.text" : "orm.cutover.bytes";
   payload_data.storage_type = &buffer_type;

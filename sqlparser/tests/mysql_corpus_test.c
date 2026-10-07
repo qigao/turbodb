@@ -5,7 +5,7 @@ struct mysql_fixture {
   size_t first_line, last_line, offset, length;
 };
 #include "mysql_corpus_files.h"
-static salts_fs_buf_t upstream;
+static cmeta_fs_buf_t upstream;
 
 static void check_provenance(const struct mysql_fixture *fixture) {
   read_fixture(SQLPARSER_MYSQL_CORPUS_ROOT "upstream/", fixture->source, &upstream);
@@ -21,11 +21,11 @@ static void check_provenance(const struct mysql_fixture *fixture) {
     if (input.base[i]=='\n') ++last;
   check_equal(first, fixture->first_line);
   check_equal(last, fixture->last_line);
-  salts_fs_buf_free(&upstream);
+  cmeta_fs_buf_free(&upstream);
 }
 
 spec("MySQL 8.4 official SQL corpus and documented coverage gaps") {
-  after_each() { clear_corpus(); salts_fs_buf_free(&upstream); }
+  after_each() { clear_corpus(); cmeta_fs_buf_free(&upstream); }
 
   it("retains exact upstream SQL and distinguishes syntax errors from server errors") {
     size_t accepted=0, rejected=0, missing=0, overaccepted=0, regressions=0;
@@ -86,10 +86,10 @@ spec("MySQL 8.4 official SQL corpus and documented coverage gaps") {
       check_true(length>=0 && (size_t)length<sizeof(row));
       append_report(row);
       sqlparser_document_destroy(document); document=NULL;
-      salts_fs_buf_free(&input);
+      cmeta_fs_buf_free(&input);
     }
-    salts_fs_buf_t output = {report,tstr_len(report)};
-    check_equal(salts_fs_write_file(SQLPARSER_MYSQL_CORPUS_REPORT,&output),0);
+    cmeta_fs_buf_t output = {report,tstr_len(report)};
+    check_equal(cmeta_fs_write_file(SQLPARSER_MYSQL_CORPUS_REPORT,&output),0);
     printf("MYSQL CORPUS files=%zu accepted=%zu rejected=%zu upstream_syntax_errors=%zu upstream_server_errors=%zu missing_syntax=%zu over_accept=%zu baseline_mismatches=%zu\n",
         count,accepted,rejected,upstream_syntax_errors,upstream_server_errors,missing,overaccepted,regressions);
     printf("MYSQL CORPUS report=%s\n",SQLPARSER_MYSQL_CORPUS_REPORT);

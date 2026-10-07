@@ -2,7 +2,7 @@
 
 #include <libpq-fe.h>
 #include <salts/clock.h>
-#include <salts_error.h>
+#include <cmeta_error.h>
 #include <tinytest.h>
 
 #include <stdio.h>
@@ -12,7 +12,7 @@
 static int wait_for_binding(orm_postgres_direct_tls_bridge *bridge,
                             uint8_t *binding, size_t capacity,
                             size_t *binding_size) {
-  const uint64_t deadline = salts_monotonic_ms() + UINT64_C(5000);
+  const uint64_t deadline = cmeta_monotonic_ms() + UINT64_C(5000);
   int status;
 
   for (;;) {
@@ -25,7 +25,7 @@ static int wait_for_binding(orm_postgres_direct_tls_bridge *bridge,
     status = orm_postgres_direct_tls_bridge_progress(bridge, 1u);
     if (status != SALTS_OK)
       return status;
-    if (salts_monotonic_ms() >= deadline)
+    if (cmeta_monotonic_ms() >= deadline)
       return SALTS_ETIMEDOUT;
   }
 }
@@ -110,8 +110,8 @@ static int connect_with_mismatched_binding(
   if (orm_postgres_direct_tls_bridge_enable_forwarding(&bridge) != SALTS_OK)
     goto cleanup;
 
-  deadline = salts_monotonic_ms() + UINT64_C(5000);
-  while (salts_monotonic_ms() < deadline) {
+  deadline = cmeta_monotonic_ms() + UINT64_C(5000);
+  while (cmeta_monotonic_ms() < deadline) {
     poll_status = PQconnectPoll(connection);
     if (poll_status == PGRES_POLLING_FAILED) {
       status = 0;

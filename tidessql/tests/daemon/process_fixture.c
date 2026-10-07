@@ -2,7 +2,7 @@
 
 #include <salts/clock.h>
 #include <salts/thread.h>
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 
 #include <errno.h>
 #include <stdint.h>
@@ -42,10 +42,10 @@ static char *portable_path(const char *path) {
 
 const char *tidessqld_test_executable(const char *fallback) {
   const char *override = getenv("TURBODB_TEST_TIDESSQLD");
-  salts_fs_stat_t file = {0};
+  cmeta_fs_stat_t file = {0};
   if (override == NULL || override[0] == '\0') return fallback;
-  if (!salts_fs_path_is_absolute(override) ||
-      salts_fs_stat(override, &file) != 0 || !file.is_file)
+  if (!cmeta_fs_path_is_absolute(override) ||
+      cmeta_fs_stat(override, &file) != 0 || !file.is_file)
     return NULL;
   return override;
 }
@@ -98,8 +98,8 @@ int tidessqld_test_write_config(
       "default_database = \"tenant\"\n",
       certificate, key, data);
   if (length > 0 && length < TIDESSQLD_TEST_CONFIG_BYTES) {
-    const salts_fs_buf_t bytes = {text, (size_t)length};
-    result = salts_fs_write_file(config, &bytes);
+    const cmeta_fs_buf_t bytes = {text, (size_t)length};
+    result = cmeta_fs_write_file(config, &bytes);
   }
 cleanup:
   free(text); free(key); free(certificate); free(data); free(config);
@@ -257,7 +257,7 @@ int tidessqld_test_run(
   CloseHandle(write_end);
   write_end = NULL;
   if (!started) goto cleanup;
-  const uint64_t deadline = salts_monotonic_ms() + timeout_ms;
+  const uint64_t deadline = cmeta_monotonic_ms() + timeout_ms;
   for (;;) {
     DWORD child_code = 0u;
     if (capture_read(read_end, output, output_capacity, &output_size) != 0)
@@ -271,9 +271,9 @@ int tidessqld_test_run(
       result = 0;
       break;
     }
-    if (wait != WAIT_TIMEOUT || salts_monotonic_ms() >= deadline)
+    if (wait != WAIT_TIMEOUT || cmeta_monotonic_ms() >= deadline)
       goto terminate;
-    salts_sleep_ms(5);
+    cmeta_sleep_ms(5);
   }
   goto cleanup;
 
@@ -435,7 +435,7 @@ int tidessqld_test_run(
   const int flags = fcntl(pipes[0], F_GETFL);
   if (flags < 0 || fcntl(pipes[0], F_SETFL, flags | O_NONBLOCK) != 0)
     goto terminate;
-  const uint64_t deadline = salts_monotonic_ms() + timeout_ms;
+  const uint64_t deadline = cmeta_monotonic_ms() + timeout_ms;
   for (;;) {
     if (capture_read(pipes[0], output, output_capacity, &output_size) != 0)
       goto terminate;
@@ -449,8 +449,8 @@ int tidessqld_test_run(
       result = 0;
       goto cleanup;
     }
-    if (waited < 0 || salts_monotonic_ms() >= deadline) goto terminate;
-    salts_sleep_ms(5);
+    if (waited < 0 || cmeta_monotonic_ms() >= deadline) goto terminate;
+    cmeta_sleep_ms(5);
   }
 
 terminate:
@@ -512,13 +512,13 @@ static int daemon_running(tidessqld_test_daemon *daemon) {
 int tidessqld_test_daemon_stop(tidessqld_test_daemon *daemon, uint32_t timeout_ms) {
   uint64_t deadline; int status = 0;
   if (daemon == NULL || daemon->pid <= 0 || kill((pid_t)daemon->pid, SIGTERM) != 0) return -1;
-  deadline = salts_monotonic_ms() + timeout_ms;
-  while (salts_monotonic_ms() < deadline) {
+  deadline = cmeta_monotonic_ms() + timeout_ms;
+  while (cmeta_monotonic_ms() < deadline) {
     if (waitpid((pid_t)daemon->pid, &status, WNOHANG) == (pid_t)daemon->pid) {
       close(daemon->log_read); *daemon = (tidessqld_test_daemon){0};
       return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
     }
-    salts_sleep_ms(10);
+    cmeta_sleep_ms(10);
   }
   return -1;
 }
@@ -535,8 +535,8 @@ int tidessqld_test_daemon_wait_for_port(
   char log[TIDESSQLD_TEST_LOG_BYTES] = {0}; size_t size = 0u;
   uint64_t deadline;
   if (daemon == NULL || port == NULL || timeout_ms == 0u) return -1;
-  *port = 0u; deadline = salts_monotonic_ms() + timeout_ms;
-  while (salts_monotonic_ms() < deadline && daemon_running(daemon)) {
+  *port = 0u; deadline = cmeta_monotonic_ms() + timeout_ms;
+  while (cmeta_monotonic_ms() < deadline && daemon_running(daemon)) {
     const char *marker; char *end = NULL; unsigned long value;
     if (tidessqld_test_daemon_read(daemon, log, sizeof(log), &size) < 0) return -1;
     marker = strstr(log, "port=");
@@ -546,7 +546,7 @@ int tidessqld_test_daemon_wait_for_port(
         *port = (uint16_t)value; return 0;
       }
     }
-    salts_sleep_ms(10);
+    cmeta_sleep_ms(10);
   }
   return -1;
 }

@@ -1,7 +1,7 @@
 #include "postgres_direct_tls_bridge.h"
 
-#include <salts_buffer.h>
-#include <salts_error.h>
+#include <cmeta_buffer.h>
+#include <cmeta_error.h>
 
 #include <stdio.h>
 #include <string.h>

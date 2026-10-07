@@ -1,7 +1,7 @@
 #include "bridge.h"
 #include <tinytest.h>
-#include <salts_error.h>
-#include <salts_process.h>
+#include <cmeta_error.h>
+#include <cmeta_process.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +30,7 @@ static orm_tidesdb_database_t *database;
 static orm_tidesdb_column_family_t *family;
 static orm_tidesdb_transaction_t *transactions[TRANSACTION_SLOTS];
 static orm_tidesdb_iterator_t *iterator;
-static salts_process_t *child;
+static cmeta_process_t *child;
 static char *directory;
 
 static void open_database(void) {
@@ -226,22 +226,22 @@ static void crash_worker(const char *mode) {
 static void run_crash(const char *environment) {
   const char *program = getenv("ORM_TDB_STORAGE_TEST_EXE");
   const char *env[] = {environment, NULL};
-  salts_process_options_t options;
-  salts_process_result_t result = {0};
-  salts_process_options_init(&options);
+  cmeta_process_options_t options;
+  cmeta_process_result_t result = {0};
+  cmeta_process_options_init(&options);
   check_not_null(program);
   options.program = program;
   options.cwd = directory;
   options.env = env;
   options.timeout_ms = CHILD_TIMEOUT_MS;
   options.max_output_bytes = CHILD_OUTPUT_BYTES;
-  check_equal(salts_process_spawn(&options, &child), SALTS_OK);
-  check_equal(salts_process_wait(child, &result), SALTS_OK);
+  check_equal(cmeta_process_spawn(&options, &child), SALTS_OK);
+  check_equal(cmeta_process_wait(child, &result), SALTS_OK);
   char output[CHILD_OUTPUT_BYTES] = {0};
   size_t total = 0;
   while (total < sizeof(output) - 1u) {
     size_t count = 0;
-    int status = salts_process_read_stderr(child, output + total,
+    int status = cmeta_process_read_stderr(child, output + total,
         sizeof(output) - 1u - total, &count);
     total += count;
     if (status == SALTS_EOF || count == 0) break;
@@ -251,7 +251,7 @@ static void run_crash(const char *environment) {
   check_equal(result.state, SALTS_PROCESS_EXITED);
   check_equal(result.exit_code, EXIT_SUCCESS);
   check_not_null(strstr(output, "storage-crash-point"));
-  salts_process_destroy(child);
+  cmeta_process_destroy(child);
   child = NULL;
 }
 
@@ -309,7 +309,7 @@ spec("TidesDB SQL native storage prerequisites") {
     create_family(ORM_TDB_SYNC_FULL);
   }
   after_each() {
-    salts_process_destroy(child);
+    cmeta_process_destroy(child);
     orm_tidesdb_iter_free(iterator);
     for (size_t i = 0; i < TRANSACTION_SLOTS; ++i) {
       if (transactions[i] != NULL) {

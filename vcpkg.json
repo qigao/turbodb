@@ -10,6 +10,13 @@
     "gmssl"
   ],
   "features": {
+    "salts-utils": {
+      "description": "Resolve the Lua and QuickJS dependencies exported by SaltsUtils",
+      "dependencies": [
+        "lua",
+        "quickjs-ng"
+      ]
+    },
     "sqlite": {
       "description": "Build SQLite ORM/database-tool backends and SQL parser reference tests",
       "dependencies": [

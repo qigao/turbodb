@@ -15,48 +15,48 @@ orm_status_t runtime_result(orm_error_t *error, orm_status_t status,
 }
 
 orm_status_t runtime_plugin_status(
-    salts_plugin_status status, orm_error_t *error, const char *context) {
+    cmeta_plugin_status status, orm_error_t *error, const char *context) {
   orm_status_t mapped;
   switch (status) {
-  case SALTS_PLUGIN_OK:
+  case CMETA_PLUGIN_OK:
     mapped = ORM_STATUS_OK;
     break;
-  case SALTS_PLUGIN_INVALID_ARGUMENT:
+  case CMETA_PLUGIN_INVALID_ARGUMENT:
     mapped = ORM_STATUS_INVALID_ARGUMENT;
     break;
-  case SALTS_PLUGIN_ALLOCATION_FAILED:
+  case CMETA_PLUGIN_ALLOCATION_FAILED:
     mapped = ORM_STATUS_OUT_OF_MEMORY;
     break;
-  case SALTS_PLUGIN_CAPACITY_EXCEEDED:
+  case CMETA_PLUGIN_CAPACITY_EXCEEDED:
     mapped = ORM_STATUS_LIMIT_EXCEEDED;
     break;
-  case SALTS_PLUGIN_DUPLICATE_PLUGIN_ID:
-  case SALTS_PLUGIN_ALREADY:
+  case CMETA_PLUGIN_DUPLICATE_PLUGIN_ID:
+  case CMETA_PLUGIN_ALREADY:
     mapped = ORM_STATUS_DRIVER_ALREADY_REGISTERED;
     break;
-  case SALTS_PLUGIN_LOAD_FAILED:
+  case CMETA_PLUGIN_LOAD_FAILED:
     mapped = ORM_STATUS_DRIVER_LOAD_ERROR;
     break;
-  case SALTS_PLUGIN_QUERY_MISSING:
-  case SALTS_PLUGIN_UNKNOWN_EXPORT:
+  case CMETA_PLUGIN_QUERY_MISSING:
+  case CMETA_PLUGIN_UNKNOWN_EXPORT:
     mapped = ORM_STATUS_DRIVER_ENTRY_MISSING;
     break;
-  case SALTS_PLUGIN_UNSUPPORTED_ABI:
-  case SALTS_PLUGIN_INVALID_MANIFEST:
-  case SALTS_PLUGIN_QUERY_REJECTED:
-  case SALTS_PLUGIN_INCOMPATIBLE_CONTRACT:
+  case CMETA_PLUGIN_UNSUPPORTED_ABI:
+  case CMETA_PLUGIN_INVALID_MANIFEST:
+  case CMETA_PLUGIN_QUERY_REJECTED:
+  case CMETA_PLUGIN_INCOMPATIBLE_CONTRACT:
     mapped = ORM_STATUS_ABI_MISMATCH;
     break;
-  case SALTS_PLUGIN_BUSY:
+  case CMETA_PLUGIN_BUSY:
     mapped = ORM_STATUS_BUSY;
     break;
-  case SALTS_PLUGIN_UNLOAD_FAILED:
+  case CMETA_PLUGIN_UNLOAD_FAILED:
     mapped = ORM_STATUS_CLEANUP_FAILED;
     break;
-  case SALTS_PLUGIN_UNKNOWN_PLUGIN:
-  case SALTS_PLUGIN_STALE:
-  case SALTS_PLUGIN_INVALID_STATE:
-  case SALTS_PLUGIN_DUPLICATE_EXPORT:
+  case CMETA_PLUGIN_UNKNOWN_PLUGIN:
+  case CMETA_PLUGIN_STALE:
+  case CMETA_PLUGIN_INVALID_STATE:
+  case CMETA_PLUGIN_DUPLICATE_EXPORT:
   default:
     mapped = ORM_STATUS_INVALID_STATE;
     break;
@@ -66,7 +66,7 @@ orm_status_t runtime_plugin_status(
   char message[ORM_C_ERROR_MESSAGE_CAPACITY];
   (void)snprintf(message, sizeof(message), "%s: %s",
                  context != NULL ? context : "plugin",
-                 salts_plugin_status_string(status));
+                 cmeta_plugin_status_string(status));
   return runtime_result(error, mapped, message);
 }
 
@@ -103,53 +103,53 @@ orm_runtime_driver *runtime_find_driver(orm_runtime_t *runtime,
 
 orm_status_t runtime_acquire_dependent(
     orm_runtime_t *runtime, orm_error_t *error) {
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
   if (runtime->dependents == runtime->config.max_connections) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "runtime connection budget is full");
   }
   if (runtime->refs == UINT32_MAX) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "runtime reference budget is full");
   }
   ++runtime->dependents;
   ++runtime->refs;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return ORM_STATUS_OK;
 }
 
 static int runtime_release_dependent_ref(orm_runtime_t *runtime) {
   int last = 0;
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->dependents == 0u || runtime->refs == 0u) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->dependents;
   --runtime->refs;
   last = runtime->refs == 0u;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return last;
 }
 
 void runtime_finish_pending(
     orm_runtime_t *runtime, int load_operation) {
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->pending_operations == 0u ||
       (load_operation && runtime->load_active == 0u)) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->pending_operations;
   if (load_operation) runtime->load_active = 0u;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
 }
 
 static void runtime_release_last(orm_runtime_t *runtime);
@@ -161,17 +161,17 @@ void runtime_drop_dependent(orm_runtime_t *runtime) {
 
 static int runtime_release_extension_ref(orm_runtime_t *runtime) {
   int last = 0;
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->extension_count == 0u ||
       runtime->dependents == 0u || runtime->refs == 0u) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->extension_count;
   --runtime->dependents;
   --runtime->refs;
   last = runtime->refs == 0u;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return last;
 }
 
@@ -237,19 +237,19 @@ orm_runtime_create(const orm_runtime_config_t *config,
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime");
 
-  salts_mutex_init(&runtime->mutex);
+  cmeta_mutex_init(&runtime->mutex);
   if (runtime->mutex == NULL) {
     free(runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "initialize runtime mutex");
   }
 
-  salts_plugin_registry_config plugin_config = {
+  cmeta_plugin_registry_config plugin_config = {
       (size_t)config->max_drivers};
-  const salts_plugin_status plugin_status =
-      salts_plugin_registry_init(&runtime->plugins, &plugin_config);
-  if (plugin_status != SALTS_PLUGIN_OK) {
-    salts_mutex_destroy(&runtime->mutex);
+  const cmeta_plugin_status plugin_status =
+      cmeta_plugin_registry_init(&runtime->plugins, &plugin_config);
+  if (plugin_status != CMETA_PLUGIN_OK) {
+    cmeta_mutex_destroy(&runtime->mutex);
     free(runtime);
     return runtime_plugin_status(plugin_status, error,
                                  "initialize Plugin registry");
@@ -258,8 +258,8 @@ orm_runtime_create(const orm_runtime_config_t *config,
   runtime->drivers = (orm_runtime_driver *)calloc(
       config->max_drivers, sizeof(*runtime->drivers));
   if (runtime->drivers == NULL) {
-    (void)salts_plugin_registry_destroy(&runtime->plugins);
-    salts_mutex_destroy(&runtime->mutex);
+    (void)cmeta_plugin_registry_destroy(&runtime->plugins);
+    cmeta_mutex_destroy(&runtime->mutex);
     free(runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime driver index");
@@ -277,19 +277,19 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "runtime is required");
 
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed == ORM_RUNTIME_CLOSED) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_OK, NULL);
   }
   if (runtime->closed == ORM_RUNTIME_FAILED) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_CLEANUP_FAILED,
                           "runtime cleanup is quarantined");
   }
   if (runtime->closed == ORM_RUNTIME_OPEN) {
     if (runtime->dependents != 0u || runtime->pending_operations != 0u) {
-      salts_mutex_unlock(&runtime->mutex);
+      cmeta_mutex_unlock(&runtime->mutex);
       return runtime_result(error, ORM_STATUS_BUSY,
                             "runtime has active or pending operations");
     }
@@ -297,28 +297,28 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     runtime->close_remaining = runtime->driver_count;
   }
   const uint32_t remaining_snapshot = runtime->close_remaining;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
 
   for (uint32_t remaining = remaining_snapshot; remaining != 0u; --remaining) {
     orm_runtime_driver *driver = &runtime->drivers[remaining - 1u];
-    salts_plugin_status plugin_status =
-        salts_plugin_registry_request_stop(&runtime->plugins, driver->plugin);
-    if (plugin_status != SALTS_PLUGIN_OK &&
-        plugin_status != SALTS_PLUGIN_ALREADY) {
-      salts_mutex_lock(&runtime->mutex);
+    cmeta_plugin_status plugin_status =
+        cmeta_plugin_registry_request_stop(&runtime->plugins, driver->plugin);
+    if (plugin_status != CMETA_PLUGIN_OK &&
+        plugin_status != CMETA_PLUGIN_ALREADY) {
+      cmeta_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
-      salts_mutex_unlock(&runtime->mutex);
+      cmeta_mutex_unlock(&runtime->mutex);
       return runtime_plugin_status(
           plugin_status, error, "request Driver Plugin stop");
     }
 
     bool quiescent = false;
-    plugin_status = salts_plugin_registry_poll_quiescent(
+    plugin_status = cmeta_plugin_registry_poll_quiescent(
         &runtime->plugins, driver->plugin, &quiescent);
-    if (plugin_status != SALTS_PLUGIN_OK) {
-      salts_mutex_lock(&runtime->mutex);
+    if (plugin_status != CMETA_PLUGIN_OK) {
+      cmeta_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
-      salts_mutex_unlock(&runtime->mutex);
+      cmeta_mutex_unlock(&runtime->mutex);
       return runtime_plugin_status(
           plugin_status, error, "poll Driver Plugin quiescence");
     }
@@ -327,14 +327,14 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
                             "driver Plugin is still quiescing");
 
     plugin_status =
-        salts_plugin_registry_unload(&runtime->plugins, driver->plugin);
-    if (plugin_status != SALTS_PLUGIN_OK) {
-      if (plugin_status == SALTS_PLUGIN_BUSY)
+        cmeta_plugin_registry_unload(&runtime->plugins, driver->plugin);
+    if (plugin_status != CMETA_PLUGIN_OK) {
+      if (plugin_status == CMETA_PLUGIN_BUSY)
         return runtime_plugin_status(
             plugin_status, error, "unload Driver Plugin");
-      salts_mutex_lock(&runtime->mutex);
+      cmeta_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
-      salts_mutex_unlock(&runtime->mutex);
+      cmeta_mutex_unlock(&runtime->mutex);
       return runtime_plugin_status(
           plugin_status, error, "unload Driver Plugin");
     }
@@ -342,30 +342,30 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     free(driver->module_path);
     driver->module_path = NULL;
     driver->binding = NULL;
-    driver->plugin = (salts_plugin_ref){0};
+    driver->plugin = (cmeta_plugin_ref){0};
 
-    salts_mutex_lock(&runtime->mutex);
+    cmeta_mutex_lock(&runtime->mutex);
     if (runtime->close_remaining != remaining) {
-      salts_mutex_unlock(&runtime->mutex);
+      cmeta_mutex_unlock(&runtime->mutex);
       abort();
     }
     --runtime->close_remaining;
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
   }
 
-  const salts_plugin_status destroy_status =
-      salts_plugin_registry_destroy(&runtime->plugins);
-  if (destroy_status != SALTS_PLUGIN_OK) {
-    salts_mutex_lock(&runtime->mutex);
+  const cmeta_plugin_status destroy_status =
+      cmeta_plugin_registry_destroy(&runtime->plugins);
+  if (destroy_status != CMETA_PLUGIN_OK) {
+    cmeta_mutex_lock(&runtime->mutex);
     runtime->closed = ORM_RUNTIME_FAILED;
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     return runtime_plugin_status(
         destroy_status, error, "destroy Driver Plugin registry");
   }
 
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   runtime->closed = ORM_RUNTIME_CLOSED;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
@@ -382,31 +382,31 @@ static void runtime_release_last(orm_runtime_t *runtime) {
     abort();
   }
   free(runtime->drivers);
-  salts_mutex_destroy(&runtime->mutex);
+  cmeta_mutex_destroy(&runtime->mutex);
   free(runtime);
 }
 
 void ORM_C_CALL orm_runtime_retain(orm_runtime_t *runtime) {
   if (runtime == NULL) return;
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->refs == 0u || runtime->refs == UINT32_MAX) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     abort();
   }
   ++runtime->refs;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
 }
 
 void ORM_C_CALL orm_runtime_release(orm_runtime_t *runtime) {
   if (runtime == NULL) return;
   int last = 0;
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->refs == 0u) {
-    salts_mutex_unlock(&runtime->mutex);
+    cmeta_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->refs;
   last = runtime->refs == 0u;
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   if (last) runtime_release_last(runtime);
 }

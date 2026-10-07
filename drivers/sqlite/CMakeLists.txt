@@ -39,7 +39,7 @@ set_target_properties(
              FOLDER "drivers/sqlite")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # Keep statically linked SQLite/Salts archive symbols private to the Driver
-  # MODULE. salts_plugin_query is defined by the MODULE object itself and
+  # MODULE. cmeta_plugin_query is defined by the MODULE object itself and
   # remains the only intentional generic loader entry.
   target_link_options(orm_sqlite_driver PRIVATE "LINKER:--exclude-libs,ALL")
 endif()

@@ -5,8 +5,8 @@
 #define TINYTEST_NO_MAIN
 #include "orm_internal.h"
 #include <tinytest.h>
-#include <salts_process.h>
-#include <salts_error.h>
+#include <cmeta_process.h>
+#include <cmeta_error.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +14,7 @@
 
 enum { CHILD_TIMEOUT_MS = 10000, CHILD_OUTPUT_BYTES = 8192, CHILD_CHECK_FAILED = 70 };
 static const char *program_path;
-static salts_process_t *child_process;
+static cmeta_process_t *child_process;
 static orm_owner control_probe;
 static const char rollback_message[] = "injected final rollback failure";
 static unsigned transaction_destroys;
@@ -245,21 +245,21 @@ static int run_child(const char *mode) {
   _Exit(EXIT_SUCCESS);
 }
 
-static void launch_child(const char *mode, salts_process_result_t *result,
+static void launch_child(const char *mode, cmeta_process_result_t *result,
                           char output[CHILD_OUTPUT_BYTES]) {
-  salts_process_options_t options;
+  cmeta_process_options_t options;
   const char *args[] = {"--cleanup-child", mode, NULL};
-  salts_process_options_init(&options);
+  cmeta_process_options_init(&options);
   options.program = program_path;
   options.args = args;
   options.timeout_ms = CHILD_TIMEOUT_MS;
   options.max_output_bytes = CHILD_OUTPUT_BYTES;
-  check_equal(salts_process_spawn(&options, &child_process), SALTS_OK);
-  check_equal(salts_process_wait(child_process, result), SALTS_OK);
+  check_equal(cmeta_process_spawn(&options, &child_process), SALTS_OK);
+  check_equal(cmeta_process_wait(child_process, result), SALTS_OK);
   size_t total = 0u;
   while (total < CHILD_OUTPUT_BYTES - 1u) {
     size_t count = 0u;
-    const int status = salts_process_read_stderr(child_process, output + total,
+    const int status = cmeta_process_read_stderr(child_process, output + total,
         CHILD_OUTPUT_BYTES - 1u - total, &count);
     total += count;
     if (status == SALTS_EOF || count == 0u) break;
@@ -270,7 +270,7 @@ static void launch_child(const char *mode, salts_process_result_t *result,
 }
 
 static void require_successful_child(const char *mode, const char *marker) {
-  salts_process_result_t result = {0};
+  cmeta_process_result_t result = {0};
   char output[CHILD_OUTPUT_BYTES] = {0};
   launch_child(mode, &result, output);
   check_equal(result.state, SALTS_PROCESS_EXITED);
@@ -284,12 +284,12 @@ spec("native cleanup failure policy") {
   (void)ttest_config__;
   before_each() { child_process = NULL; memset(&control_probe, 0, sizeof(control_probe)); }
   after_each() {
-    salts_process_destroy(child_process); child_process = NULL;
+    cmeta_process_destroy(child_process); child_process = NULL;
     /* This stack-state probe owns no native payload; reclaim only its mutex. */
-    if (control_probe.mutex != NULL) salts_mutex_destroy(&control_probe.mutex);
+    if (control_probe.mutex != NULL) cmeta_mutex_destroy(&control_probe.mutex);
   }
   it("fails fast by default rather than silently destroying after a failed rollback") {
-    salts_process_result_t result = {0};
+    cmeta_process_result_t result = {0};
     char output[CHILD_OUTPUT_BYTES] = {0};
     launch_child("default", &result, output);
 #ifndef _WIN32

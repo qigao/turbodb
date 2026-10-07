@@ -152,16 +152,16 @@ turbodb_status_t tidessqld_runtime_port(const tidessqld_runtime *runtime, uint16
 turbodb_status_t tidessqld_runtime_stop(tidessqld_runtime *runtime,
                                         turbodb_error_t *error) {
   if (!runtime || !runtime->initialized) return TURBODB_STATUS_OK;
-  const uint64_t deadline = salts_monotonic_ms() +
+  const uint64_t deadline = cmeta_monotonic_ms() +
       runtime->config->server.shutdown_timeout_ms;
   turbodb_status_t status;
   do {
-    const uint64_t now = salts_monotonic_ms();
+    const uint64_t now = cmeta_monotonic_ms();
     const uint64_t remaining = now < deadline ? deadline - now : 0u;
     const uint32_t slice = remaining > TIDESSQLD_STOP_SLICE_MS
         ? TIDESSQLD_STOP_SLICE_MS : (uint32_t)remaining;
     status = tdsql_mysql_server_stop(&runtime->server, slice, error);
-  } while (status == TURBODB_STATUS_BUSY && salts_monotonic_ms() < deadline);
+  } while (status == TURBODB_STATUS_BUSY && cmeta_monotonic_ms() < deadline);
   if (status != TURBODB_STATUS_OK) return status;
   status = close_databases(runtime, error);
   if (status == TURBODB_STATUS_BUSY) return status;

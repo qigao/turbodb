@@ -1,6 +1,6 @@
 #include "config.h"
 #include "runtime.h"
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <tinytest.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,9 +59,9 @@ static int write_config_with_extra_database(
       TEST_TLS_CERT, TEST_TLS_KEY, extra_server ? extra_server : "",
       portable_database, extra_database ? extra_database : "", salt,
       grant_known ? "tenant" : "missing", account_default);
-  const salts_fs_buf_t bytes = {text, length > 0 ? (size_t)length : 0u};
+  const cmeta_fs_buf_t bytes = {text, length > 0 ? (size_t)length : 0u};
   const int result = length <= 0 || length >= TEST_CONFIG_BYTES ? -1
-      : salts_fs_write_file(portable_config, &bytes);
+      : cmeta_fs_write_file(portable_config, &bytes);
   free(text); free(portable_config); free(portable_database);
   return result;
 }
@@ -73,23 +73,23 @@ static int write_config(const char *extra_server, const char *account_default,
 }
 
 static int resize_config(size_t size, bool embed_nul) {
-  salts_fs_buf_t source = {0};
-  if (salts_fs_read_file(config_path, &source) != 0 || size < source.len) {
-    salts_fs_buf_free(&source);
+  cmeta_fs_buf_t source = {0};
+  if (cmeta_fs_read_file(config_path, &source) != 0 || size < source.len) {
+    cmeta_fs_buf_free(&source);
     return -1;
   }
   char *bytes = (char *)malloc(size);
   if (!bytes) {
-    salts_fs_buf_free(&source);
+    cmeta_fs_buf_free(&source);
     return -1;
   }
   memcpy(bytes, source.base, source.len);
   memset(bytes + source.len, ' ', size - source.len);
   if (embed_nul && size) bytes[size / 2u] = '\0';
-  const salts_fs_buf_t output = {bytes, size};
-  const int result = salts_fs_write_file(config_path, &output);
+  const cmeta_fs_buf_t output = {bytes, size};
+  const int result = cmeta_fs_write_file(config_path, &output);
   free(bytes);
-  salts_fs_buf_free(&source);
+  cmeta_fs_buf_free(&source);
   return result;
 }
 
