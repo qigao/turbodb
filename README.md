@@ -145,6 +145,18 @@ ctest --preset win-release-user -R "^dbtool_" --output-on-failure
 
 Consumers must select the intended package explicitly. Profiles do not fall back to each other. Runtime ORM Drivers are deployment artifacts under `turbodb/drivers`; changing Driver deployment does not require relinking `Orm::C`.
 
+TidesSQL 引擎、协议、服务端及依赖 `tidessqld` 的跨模块 E2E 测试由独立的
+[`TidesSQL engine and server tests`](.github/workflows/tidessql.yml) workflow 执行。
+ORM、驱动及其余模块测试由原有 native CI 执行，并作为 SDK 发布门禁；发布流程不依赖
+TidesSQL workflow 的结果。两者复用原有 presets 和完整构建，发布包仍包含 TidesSQL
+和宿主平台的 `tidessqld`，因此编译依赖仍保留。Android 仅交叉编译，不执行宿主测试。
+本地可按同一标签选择测试：
+
+```powershell
+ctest --preset orm-win-release-user --output-on-failure
+ctest --preset win-release-user -L "^tidessql$" --output-on-failure
+```
+
 ### SQLite
 
 ```powershell

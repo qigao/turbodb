@@ -5,6 +5,26 @@
   ],
   "testPresets": [
     {
+      "name": "orm-test",
+      "hidden": true,
+      "inherits": "base-test",
+      "filter": {
+        "exclude": {
+          "label": "^(benchmark|tidessql)$"
+        }
+      }
+    },
+    {
+      "name": "tidessql-test",
+      "hidden": true,
+      "inherits": "base-test",
+      "filter": {
+        "include": {
+          "label": "^tidessql$"
+        }
+      }
+    },
+    {
       "name": "base-test",
       "hidden": true,
       "displayName": "Base Test Preset",

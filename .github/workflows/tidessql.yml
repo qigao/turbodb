@@ -1,0 +1,22 @@
+name: TidesSQL engine and server tests
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: tidessql-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tidessql:
+    uses: ./.github/workflows/native-sdk.yml
+    with:
+      tidessql-tests: true

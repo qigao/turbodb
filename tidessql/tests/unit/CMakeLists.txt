@@ -98,3 +98,6 @@ if(WIN32)
     orm_tidesdb_sql_expr orm_tidesdb_sql_scan orm_tidesdb_sql_aggregate orm_tidesdb_sql_window orm_tidesdb_sql_join orm_tidesdb_sql_union orm_tidesdb_sql_subquery orm_tidesdb_sql_cte_store orm_tidesdb_sql_cte_recursive orm_tidesdb_sql_cte_bind orm_tidesdb_sql_from orm_tidesdb_sql_select orm_tidesdb_sql_catalog PROPERTIES
     ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
+
+get_property(tidessql_tests DIRECTORY PROPERTY TESTS)
+set_property(TEST ${tidessql_tests} APPEND PROPERTY LABELS tidessql)

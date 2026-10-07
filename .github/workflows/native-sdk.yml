@@ -6,6 +6,10 @@ on:
       version:
         type: string
         default: ci
+      tidessql-tests:
+        description: Run the independent TidesSQL suite instead of ORM tests and SDK staging
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,9 +17,11 @@ permissions:
 
 jobs:
   sdk:
-    name: ORM + drivers (${{ matrix.rid }})
+    name: ${{ inputs.tidessql-tests && 'TidesSQL' || 'ORM + drivers' }} (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      TURBODB_TEST_PRESET: ${{ inputs.tidessql-tests && format('{0}-tidessql', matrix.preset) || matrix.preset }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +45,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          brew install autoconf ninja maven gcc@15
+          brew install autoconf ninja gcc@15
+          if [[ '${{ inputs.tidessql-tests }}' == true ]]; then
+            brew install maven
+          fi
           echo "$(brew --prefix gcc@15)/bin" >> "$GITHUB_PATH"
       - name: Build bundled Lemon host tool
         if: matrix.rid == 'android-arm64-v8a'
@@ -72,13 +81,13 @@ jobs:
           choco install ninja -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw 'Ninja install failed' }
       - name: Install Java for Connector/J compatibility test
-        if: matrix.rid != 'android-arm64-v8a'
+        if: inputs.tidessql-tests && matrix.rid != 'android-arm64-v8a'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - name: Fetch Connector/J compatibility fixture
-        if: matrix.rid != 'android-arm64-v8a'
+        if: inputs.tidessql-tests && matrix.rid != 'android-arm64-v8a'
         shell: pwsh
         env:
           CONNECTOR_J_VERSION: '9.1.0'
@@ -105,7 +114,7 @@ jobs:
             cmake --preset '${{ matrix.preset }}' \
               -DLEMON_EXECUTABLE="$TURBODB_HOST_LEMON"
           else
-            cmake --preset '${{ matrix.preset }}' -DTURBODB_MYSQL_CONNECTOR_J_JAR="$CONNECTOR_J_JAR"
+            cmake --preset '${{ matrix.preset }}' -DTURBODB_MYSQL_CONNECTOR_J_JAR="${CONNECTOR_J_JAR:-}"
           fi
       - name: Configure on Windows
         if: runner.os == 'Windows'
@@ -134,7 +143,7 @@ jobs:
             sudo sysctl -w "kernel.core_pattern=$RUNNER_TEMP/turbodb-cores/%E"
             ulimit -c unlimited
           fi
-          ctest --preset '${{ matrix.preset }}'
+          ctest --preset "$TURBODB_TEST_PRESET"
       - name: Diagnose Linux test crashes
         if: failure() && runner.os == 'Linux' && matrix.rid != 'android-arm64-v8a'
         shell: bash
@@ -151,7 +160,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          ctest --preset ci-windows-release
+          ctest --preset "%TURBODB_TEST_PRESET%"
           if errorlevel 1 exit /b 1
 
       - name: Install on Unix
@@ -164,7 +173,7 @@ jobs:
           cmake --build --preset install-ci-windows-release --parallel 4
           if errorlevel 1 exit /b 1
       - name: Test installed tidessqld
-        if: matrix.rid != 'android-arm64-v8a'
+        if: inputs.tidessql-tests && matrix.rid != 'android-arm64-v8a'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -173,18 +182,19 @@ jobs:
           if (-not (Test-Path -LiteralPath $env:TURBODB_TEST_TIDESSQLD -PathType Leaf)) {
             throw "installed tidessqld was not found: $env:TURBODB_TEST_TIDESSQLD"
           }
-          ctest --preset '${{ matrix.preset }}' `
+          ctest --preset $env:TURBODB_TEST_PRESET `
             -R '^(tidessqld_(process_e2e|cli|connector_j_e2e)|orm_mysql_tidessqld_e2e)$' `
             -j 1 --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw 'installed tidessqld tests failed' }
       - name: Stage native SDK
+        if: ${{ !inputs.tidessql-tests }}
         shell: pwsh
         run: ./cmake/ci/stage-native-sdk.ps1 -Rid '${{ matrix.rid }}' -Version '${{ inputs.version }}'
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.tidessql-tests }}
         with:
           name: turbodb-sdk-${{ matrix.rid }}
           path: build/stage/sdk/${{ matrix.rid }}
           if-no-files-found: error
           retention-days: 3
           compression-level: 0
-
