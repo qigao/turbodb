@@ -1,7 +1,7 @@
 #include "redis_internal.h"
 
 #include <fmt.h>
-#include "salts_error.h"
+#include "cmeta_error.h"
 
 #include <stdint.h>
 #include <string.h>

@@ -2,7 +2,7 @@
  * CSerde reader and canonical Salts providers; no substitute binder or lease. */
 #define TINYTEST_NO_MAIN
 #include "orm_row_publisher.h"
-#include <salts_cmeta_data.h>
+#include <cmeta_cmeta_data.h>
 #include <tinytest.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,7 +76,7 @@ static const orm_row_cursor_ops borrowed_cursor_ops = {
     borrowed_next, borrowed_cancel, borrowed_destroy, borrowed_configure, NULL};
 
 static void require_stable_owned(cmeta_data_kind kind) {
-  cmeta_data_desc shape = salts_tstr_cmeta_data;
+  cmeta_data_desc shape = cmeta_tstr_cmeta_data;
   shape.kind = kind;
   borrowed_source.token_kind = kind == CMETA_DATA_STRING ? CSERDE_STRING : CSERDE_BYTES;
   borrowed_source.payload = malloc(sizeof(original_payload));
@@ -109,16 +109,16 @@ static void require_stable_owned(cmeta_data_kind kind) {
 }
 
 static void require_borrowed_rejection(cmeta_data_kind kind, bool nested) {
-  cmeta_data_desc value = salts_tstr_cmeta_data;
+  cmeta_data_desc value = cmeta_tstr_cmeta_data;
   const cmeta_data_buffer_shape borrowed_shape = {CMETA_DATA_BUFFER_BORROWED};
   value.kind = kind;
   value.stable_id = kind == CMETA_DATA_STRING ? "orm.test.borrowed.text" : "orm.test.borrowed.bytes";
   value.display_name = "BorrowedValue";
   value.shape = &borrowed_shape;
-  value.storage_type = &salts_vstr_cmeta_type;
-  value.buffer_ops = &salts_vstr_cmeta_buffer_ops;
+  value.storage_type = &cmeta_vstr_cmeta_type;
+  value.buffer_ops = &cmeta_vstr_cmeta_buffer_ops;
   check_true(cmeta_data_desc_valid(&value));
-  check_true(cmeta_data_buffer_ops_of(&value) == &salts_vstr_cmeta_buffer_ops);
+  check_true(cmeta_data_buffer_ops_of(&value) == &cmeta_vstr_cmeta_buffer_ops);
   check_equal(value.buffer_ops->ownership, CMETA_DATA_BUFFER_BORROWED);
   typedef struct BorrowedRow { vstr value; } BorrowedRow;
   const cmeta_type_identity identity = CMETA_TYPE_ID_ATOM_INIT("orm.test.BorrowedRow");
@@ -127,7 +127,7 @@ static void require_borrowed_rejection(cmeta_data_kind kind, bool nested) {
       .kind = CMETA_T_OBJECT, .identity = &identity};
   const cmeta_field_desc field = {
       .name = "value", .type_name = "vstr", .offset = offsetof(BorrowedRow, value),
-      .size = sizeof(vstr), .align = _Alignof(vstr), .type = &salts_vstr_cmeta_type};
+      .size = sizeof(vstr), .align = _Alignof(vstr), .type = &cmeta_vstr_cmeta_type};
   const cmeta_struct_desc layout = {"BorrowedRow", sizeof(BorrowedRow),
                                    _Alignof(BorrowedRow), &field, 1u};
   const cmeta_data_field_desc data_field = {"row.value", "value",
@@ -214,7 +214,7 @@ spec("ORM source lifetime and borrowed output admission") {
     orm_row_cursor_dispose(&borrowed_cursor);
     free(borrowed_source.payload);
     borrowed_source.payload = NULL;
-    salts_tstr_cmeta_buffer_ops.restore_zero(&owned_output);
+    cmeta_tstr_cmeta_buffer_ops.restore_zero(&owned_output);
   }
   it("copies STABLE text into ownership surviving cancellation and source destruction") {
     require_stable_owned(CMETA_DATA_STRING);

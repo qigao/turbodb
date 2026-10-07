@@ -1,8 +1,8 @@
 #include "../redis_sentinel.h"
 
 #include "tinytest.h"
-#include "salts_error.h"
-#include "salts_thread.h"
+#include "cmeta_error.h"
+#include "cmeta_thread.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +23,7 @@ typedef int redis_sentinel_test_socket;
 
 typedef struct redis_sentinel_test_server {
   redis_sentinel_test_socket listener;
-  salts_thread_t thread;
+  cmeta_thread_t thread;
   uint16_t port;
   int connections;
 } redis_sentinel_test_server;
@@ -115,7 +115,7 @@ suite("redis CFlow Sentinel") {
     check_equal(redis_io_runtime_init(&runtime, &runtime_config), SALTS_OK);
     check_equal(redis_sentinel_test_listen(&server), 0);
     ports[0] = server.port;
-    check_equal(salts_thread_create(&server.thread, redis_sentinel_test_server_main, &server),
+    check_equal(cmeta_thread_create(&server.thread, redis_sentinel_test_server_main, &server),
                 SALTS_OK);
     config.runtime = &runtime;
     config.sentinel_hosts = hosts;
@@ -149,8 +149,8 @@ suite("redis CFlow Sentinel") {
     check_equal(redis_sentinel_destroy(&sentinel), SALTS_OK);
     check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
     check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
-    check_equal(salts_thread_join(&server.thread), SALTS_OK);
-    salts_thread_destroy(&server.thread);
+    check_equal(cmeta_thread_join(&server.thread), SALTS_OK);
+    cmeta_thread_destroy(&server.thread);
     redis_sentinel_test_close(server.listener);
     check_equal(server.connections, 2);
   }

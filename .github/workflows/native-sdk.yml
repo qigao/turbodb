@@ -20,11 +20,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, rid: linux-x64, preset: ci-linux-release}
-          - {os: ubuntu-24.04-arm, rid: linux-arm64, preset: ci-linux-arm64-release}
-          - {os: macos-15, rid: macos-arm64, preset: ci-macos-arm64-release}
-          - {os: windows-2022, rid: windows-x64, preset: ci-windows-release}
-          - {os: ubuntu-24.04, rid: android-arm64-v8a, preset: ci-android-release}
+          - {os: ubuntu-24.04, rid: linux-x64, host: linux-x64, preset: ci-linux-release}
+          - {os: ubuntu-24.04-arm, rid: linux-arm64, host: linux-arm64, preset: ci-linux-arm64-release}
+          - {os: macos-15, rid: macos-arm64, host: macos-arm64, preset: ci-macos-arm64-release}
+          - {os: windows-2025, rid: windows-x64, host: windows-x64, preset: ci-windows-release}
+          - {os: ubuntu-24.04, rid: android-arm64-v8a, host: linux-x64, preset: ci-android-release}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,10 +34,13 @@ jobs:
           platform: ${{ matrix.rid }}
       - name: Install Linux host tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gdb
       - name: Install macOS host tools
         if: runner.os == 'macOS'
-        run: brew install autoconf ninja maven
+        run: |
+          set -euo pipefail
+          brew install autoconf ninja maven gcc@15
+          echo "$(brew --prefix gcc@15)/bin" >> "$GITHUB_PATH"
       - name: Build bundled Lemon host tool
         if: matrix.rid == 'android-arm64-v8a'
         shell: bash
@@ -92,7 +95,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}'
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}' -HostRid '${{ matrix.host }}'
       - name: Configure on Unix
         if: runner.os != 'Windows'
         shell: bash
@@ -123,7 +126,27 @@ jobs:
 
       - name: Test on Unix
         if: runner.os != 'Windows' && matrix.rid != 'android-arm64-v8a'
-        run: ctest --preset '${{ matrix.preset }}'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            mkdir -p "$RUNNER_TEMP/turbodb-cores"
+            sudo sysctl -w "kernel.core_pattern=$RUNNER_TEMP/turbodb-cores/%E"
+            ulimit -c unlimited
+          fi
+          ctest --preset '${{ matrix.preset }}'
+      - name: Diagnose Linux test crashes
+        if: failure() && runner.os == 'Linux' && matrix.rid != 'android-arm64-v8a'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for core in "$RUNNER_TEMP"/turbodb-cores/*; do
+            executable="${core##*/}"
+            executable="${executable//!//}"
+            gdb --batch "$executable" "$core" \
+              -ex 'thread apply all bt' -ex 'info registers' -ex 'x/8i $pc'
+          done
       - name: Test on Windows
         if: runner.os == 'Windows'
         shell: cmd

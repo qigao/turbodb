@@ -633,7 +633,7 @@ configure 并回归。
 状态｜公开部署契约已由用户确认并接入。新增可执行文件、CMake 选项和 TOML v1；
 现有 SDK ABI、MySQL wire 与磁盘格式不变。
 
-候选方案｜A 使用已安装的 `Salts::TomlParser` 严格解析 TOML，使用 `salts_fs_read_file`
+候选方案｜A 使用已安装的 `Salts::TomlParser` 严格解析 TOML，使用 `cmeta_fs_read_file`
 有界读取；B 使用 SaltsUtils DataBind JSON；C 只提供大量 CLI 参数。选择 A：当前 SaltsUtils
 已经导出静态 `Salts::TomlParser`，不新增第三方包；TOML 适合账户/数据库数组。DataBind
 本机为 3.0/ABI 9，会把共享 DataBind runtime 与 schema 生命周期带入仅需控制面解析的

@@ -1,8 +1,10 @@
-# Find re2c
-find_program(RE2C_EXECUTABLE re2c)
-if(NOT RE2C_EXECUTABLE)
-    message(WARNING "re2c not found - some lexers might not be generated")
+if(NOT DEFINED ENV{RE2C_ROOT} OR NOT IS_DIRECTORY "$ENV{RE2C_ROOT}")
+    message(FATAL_ERROR "RE2C_ROOT must name the restored host re2c package")
 endif()
+unset(RE2C_EXECUTABLE CACHE)
+unset(RE2C_EXECUTABLE)
+find_program(RE2C_EXECUTABLE re2c PATHS "$ENV{RE2C_ROOT}/bin"
+    NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 
 # Find Lemon.
 #

@@ -18,9 +18,9 @@ typedef enum race_operation {
 } race_operation;
 
 typedef struct race_fixture {
-  salts_mutex_t mutex;
-  salts_cond_t condition;
-  salts_thread_t worker;
+  cmeta_mutex_t mutex;
+  cmeta_cond_t condition;
+  cmeta_thread_t worker;
   race_operation operation;
   bool ready, start, entered, permit_native, returned, permit_return;
   bool completed, finish, exited, stop, timed_out;
@@ -44,23 +44,23 @@ static const char race_savepoint[] = "owner_race_point";
  * absolute budget. Timeout opens every gate, so ordinary assertion teardown
  * can still join the fixture instead of leaving a worker holding stack state. */
 static bool wait_locked(const bool *predicate) {
-  const uint64_t started = salts_monotonic_ms();
+  const uint64_t started = cmeta_monotonic_ms();
   while (!*predicate && !fixture.stop) {
-    const uint64_t elapsed = salts_monotonic_ms() - started;
+    const uint64_t elapsed = cmeta_monotonic_ms() - started;
     if (elapsed >= RACE_TIMEOUT_MS) {
       fixture.timed_out = true;
       fixture.stop = true;
-      salts_cond_broadcast(&fixture.condition);
+      cmeta_cond_broadcast(&fixture.condition);
       break;
     }
-    const int status = salts_cond_timedwait(&fixture.condition, &fixture.mutex,
-        salts_ms_to_ns((uint64_t)RACE_TIMEOUT_MS - elapsed));
+    const int status = cmeta_cond_timedwait(&fixture.condition, &fixture.mutex,
+        cmeta_ms_to_ns((uint64_t)RACE_TIMEOUT_MS - elapsed));
     /* Salts reports timeout as a negative result. Recheck the predicate and
      * absolute clock; an early/spurious wake must not satisfy the barrier. */
-    if (status != 0 && salts_monotonic_ms() - started < RACE_TIMEOUT_MS) {
+    if (status != 0 && cmeta_monotonic_ms() - started < RACE_TIMEOUT_MS) {
       fixture.timed_out = true;
       fixture.stop = true;
-      salts_cond_broadcast(&fixture.condition);
+      cmeta_cond_broadcast(&fixture.condition);
       break;
     }
   }
@@ -68,25 +68,25 @@ static bool wait_locked(const bool *predicate) {
 }
 
 static bool await(const bool *predicate) {
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   const bool reached = wait_locked(predicate);
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_mutex_unlock(&fixture.mutex);
   return reached;
 }
 
 static void signal_flag(bool *predicate) {
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   *predicate = true;
-  salts_cond_broadcast(&fixture.condition);
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_cond_broadcast(&fixture.condition);
+  cmeta_mutex_unlock(&fixture.mutex);
 }
 
 static void pause_callback(bool *phase, const bool *permission) {
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   *phase = true;
-  salts_cond_broadcast(&fixture.condition);
+  cmeta_cond_broadcast(&fixture.condition);
   (void)wait_locked(permission);
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_mutex_unlock(&fixture.mutex);
 }
 
 static void relinquish_worker_reference(void) {
@@ -99,9 +99,9 @@ static void relinquish_worker_reference(void) {
 static void before_native(void) {
   relinquish_worker_reference();
   pause_callback(&fixture.entered, &fixture.permit_native);
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   ++fixture.native_calls;
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_mutex_unlock(&fixture.mutex);
 }
 
 static void after_native(void) {
@@ -133,9 +133,9 @@ static orm_status_t gated_savepoint(void *context, vstr name, orm_error_t *error
 }
 
 static void observed_destroy(void *context) {
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   ++fixture.destroy_calls;
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_mutex_unlock(&fixture.mutex);
   if (fixture.executing && fixture.operation == RACE_DESTROY) {
     before_native();
     fixture.native->destroy(context);
@@ -146,16 +146,16 @@ static void observed_destroy(void *context) {
 }
 
 static unsigned read_counter(const unsigned *counter) {
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   const unsigned value = *counter;
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_mutex_unlock(&fixture.mutex);
   return value;
 }
 
 static uint32_t parent_dependents(void) {
-  salts_mutex_lock(&fixture.connection->owner.mutex);
+  cmeta_mutex_lock(&fixture.connection->owner.mutex);
   const uint32_t value = fixture.connection->owner.dependents;
-  salts_mutex_unlock(&fixture.connection->owner.mutex);
+  cmeta_mutex_unlock(&fixture.connection->owner.mutex);
   return value;
 }
 
@@ -253,7 +253,7 @@ static void drop_transaction(void) {
 static void launch(race_operation operation, bool release_worker_reference) {
   fixture.operation = operation;
   fixture.release_worker_reference = release_worker_reference;
-  check_equal(salts_thread_create(&fixture.worker, worker_main, NULL), 0);
+  check_equal(cmeta_thread_create(&fixture.worker, worker_main, NULL), 0);
   check_true(await(&fixture.ready));
   check_equal(fixture.setup_status, ORM_STATUS_OK);
 }
@@ -292,8 +292,8 @@ spec("native owner cross-thread admission and callback completion") {
   (void)ttest_config__;
   before_each() {
     memset(&fixture, 0, sizeof(fixture));
-    salts_mutex_init(&fixture.mutex);
-    salts_cond_init(&fixture.condition);
+    cmeta_mutex_init(&fixture.mutex);
+    cmeta_cond_init(&fixture.condition);
     check_not_null(fixture.mutex);
     check_not_null(fixture.condition);
   }
@@ -310,26 +310,26 @@ spec("native owner cross-thread admission and callback completion") {
       if (!await(&fixture.exited)) {
         /* stop wakes the worker too; wait for its explicit exit with a fresh
          * bounded join predicate, rather than detach a live fixture. */
-        salts_mutex_lock(&fixture.mutex);
-        const uint64_t deadline = salts_monotonic_ms() + RACE_TIMEOUT_MS;
-        while (!fixture.exited && salts_monotonic_ms() < deadline) {
-          const uint64_t now = salts_monotonic_ms();
+        cmeta_mutex_lock(&fixture.mutex);
+        const uint64_t deadline = cmeta_monotonic_ms() + RACE_TIMEOUT_MS;
+        while (!fixture.exited && cmeta_monotonic_ms() < deadline) {
+          const uint64_t now = cmeta_monotonic_ms();
           if (now >= deadline) break;
-          (void)salts_cond_timedwait(&fixture.condition, &fixture.mutex,
-                                    salts_ms_to_ns(deadline - now));
+          (void)cmeta_cond_timedwait(&fixture.condition, &fixture.mutex,
+                                    cmeta_ms_to_ns(deadline - now));
         }
         const bool exited = fixture.exited;
-        salts_mutex_unlock(&fixture.mutex);
+        cmeta_mutex_unlock(&fixture.mutex);
         if (!exited) {
           (void)fprintf(stderr, "native race fixture failed to stop within its deadline\n");
           abort();
         }
       }
-      check_equal(salts_thread_join(&fixture.worker), 0);
+      check_equal(cmeta_thread_join(&fixture.worker), 0);
       check_false(fixture.timed_out);
     }
-    salts_cond_destroy(&fixture.condition);
-    salts_mutex_destroy(&fixture.mutex);
+    cmeta_cond_destroy(&fixture.condition);
+    cmeta_mutex_destroy(&fixture.mutex);
   }
 
   it("rejects close and new work until the native commit callback returns") {

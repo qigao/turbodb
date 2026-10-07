@@ -8,7 +8,7 @@
 /*
  * Driver plugins follow the exact Salts Plugin ABI epoch used to build this
  * TurboDB source tree.  Binary compatibility is still exact at load time:
- * every manifest/query uses SALTS_PLUGIN_ABI_VERSION and Salts rejects a
+ * every manifest/query uses CMETA_PLUGIN_ABI_VERSION and Salts rejects a
  * different host epoch.  Do not freeze the source SDK to one dependency epoch.
  */
 #define ORM_DRIVER_PLUGIN_EXPORT_ID "driver"
@@ -18,15 +18,15 @@
  * interface value are borrowed from the plugin module and therefore remain
  * usable only while the host retains a live Salts::Plugin lease.
  */
-CMETA_INLINE salts_plugin_export orm_driver_plugin_export(
+CMETA_INLINE cmeta_plugin_export orm_driver_plugin_export(
     TurboDb_Driver *driver, uint64_t capabilities) {
 #ifdef __cplusplus
-  salts_plugin_export entry{};
+  cmeta_plugin_export entry{};
 #else
-  salts_plugin_export entry = {0};
+  cmeta_plugin_export entry = {0};
 #endif
-  entry.struct_size = SALTS_PLUGIN_EXPORT_SIZE;
-  entry.kind = SALTS_PLUGIN_EXPORT_INTERFACE;
+  entry.struct_size = CMETA_PLUGIN_EXPORT_SIZE;
+  entry.kind = CMETA_PLUGIN_EXPORT_INTERFACE;
   entry.contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION;
   entry.capabilities = capabilities;
   entry.export_id = ORM_DRIVER_PLUGIN_EXPORT_ID;

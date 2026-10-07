@@ -1,6 +1,6 @@
 #include "auth.h"
 
-#include <salts_crypto.h>
+#include <cmeta_crypto.h>
 
 #include <string.h>
 
@@ -14,14 +14,14 @@ static mysql_wire_status_t mysql_auth_caching_sha2(
   size_t password_size = strlen(password);
   size_t i;
 
-  if (salts_sha256(password, password_size, first) != 0)
+  if (cmeta_sha256(password, password_size, first) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
-  if (salts_sha256(first, sizeof(first), second) != 0)
+  if (cmeta_sha256(first, sizeof(first), second) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
 
   memcpy(challenge_input, second, sizeof(second));
   memcpy(challenge_input + sizeof(second), nonce, MYSQL_AUTH_NONCE_BYTES);
-  if (salts_sha256(challenge_input, sizeof(challenge_input), challenge) != 0)
+  if (cmeta_sha256(challenge_input, sizeof(challenge_input), challenge) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
 
   for (i = 0u; i < sizeof(first); ++i)
@@ -39,14 +39,14 @@ static mysql_wire_status_t mysql_auth_native(
   size_t password_size = strlen(password);
   size_t i;
 
-  if (salts_sha1(password, password_size, first) != 0)
+  if (cmeta_sha1(password, password_size, first) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
-  if (salts_sha1(first, sizeof(first), second) != 0)
+  if (cmeta_sha1(first, sizeof(first), second) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
 
   memcpy(challenge_input, nonce, MYSQL_AUTH_NONCE_BYTES);
   memcpy(challenge_input + MYSQL_AUTH_NONCE_BYTES, second, sizeof(second));
-  if (salts_sha1(challenge_input, sizeof(challenge_input), challenge) != 0)
+  if (cmeta_sha1(challenge_input, sizeof(challenge_input), challenge) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
 
   for (i = 0u; i < sizeof(first); ++i)

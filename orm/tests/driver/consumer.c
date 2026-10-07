@@ -40,22 +40,22 @@ int main(void) {
       .execution_models = consumer_execution_models,
       .storage_capabilities = consumer_storage_capabilities};
   TurboDb_Driver driver = TurboDb_Driver_bind(&consumer_state, &vtable);
-  salts_plugin_export entry =
+  cmeta_plugin_export entry =
       orm_driver_plugin_export(&driver, ORM_DRIVER_CAP_SELECT);
-  salts_plugin_manifest manifest = {
-      .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
-      .abi_version = SALTS_PLUGIN_ABI_VERSION,
+  cmeta_plugin_manifest manifest = {
+      .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,
+      .abi_version = CMETA_PLUGIN_ABI_VERSION,
       .plugin_id = "sdk-consumer",
       .version = {1u, 0u, 0u},
       .exports = &entry,
       .export_count = 1u};
 
   REQUIRE(TurboDb_Driver_valid(&driver));
-  REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_OK);
-  REQUIRE(salts_plugin_export_require_interface(
+  REQUIRE(cmeta_plugin_manifest_validate(&manifest) == CMETA_PLUGIN_OK);
+  REQUIRE(cmeta_plugin_export_require_interface(
               &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
               ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
               ORM_DRIVER_CAP_SELECT,
-              TurboDb_Driver_interface()) == SALTS_PLUGIN_OK);
+              TurboDb_Driver_interface()) == CMETA_PLUGIN_OK);
   return 0;
 }

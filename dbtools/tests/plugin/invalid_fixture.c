@@ -9,9 +9,9 @@ static const TurboDb_SchemaApply_vtable vtable = {
     .implementation = "invalid", .operations = dbtool_schema_operations};
 static TurboDb_SchemaApply binding = {(void *)&invalid_ops, &vtable};
 
-static const salts_plugin_export exports[] = {{
-    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+static const cmeta_plugin_export exports[] = {{
+    .struct_size = CMETA_PLUGIN_EXPORT_SIZE,
+    .kind = CMETA_PLUGIN_EXPORT_INTERFACE,
 #if defined(DBTOOL_FIXTURE_CONTRACT)
     .contract_version = DBTOOL_SCHEMA_CONTRACT_VERSION + 1u,
 #else
@@ -24,17 +24,17 @@ static const salts_plugin_export exports[] = {{
 #endif
     .contract_id = DBTOOL_SCHEMA_CONTRACT_ID,
     .value.interface = {&TurboDb_SchemaApply_interface_meta, &binding}}};
-static const salts_plugin_manifest manifest = {
-    .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
+static const cmeta_plugin_manifest manifest = {
+    .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,
 #if defined(DBTOOL_FIXTURE_ABI)
-    .abi_version = SALTS_PLUGIN_ABI_VERSION + 1u,
+    .abi_version = CMETA_PLUGIN_ABI_VERSION + 1u,
 #else
-    .abi_version = SALTS_PLUGIN_ABI_VERSION,
+    .abi_version = CMETA_PLUGIN_ABI_VERSION,
 #endif
     .plugin_id = "sqlite", .version = {1u, 0u, 0u},
     .exports = exports, .export_count = 1u};
 
-SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
-salts_plugin_query(uint32_t host_abi) {
-  return host_abi == SALTS_PLUGIN_ABI_VERSION ? &manifest : NULL;
+CMETA_PLUGIN_QUERY_EXPORT const cmeta_plugin_manifest *CMETA_PLUGIN_CALL
+cmeta_plugin_query(uint32_t host_abi) {
+  return host_abi == CMETA_PLUGIN_ABI_VERSION ? &manifest : NULL;
 }

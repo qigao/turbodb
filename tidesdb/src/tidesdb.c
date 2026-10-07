@@ -27275,11 +27275,12 @@ static int tidesdb_txn_check_ssi_conflicts(tidesdb_txn_t *txn)
         return TDB_SUCCESS;
     }
 
-    /**** we hold rdlock for the entire iteration to prevent other threads from
-     ***  removing and freeing their transactions while we dereference them.
-     **   removal from active list requires wrlock, so all pointers in the
-     *    array remain valid while we hold rdlock. */
-    pthread_rwlock_rdlock(&txn->db->active_txns_lock);
+    /* Conflict edges and the victim decision form one state transition. A read
+     * lock preserves peer lifetimes but lets concurrent checkers mark each
+     * other as victims, aborting every same-key contender. Serialize this
+     * transition with the existing active-list write lock; WAL and memtable
+     * work stay outside it. Peers remain borrowed until the lock is released. */
+    pthread_rwlock_wrlock(&txn->db->active_txns_lock);
     const int count = txn->db->num_active_txns;
     tidesdb_txn_t **active = txn->db->active_txns;
 
@@ -27357,7 +27358,7 @@ static int tidesdb_txn_check_ssi_conflicts(tidesdb_txn_t *txn)
         }
     }
 
-    /* we release rdlock before taking wrlock in remove_from_active_list */
+    /* The removal helper acquires the active-list lock itself. */
     pthread_rwlock_unlock(&txn->db->active_txns_lock);
 
     if (conflict)

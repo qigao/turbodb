@@ -4,7 +4,7 @@
 #include <session_transaction.h>
 #include <salts/clock.h>
 #include <salts/thread.h>
-#include <salts_coro_executor.h>
+#include <coro_executor.h>
 #include <gmssl/mem.h>
 #include <tinytest.h>
 
@@ -40,7 +40,7 @@ static tdsql_mysql_database_binding binding;
 static tdsql_mysql_auth_policy policy;
 static tdsql_mysql_server server;
 static tdsql_mysql_server_config server_config;
-static salts_coro_executor_t *executor;
+static coro_executor_t *executor;
 static test_server_task server_task;
 static mysql_session_config_t client;
 static turbodb_error_t error;
@@ -110,20 +110,20 @@ static void test_server_run(coro_t *coroutine, void *argument) {
     size_t events = 0;
     result = tdsql_mysql_server_poll(task->server, 1, &events, &task->error);
     if (result != TURBODB_STATUS_OK) break;
-    if (salts_coro_executor_yield() != SALTS_OK) {
+    if (coro_executor_yield() != SALTS_OK) {
       result = TURBODB_STATUS_INTERNAL_ERROR;
       break;
     }
   }
 
-  const uint64_t deadline = salts_monotonic_ms() + TEST_TIMEOUT_MS;
+  const uint64_t deadline = cmeta_monotonic_ms() + TEST_TIMEOUT_MS;
   turbodb_status_t stopped;
   do {
     stopped = tdsql_mysql_server_stop(
         task->server, TEST_STOP_SLICE_MS, &task->error);
-    if (stopped == TURBODB_STATUS_BUSY && salts_monotonic_ms() < deadline)
-      (void)salts_coro_executor_yield();
-  } while (stopped == TURBODB_STATUS_BUSY && salts_monotonic_ms() < deadline);
+    if (stopped == TURBODB_STATUS_BUSY && cmeta_monotonic_ms() < deadline)
+      (void)coro_executor_yield();
+  } while (stopped == TURBODB_STATUS_BUSY && cmeta_monotonic_ms() < deadline);
   if (result == TURBODB_STATUS_OK) result = stopped;
 
   atomic_store_explicit(&task->status, (int)result, memory_order_release);
@@ -139,10 +139,10 @@ static void test_server_cancel(void *argument, int status) {
 }
 
 static bool wait_for_atomic(atomic_int *value) {
-  const uint64_t deadline = salts_monotonic_ms() + TEST_TIMEOUT_MS;
+  const uint64_t deadline = cmeta_monotonic_ms() + TEST_TIMEOUT_MS;
   while (!atomic_load_explicit(value, memory_order_acquire) &&
-         salts_monotonic_ms() < deadline)
-    salts_sleep_ms(1);
+         cmeta_monotonic_ms() < deadline)
+    cmeta_sleep_ms(1);
   return atomic_load_explicit(value, memory_order_acquire) != 0;
 }
 
@@ -150,9 +150,9 @@ static void stop_server_executor(void) {
   if (!executor) return;
   atomic_store_explicit(&server_task.stop, 1, memory_order_release);
   check_true(wait_for_atomic(&server_task.done));
-  check_equal(salts_coro_executor_shutdown(executor), SALTS_OK);
-  check_equal(salts_coro_executor_wait(executor), SALTS_OK);
-  check_equal(salts_coro_executor_destroy(executor), SALTS_OK);
+  check_equal(coro_executor_shutdown(executor), SALTS_OK);
+  check_equal(coro_executor_wait(executor), SALTS_OK);
+  check_equal(coro_executor_destroy(executor), SALTS_OK);
   executor = NULL;
   check_equal(
       atomic_load_explicit(&server_task.status, memory_order_acquire),
@@ -282,19 +282,19 @@ spec("TidesSQL MySQL server remote transaction end to end") {
     atomic_init(&server_task.done, 0);
     atomic_init(&server_task.status, (int)TURBODB_STATUS_OK);
     turbodb_error_init(&server_task.error);
-    const salts_coro_executor_config_t executor_config = {
+    const coro_executor_config_t executor_config = {
         .worker_count = 1,
         .queue_capacity_per_worker = 2,
         .coroutine_pool = {.initial_capacity = 1, .max_capacity = 1}};
-    executor = salts_coro_executor_create(&executor_config);
+    executor = coro_executor_create(&executor_config);
     check_not_null(executor);
     if (executor) {
-      const salts_coro_executor_task_t task = {
+      const coro_executor_task_t task = {
           .run = test_server_run,
           .cancel = test_server_cancel,
           .finalize = NULL,
           .arg = &server_task};
-      check_equal(salts_coro_executor_submit(executor, &task), SALTS_OK);
+      check_equal(coro_executor_submit(executor, &task), SALTS_OK);
       check_true(wait_for_atomic(&server_task.started));
     }
   }

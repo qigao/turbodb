@@ -104,59 +104,63 @@ set_target_properties(
     FOLDER "app"
     OUTPUT_NAME "TurboDBStudio")
 
-add_executable(
-  turbodb-app-language-test
-  EXCLUDE_FROM_ALL
-  tests/sql_language_service_test.cpp
-  src/connection/connection_manager.cpp
-  src/connection/connection_manager.h
-  src/explorer/schema_explorer_model.cpp
-  src/explorer/schema_explorer_model.h
-  src/language/sql_language_service.cpp
-  src/language/sql_language_service.h
-  src/workspace/sql_workspace_session.h)
-target_compile_features(turbodb-app-language-test PRIVATE cxx_std_17)
-target_include_directories(
-  turbodb-app-language-test
-  PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(turbodb-app-language-test PRIVATE Orm::C)
-target_compile_definitions(
-  turbodb-app-language-test
-  PRIVATE
-    TURBODB_APP_SQLITE_PLUGIN_PATH="$<TARGET_FILE:orm_sqlite_driver>")
-add_dependencies(turbodb-app-language-test orm_sqlite_driver)
-set_target_properties(turbodb-app-language-test PROPERTIES FOLDER "app/tests")
+if(BUILD_TESTS)
+  add_executable(
+    turbodb-app-language-test
+    tests/sql_language_service_test.cpp
+    src/connection/connection_manager.cpp
+    src/connection/connection_manager.h
+    src/explorer/schema_explorer_model.cpp
+    src/explorer/schema_explorer_model.h
+    src/language/sql_language_service.cpp
+    src/language/sql_language_service.h
+    src/workspace/sql_workspace_session.h)
+  target_compile_features(turbodb-app-language-test PRIVATE cxx_std_17)
+  target_include_directories(
+    turbodb-app-language-test
+    PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(turbodb-app-language-test PRIVATE Orm::C)
+  target_compile_definitions(
+    turbodb-app-language-test
+    PRIVATE
+      TURBODB_APP_SQLITE_PLUGIN_PATH="$<TARGET_FILE:orm_sqlite_driver>")
+  add_dependencies(turbodb-app-language-test orm_sqlite_driver)
+  set_target_properties(turbodb-app-language-test PROPERTIES FOLDER "app/tests")
 
-add_executable(
-  turbodb-app-query-test
-  EXCLUDE_FROM_ALL
-  tests/query_controller_test.cpp
-  src/connection/connection_manager.cpp
-  src/connection/connection_manager.h
-  src/plan/execution_plan_model.cpp
-  src/plan/execution_plan_model.h
-  src/plan/explain_controller.cpp
-  src/plan/explain_controller.h
-  src/query/query_controller.cpp
-  src/query/query_controller.h
-  src/query/query_result_model.cpp
-  src/query/query_result_model.h
-  src/workspace/sql_workspace_session.h)
-target_compile_features(turbodb-app-query-test PRIVATE cxx_std_17)
-target_compile_definitions(
-  turbodb-app-query-test
-  PRIVATE
-    WIN32_LEAN_AND_MEAN
-    NOMINMAX)
-target_include_directories(
-  turbodb-app-query-test
-  PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(turbodb-app-query-test PRIVATE Orm::C)
-target_compile_definitions(
-  turbodb-app-query-test
-  PRIVATE
-    TURBODB_APP_SQLITE_PLUGIN_PATH="$<TARGET_FILE:orm_sqlite_driver>")
-add_dependencies(turbodb-app-query-test orm_sqlite_driver)
-set_target_properties(turbodb-app-query-test PROPERTIES FOLDER "app/tests")
+  add_executable(
+    turbodb-app-query-test
+    tests/query_controller_test.cpp
+    src/connection/connection_manager.cpp
+    src/connection/connection_manager.h
+    src/plan/execution_plan_model.cpp
+    src/plan/execution_plan_model.h
+    src/plan/explain_controller.cpp
+    src/plan/explain_controller.h
+    src/query/query_controller.cpp
+    src/query/query_controller.h
+    src/query/query_result_model.cpp
+    src/query/query_result_model.h
+    src/workspace/sql_workspace_session.h)
+  target_compile_features(turbodb-app-query-test PRIVATE cxx_std_17)
+  target_compile_definitions(
+    turbodb-app-query-test
+    PRIVATE
+      WIN32_LEAN_AND_MEAN
+      NOMINMAX)
+  target_include_directories(
+    turbodb-app-query-test
+    PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(turbodb-app-query-test PRIVATE Orm::C)
+  target_compile_definitions(
+    turbodb-app-query-test
+    PRIVATE
+      TURBODB_APP_SQLITE_PLUGIN_PATH="$<TARGET_FILE:orm_sqlite_driver>")
+  add_dependencies(turbodb-app-query-test orm_sqlite_driver)
+  set_target_properties(turbodb-app-query-test PROPERTIES FOLDER "app/tests")
+
+  add_test(NAME turbodb-app-language COMMAND turbodb-app-language-test)
+  add_test(NAME turbodb-app-query COMMAND turbodb-app-query-test)
+  add_test(NAME turbodb-app-startup COMMAND turbodb-studio --self-test)
+endif()

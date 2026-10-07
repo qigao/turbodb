@@ -108,9 +108,9 @@ spec("standalone tidessqld process with the existing MySQL driver") {
     bool failed = false;
     mysql_session_status_t step_status = MYSQL_SESSION_OK;
     char step_message[256] = {0};
-    const uint64_t deadline = salts_monotonic_ms() + TEST_TIMEOUT_MS;
+    const uint64_t deadline = cmeta_monotonic_ms() + TEST_TIMEOUT_MS;
     while (opened == MYSQL_SESSION_OK && !done &&
-           salts_monotonic_ms() < deadline) {
+           cmeta_monotonic_ms() < deadline) {
       const mysql_async_step step = mysql_session_async_next(&source);
       if (step.kind == MYSQL_ASYNC_METADATA)
         metadata = step.column_count == 1u;
@@ -127,7 +127,7 @@ spec("standalone tidessqld process with the existing MySQL driver") {
         break;
       }
       if (!done)
-        salts_sleep_ms(1);
+        cmeta_sleep_ms(1);
     }
     const mysql_session_status_t closed =
         source.context != NULL

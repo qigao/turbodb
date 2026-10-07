@@ -18,7 +18,7 @@ static orm_status_t runtime_begin_connect(
   *out_driver = NULL;
   orm_status_t status = ORM_STATUS_OK;
   const char *message = NULL;
-  salts_mutex_lock(&runtime->mutex);
+  cmeta_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
     status = ORM_STATUS_INVALID_STATE;
     message = "runtime is closed";
@@ -36,7 +36,7 @@ static orm_status_t runtime_begin_connect(
       *out_driver = driver;
     }
   }
-  salts_mutex_unlock(&runtime->mutex);
+  cmeta_mutex_unlock(&runtime->mutex);
   return runtime_result(error, status, message);
 }
 
@@ -59,7 +59,7 @@ static orm_driver_limits_v1 runtime_driver_limits(const orm_limits *limits) {
 typedef struct orm_runtime_backend {
   orm_runtime_t *runtime;
   orm_runtime_driver *driver;
-  salts_plugin_lease plugin_lease;
+  cmeta_plugin_lease plugin_lease;
   orm_driver_connection_v1 native;
   orm_driver_connection_ops_v2 ops;
 } orm_runtime_backend;
@@ -70,10 +70,10 @@ static void runtime_backend_destroy(void *context) {
   if (backend->native.context != NULL)
     backend->ops.destroy(backend->native.context);
   orm_runtime_t *runtime = backend->runtime;
-  const salts_plugin_status release_status =
-      salts_plugin_registry_release(&runtime->plugins, &backend->plugin_lease);
+  const cmeta_plugin_status release_status =
+      cmeta_plugin_registry_release(&runtime->plugins, &backend->plugin_lease);
   free(backend);
-  if (release_status != SALTS_PLUGIN_OK) {
+  if (release_status != CMETA_PLUGIN_OK) {
     orm_error_t cleanup_error;
     (void)runtime_plugin_status(
         release_status, &cleanup_error, "release Driver Plugin lease");
@@ -518,8 +518,8 @@ typedef struct orm_runtime_factory_context {
 static orm_status_t runtime_backend_factory(
     const orm_config_t *config, const orm_limits *limits, void *context,
     orm_backend *out_backend, orm_error_t *error) {
-  salts_plugin_lease lease = {0};
-  const salts_plugin_manifest *manifest = NULL;
+  cmeta_plugin_lease lease = {0};
+  const cmeta_plugin_manifest *manifest = NULL;
 
   if (out_backend != NULL) memset(out_backend, 0, sizeof(*out_backend));
   if (config == NULL || limits == NULL || context == NULL ||
@@ -531,11 +531,11 @@ static orm_status_t runtime_backend_factory(
   orm_status_t status = runtime_acquire_dependent(factory->runtime, error);
   if (status != ORM_STATUS_OK) return status;
 
-  const salts_plugin_status acquire_status =
-      salts_plugin_registry_acquire(
+  const cmeta_plugin_status acquire_status =
+      cmeta_plugin_registry_acquire(
           &factory->runtime->plugins, factory->driver->plugin,
           &lease, &manifest);
-  if (acquire_status != SALTS_PLUGIN_OK) {
+  if (acquire_status != CMETA_PLUGIN_OK) {
     runtime_drop_dependent(factory->runtime);
     return runtime_plugin_status(
         acquire_status, error, "acquire Driver Plugin lease");
@@ -548,7 +548,7 @@ static orm_status_t runtime_backend_factory(
   status = TurboDb_Driver_create(
       factory->driver->binding, config, &driver_limits, &native, error);
   if (status != ORM_STATUS_OK) {
-    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
+    (void)cmeta_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return status;
   }
@@ -556,7 +556,7 @@ static orm_status_t runtime_backend_factory(
   status = orm_driver_validate_connection_v1(
       &native, (uint32_t)sizeof(native), factory->driver->capabilities, error);
   if (status != ORM_STATUS_OK) {
-    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
+    (void)cmeta_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return status;
   }
@@ -568,7 +568,7 @@ static orm_status_t runtime_backend_factory(
       (orm_runtime_backend *)calloc(1u, sizeof(*backend));
   if (backend == NULL) {
     connection_ops.destroy(native.context);
-    (void)salts_plugin_registry_release(&factory->runtime->plugins, &lease);
+    (void)cmeta_plugin_registry_release(&factory->runtime->plugins, &lease);
     runtime_drop_dependent(factory->runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime driver connection adapter");

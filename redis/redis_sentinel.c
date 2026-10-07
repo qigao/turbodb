@@ -1,6 +1,6 @@
 #include "redis_sentinel.h"
 
-#include "salts_error.h"
+#include "cmeta_error.h"
 #include "tstr.h"
 
 #include <errno.h>

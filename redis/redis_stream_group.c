@@ -1,6 +1,6 @@
 #include "redis_stream_group.h"
 
-#include "salts_error.h"
+#include "cmeta_error.h"
 
 #include <inttypes.h>
 #include <stdio.h>

@@ -14,7 +14,7 @@ orm_status_t orm_owner_init(orm_owner *owner, uint32_t max_references,
   if (owner->mutex != NULL)
     return ORM_STATUS_INVALID_STATE;
   memset(owner, 0, sizeof(*owner));
-  salts_mutex_init(&owner->mutex);
+  cmeta_mutex_init(&owner->mutex);
   if (owner->mutex == NULL)
     return ORM_STATUS_OUT_OF_MEMORY;
   owner->references = 1u;
@@ -27,7 +27,7 @@ orm_status_t orm_owner_init(orm_owner *owner, uint32_t max_references,
 orm_status_t orm_owner_try_retain(orm_owner *owner) {
   orm_status_t status = ORM_STATUS_OK;
   if (!owner_valid(owner)) return ORM_STATUS_INVALID_ARGUMENT;
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (owner->references == 0u || owner->phase == ORM_OWNER_CLOSING ||
       owner->phase == ORM_OWNER_CLOSE_FAILED)
     status = ORM_STATUS_INVALID_STATE;
@@ -35,21 +35,21 @@ orm_status_t orm_owner_try_retain(orm_owner *owner) {
     status = ORM_STATUS_LIMIT_EXCEEDED;
   else
     ++owner->references;
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   return status;
 }
 
 orm_status_t orm_owner_admit(orm_owner *owner) {
   orm_status_t status = ORM_STATUS_OK;
   if (!owner_valid(owner)) return ORM_STATUS_INVALID_ARGUMENT;
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u)
     status = ORM_STATUS_INVALID_STATE;
   else if (owner->dependents >= owner->max_dependents)
     status = ORM_STATUS_LIMIT_EXCEEDED;
   else
     ++owner->dependents;
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   return status;
 }
 
@@ -72,12 +72,12 @@ static orm_owner_action owner_after_release(orm_owner *owner) {
 static orm_owner_action owner_release(orm_owner *owner, bool dependent) {
   orm_owner_action action;
   if (!owner_valid(owner)) abort();
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   uint32_t *count = dependent ? &owner->dependents : &owner->references;
   if (*count == 0u) abort(); /* Invalid/double release is a caller contract bug. */
   --*count;
   action = owner_after_release(owner);
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   return action;
 }
 
@@ -93,7 +93,7 @@ orm_status_t orm_owner_begin_close(orm_owner *owner, orm_owner_action *action) {
   orm_status_t status = ORM_STATUS_OK;
   if (action != NULL) *action = ORM_OWNER_KEEP;
   if (!owner_valid(owner) || action == NULL) return ORM_STATUS_INVALID_ARGUMENT;
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (owner->phase == ORM_OWNER_CLOSE_FAILED) {
     status = ORM_OWNER_STATUS_CLEANUP_FAILED;
   } else if (owner->phase == ORM_OWNER_CLOSED) {
@@ -106,18 +106,18 @@ orm_status_t orm_owner_begin_close(orm_owner *owner, orm_owner_action *action) {
     owner->phase = ORM_OWNER_CLOSING;
     *action = ORM_OWNER_CLOSE_RESOURCES;
   }
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   return status;
 }
 
 orm_owner_action orm_owner_finish_close(orm_owner *owner) {
   orm_owner_action action;
   if (!owner_valid(owner)) abort();
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (owner->phase != ORM_OWNER_CLOSING || owner->dependents != 0u) abort();
   owner->phase = ORM_OWNER_CLOSED;
   action = owner->references == 0u ? ORM_OWNER_FREE_MEMORY : ORM_OWNER_KEEP;
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   return action;
 }
 
@@ -126,22 +126,22 @@ void orm_owner_dispose(orm_owner *owner) {
    * is legal without its own reference or dependent hold. */
   if (!owner_valid(owner) || owner->references != 0u || owner->dependents != 0u ||
       owner->phase != ORM_OWNER_CLOSED) abort();
-  salts_mutex_destroy(&owner->mutex);
+  cmeta_mutex_destroy(&owner->mutex);
 }
 
 orm_status_t orm_owner_begin_write(orm_owner *owner) {
   orm_status_t status = ORM_STATUS_OK;
   if (!owner_valid(owner)) return ORM_STATUS_INVALID_ARGUMENT;
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u)
     status = ORM_STATUS_INVALID_STATE;
   else if (owner->dependents != 0u)
     status = ORM_STATUS_BUSY;
-  if (status != ORM_STATUS_OK) salts_mutex_unlock(&owner->mutex);
+  if (status != ORM_STATUS_OK) cmeta_mutex_unlock(&owner->mutex);
   return status;
 }
 
 void orm_owner_end_write(orm_owner *owner) {
   if (!owner_valid(owner)) abort();
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
 }

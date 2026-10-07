@@ -1,9 +1,4 @@
 cmake_minimum_required(VERSION 3.21)
-# Development/test builds never inject vcpkg applocal deployment into link
-# steps.
-set(VCPKG_APPLOCAL_DEPS
-    OFF
-    CACHE BOOL "" FORCE)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 if(POLICY CMP0144)
   cmake_policy(SET CMP0144 NEW)
@@ -12,7 +7,7 @@ include(CMakeOptions.cmake)
 
 project(
   TurboDB
-  VERSION 2.2.0
+  VERSION 2.3.0
   DESCRIPTION "C/C++ database libraries"
   HOMEPAGE_URL "https://github.com/qigao/turbodb"
   LANGUAGES C CXX)
@@ -47,10 +42,16 @@ enable_testing()
 include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
+if(NOT DEFINED ENV{SALTS_ROOT} OR NOT IS_DIRECTORY "$ENV{SALTS_ROOT}")
+  message(FATAL_ERROR "SALTS_ROOT must name the restored Salts SDK")
+endif()
 cmake_path(CONVERT "$ENV{SALTS_ROOT}" TO_CMAKE_PATH_LIST
   _TURBODB_SALTS_ROOT NORMALIZE)
 cmake_path(CONVERT "$ENV{SALTS_UTILS_ROOT}" TO_CMAKE_PATH_LIST
   _TURBODB_SALTS_UTILS_ROOT NORMALIZE)
+# Restoring a new SDK must invalidate the previous package location.
+unset(Salts_DIR CACHE)
+unset(Salts_DIR)
 find_package(
   Salts
   CONFIG
@@ -61,6 +62,11 @@ find_package(
   NO_CMAKE_FIND_ROOT_PATH)
 
 if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS OR TURBODB_BUILD_TIDESSQL_SERVER)
+  if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR NOT IS_DIRECTORY "$ENV{SALTS_UTILS_ROOT}")
+    message(FATAL_ERROR "SALTS_UTILS_ROOT must name the restored SaltsUtils SDK")
+  endif()
+  unset(SaltsUtils_DIR CACHE)
+  unset(SaltsUtils_DIR)
   find_package(
     SaltsUtils
     CONFIG

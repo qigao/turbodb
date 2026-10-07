@@ -1,5 +1,5 @@
 #include <orm_tidesdb.h>
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 
 #include "bridge.h"
 #include "orm_internal.h"
@@ -83,7 +83,7 @@ static orm_status_t tidesdb_join_path(
     char out[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u],
     const char *base, const char *child, const char *role,
     orm_error_t *error) {
-  if (salts_fs_path_join(
+  if (cmeta_fs_path_join(
           out, ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u,
           base, child) != 0) {
     char message[ORM_C_ERROR_MESSAGE_CAPACITY];
@@ -97,8 +97,8 @@ static orm_status_t tidesdb_join_path(
 
 static orm_status_t tidesdb_require_directory(
     const char *path, const char *role, orm_error_t *error) {
-  salts_fs_stat_t stat;
-  const int rc = salts_fs_lstat(path, &stat);
+  cmeta_fs_stat_t stat;
+  const int rc = cmeta_fs_lstat(path, &stat);
   if (rc != 0)
     return tidesdb_maintenance_fail_fs(rc, role, error);
   if (!stat.is_directory || stat.is_symlink) {
@@ -111,15 +111,15 @@ static orm_status_t tidesdb_require_directory(
 
 static orm_status_t tidesdb_require_nonempty_directory(
     const char *path, orm_error_t *error) {
-  salts_fs_dir_t *dir = NULL;
-  salts_fs_dirent_t entry;
-  int rc = salts_fs_opendir(path, &dir);
+  cmeta_fs_dir_t *dir = NULL;
+  cmeta_fs_dirent_t entry;
+  int rc = cmeta_fs_opendir(path, &dir);
   if (rc != 0)
     return tidesdb_maintenance_fail_fs(
         rc, "open TidesDB generation directory", error);
-  rc = salts_fs_readdir(dir, &entry);
+  rc = cmeta_fs_readdir(dir, &entry);
   {
-    const int close_rc = salts_fs_closedir(dir);
+    const int close_rc = cmeta_fs_closedir(dir);
     if (rc < 0)
       return tidesdb_maintenance_fail_fs(
           rc, "read TidesDB generation directory", error);
@@ -172,7 +172,7 @@ static orm_status_t tidesdb_prepare_provider_paths(
       provider_root, "provider root", root,
       ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u, error);
   if (status != ORM_STATUS_OK) return status;
-  if (!salts_fs_path_is_absolute(root)) {
+  if (!cmeta_fs_path_is_absolute(root)) {
     orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
                   "TidesDB provider root must be absolute");
     return ORM_STATUS_INVALID_ARGUMENT;
@@ -188,7 +188,7 @@ static orm_status_t tidesdb_prepare_provider_paths(
 }
 
 static void tidesdb_map_publication_state(
-    salts_fs_replace_state_t source,
+    cmeta_fs_replace_state_t source,
     orm_tidesdb_generation_publish_result *result) {
   switch (source) {
   case SALTS_FS_REPLACE_PUBLISHED_DURABLE:
@@ -262,8 +262,8 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_publish_generation(
   char active_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
   char stage_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
   char lock_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
-  salts_file_t lock_file = SALTS_INVALID_FILE;
-  salts_fs_replace_state_t replace_state = SALTS_FS_REPLACE_NOT_PUBLISHED;
+  cmeta_file_t lock_file = SALTS_INVALID_FILE;
+  cmeta_fs_replace_state_t replace_state = SALTS_FS_REPLACE_NOT_PUBLISHED;
   orm_status_t status;
   int rc;
   int locked = 0;
@@ -284,7 +284,7 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_publish_generation(
       lock_path, root, "ACTIVE.lock", "ACTIVE lock", error);
   if (status != ORM_STATUS_OK) return status;
 
-  lock_file = salts_fs_open(
+  lock_file = cmeta_fs_open(
       lock_path, SALTS_FS_O_RDWR | SALTS_FS_O_CREAT,
       SALTS_FS_DEFAULT_MODE);
   if (lock_file == SALTS_INVALID_FILE) {
@@ -292,19 +292,19 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_publish_generation(
                   "open TidesDB ACTIVE lock failed");
     return ORM_STATUS_DATASTORE_ERROR;
   }
-  rc = salts_fs_lock(
+  rc = cmeta_fs_lock(
       lock_file, SALTS_FS_LOCK_EXCLUSIVE | SALTS_FS_LOCK_NONBLOCK, 0, 0);
   if (rc != 0) {
-    (void)salts_fs_close(lock_file);
+    (void)cmeta_fs_close(lock_file);
     orm_error_set(error, ORM_STATUS_BUSY,
                   "TidesDB ACTIVE publication is busy");
     return ORM_STATUS_BUSY;
   }
   locked = 1;
 
-  rc = salts_fs_access(stage_path, SALTS_FS_ACCESS_EXISTS);
+  rc = cmeta_fs_access(stage_path, SALTS_FS_ACCESS_EXISTS);
   if (rc == 0) {
-    rc = salts_fs_unlink(stage_path);
+    rc = cmeta_fs_unlink(stage_path);
     if (rc != 0) {
       status = tidesdb_maintenance_fail_fs(
           rc, "remove stale TidesDB ACTIVE staging file", error);
@@ -317,9 +317,9 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_publish_generation(
   }
 
   {
-    salts_fs_buf_t bytes = salts_fs_buf_init(
+    cmeta_fs_buf_t bytes = cmeta_fs_buf_init(
         result->generation, result->generation_size);
-    rc = salts_fs_write_file(stage_path, &bytes);
+    rc = cmeta_fs_write_file(stage_path, &bytes);
     if (rc != 0) {
       status = tidesdb_maintenance_fail_fs(
           rc, "write TidesDB ACTIVE staging file", error);
@@ -327,7 +327,7 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_publish_generation(
     }
   }
 
-  rc = salts_fs_replace_durable(stage_path, active_path, &replace_state);
+  rc = cmeta_fs_replace_durable(stage_path, active_path, &replace_state);
   tidesdb_map_publication_state(replace_state, result);
   if (rc != 0) {
     if (replace_state == SALTS_FS_REPLACE_DURABILITY_UNKNOWN) {
@@ -353,7 +353,7 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_publish_generation(
 
 cleanup:
   if (locked) {
-    const int unlock_status = salts_fs_unlock(lock_file, 0, 0);
+    const int unlock_status = cmeta_fs_unlock(lock_file, 0, 0);
     if (status == ORM_STATUS_OK && unlock_status != 0) {
       orm_error_set(error, ORM_STATUS_CLEANUP_FAILED,
                     "unlock TidesDB ACTIVE publication failed");
@@ -361,7 +361,7 @@ cleanup:
     }
   }
   if (lock_file != SALTS_INVALID_FILE) {
-    const int close_status = salts_fs_close(lock_file);
+    const int close_status = cmeta_fs_close(lock_file);
     if (status == ORM_STATUS_OK && close_status != 0) {
       orm_error_set(error, ORM_STATUS_CLEANUP_FAILED,
                     "close TidesDB ACTIVE lock failed");
@@ -379,9 +379,9 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
   char generation_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
   char active_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
   char lock_path[ORM_TIDESDB_PROVIDER_PATH_MAX_BYTES + 1u];
-  salts_fs_stat_t active_stat;
-  salts_fs_buf_t active_bytes = {0};
-  salts_file_t lock_file = SALTS_INVALID_FILE;
+  cmeta_fs_stat_t active_stat;
+  cmeta_fs_buf_t active_bytes = {0};
+  cmeta_file_t lock_file = SALTS_INVALID_FILE;
   orm_status_t status;
   int rc;
   int locked = 0;
@@ -420,7 +420,7 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
       lock_path, root, "ACTIVE.lock", "ACTIVE lock", error);
   if (status != ORM_STATUS_OK) return status;
 
-  lock_file = salts_fs_open(
+  lock_file = cmeta_fs_open(
       lock_path, SALTS_FS_O_RDWR | SALTS_FS_O_CREAT,
       SALTS_FS_DEFAULT_MODE);
   if (lock_file == SALTS_INVALID_FILE) {
@@ -428,17 +428,17 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
                   "open TidesDB ACTIVE lock failed");
     return ORM_STATUS_DATASTORE_ERROR;
   }
-  rc = salts_fs_lock(
+  rc = cmeta_fs_lock(
       lock_file, SALTS_FS_LOCK_SHARED | SALTS_FS_LOCK_NONBLOCK, 0, 0);
   if (rc != 0) {
-    (void)salts_fs_close(lock_file);
+    (void)cmeta_fs_close(lock_file);
     orm_error_set(error, ORM_STATUS_BUSY,
                   "TidesDB ACTIVE resolution is busy");
     return ORM_STATUS_BUSY;
   }
   locked = 1;
 
-  rc = salts_fs_lstat(active_path, &active_stat);
+  rc = cmeta_fs_lstat(active_path, &active_stat);
   if (rc != 0) {
     status = tidesdb_maintenance_fail_fs(
         rc, "inspect TidesDB ACTIVE pointer", error);
@@ -453,7 +453,7 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
     goto cleanup;
   }
 
-  rc = salts_fs_read_file(active_path, &active_bytes);
+  rc = cmeta_fs_read_file(active_path, &active_bytes);
   if (rc != 0) {
     status = tidesdb_maintenance_fail_fs(
         rc, "read TidesDB ACTIVE pointer", error);
@@ -465,7 +465,7 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
     status = tidesdb_copy_generation_id(
         generation, result->generation, &result->generation_size, error);
   }
-  salts_fs_buf_free(&active_bytes);
+  cmeta_fs_buf_free(&active_bytes);
   active_bytes.base = NULL;
   active_bytes.len = 0u;
   if (status != ORM_STATUS_OK) goto cleanup;
@@ -486,9 +486,9 @@ static orm_status_t ORM_DRIVER_CALL tidesdb_resolve_active(
 
 cleanup:
   if (active_bytes.base != NULL)
-    salts_fs_buf_free(&active_bytes);
+    cmeta_fs_buf_free(&active_bytes);
   if (locked) {
-    const int unlock_status = salts_fs_unlock(lock_file, 0, 0);
+    const int unlock_status = cmeta_fs_unlock(lock_file, 0, 0);
     if (status == ORM_STATUS_OK && unlock_status != 0) {
       orm_error_set(error, ORM_STATUS_CLEANUP_FAILED,
                     "unlock TidesDB ACTIVE resolution failed");
@@ -496,7 +496,7 @@ cleanup:
     }
   }
   if (lock_file != SALTS_INVALID_FILE) {
-    const int close_status = salts_fs_close(lock_file);
+    const int close_status = cmeta_fs_close(lock_file);
     if (status == ORM_STATUS_OK && close_status != 0) {
       orm_error_set(error, ORM_STATUS_CLEANUP_FAILED,
                     "close TidesDB ACTIVE resolution lock failed");

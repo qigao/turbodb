@@ -60,7 +60,7 @@ not compile a private copy of the loader. `Orm::DriverABI` publishes the ORM
 driver headers and their `Salts::PluginABI`, Core, CFlow and CSerde dependencies.
 It does not link the host loader or a native database library.
 
-`SALTS_PLUGIN_ABI_VERSION` selects the exact admission epoch, including the CMeta
+`CMETA_PLUGIN_ABI_VERSION` selects the exact admission epoch, including the CMeta
 reflection layouts exposed by exports. The source SDK follows the installed Salts
 epoch; the host rejects mismatched modules before consuming their descriptors. There is no cross-epoch
 negotiation, retry or compatibility path. Rebuild the host and all modules with

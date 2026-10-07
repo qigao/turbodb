@@ -15,7 +15,7 @@ spec("native owner control state") {
   after_each() {
     /* These stack-state tests own no native resources. Always release their
      * synchronization allocation, including a failed assertion's cleanup. */
-    salts_mutex_destroy(&owner.mutex);
+    cmeta_mutex_destroy(&owner.mutex);
   }
   it("rejects missing owners and zero budgets before allocating") {
     check_equal(orm_owner_init(NULL, 1u, 1u), ORM_STATUS_INVALID_ARGUMENT);

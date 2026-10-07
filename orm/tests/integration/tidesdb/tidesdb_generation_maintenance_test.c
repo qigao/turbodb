@@ -1,6 +1,6 @@
 #include <orm_tidesdb.h>
 
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <tinytest.h>
 
 #include <stdint.h>
@@ -119,20 +119,20 @@ static long read_generation_connection(orm_connection_t *connection) {
 
 static void join_path(char *out, size_t out_size,
                       const char *base, const char *child) {
-  check_equal(salts_fs_path_join(out, out_size, base, child), 0);
+  check_equal(cmeta_fs_path_join(out, out_size, base, child), 0);
 }
 
 static void prepare_layout(
     const char *root, char *generations, size_t generations_size) {
   join_path(generations, generations_size, root, "generations");
-  check_equal(salts_fs_mkdir(generations, 0755), 0);
+  check_equal(cmeta_fs_mkdir(generations, 0755), 0);
 }
 
 static void create_generation_dir(
     const char *generations, const char *id,
     char *path, size_t path_size) {
   join_path(path, path_size, generations, id);
-  check_equal(salts_fs_mkdir(path, 0755), 0);
+  check_equal(cmeta_fs_mkdir(path, 0755), 0);
 }
 
 static orm_tidesdb_generation_publish_result publish_generation(
@@ -172,7 +172,7 @@ spec("TidesDB staged generation publication") {
     char g1_path[1024];
     char g2_path[1024];
     char resolved_path[1024];
-    salts_fs_stat_t g1_stat;
+    cmeta_fs_stat_t g1_stat;
     orm_error_t error;
     orm_runtime_t *runtime;
     orm_driver_storage_capabilities_v1 storage;
@@ -218,7 +218,7 @@ spec("TidesDB staged generation publication") {
     check_equal(memcmp(active.generation, "g-000002", 8u), 0);
 
     check_equal(read_generation_connection(old_connection), 11L);
-    check_equal(salts_fs_lstat(g1_path, &g1_stat), 0);
+    check_equal(cmeta_fs_lstat(g1_path, &g1_stat), 0);
     check_true(g1_stat.is_directory);
 
     join_path(resolved_path, sizeof(resolved_path),

@@ -85,8 +85,8 @@ static void connect_pair(uint32_t timeout) {
   check_greater(snprintf(uri,sizeof(uri),"tcp://127.0.0.1:%u",(unsigned)port),0);
   cnet_connect_options options={.uri=uri,.observer=observer(&client_peer)};
   check_equal(cnet_connect(&client,&options,&client_peer.connection),SALTS_OK);
-  uint64_t deadline=salts_monotonic_ms()+TEST_DEADLINE_MS; bool accepted=false;
-  while((!client_peer.connected || !server_peer.connected) && salts_monotonic_ms()<deadline) {
+  uint64_t deadline=cmeta_monotonic_ms()+TEST_DEADLINE_MS; bool accepted=false;
+  while((!client_peer.connected || !server_peer.connected) && cmeta_monotonic_ms()<deadline) {
     if(!accepted) {
       int ready=0; check_equal(cnet_listener_wait(&listener,0,&ready),SALTS_OK);
       if(ready) {
@@ -107,9 +107,9 @@ static void exchange(tls_peer *sender,tls_peer *receiver,const uint8_t *bytes,si
   memcpy(mem_buffer_data(buffer),bytes,size); mem_set_used(buffer,size);
   int status=cnet_send_buffer(sender->owner,sender->connection,buffer);
   mem_buffer_release(buffer); check_equal(status,SALTS_OK);
-  uint64_t deadline=salts_monotonic_ms()+TEST_DEADLINE_MS;
+  uint64_t deadline=cmeta_monotonic_ms()+TEST_DEADLINE_MS;
   while((receiver->size<size || sender->sent<expected_send) && !receiver->terminal && !sender->terminal &&
-      !receiver->failed && !sender->failed && salts_monotonic_ms()<deadline) poll_pair();
+      !receiver->failed && !sender->failed && cmeta_monotonic_ms()<deadline) poll_pair();
   check_false(receiver->failed); check_false(sender->failed);
   check_equal(receiver->size,size); check_equal(sender->sent,expected_send);
   check_equal(receiver->bytes,bytes,size);
@@ -130,9 +130,9 @@ static void upgrade(const char *identity,const char *ca) {
   cnet_tls_client_config policy={.size=sizeof(policy),.ca_file=ca,.server_name=identity};
   cnet_start_tls_options options=CNET_START_TLS_OPTIONS_INIT; options.tls=&policy;
   check_equal(cnet_start_tls(&client,client_peer.connection,&options),SALTS_OK);
-  uint64_t deadline=salts_monotonic_ms()+TEST_DEADLINE_MS;
+  uint64_t deadline=cmeta_monotonic_ms()+TEST_DEADLINE_MS;
   while((client_peer.connected<2 || server_peer.connected<2) && !client_peer.terminal && !server_peer.terminal &&
-      salts_monotonic_ms()<deadline) poll_pair();
+      cmeta_monotonic_ms()<deadline) poll_pair();
 }
 spec("MySQL frontend real CNet TLS transport") {
   before_each() {
@@ -178,23 +178,23 @@ spec("MySQL frontend real CNet TLS transport") {
   }
   it("rejects a mismatched certificate identity before permitting a login") {
     connect_pair(TEST_IO_TIMEOUT_MS); ssl_request(); upgrade("untrusted.invalid",TEST_TLS_CA);
-    uint64_t deadline=salts_monotonic_ms()+TEST_DEADLINE_MS;
-    while(!client_peer.terminal && salts_monotonic_ms()<deadline) poll_pair();
+    uint64_t deadline=cmeta_monotonic_ms()+TEST_DEADLINE_MS;
+    while(!client_peer.terminal && cmeta_monotonic_ms()<deadline) poll_pair();
     check_true(client_peer.terminal); check_true(client_peer.failed); check_equal(client_peer.connected,1u);
     check_equal(gate.phase,TDSQL_MYSQL_WAIT_TLS); check_equal(server_peer.size,(size_t)TDSQL_MYSQL_SSL_BYTES);
   }
   it("rejects a server certificate signed by an untrusted key before login") {
     connect_pair(TEST_IO_TIMEOUT_MS); ssl_request(); upgrade("localhost",TEST_TLS_WRONG_CA);
-    uint64_t deadline=salts_monotonic_ms()+TEST_DEADLINE_MS;
-    while(!client_peer.terminal && salts_monotonic_ms()<deadline) poll_pair();
+    uint64_t deadline=cmeta_monotonic_ms()+TEST_DEADLINE_MS;
+    while(!client_peer.terminal && cmeta_monotonic_ms()<deadline) poll_pair();
     check_true(client_peer.terminal); check_true(client_peer.failed); check_equal(client_peer.connected,1u);
     check_equal(gate.phase,TDSQL_MYSQL_WAIT_TLS); check_equal(server_peer.size,(size_t)TDSQL_MYSQL_SSL_BYTES);
   }
   it("terminates a stalled server TLS handshake without authorizing plaintext") {
     connect_pair(TEST_STALLED_TLS_MS); ssl_request();
     check_equal(cnet_start_tls_server(&server,server_peer.connection,&tls_server),SALTS_OK);
-    uint64_t deadline=salts_monotonic_ms()+TEST_DEADLINE_MS;
-    while(!server_peer.terminal && salts_monotonic_ms()<deadline) poll_pair();
+    uint64_t deadline=cmeta_monotonic_ms()+TEST_DEADLINE_MS;
+    while(!server_peer.terminal && cmeta_monotonic_ms()<deadline) poll_pair();
     check_true(server_peer.terminal); check_true(server_peer.failed);
     check_equal(server_peer.status,SALTS_ETIMEDOUT); check_equal(server_peer.connected,1u);
     check_equal(gate.phase,TDSQL_MYSQL_WAIT_TLS);

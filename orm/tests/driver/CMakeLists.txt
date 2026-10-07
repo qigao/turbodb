@@ -228,7 +228,7 @@ set_tests_properties(
     "ORM_PLUGIN_FIXTURE=$<TARGET_FILE:orm_runtime_plugin_fixture>;ORM_PLUGIN_NO_QUERY_FIXTURE=$<TARGET_FILE:orm_plugin_no_query_fixture>;ORM_PLUGIN_BAD_ABI_FIXTURE=$<TARGET_FILE:orm_plugin_bad_abi_fixture>;ORM_PLUGIN_BAD_CONTRACT_FIXTURE=$<TARGET_FILE:orm_plugin_bad_contract_fixture>;ORM_PLUGIN_BAD_SHAPE_FIXTURE=$<TARGET_FILE:orm_plugin_bad_shape_fixture>;ORM_PLUGIN_BAD_STORAGE_FIXTURE=$<TARGET_FILE:orm_plugin_bad_storage_fixture>"
 )
 # Dedicated race fixture intentionally exports test-only gate symbols in
-# addition to canonical salts_plugin_query. It is not the export-surface
+# addition to canonical cmeta_plugin_query. It is not the export-surface
 # fixture.
 add_library(orm_runtime_race_fixture MODULE orm_runtime_race_fixture.c)
 target_include_directories(orm_runtime_race_fixture PRIVATE ${ORM_SOURCE_DIR}/include/orm)

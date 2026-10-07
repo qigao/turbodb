@@ -78,44 +78,44 @@ static void race_gate_pause(uint32_t phase) {
     return;
 
   race_marker_write(entered);
-  const uint64_t started = salts_monotonic_ms();
+  const uint64_t started = cmeta_monotonic_ms();
   while (!race_marker_exists(release) &&
-         salts_monotonic_ms() - started < RACE_TIMEOUT_MS)
-    salts_sleep_ms(1u);
+         cmeta_monotonic_ms() - started < RACE_TIMEOUT_MS)
+    cmeta_sleep_ms(1u);
 
   (void)remove(arm);
   (void)remove(entered);
   (void)remove(release);
 }
 
-static salts_plugin_status SALTS_PLUGIN_CALL race_start(void *self) {
+static cmeta_plugin_status CMETA_PLUGIN_CALL race_start(void *self) {
   race_module *module = (race_module *)self;
   if (module != &module_context)
-    return SALTS_PLUGIN_INVALID_ARGUMENT;
+    return CMETA_PLUGIN_INVALID_ARGUMENT;
   race_gate_pause(ORM_RUNTIME_RACE_GATE_START);
   module->started = 1u;
-  return SALTS_PLUGIN_OK;
+  return CMETA_PLUGIN_OK;
 }
 
-static salts_plugin_status SALTS_PLUGIN_CALL race_request_stop(void *self) {
+static cmeta_plugin_status CMETA_PLUGIN_CALL race_request_stop(void *self) {
   race_module *module = (race_module *)self;
   if (module != &module_context)
-    return SALTS_PLUGIN_INVALID_ARGUMENT;
+    return CMETA_PLUGIN_INVALID_ARGUMENT;
   race_gate_pause(ORM_RUNTIME_RACE_GATE_STOP);
   if (module->live_connections != 0u)
-    return SALTS_PLUGIN_BUSY;
+    return CMETA_PLUGIN_BUSY;
   module->started = 0u;
-  return SALTS_PLUGIN_OK;
+  return CMETA_PLUGIN_OK;
 }
 
-static bool SALTS_PLUGIN_CALL race_is_quiescent(const void *self) {
+static bool CMETA_PLUGIN_CALL race_is_quiescent(const void *self) {
   const race_module *module = (const race_module *)self;
   return module == &module_context &&
          module->started == 0u &&
          module->live_connections == 0u;
 }
 
-static void SALTS_PLUGIN_CALL race_destroy(void *self) {
+static void CMETA_PLUGIN_CALL race_destroy(void *self) {
   if (self == &module_context)
     memset(&module_context, 0, sizeof(module_context));
 }
@@ -201,18 +201,18 @@ static const TurboDb_Driver_vtable driver_vtable = {
 static TurboDb_Driver driver = {
     &module_context, &driver_vtable};
 
-static const salts_plugin_export exports[] = {{
-    .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-    .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+static const cmeta_plugin_export exports[] = {{
+    .struct_size = CMETA_PLUGIN_EXPORT_SIZE,
+    .kind = CMETA_PLUGIN_EXPORT_INTERFACE,
     .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
     .capabilities = 0u,
     .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
     .contract_id = ORM_DRIVER_INTERFACE_CONTRACT_ID,
     .value.interface = {&TurboDb_Driver_interface_meta, &driver}}};
 
-static const salts_plugin_manifest manifest = {
-    .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
-    .abi_version = SALTS_PLUGIN_ABI_VERSION,
+static const cmeta_plugin_manifest manifest = {
+    .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,
+    .abi_version = CMETA_PLUGIN_ABI_VERSION,
     .plugin_id = driver_id,
     .version = {1u, 0u, 0u},
     .exports = exports,
@@ -223,7 +223,7 @@ static const salts_plugin_manifest manifest = {
     .is_quiescent = race_is_quiescent,
     .destroy = race_destroy};
 
-SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
-salts_plugin_query(uint32_t host_abi) {
-  return host_abi == SALTS_PLUGIN_ABI_VERSION ? &manifest : NULL;
+CMETA_PLUGIN_QUERY_EXPORT const cmeta_plugin_manifest *CMETA_PLUGIN_CALL
+cmeta_plugin_query(uint32_t host_abi) {
+  return host_abi == CMETA_PLUGIN_ABI_VERSION ? &manifest : NULL;
 }

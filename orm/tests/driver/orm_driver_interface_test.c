@@ -131,61 +131,61 @@ int main(void) {
   REQUIRE(orm_driver_storage_capabilities_valid(
               TurboDb_Driver_storage_capabilities(&driver)));
 
-  salts_plugin_export entry = orm_driver_plugin_export(
+  cmeta_plugin_export entry = orm_driver_plugin_export(
       &driver, ORM_DRIVER_CAP_SELECT | ORM_DRIVER_CAP_TRANSACTION);
-  REQUIRE(entry.struct_size == SALTS_PLUGIN_EXPORT_SIZE);
-  REQUIRE(entry.kind == SALTS_PLUGIN_EXPORT_INTERFACE);
+  REQUIRE(entry.struct_size == CMETA_PLUGIN_EXPORT_SIZE);
+  REQUIRE(entry.kind == CMETA_PLUGIN_EXPORT_INTERFACE);
   REQUIRE(strcmp(entry.export_id, ORM_DRIVER_PLUGIN_EXPORT_ID) == 0);
   REQUIRE(strcmp(entry.contract_id, ORM_DRIVER_INTERFACE_CONTRACT_ID) == 0);
   REQUIRE(entry.contract_version == ORM_DRIVER_INTERFACE_CONTRACT_VERSION);
   REQUIRE(entry.value.interface.value == &driver);
   REQUIRE(entry.value.interface.desc == local);
 
-  REQUIRE(salts_plugin_export_require_interface(
+  REQUIRE(cmeta_plugin_export_require_interface(
              &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
-             ORM_DRIVER_CAP_SELECT, peer_a) == SALTS_PLUGIN_OK);
-  REQUIRE(salts_plugin_export_require_interface(
+             ORM_DRIVER_CAP_SELECT, peer_a) == CMETA_PLUGIN_OK);
+  REQUIRE(cmeta_plugin_export_require_interface(
              &entry, "TurboDb.NotDriver",
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
              ORM_DRIVER_CAP_SELECT, peer_a) ==
-         SALTS_PLUGIN_INCOMPATIBLE_CONTRACT);
-  REQUIRE(salts_plugin_export_require_interface(
+         CMETA_PLUGIN_INCOMPATIBLE_CONTRACT);
+  REQUIRE(cmeta_plugin_export_require_interface(
              &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION + 1u,
              ORM_DRIVER_CAP_SELECT, peer_a) ==
-         SALTS_PLUGIN_INCOMPATIBLE_CONTRACT);
-  REQUIRE(salts_plugin_export_require_interface(
+         CMETA_PLUGIN_INCOMPATIBLE_CONTRACT);
+  REQUIRE(cmeta_plugin_export_require_interface(
              &entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
              ORM_DRIVER_CAP_DELETE, peer_a) ==
-         SALTS_PLUGIN_INCOMPATIBLE_CONTRACT);
+         CMETA_PLUGIN_INCOMPATIBLE_CONTRACT);
 
   const cmeta_interface_desc *wrong_base = TurboDb_Driver_Wrong_interface();
   cmeta_interface_desc wrong_shape = *wrong_base;
   wrong_shape.name = local->name;
   REQUIRE(cmeta_interface_desc_valid(&wrong_shape));
-  salts_plugin_export wrong_entry = entry;
+  cmeta_plugin_export wrong_entry = entry;
   wrong_entry.value.interface.desc = &wrong_shape;
-  REQUIRE(salts_plugin_export_require_interface(
+  REQUIRE(cmeta_plugin_export_require_interface(
              &wrong_entry, ORM_DRIVER_INTERFACE_CONTRACT_ID,
              ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
              ORM_DRIVER_CAP_SELECT, peer_a) ==
-         SALTS_PLUGIN_INCOMPATIBLE_CONTRACT);
+         CMETA_PLUGIN_INCOMPATIBLE_CONTRACT);
 
-  salts_plugin_manifest manifest = {
-      .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
-      .abi_version = SALTS_PLUGIN_ABI_VERSION,
+  cmeta_plugin_manifest manifest = {
+      .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,
+      .abi_version = CMETA_PLUGIN_ABI_VERSION,
       .plugin_id = "turbodb-driver-fixture",
       .version = {1u, 0u, 0u},
       .exports = &entry,
       .export_count = 1u};
-  REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_OK);
-  manifest.abi_version = SALTS_PLUGIN_ABI_VERSION - 1u;
-  REQUIRE(salts_plugin_manifest_validate(&manifest) == SALTS_PLUGIN_UNSUPPORTED_ABI);
-  manifest.abi_version = SALTS_PLUGIN_ABI_VERSION + 1u;
-  REQUIRE(salts_plugin_manifest_validate(&manifest) ==
-         SALTS_PLUGIN_UNSUPPORTED_ABI);
+  REQUIRE(cmeta_plugin_manifest_validate(&manifest) == CMETA_PLUGIN_OK);
+  manifest.abi_version = CMETA_PLUGIN_ABI_VERSION - 1u;
+  REQUIRE(cmeta_plugin_manifest_validate(&manifest) == CMETA_PLUGIN_UNSUPPORTED_ABI);
+  manifest.abi_version = CMETA_PLUGIN_ABI_VERSION + 1u;
+  REQUIRE(cmeta_plugin_manifest_validate(&manifest) ==
+         CMETA_PLUGIN_UNSUPPORTED_ABI);
 
   orm_driver_storage_capabilities_v1 invalid = fixture_storage;
   invalid.capabilities = ORM_DRIVER_STORAGE_CAP_AMBIGUOUS_COMMIT;

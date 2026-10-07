@@ -7,10 +7,13 @@ cmake-build-*/
 .vcpkg_installed/
 vcpkg_installed/
 /vcpkg_installed_pg/
+/vcpkg_installed_android/
 conan-cache/
 coverage.xml
 .codegraph/
 .tmp/
+/stage/
+/external/pkgs/
 
 # IDE files
 .vs/

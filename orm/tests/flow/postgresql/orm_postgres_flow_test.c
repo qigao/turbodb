@@ -24,12 +24,12 @@ typedef struct orm_postgres_test_result {
   const char *sqlstate;
 } orm_postgres_test_result;
 
-FunctionDecl(value, int, orm_postgres_test_send_mock,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, orm_postgres_test_send_mock,
     (void *, context, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER),
     (void *, request, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
-FunctionDecl(value, int, orm_postgres_test_single_row,
+FunctionDeclResult(value, int, CMETA_RESULT_VALUE, orm_postgres_test_single_row,
     (void *, context, CMETA_PARAM_IN | CMETA_PARAM_BORROWED,
      &cmeta_type_void_ptr, CMETA_ABI_OBJECT_POINTER));
 FunctionDecl(value, void, orm_postgres_test_release_result,

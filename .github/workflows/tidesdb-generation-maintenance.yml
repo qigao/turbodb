@@ -43,7 +43,7 @@ jobs:
       matrix:
         include:
           - {os: ubuntu-24.04, rid: linux-x64, preset: ci-linux-release}
-          - {os: windows-2022, rid: windows-x64, preset: ci-windows-release}
+          - {os: windows-2025, rid: windows-x64, preset: ci-windows-release}
 
     steps:
       - name: Checkout exact TurboDB head
@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build lemon
+          sudo apt-get install -y --no-install-recommends ninja-build
 
       - name: Locate MSVC and install Ninja
         if: runner.os == 'Windows'
@@ -88,10 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake --preset '${{ matrix.preset }}' -DTURBODB_BUILD_DBTOOLS=OFF
-          cmake --build --preset '${{ matrix.preset }}' --parallel 4 \
-            --target orm_driver_interface_test \
-                     orm_tidesdb_sql_relational_test \
-                     orm_tidesdb_generation_maintenance_test
+          cmake --build --preset '${{ matrix.preset }}' --parallel 4
 
           mkdir -p evidence/tidesdb-generation
           ctest --preset '${{ matrix.preset }}' \
@@ -103,11 +100,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
+          set "TURBODB_PINNED_VCPKG_ROOT=%VCPKG_ROOT%"
           call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
           if errorlevel 1 exit /b 1
+          set "VCPKG_ROOT=%TURBODB_PINNED_VCPKG_ROOT%"
           cmake --preset ${{ matrix.preset }} -DTURBODB_BUILD_DBTOOLS=OFF
           if errorlevel 1 exit /b 1
-          cmake --build --preset ${{ matrix.preset }} --parallel 4 --target orm_driver_interface_test orm_tidesdb_sql_relational_test orm_tidesdb_generation_maintenance_test
+          cmake --build --preset ${{ matrix.preset }} --parallel 4
           if errorlevel 1 exit /b 1
           ctest --preset ${{ matrix.preset }} -R "^(orm_driver_interface|orm_tidesdb_sql_relational|orm_tidesdb_generation_maintenance)$" --output-on-failure
           if errorlevel 1 exit /b 1

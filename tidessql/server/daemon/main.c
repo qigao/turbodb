@@ -73,18 +73,18 @@ static tlog_t *logger_create(void) {
                                 TIDESSQLD_LOG_POOL_BYTES};
   tlog_t *logger = tlog_create(&config);
   if (!logger) return NULL;
-  const salts_console_sink_opts_t options = {stderr, 0, SALTS_LOG_DEFAULT_PATTERN};
-  salts_log_sink_t *sink = salts_sink_console_create(&options);
+  const cmeta_console_sink_opts_t options = {stderr, 0, SALTS_LOG_DEFAULT_PATTERN};
+  cmeta_log_sink_t *sink = cmeta_sink_console_create(&options);
   if (!sink || tlog_add_sink(logger, sink) != 0) {
-    if (sink) salts_sink_destroy(sink);
+    if (sink) cmeta_sink_destroy(sink);
     tlog_destroy(logger);
     return NULL;
   }
   return logger;
 }
 
-static void log_message(tlog_t *logger, salts_log_level_t level, const char *message) {
-  salts_log_str(logger, level, vstr_from_cstr("tidessqld"), vstr_from_buf(NULL, 0), 0,
+static void log_message(tlog_t *logger, cmeta_log_level_t level, const char *message) {
+  cmeta_log_str(logger, level, vstr_from_cstr("tidessqld"), vstr_from_buf(NULL, 0), 0,
                 vstr_from_cstr(message));
 }
 

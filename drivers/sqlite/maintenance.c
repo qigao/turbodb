@@ -1,5 +1,5 @@
 #include <orm_sqlite.h>
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 #include <sqlite3.h>
 
 #include "orm_internal.h"
@@ -141,7 +141,7 @@ static orm_status_t sqlite_maintenance_validate_request(
     return ORM_STATUS_INVALID_ARGUMENT;
   }
 
-  access_status = salts_fs_access(staging_path, SALTS_FS_ACCESS_EXISTS);
+  access_status = cmeta_fs_access(staging_path, SALTS_FS_ACCESS_EXISTS);
   if (access_status == 0) {
     orm_error_set(error, ORM_STATUS_INVALID_STATE,
                   "SQLite staging path already exists");
@@ -338,7 +338,7 @@ cleanup:
 }
 
 static void sqlite_maintenance_map_publication_state(
-    salts_fs_replace_state_t source, orm_sqlite_file_copy_result *result) {
+    cmeta_fs_replace_state_t source, orm_sqlite_file_copy_result *result) {
   switch (source) {
   case SALTS_FS_REPLACE_PUBLISHED_DURABLE:
     result->publication_state = ORM_SQLITE_PUBLICATION_PUBLISHED_DURABLE;
@@ -360,7 +360,7 @@ static orm_status_t sqlite_maintenance_copy_and_publish(
   char source_path[ORM_SQLITE_MAINTENANCE_PATH_MAX_BYTES + 1u];
   char staging_path[ORM_SQLITE_MAINTENANCE_PATH_MAX_BYTES + 1u];
   char destination_path[ORM_SQLITE_MAINTENANCE_PATH_MAX_BYTES + 1u];
-  salts_fs_replace_state_t replace_state = SALTS_FS_REPLACE_NOT_PUBLISHED;
+  cmeta_fs_replace_state_t replace_state = SALTS_FS_REPLACE_NOT_PUBLISHED;
   orm_status_t status;
   int replace_status;
 
@@ -377,7 +377,7 @@ static orm_status_t sqlite_maintenance_copy_and_publish(
   if (status != ORM_STATUS_OK) return status;
 
   replace_status =
-      salts_fs_replace_durable(staging_path, destination_path, &replace_state);
+      cmeta_fs_replace_durable(staging_path, destination_path, &replace_state);
   sqlite_maintenance_map_publication_state(replace_state, result);
   if (replace_status != 0)
     return sqlite_maintenance_fail_fs(replace_status, operation, error);

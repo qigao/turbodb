@@ -65,10 +65,10 @@ static void redis_io_fake_check_sockets(size_t count, uintptr_t expected) {
  * bounded fake is single-threaded and preserves the per-call return sequences
  * needed to exercise retry and clock-wrap behavior. */
 #define cflow_io_native_backend_forget_socket test_forget_socket
-#define salts_hrtime test_hrtime
+#define cmeta_hrtime test_hrtime
 #include "../../redis_io.c"
 #undef cflow_io_native_backend_forget_socket
-#undef salts_hrtime
+#undef cmeta_hrtime
 
 enum { TEST_SOCKET = 1234, NEXT_SOCKET = 5678, TEST_TIMEOUT_NS = 20,
        TEST_START_NS = 100, TEST_TICK_NS = 10 };

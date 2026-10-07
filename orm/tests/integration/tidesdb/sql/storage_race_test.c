@@ -14,16 +14,16 @@
 enum { WORKERS = 4, ROUNDS = 16, WAIT_MS = 5000, SCAN_LIMIT = WORKERS + 1 };
 typedef enum race_kind { UNIQUE_RACE, SCAN_RACE, DISJOINT_WRITES } race_kind;
 typedef struct race_worker {
-  salts_thread_t thread;
+  cmeta_thread_t thread;
   size_t id;
   int prepared, committed, rolled_back;
   bool attempted;
   size_t scanned;
 } race_worker;
 static struct {
-  salts_mutex_t mutex;
-  salts_cond_t changed;
-  size_t ready, done, launched;
+  cmeta_mutex_t mutex;
+  cmeta_cond_t changed;
+  size_t ready, start, done, launched;
   bool stop;
   race_kind kind;
   race_worker workers[WORKERS];
@@ -85,17 +85,17 @@ static int scan_empty(orm_tidesdb_transaction_t *txn, size_t *count) {
 /* The monotonic deadline bounds spurious wakes. stop releases preparation
  * waiters, but completion waits still drain every launched worker. */
 static bool wait_locked(const size_t *count, size_t expected, bool preparing) {
-  const uint64_t started = salts_monotonic_ms();
+  const uint64_t started = cmeta_monotonic_ms();
   while (*count < expected && !(preparing && fixture.stop)) {
-    const uint64_t elapsed = salts_monotonic_ms() - started;
+    const uint64_t elapsed = cmeta_monotonic_ms() - started;
     if (elapsed >= WAIT_MS) break;
-    const int status = salts_cond_timedwait(&fixture.changed, &fixture.mutex,
-        salts_ms_to_ns((uint64_t)WAIT_MS - elapsed));
-    if (status != 0 && salts_monotonic_ms() - started < WAIT_MS) break;
+    const int status = cmeta_cond_timedwait(&fixture.changed, &fixture.mutex,
+        cmeta_ms_to_ns((uint64_t)WAIT_MS - elapsed));
+    if (status != 0 && cmeta_monotonic_ms() - started < WAIT_MS) break;
   }
   if (*count < expected) {
     fixture.stop = true;
-    salts_cond_broadcast(&fixture.changed);
+    cmeta_cond_broadcast(&fixture.changed);
     return false;
   }
   return true;
@@ -125,12 +125,12 @@ static void worker_main(void *arg) {
   worker->prepared = orm_tidesdb_txn_begin_with_isolation(fixture.database,
       ORM_TDB_ISOLATION_SERIALIZABLE, &txn);
   if (worker->prepared == ORM_TDB_SUCCESS) worker->prepared = prepare_worker(worker, txn);
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   if (worker->prepared != ORM_TDB_SUCCESS) fixture.stop = true;
   ++fixture.ready;
-  salts_cond_broadcast(&fixture.changed);
-  const bool proceed = wait_locked(&fixture.ready, WORKERS, true) && !fixture.stop;
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_cond_broadcast(&fixture.changed);
+  const bool proceed = wait_locked(&fixture.start, 1u, true) && !fixture.stop;
+  cmeta_mutex_unlock(&fixture.mutex);
   if (proceed) {
     worker->attempted = true;
     worker->committed = orm_tidesdb_txn_commit(txn);
@@ -138,23 +138,23 @@ static void worker_main(void *arg) {
   if (txn != NULL && (!worker->attempted || worker->committed != ORM_TDB_SUCCESS))
     worker->rolled_back = orm_tidesdb_txn_rollback(txn);
   orm_tidesdb_txn_free(txn);
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   ++fixture.done;
-  salts_cond_broadcast(&fixture.changed);
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_cond_broadcast(&fixture.changed);
+  cmeta_mutex_unlock(&fixture.mutex);
 }
 
 static void join_workers(void) {
   if (fixture.launched == 0) return;
-  salts_mutex_lock(&fixture.mutex);
+  cmeta_mutex_lock(&fixture.mutex);
   const bool finished = wait_locked(&fixture.done, fixture.launched, false);
-  salts_mutex_unlock(&fixture.mutex);
+  cmeta_mutex_unlock(&fixture.mutex);
   if (!finished) {
     (void)fputs("TidesDB race workers did not drain within deadline\n", stderr);
     abort();
   }
   for (size_t i = 0; i < fixture.launched; ++i) {
-    if (salts_thread_join(&fixture.workers[i].thread) != 0) abort();
+    if (cmeta_thread_join(&fixture.workers[i].thread) != 0) abort();
   }
   fixture.launched = 0;
 }
@@ -228,14 +228,21 @@ static void run_race(race_kind kind) {
      * writers commit; it must retain the complete pre-commit snapshot. */
     begin_reader();
     verify_old_snapshot();
-    fixture.ready = 0; fixture.done = 0; fixture.stop = false;
+    fixture.ready = 0; fixture.start = 0; fixture.done = 0; fixture.stop = false;
     memset(fixture.workers, 0, sizeof(fixture.workers));
     for (size_t i = 0; i < WORKERS; ++i) {
       fixture.workers[i].id = i;
-      check_equal(salts_thread_create(&fixture.workers[i].thread,
+      check_equal(cmeta_thread_create(&fixture.workers[i].thread,
           worker_main, &fixture.workers[i]), 0);
       ++fixture.launched;
     }
+    /* Release every prepared worker from the coordinator so the last worker
+     * does not start committing while its peers are still waking up. */
+    cmeta_mutex_lock(&fixture.mutex);
+    if (wait_locked(&fixture.ready, WORKERS, true) && !fixture.stop)
+      fixture.start = 1u;
+    cmeta_cond_broadcast(&fixture.changed);
+    cmeta_mutex_unlock(&fixture.mutex);
     join_workers();
     check_false(fixture.stop);
     verify_old_snapshot();
@@ -255,7 +262,7 @@ static void run_race(race_kind kind) {
 spec("TidesDB parallel storage contracts") {
   before_each() {
     memset(&fixture, 0, sizeof(fixture));
-    salts_mutex_init(&fixture.mutex); salts_cond_init(&fixture.changed);
+    cmeta_mutex_init(&fixture.mutex); cmeta_cond_init(&fixture.changed);
     check_not_null(fixture.mutex); check_not_null(fixture.changed);
     fixture.directory = tt_make_temp_dir("orm-tidesdb-race");
     check_not_null(fixture.directory);
@@ -268,10 +275,10 @@ spec("TidesDB parallel storage contracts") {
   }
   after_each() {
     if (fixture.launched != 0) {
-      salts_mutex_lock(&fixture.mutex);
+      cmeta_mutex_lock(&fixture.mutex);
       fixture.stop = true;
-      salts_cond_broadcast(&fixture.changed);
-      salts_mutex_unlock(&fixture.mutex);
+      cmeta_cond_broadcast(&fixture.changed);
+      cmeta_mutex_unlock(&fixture.mutex);
       join_workers();
     }
     if (fixture.reader != NULL) {
@@ -279,7 +286,7 @@ spec("TidesDB parallel storage contracts") {
       orm_tidesdb_txn_free(fixture.reader);
     }
     if (fixture.database != NULL) check_equal(orm_tidesdb_close(fixture.database), ORM_TDB_SUCCESS);
-    salts_cond_destroy(&fixture.changed); salts_mutex_destroy(&fixture.mutex);
+    cmeta_cond_destroy(&fixture.changed); cmeta_mutex_destroy(&fixture.mutex);
     if (fixture.directory != NULL) {
       check_equal(tt_remove_tree(fixture.directory), 0);
       free(fixture.directory);

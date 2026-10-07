@@ -15,7 +15,7 @@ typedef struct orm_runtime_id {
 } orm_runtime_id;
 
 typedef struct orm_runtime_driver {
-  salts_plugin_ref plugin;
+  cmeta_plugin_ref plugin;
   TurboDb_Driver *binding;
   char *module_path;
   orm_runtime_id canonical;
@@ -33,11 +33,11 @@ enum {
 };
 
 struct orm_runtime {
-  salts_mutex_t mutex;
+  cmeta_mutex_t mutex;
   uint32_t refs;
   uint32_t closed;
   orm_runtime_config_t config;
-  salts_plugin_registry plugins;
+  cmeta_plugin_registry plugins;
   orm_runtime_driver *drivers;
   uint32_t driver_count;
   uint32_t close_remaining;
@@ -50,7 +50,7 @@ struct orm_runtime {
 orm_status_t runtime_result(
     orm_error_t *error, orm_status_t status, const char *message);
 orm_status_t runtime_plugin_status(
-    salts_plugin_status status, orm_error_t *error, const char *context);
+    cmeta_plugin_status status, orm_error_t *error, const char *context);
 int runtime_id_valid(orm_string_view_t id);
 int runtime_same_bytes(const orm_runtime_id *id, const void *data, uint64_t size);
 /* Caller holds the mutex or a serialized load reservation. */

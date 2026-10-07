@@ -1,8 +1,8 @@
 #include "../redis_pool.h"
 
 #include "tinytest.h"
-#include "salts_error.h"
-#include "salts_thread.h"
+#include "cmeta_error.h"
+#include "cmeta_thread.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -23,7 +23,7 @@ typedef int redis_pool_test_socket;
 
 typedef struct redis_pool_test_server {
   redis_pool_test_socket listener;
-  salts_thread_t thread;
+  cmeta_thread_t thread;
   int accepted;
   int commands;
 } redis_pool_test_server;
@@ -165,7 +165,7 @@ suite("redis CFlow connection pool") {
     server.listener = REDIS_POOL_TEST_INVALID;
     check_equal(redis_io_runtime_init(&runtime, &runtime_config), SALTS_OK);
     check_equal(redis_pool_test_listener(&server.listener, &port), 0);
-    check_equal(salts_thread_create(&server.thread,
+    check_equal(cmeta_thread_create(&server.thread,
                                     redis_pool_test_server_main, &server),
                 SALTS_OK);
     config.runtime = &runtime;
@@ -214,8 +214,8 @@ suite("redis CFlow connection pool") {
     check_equal(redis_pool_destroy(&pool), SALTS_OK);
     check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
     check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
-    check_equal(salts_thread_join(&server.thread), SALTS_OK);
-    salts_thread_destroy(&server.thread);
+    check_equal(cmeta_thread_join(&server.thread), SALTS_OK);
+    cmeta_thread_destroy(&server.thread);
     redis_pool_test_close_socket(server.listener);
     check_equal(server.accepted, 1);
     check_equal(server.commands, 2);
@@ -238,7 +238,7 @@ suite("redis CFlow connection pool") {
     server.listener = REDIS_POOL_TEST_INVALID;
     check_equal(redis_io_runtime_init(&runtime, &runtime_config), SALTS_OK);
     check_equal(redis_pool_test_listener(&server.listener, &port), 0);
-    check_equal(salts_thread_create(&server.thread,
+    check_equal(cmeta_thread_create(&server.thread,
                                     redis_pool_recovery_server_main, &server),
                 SALTS_OK);
     config.runtime = &runtime;
@@ -285,8 +285,8 @@ suite("redis CFlow connection pool") {
     check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
     redis_pool_test_close_socket(server.listener);
     server.listener = REDIS_POOL_TEST_INVALID;
-    check_equal(salts_thread_join(&server.thread), SALTS_OK);
-    salts_thread_destroy(&server.thread);
+    check_equal(cmeta_thread_join(&server.thread), SALTS_OK);
+    cmeta_thread_destroy(&server.thread);
     check_equal(server.accepted, 2);
     check_equal(server.commands, 2);
   }

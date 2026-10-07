@@ -44,31 +44,31 @@ typedef struct tidesdb_plugin_lifecycle {
 
 static tidesdb_plugin_lifecycle tidesdb_lifecycle;
 
-static salts_plugin_status SALTS_PLUGIN_CALL tidesdb_plugin_start(void *self) {
+static cmeta_plugin_status CMETA_PLUGIN_CALL tidesdb_plugin_start(void *self) {
   tidesdb_plugin_lifecycle *state = (tidesdb_plugin_lifecycle *)self;
   if (state != &tidesdb_lifecycle)
-    return SALTS_PLUGIN_INVALID_ARGUMENT;
+    return CMETA_PLUGIN_INVALID_ARGUMENT;
   state->started = 1;
   state->stopping = 0;
-  return SALTS_PLUGIN_OK;
+  return CMETA_PLUGIN_OK;
 }
 
-static salts_plugin_status SALTS_PLUGIN_CALL
+static cmeta_plugin_status CMETA_PLUGIN_CALL
 tidesdb_plugin_request_stop(void *self) {
   tidesdb_plugin_lifecycle *state = (tidesdb_plugin_lifecycle *)self;
   if (state != &tidesdb_lifecycle)
-    return SALTS_PLUGIN_INVALID_ARGUMENT;
+    return CMETA_PLUGIN_INVALID_ARGUMENT;
   state->stopping = 1;
-  return SALTS_PLUGIN_OK;
+  return CMETA_PLUGIN_OK;
 }
 
-static bool SALTS_PLUGIN_CALL tidesdb_plugin_is_quiescent(const void *self) {
+static bool CMETA_PLUGIN_CALL tidesdb_plugin_is_quiescent(const void *self) {
   const tidesdb_plugin_lifecycle *state =
       (const tidesdb_plugin_lifecycle *)self;
   return state == &tidesdb_lifecycle && state->stopping != 0;
 }
 
-static void SALTS_PLUGIN_CALL tidesdb_plugin_destroy(void *self) {
+static void CMETA_PLUGIN_CALL tidesdb_plugin_destroy(void *self) {
   tidesdb_plugin_lifecycle *state = (tidesdb_plugin_lifecycle *)self;
   if (state != &tidesdb_lifecycle)
     return;
@@ -110,10 +110,10 @@ static const TurboDb_Driver_vtable tidesdb_driver_vtable = {
 static TurboDb_Driver tidesdb_driver = {
     &tidesdb_driver_identity, &tidesdb_driver_vtable};
 
-static const salts_plugin_export tidesdb_exports[] = {
+static const cmeta_plugin_export tidesdb_exports[] = {
     {
-        .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-        .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+        .struct_size = CMETA_PLUGIN_EXPORT_SIZE,
+        .kind = CMETA_PLUGIN_EXPORT_INTERFACE,
         .contract_version = ORM_DRIVER_INTERFACE_CONTRACT_VERSION,
         .capabilities = ORM_TIDESDB_DRIVER_CAPABILITIES,
         .export_id = ORM_DRIVER_PLUGIN_EXPORT_ID,
@@ -121,8 +121,8 @@ static const salts_plugin_export tidesdb_exports[] = {
         .value.interface = {&TurboDb_Driver_interface_meta, &tidesdb_driver},
     },
     {
-        .struct_size = SALTS_PLUGIN_EXPORT_SIZE,
-        .kind = SALTS_PLUGIN_EXPORT_INTERFACE,
+        .struct_size = CMETA_PLUGIN_EXPORT_SIZE,
+        .kind = CMETA_PLUGIN_EXPORT_INTERFACE,
         .contract_version = ORM_TIDESDB_MAINTENANCE_CONTRACT_VERSION,
         .capabilities = 0u,
         .export_id = ORM_TIDESDB_MAINTENANCE_EXPORT_ID,
@@ -131,9 +131,9 @@ static const salts_plugin_export tidesdb_exports[] = {
                             &orm_tidesdb_maintenance},
     }};
 
-static const salts_plugin_manifest tidesdb_manifest = {
-    .struct_size = SALTS_PLUGIN_MANIFEST_SIZE,
-    .abi_version = SALTS_PLUGIN_ABI_VERSION,
+static const cmeta_plugin_manifest tidesdb_manifest = {
+    .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,
+    .abi_version = CMETA_PLUGIN_ABI_VERSION,
     .plugin_id = "tidesdb",
     .version = {2u, 0u, 0u},
     .exports = tidesdb_exports,
@@ -144,7 +144,7 @@ static const salts_plugin_manifest tidesdb_manifest = {
     .is_quiescent = tidesdb_plugin_is_quiescent,
     .destroy = tidesdb_plugin_destroy};
 
-SALTS_PLUGIN_QUERY_EXPORT const salts_plugin_manifest *SALTS_PLUGIN_CALL
-salts_plugin_query(uint32_t host_abi) {
-  return host_abi == SALTS_PLUGIN_ABI_VERSION ? &tidesdb_manifest : NULL;
+CMETA_PLUGIN_QUERY_EXPORT const cmeta_plugin_manifest *CMETA_PLUGIN_CALL
+cmeta_plugin_query(uint32_t host_abi) {
+  return host_abi == CMETA_PLUGIN_ABI_VERSION ? &tidesdb_manifest : NULL;
 }

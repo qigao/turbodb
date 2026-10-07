@@ -15,7 +15,7 @@
 #include "wire/statement.h"
 
 #include <cnet/cnet.h>
-#include <salts_buffer.h>
+#include <cmeta_buffer.h>
 
 #include <stdbool.h>
 #include <stdio.h>

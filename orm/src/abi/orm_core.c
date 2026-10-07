@@ -48,10 +48,10 @@ static orm_status_t orm_connection_business_status(orm_connection_t *connection,
   orm_status_t status;
   orm_status_t cause;
   if (connection == NULL) return ORM_STATUS_INVALID_ARGUMENT;
-  salts_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
   cause = connection->failure;
   status = cause == ORM_STATUS_OK ? ORM_STATUS_OK : ORM_STATUS_INVALID_STATE;
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
   if (status != ORM_STATUS_OK)
     orm_error_set(error, status, cause == ORM_OWNER_STATUS_CLEANUP_FAILED
         ? "connection is unusable after a cleanup failure"
@@ -67,10 +67,10 @@ static orm_status_t orm_connection_business_status(orm_connection_t *connection,
 static void orm_connection_record_native_error(orm_connection_t *connection,
                                                 orm_status_t status) {
   if (status != ORM_STATUS_CONNECTION_ERROR) return;
-  salts_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
   if (connection->failure == ORM_STATUS_OK)
     connection->failure = status;
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
 }
 
 /* The Publisher's query hold keeps this context and its parent valid. These
@@ -86,15 +86,15 @@ static void orm_query_report_native_error(void *context, orm_status_t status) {
 }
 
 static void orm_connection_mark_unknown(orm_connection_t *connection) {
-  salts_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
   connection->failure = ORM_OWNER_STATUS_COMMIT_UNKNOWN;
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
 }
 
 static orm_status_t orm_connection_admit_business(orm_connection_t *connection) {
   orm_owner *owner = &connection->owner;
   orm_status_t status = ORM_STATUS_OK;
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (connection->failure != ORM_STATUS_OK || owner->phase != ORM_OWNER_OPEN ||
       owner->references == 0u)
     status = ORM_STATUS_INVALID_STATE;
@@ -102,23 +102,23 @@ static orm_status_t orm_connection_admit_business(orm_connection_t *connection) 
     status = ORM_STATUS_LIMIT_EXCEEDED;
   else
     ++owner->dependents;
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   return status;
 }
 
 static void orm_connection_action(orm_connection_t *connection,
                                   orm_owner_action action) {
   if (action == ORM_OWNER_KEEP) return;
-  salts_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
   if (connection->native_active) {
     /* Final cleanup can consume the last inherited parent hold. The exclusive
      * CLOSING/CLOSED action keeps this allocation alive until the lane exits. */
     if (connection->native_final_action != ORM_OWNER_KEEP) abort();
     connection->native_final_action = action;
-    salts_mutex_unlock(&connection->owner.mutex);
+    cmeta_mutex_unlock(&connection->owner.mutex);
     return;
   }
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
   if (action == ORM_OWNER_CLOSE_RESOURCES) {
     if (connection->backend.ops != NULL && connection->backend.context != NULL)
       connection->backend.ops->destroy(connection->backend.context);
@@ -141,14 +141,14 @@ static void orm_connection_release_child(orm_connection_t *connection) {
  * existing query/transaction/Publisher admission budgets, not allocated here. */
 static void orm_connection_drain_cleanup(orm_connection_t *connection) {
   for (;;) {
-    salts_mutex_lock(&connection->owner.mutex);
+    cmeta_mutex_lock(&connection->owner.mutex);
     if (!connection->native_active) abort();
     orm_native_cleanup *node = connection->cleanup_head;
     if (node == NULL) {
       const orm_owner_action final_action = connection->native_final_action;
       connection->native_final_action = ORM_OWNER_KEEP;
       connection->native_active = false;
-      salts_mutex_unlock(&connection->owner.mutex);
+      cmeta_mutex_unlock(&connection->owner.mutex);
       orm_connection_action(connection, final_action); /* May free connection. */
       return;
     }
@@ -157,7 +157,7 @@ static void orm_connection_drain_cleanup(orm_connection_t *connection) {
     if (pending != 0u) {
       void (*run)(void *, unsigned) = node->run;
       node->completed |= pending;
-      salts_mutex_unlock(&connection->owner.mutex);
+      cmeta_mutex_unlock(&connection->owner.mutex);
       run(context, pending);
       /* Still linked and live. Reentrant requests may have added DESTROY to
        * a CANCEL in progress; consume those before unqueuing or freeing it. */
@@ -170,7 +170,7 @@ static void orm_connection_drain_cleanup(orm_connection_t *connection) {
     node->next = NULL;
     node->queued = false;
     node->requested = node->completed = 0u;
-    salts_mutex_unlock(&connection->owner.mutex);
+    cmeta_mutex_unlock(&connection->owner.mutex);
     finish(context, completed); /* May free node and release every parent hold. */
   }
 }
@@ -182,7 +182,7 @@ static void orm_connection_request_cleanup(orm_connection_t *connection,
       request == 0u ||
       (request & ~(ORM_NATIVE_CLEANUP_CANCEL | ORM_NATIVE_CLEANUP_DESTROY)) != 0u)
     abort();
-  salts_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
   node->requested |= request;
   if (!node->queued) {
     node->queued = true;
@@ -195,7 +195,7 @@ static void orm_connection_request_cleanup(orm_connection_t *connection,
   }
   const bool drain = !connection->native_active;
   if (drain) connection->native_active = true;
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
   /* Cleanup is legal after business failure and at a full dependent budget.
    * Its already admitted object holds survive until finish, and native_active
    * defers the final connection action if finishing consumes the last hold. */
@@ -210,7 +210,7 @@ static orm_status_t orm_connection_begin_native(orm_connection_t *connection,
                                                   orm_error_t *error) {
   orm_owner *owner = &connection->owner;
   orm_status_t status = ORM_STATUS_OK;
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (connection->failure != ORM_STATUS_OK ||
       (owner->phase != ORM_OWNER_OPEN && owner->phase != ORM_OWNER_RELEASE_PENDING))
     status = ORM_STATUS_INVALID_STATE;
@@ -222,7 +222,7 @@ static orm_status_t orm_connection_begin_native(orm_connection_t *connection,
     connection->native_active = true;
     ++owner->dependents;
   }
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   if (status == ORM_STATUS_INVALID_STATE &&
       orm_connection_business_status(connection, error) != ORM_STATUS_OK)
     return status; /* Preserve the existing terminal-failure diagnostic. */
@@ -233,13 +233,13 @@ static orm_status_t orm_connection_begin_native(orm_connection_t *connection,
 
 static void orm_connection_end_native(orm_connection_t *connection,
                                         orm_status_t status) {
-  salts_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
   if (!connection->native_active) abort();
   /* Record failure before making the slot available to another native call. */
   if (status == ORM_STATUS_COMMIT_UNKNOWN ||
       (status == ORM_STATUS_CONNECTION_ERROR && connection->failure == ORM_STATUS_OK))
     connection->failure = status;
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
   /* The admitted completion hold keeps the parent alive throughout the drain. */
   orm_connection_drain_cleanup(connection);
   orm_connection_release_child(connection);
@@ -282,8 +282,8 @@ static void orm_transaction_quarantine(orm_transaction_t *transaction,
   orm_owner_cleanup_policy policy;
   /* Lock order matches admission: parent before child. Neither native cleanup
    * nor the host error handler executes while either control lock is held. */
-  salts_mutex_lock(&connection->owner.mutex);
-  salts_mutex_lock(&transaction->owner.mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&transaction->owner.mutex);
   if (transaction->owner.phase != ORM_OWNER_CLOSING ||
       transaction->owner.dependents != 0u) abort();
   transaction->cleanup_error = *native_error;
@@ -293,8 +293,8 @@ static void orm_transaction_quarantine(orm_transaction_t *transaction,
   connection->failure = ORM_OWNER_STATUS_CLEANUP_FAILED;
   connection->owner.phase = ORM_OWNER_CLOSE_FAILED;
   policy = connection->cleanup_policy;
-  salts_mutex_unlock(&transaction->owner.mutex);
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&transaction->owner.mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
   if (policy.notify != NULL)
     policy.notify(policy.context, &transaction->cleanup_error);
   else
@@ -336,9 +336,9 @@ static void orm_transaction_run_cleanup(void *context, unsigned request) {
 static void orm_transaction_finish_cleanup(void *context, unsigned completed) {
   orm_transaction_t *transaction = context;
   (void)completed;
-  salts_mutex_lock(&transaction->owner.mutex);
+  cmeta_mutex_lock(&transaction->owner.mutex);
   const bool failed = transaction->owner.phase == ORM_OWNER_CLOSE_FAILED;
-  salts_mutex_unlock(&transaction->owner.mutex);
+  cmeta_mutex_unlock(&transaction->owner.mutex);
   if (!failed)
     orm_transaction_action(transaction, orm_owner_finish_close(&transaction->owner));
 }
@@ -378,8 +378,8 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
   }
   orm_owner *owner = &transaction->owner;
   orm_connection_t *connection = transaction->connection;
-  salts_mutex_lock(&connection->owner.mutex);
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&connection->owner.mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (owner->phase == ORM_OWNER_CLOSE_FAILED) {
     status = ORM_OWNER_STATUS_CLEANUP_FAILED;
   } else if (owner->phase == ORM_OWNER_CLOSED) {
@@ -397,8 +397,8 @@ orm_status_t ORM_C_CALL orm_transaction_close(orm_transaction_t *transaction,
     action = ORM_OWNER_CLOSE_RESOURCES;
     connection->native_active = true; /* Reserve close before releasing either lock. */
   }
-  salts_mutex_unlock(&owner->mutex);
-  salts_mutex_unlock(&connection->owner.mutex);
+  cmeta_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&connection->owner.mutex);
   if (action == ORM_OWNER_CLOSE_RESOURCES) {
     orm_transaction_action(transaction, action); /* Enqueues under our reservation. */
     orm_connection_drain_cleanup(connection);
@@ -429,7 +429,7 @@ static orm_status_t orm_transaction_admit(orm_transaction_t *transaction,
                                           orm_error_t *error) {
   orm_owner *owner = &transaction->owner;
   orm_status_t status = ORM_STATUS_OK;
-  salts_mutex_lock(&owner->mutex);
+  cmeta_mutex_lock(&owner->mutex);
   if (transaction->operation_active)
     status = ORM_STATUS_BUSY;
   else if (owner->phase != ORM_OWNER_OPEN || owner->references == 0u ||
@@ -439,7 +439,7 @@ static orm_status_t orm_transaction_admit(orm_transaction_t *transaction,
     status = ORM_STATUS_LIMIT_EXCEEDED;
   else
     ++owner->dependents;
-  salts_mutex_unlock(&owner->mutex);
+  cmeta_mutex_unlock(&owner->mutex);
   orm_error_set(error, status, NULL);
   return status;
 }
@@ -486,13 +486,13 @@ static void orm_transaction_end_operation(orm_transaction_t *transaction,
     orm_connection_mark_unknown(connection);
   else
     orm_connection_record_native_error(connection, status);
-  salts_mutex_lock(&transaction->owner.mutex);
+  cmeta_mutex_lock(&transaction->owner.mutex);
   if (status == ORM_OWNER_STATUS_COMMIT_UNKNOWN)
     transaction->state = ORM_TRANSACTION_COMMIT_UNKNOWN;
   else if (status == ORM_STATUS_OK)
     transaction->state = next_state;
   transaction->operation_active = false;
-  salts_mutex_unlock(&transaction->owner.mutex);
+  cmeta_mutex_unlock(&transaction->owner.mutex);
   orm_transaction_release_execution(transaction);
   /* Publish the final state/error and finish callback-triggered cleanup before
    * admitting another command or control operation on this connection. */

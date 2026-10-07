@@ -1,5 +1,14 @@
 # 第三方材料说明
 
+## TidesDB 存储引擎
+
+`tidesdb/` 保存 [TidesDB](https://github.com/tidesdb/tidesdb) 源码，当前
+`tidesdb/CMakeLists.txt` 声明版本 9.3.15；上游许可见 `tidesdb/LICENSE`。
+本地 SSI 修复将冲突边更新与回滚判定放入既有活动事务表的写锁内，避免并发
+判定使同一键的所有竞争事务互相判负。WAL 和 memtable 写入仍在锁外；不改变
+存储格式或公开 ABI。回归覆盖见 `orm_tidesdb_sql_storage_race` 和
+`orm_tidesdb_sql_storage`。
+
 ## GmSSL 密码库
 
 MySQL client 认证和私有 TidesSQL server 密码边界通过 vcpkg 的 `GmSSL::GmSSL`

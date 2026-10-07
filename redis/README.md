@@ -30,7 +30,7 @@ attached Publishers.
 
 ```c
 #include <redis_cflow.h>
-#include <salts_error.h>
+#include <cmeta_error.h>
 
 #include <stdint.h>
 

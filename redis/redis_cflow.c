@@ -3,7 +3,7 @@
 #include "redis_internal.h"
 #include "redis_io_flow.h"
 #include "redis_socket.h"
-#include "salts_error.h"
+#include "cmeta_error.h"
 
 #include <stdlib.h>
 #include <string.h>
