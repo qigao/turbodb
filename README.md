@@ -153,7 +153,7 @@ TidesSQL workflow 的结果。两者复用原有 presets 和完整构建，发�
 本地可按同一标签选择测试：
 
 ```powershell
-ctest --preset win-release-user -LE "^(tidessql|benchmark)$" --output-on-failure
+ctest --preset orm-win-release-user --output-on-failure
 ctest --preset win-release-user -L "^tidessql$" --output-on-failure
 ```
 

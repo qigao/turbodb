@@ -21,8 +21,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      CTEST_LABEL_OPTION: ${{ inputs.tidessql-tests && '-L' || '-LE' }}
-      CTEST_LABEL_PATTERN: ${{ inputs.tidessql-tests && '^tidessql$' || '^(tidessql|benchmark)$' }}
+      TURBODB_TEST_PRESET: ${{ inputs.tidessql-tests && format('{0}-tidessql', matrix.preset) || matrix.preset }}
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +143,7 @@ jobs:
             sudo sysctl -w "kernel.core_pattern=$RUNNER_TEMP/turbodb-cores/%E"
             ulimit -c unlimited
           fi
-          ctest --preset '${{ matrix.preset }}' "$CTEST_LABEL_OPTION" "$CTEST_LABEL_PATTERN"
+          ctest --preset "$TURBODB_TEST_PRESET"
       - name: Diagnose Linux test crashes
         if: failure() && runner.os == 'Linux' && matrix.rid != 'android-arm64-v8a'
         shell: bash
@@ -161,7 +160,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          ctest --preset ci-windows-release %CTEST_LABEL_OPTION% "%CTEST_LABEL_PATTERN%"
+          ctest --preset "%TURBODB_TEST_PRESET%"
           if errorlevel 1 exit /b 1
 
       - name: Install on Unix
@@ -183,7 +182,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $env:TURBODB_TEST_TIDESSQLD -PathType Leaf)) {
             throw "installed tidessqld was not found: $env:TURBODB_TEST_TIDESSQLD"
           }
-          ctest --preset '${{ matrix.preset }}' `
+          ctest --preset $env:TURBODB_TEST_PRESET `
             -R '^(tidessqld_(process_e2e|cli|connector_j_e2e)|orm_mysql_tidessqld_e2e)$' `
             -j 1 --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw 'installed tidessqld tests failed' }
