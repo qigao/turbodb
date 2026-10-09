@@ -7,19 +7,79 @@
     ],
     "configurePresets": [
         {
+            "name": "vcpkg-cache",
+            "hidden": true,
+            "toolchainFile": "$env{VCPKG_CACHE_REPOSITORY_ROOT}/cmake/QigaoVcpkgToolchain.cmake",
+            "environment": {
+                "VCPKG_BINARY_SOURCES": "clear;default,readwrite;nugettimeout,1800;nugetconfig,${sourceDir}/cmake/vcpkg-cache.nuget.config,read",
+                "VCPKG_OVERLAY_PORTS": "$env{VCPKG_CACHE_REPOSITORY_ROOT}/ports",
+                "RE2C_ROOT": "$penv{RE2C_ROOT}",
+                "PATH": "$env{RE2C_ROOT}/bin${pathListSep}$penv{PATH}"
+            }
+        },
+        {
+            "name": "native-dependency-options",
+            "hidden": true,
+            "cacheVariables": {
+                "VCPKG_MANIFEST_MODE": "ON",
+                "TIDESDB_BUILD_TESTS": "OFF",
+                "TIDESDB_WITH_SNAPPY": "OFF",
+                "TIDESDB_WITH_LZ4": "OFF"
+            }
+        },
+        {
+            "name": "desktop-tools-options",
+            "hidden": true,
+            "cacheVariables": {
+                "TURBODB_BUILD_ORM": "OFF",
+                "TURBODB_BUILD_TIDESSQL": "OFF",
+                "TURBODB_BUILD_DBTOOLS": "ON",
+                "TURBODB_BUILD_TIDESSQL_SERVER": "OFF"
+            }
+        },
+        {
+            "name": "base-win-platform",
+            "hidden": true,
+            "inherits": "native-dependency-options",
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "x64-windows"
+            },
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "toolset": {
+                "value": "host=x64",
+                "strategy": "external"
+            }
+        },
+        {
+            "name": "base-linux-platform",
+            "hidden": true,
+            "inherits": "native-dependency-options",
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "x64-linux"
+            }
+        },
+        {
             "name": "base-win-dev-user",
             "hidden": true,
             "displayName": "Developer Build (Windows, Base)",
             "inherits": [
+                "desktop-tools-options",
                 "dev-win-msvc-ninja",
                 "pkg-vcpkg"
-            ]
+            ],
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "ON"
+            }
         },
         {
             "name": "base-win-release-user",
             "hidden": true,
             "displayName": "Release Build (Windows, Base)",
             "inherits": [
+                "desktop-tools-options",
                 "release-win-msvc-ninja",
                 "pkg-vcpkg"
             ]
@@ -29,9 +89,31 @@
             "hidden": true,
             "displayName": "Developer Build (Linux, Base)",
             "inherits": [
+                "desktop-tools-options",
                 "dev-linux-ninja",
                 "pkg-vcpkg"
+            ],
+            "cacheVariables": {
+                "ENABLE_SANITIZER_ADDRESS": "ON"
+            }
+        },
+        {
+            "name": "base-linux-release-user",
+            "hidden": true,
+            "inherits": [
+                "desktop-tools-options",
+                "release-linux-ninja"
             ]
+        },
+        {
+            "name": "base-linux-pg-e2e",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
+            "cacheVariables": {
+                "BUILD_TESTS": "OFF",
+                "BUILD_E2E_TESTS": "ON",
+                "TURBODB_BUILD_TIDESSQL_SERVER": "OFF"
+            }
         },
         {
             "name": "ci-native-base",
@@ -162,6 +244,191 @@
                 "BUILD_TESTS": false,
                 "TURBODB_BUILD_DBTOOLS": false
             }
+        },
+        {
+            "name": "vcpkg-cache-ci",
+            "hidden": true,
+            "inherits": "vcpkg-cache",
+            "environment": {
+                "VCPKG_CACHE_REPOSITORY_ROOT": "$penv{VCPKG_CACHE_REPOSITORY_ROOT}",
+                "VCPKG_BINARY_SOURCES": "$penv{VCPKG_BINARY_SOURCES}",
+                "VCPKG_OVERLAY_PORTS": "$penv{VCPKG_OVERLAY_PORTS}"
+            }
+        },
+        {
+            "name": "ci-environment",
+            "hidden": true,
+            "inherits": "vcpkg-cache-ci",
+            "environment": {
+                "PKG_ROOT": "$penv{TURBODB_CI_PKG_ROOT}",
+                "VCPKG_ROOT": "$penv{VCPKG_ROOT}",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
+                "RE2C_ROOT": "$penv{RE2C_ROOT}"
+            },
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
+            }
+        },
+        {
+            "name": "ci-windows-release",
+            "inherits": [
+                "ci-windows-base",
+                "ci-environment"
+            ]
+        },
+        {
+            "name": "ci-linux-release",
+            "inherits": [
+                "ci-linux-base",
+                "ci-environment"
+            ]
+        },
+        {
+            "name": "ci-linux-arm64-release",
+            "inherits": [
+                "ci-linux-arm64-base",
+                "ci-environment"
+            ]
+        },
+        {
+            "name": "ci-macos-arm64-release",
+            "inherits": [
+                "ci-macos-arm64-base",
+                "ci-environment"
+            ]
+        },
+        {
+            "name": "ci-linux-e2e",
+            "inherits": [
+                "ci-linux-e2e-base",
+                "ci-environment"
+            ]
+        },
+        {
+            "name": "ci-android-release",
+            "inherits": [
+                "ci-android-base",
+                "ci-environment"
+            ],
+            "environment": {
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_android"
+            },
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb-android/release"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "base-install",
+            "hidden": true,
+            "targets": [
+                "install"
+            ]
+        },
+        {
+            "name": "ci-windows-release",
+            "configurePreset": "ci-windows-release"
+        },
+        {
+            "name": "install-ci-windows-release",
+            "configurePreset": "ci-windows-release",
+            "inherits": "base-install"
+        },
+        {
+            "name": "ci-linux-release",
+            "configurePreset": "ci-linux-release"
+        },
+        {
+            "name": "install-ci-linux-release",
+            "configurePreset": "ci-linux-release",
+            "inherits": "base-install"
+        },
+        {
+            "name": "ci-linux-arm64-release",
+            "configurePreset": "ci-linux-arm64-release"
+        },
+        {
+            "name": "install-ci-linux-arm64-release",
+            "configurePreset": "ci-linux-arm64-release",
+            "inherits": "base-install"
+        },
+        {
+            "name": "ci-macos-arm64-release",
+            "configurePreset": "ci-macos-arm64-release"
+        },
+        {
+            "name": "install-ci-macos-arm64-release",
+            "configurePreset": "ci-macos-arm64-release",
+            "inherits": "base-install"
+        },
+        {
+            "name": "ci-linux-e2e",
+            "configurePreset": "ci-linux-e2e"
+        },
+        {
+            "name": "install-ci-linux-e2e",
+            "configurePreset": "ci-linux-e2e",
+            "inherits": "base-install"
+        },
+        {
+            "name": "ci-android-release",
+            "configurePreset": "ci-android-release"
+        },
+        {
+            "name": "install-ci-android-release",
+            "configurePreset": "ci-android-release",
+            "inherits": "base-install"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "base-test-e2e",
+            "hidden": true,
+            "inherits": "base-test",
+            "filter": {
+                "include": {
+                    "label": "e2e"
+                }
+            }
+        },
+        {
+            "name": "base-test-pg-e2e",
+            "hidden": true,
+            "inherits": "base-test-e2e",
+            "filter": {
+                "include": {
+                    "label": "e2e",
+                    "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|orm_sql_validation_parity)$"
+                }
+            }
+        },
+        {
+            "name": "ci-windows-release",
+            "inherits": "base-test",
+            "configurePreset": "ci-windows-release"
+        },
+        {
+            "name": "ci-linux-release",
+            "inherits": "base-test",
+            "configurePreset": "ci-linux-release"
+        },
+        {
+            "name": "ci-linux-arm64-release",
+            "inherits": "base-test",
+            "configurePreset": "ci-linux-arm64-release"
+        },
+        {
+            "name": "ci-macos-arm64-release",
+            "inherits": "base-test",
+            "configurePreset": "ci-macos-arm64-release"
+        },
+        {
+            "name": "ci-linux-e2e",
+            "inherits": "base-test-e2e",
+            "configurePreset": "ci-linux-e2e"
         }
     ]
 }

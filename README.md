@@ -103,7 +103,25 @@ They are intentionally narrow:
 ### Build
 
 Windows development and Release use `win-dev-user` and `win-release-user`.
-Both build ORM, database drivers, `tidessqld`, and SQLite/PostgreSQL/MySQL tools:
+The standard profiles build the database tools and SQLite/PostgreSQL/MySQL clients.
+ORM, TidesSQL, TidesDB, and `tidessqld` are opt-in. With the standard profiles,
+set both `TURBODB_BUILD_ORM=ON` and `TURBODB_BUILD_TIDESSQL=ON` to build ORM
+and its TidesDB driver. Enable `TURBODB_BUILD_TIDESSQL_SERVER=ON` to build
+`tidessqld` as well.
+
+Presets are organized by how they are used:
+
+- Manual development: the version-controlled `CMakeUserPresets.json` owns local
+  environment and SDK paths plus the development configure/build/test/install
+  entries (`win-*-user`, `linux-*-user`, and `android-*-win`).
+- CI workflows: `CMakePresets.json` owns the `ci-*` and `install-ci-*` entries
+  and their environment bindings. Workflow setup supplies SDK, toolchain, and
+  cache locations through the parent environment; CI presets do not inherit
+  from user presets.
+
+Both groups reuse hidden presets in `CMakePresets.json` and `presets/*.json`
+for the vcpkg toolchain, platform settings, build options, install targets, and
+test filters. Keep machine-specific paths in `CMakeUserPresets.json`.
 
 Release 构建先恢复最新发布的 Salts、SaltsUtils 和宿主 re2c 包。安装 .NET SDK 8、
 PowerShell 7，并在父环境设置具有 `read:packages` 权限的 `GITHUB_TOKEN`。
@@ -207,7 +225,7 @@ The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` 
 
 Salts owns canonical CMeta reflection plus Plugin publication, loading, lifecycle, and leases. The plugin ABI epoch follows the installed Salts SDK and must match between host and modules. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
 
-The `TURBODB_BUILD_ORM`, `TURBODB_BUILD_REDIS` and `TURBODB_BUILD_DBTOOLS` switches select modules. ORM builds SQLite, PostgreSQL, MySQL and TidesDB drivers together; consumers choose which plugins to load at runtime. Redis remains an independently selectable native client because it does not provide the SQL contract required by the ORM. MongoDB is not included. The generic `Orm::C` target does not link database clients.
+The `TURBODB_BUILD_ORM`, `TURBODB_BUILD_REDIS` and `TURBODB_BUILD_DBTOOLS` switches select modules. `TURBODB_BUILD_ORM` is off by default and builds SQLite, PostgreSQL, MySQL and TidesDB drivers together when enabled; consumers choose which plugins to load at runtime. Redis remains an independently selectable native client because it does not provide the SQL contract required by the ORM. MongoDB is not included. The generic `Orm::C` target does not link database clients.
 
 ## Design principles
 
