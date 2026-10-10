@@ -37,9 +37,8 @@ $config = Join-Path $repositoryRoot "cmake/vcpkg-cache.nuget.config"
 $project = Join-Path $restoreRoot "qigao-turbodb-native-sdk.csproj"
 New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
 
-# Release artifacts may only consume published stable producer SDKs. Preview
-# qualification can still select an RC cohort, but that cohort cannot silently
-# flow into a stable TurboDB.Native NuGet release.
+# Published TurboDB.Native packages must use a stable upstream SDK graph.
+# Candidate builds can still exercise the 2.3/4.3 RC cohort separately.
 $saltsVersionSpec = if ($RequireStable) { "*" } else { "2.3.0-*" }
 $utilsVersionSpec = if ($RequireStable) { "*" } else { "4.3.0-*" }
 
@@ -75,61 +74,7 @@ if ($RequireStable) {
     @{ Package = "Salts.Native"; Version = (Split-Path $saltsPackage -Leaf) },
     @{ Package = "SaltsUtils.Native"; Version = (Split-Path $utilsPackage -Leaf) }
   )) {
-    if ($entry.Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+
-$saltsRoot = Join-Path $saltsPackage "sdk/$Rid"
-$utilsRoot = Join-Path $utilsPackage "sdk/$Rid"
-$re2cRoot = Join-Path (Get-RestoredPackage "Qigao.Re2c.Binary") "tools/$HostRid"
-$re2cExe = if ($HostRid -eq "windows-x64") { "re2c.exe" } else { "re2c" }
-foreach ($path in @(
-  (Join-Path $saltsRoot "lib/cmake/Salts/SaltsConfig.cmake"),
-  (Join-Path $utilsRoot "lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"),
-  (Join-Path $re2cRoot "bin/$re2cExe")
-)) {
-  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing restored SDK file: $path" }
-}
-if (-not $IsWindows) {
-  & chmod +x (Join-Path $re2cRoot "bin/$re2cExe")
-  if ($LASTEXITCODE -ne 0) { throw "failed to make restored re2c executable" }
-}
-
-if ($Local) {
-  function Set-LocalPackageLink([string]$relativePath, [string]$target) {
-    $link = Join-Path $repositoryRoot "stage/dependencies/$relativePath"
-    New-Item -ItemType Directory -Path (Split-Path $link -Parent) -Force | Out-Null
-    $existing = Get-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
-    if ($existing) {
-      $expectedType = if ($IsWindows) { "Junction" } else { "SymbolicLink" }
-      if ($existing.LinkType -ne $expectedType) { throw "refusing to replace non-link SDK path: $link" }
-      if ($existing.Target -eq $target) { return $link }
-      Remove-Item -LiteralPath $link -Force
-    }
-    $linkType = if ($IsWindows) { "Junction" } else { "SymbolicLink" }
-    New-Item -ItemType $linkType -Path $link -Target $target | Out-Null
-    return $link
-  }
-  $saltsRoot = Set-LocalPackageLink "salts/$Rid" $saltsRoot
-  $utilsRoot = Set-LocalPackageLink "salts-utils/$Rid" $utilsRoot
-  $re2cRoot = Set-LocalPackageLink "re2c/$HostRid" $re2cRoot
-}
-
-$environment = [ordered]@{
-  SALTS_ROOT = $saltsRoot
-  SALTS_UTILS_ROOT = $utilsRoot
-  RE2C_ROOT = $re2cRoot
-  QIGAO_NUGET_PACKAGES = $packages
-  SALTS_PACKAGE_VERSION = (Split-Path $saltsPackage -Leaf)
-  SALTS_UTILS_PACKAGE_VERSION = (Split-Path $utilsPackage -Leaf)
-}
-if (-not $Local) {
-  $environment.TURBODB_CI_PKG_ROOT = Join-Path $env:GITHUB_WORKSPACE "external/pkgs"
-}
-foreach ($entry in $environment.GetEnumerator()) {
-  [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value)
-  if (-not $Local) { "$($entry.Key)=$($entry.Value)" >> $env:GITHUB_ENV }
-}
-if (-not $Local) { (Join-Path $re2cRoot "bin") >> $env:GITHUB_PATH }
-Write-Host "Restored Salts.Native $($environment.SALTS_PACKAGE_VERSION) and SaltsUtils.Native $($environment.SALTS_UTILS_PACKAGE_VERSION) for $Rid"
-) {
+    if ($entry.Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
       throw "stable TurboDB.Native publication requires stable $($entry.Package), resolved $($entry.Version)"
     }
   }
