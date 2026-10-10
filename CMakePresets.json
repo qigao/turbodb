@@ -199,7 +199,7 @@
             "hidden": true,
             "inherits": [
                 "ci-native-base",
-                "GccMac",
+                "AppleClang",
                 "flags-darwin",
                 "ISMac"
             ],

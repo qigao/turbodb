@@ -39,8 +39,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          brew install autoconf ninja gcc@15
-          echo "$(brew --prefix gcc@15)/bin" >> "$GITHUB_PATH"
+          brew install autoconf ninja
       - name: Build bundled Lemon host tool
         if: matrix.rid == 'android-arm64-v8a'
         shell: bash

@@ -123,6 +123,9 @@ Both groups reuse hidden presets in `CMakePresets.json` and `presets/*.json`
 for the vcpkg toolchain, platform settings, build options, install targets, and
 test filters. Keep machine-specific paths in `CMakeUserPresets.json`.
 
+The macOS ARM64 CI profile uses AppleClang to match the published Salts SDK,
+including TinyTest's native thread-local storage ABI.
+
 Release 构建先恢复指定版本范围内最新发布的 Salts、SaltsUtils，以及最新稳定版宿主 re2c 包。安装 .NET SDK 8、
 PowerShell 7，并在父环境设置具有 `read:packages` 权限的 `GITHUB_TOKEN`。
 Windows 在 Visual Studio Developer PowerShell 中运行以下命令。
