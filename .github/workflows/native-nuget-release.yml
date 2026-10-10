@@ -54,6 +54,7 @@ jobs:
     uses: ./.github/workflows/native-sdk.yml
     with:
       version: ${{ needs.metadata.outputs.version }}
+      require_stable: true
 
   pack:
     name: Pack TurboDB.Native
