@@ -167,3 +167,6 @@ set_tests_properties(tidessql_mysql_registry_owner PROPERTIES TIMEOUT 60)
 if(WIN32)
   set_tests_properties(tidessql_mysql_registry_owner PROPERTIES ENVIRONMENT_MODIFICATION "${TIDESSQL_TEST_RUNTIME_PATH}")
 endif()
+
+get_property(tidessql_tests DIRECTORY PROPERTY TESTS)
+set_property(TEST ${tidessql_tests} APPEND PROPERTY LABELS tidessql)

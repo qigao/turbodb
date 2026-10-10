@@ -407,22 +407,22 @@
         },
         {
             "name": "ci-windows-release",
-            "inherits": "base-test",
+            "inherits": "orm-test",
             "configurePreset": "ci-windows-release"
         },
         {
             "name": "ci-linux-release",
-            "inherits": "base-test",
+            "inherits": "orm-test",
             "configurePreset": "ci-linux-release"
         },
         {
             "name": "ci-linux-arm64-release",
-            "inherits": "base-test",
+            "inherits": "orm-test",
             "configurePreset": "ci-linux-arm64-release"
         },
         {
             "name": "ci-macos-arm64-release",
-            "inherits": "base-test",
+            "inherits": "orm-test",
             "configurePreset": "ci-macos-arm64-release"
         },
         {
