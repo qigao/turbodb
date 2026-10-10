@@ -43,8 +43,8 @@ New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Salts.Native" Version="*" />
-    <PackageReference Include="SaltsUtils.Native" Version="*" />
+    <PackageReference Include="Salts.Native" Version="2.3.0-*" />
+    <PackageReference Include="SaltsUtils.Native" Version="4.3.0-*" />
     <PackageReference Include="Qigao.Re2c.Binary" Version="*" />
   </ItemGroup>
 </Project>

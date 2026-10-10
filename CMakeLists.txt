@@ -143,6 +143,10 @@ if(TURBODB_BUILD_DBTOOLS)
   add_subdirectory(dbtools)
 endif()
 
+if(WIN32)
+  include(TurboDBRuntime)
+endif()
+
 if(TURBODB_BUILD_ORM OR TURBODB_BUILD_REDIS OR TURBODB_BUILD_DBTOOLS OR
    TURBODB_BUILD_SQLPARSER OR TURBODB_BUILD_TIDESSQL_SERVER)
   include(CMakePackageConfigHelpers)

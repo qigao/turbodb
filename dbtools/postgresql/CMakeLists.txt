@@ -7,16 +7,7 @@ else()
   target_compile_options(turbodb-postgresql PRIVATE -Wall -Wextra -Wpedantic
                                                     -Werror)
 endif()
-if(WIN32)
-  add_custom_command(
-    TARGET turbodb-postgresql
-    POST_BUILD
-    COMMAND
-      ${CMAKE_COMMAND} -E copy_if_different
-      $<TARGET_RUNTIME_DLLS:turbodb-postgresql>
-      $<TARGET_FILE_DIR:turbodb-postgresql>
-    COMMAND_EXPAND_LISTS)
-else()
+if(NOT WIN32)
   set_property(TARGET turbodb-postgresql PROPERTY INSTALL_RPATH
                                                   "$ORIGIN/../lib")
 endif()

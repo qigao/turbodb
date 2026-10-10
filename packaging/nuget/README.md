@@ -4,9 +4,9 @@
 
 每个平台的安装树位于 `sdk/linux-x64`、`sdk/linux-arm64`、`sdk/macos-arm64`、`sdk/windows-x64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 的 `bin/tidessqld[.exe]` 提供独立 MySQL/TLS 服务并另含 dbtools；Android 只发布库。
 
-CI 和发布流程始终以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新稳定版本，通过 `--no-cache --force-evaluate` 重新解析，不锁定版本、不生成依赖锁文件。每个安装树的 `turbodb-sdk-manifest.txt` 仅记录实际构建版本供诊断，不参与后续版本选择。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`；libpq 不含 SSL，TLS 由 Salts::CNet 提供。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
+CI 和发布流程分别以 `Version="2.3.0-*"` 和 `Version="4.3.0-*"` 获取 Salts.Native 和 SaltsUtils.Native 对应版本的最新预发布版或正式版，通过 `--no-cache --force-evaluate` 重新解析，不固定预发布后缀、不生成依赖锁文件。该策略纳入 Salts `2.3.0-rc.2` 与 SaltsUtils `4.3.0-rc.2`；实际版本以本轮 restore 输出为准。每个安装树的 `turbodb-sdk-manifest.txt` 仅记录实际构建版本供诊断，不参与后续版本选择。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`；libpq 不含 SSL，TLS 由 Salts::CNet 提供。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
 
-消费项目也应直接声明 `Salts.Native`、`SaltsUtils.Native` 的 `PackageReference Version="*"`，并在 restore 时使用 `--no-cache --force-evaluate`。NuGet 发布包中的传递依赖不能保证每次都选择最新版本，直接浮动引用才表达这一要求，参见 [NuGet 依赖解析规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution)。
+消费项目也应直接声明 `Salts.Native` 的 `PackageReference Version="2.3.0-*"` 和 `SaltsUtils.Native` 的 `PackageReference Version="4.3.0-*"`，并在 restore 时使用 `--no-cache --force-evaluate`。`版本号-*` 选择该基础版本的最新预发布版或正式版；升级基础版本时同步修改恢复脚本与 NuGet 项目中的版本范围。NuGet 发布包中的传递依赖不能保证每次都选择最新版本，直接浮动引用才表达这一要求，参见 [NuGet 依赖解析规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution)。
 
 SDK 恢复和暂存步骤只负责下载、复制及导出路径。依赖是否可用由构建和测试验证，不检查 Salts/SaltsUtils 的版本或 ABI 数值。实际解析的包版本仅用于定位安装目录和记录构建信息。
 
@@ -16,7 +16,7 @@ CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 
 
 发布包将核心与四种驱动一起交付，客户端仍按需加载。当前仅支持 Driver ABI 2 / `TurboDb.Driver` 契约版本 4，旧 ABI 插件直接拒绝；升级时统一重编驱动 SDK 消费代码并成套替换核心与驱动。数据库格式不变。
 
-从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。Salts/SaltsUtils 始终使用最新稳定版本。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
+从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。Salts/SaltsUtils 使用指定版本范围内的最新发布版本（含预发布版）。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
 
 zstd 仅由 TidesDB 的生产端构建查找并私有链接。共享 TidesDB 库包含所需静态 zstd 代码；静态 TidesDB SDK 将最终链接所需的 archive 安装到 `lib/tidesdb`，由导出 target 按 SDK 安装前缀直接引用，并附带 `share/tidesdb/zstd/copyright`。`TidesDBConfig.cmake` 只加载导出文件和检查组件；消费项目无需查询或另装 zstd。此路径保留静态库最终链接所需的符号，SDK 移动目录后仍从自身安装树解析 archive，不改变压缩数据格式。
 

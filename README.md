@@ -123,7 +123,7 @@ Both groups reuse hidden presets in `CMakePresets.json` and `presets/*.json`
 for the vcpkg toolchain, platform settings, build options, install targets, and
 test filters. Keep machine-specific paths in `CMakeUserPresets.json`.
 
-Release 构建先恢复最新发布的 Salts、SaltsUtils 和宿主 re2c 包。安装 .NET SDK 8、
+Release 构建先恢复指定版本范围内最新发布的 Salts、SaltsUtils，以及最新稳定版宿主 re2c 包。安装 .NET SDK 8、
 PowerShell 7，并在父环境设置具有 `read:packages` 权限的 `GITHUB_TOKEN`。
 Windows 在 Visual Studio Developer PowerShell 中运行以下命令。
 共享 [vcpkg-cache](https://github.com/qigao/vcpkg-cache) checkout 位于
@@ -149,12 +149,22 @@ Android 使用独立的 `vcpkg_installed_android`，避免切换目标时移除�
 迁移为 `cmeta_*` / `CMETA_PLUGIN_*`，协程执行器使用 `coro_*`；插件入口改为
 `cmeta_plugin_query`，旧二进制插件不能混用。此次接入不迁移数据库文件或更改存储格式。
 
-Salts 与 SaltsUtils SDK 始终恢复最新发布版本，不在配置中固定版本号。
-上游发布后，重新运行上述恢复、配置和构建命令即可使用新包。
+Salts 与 SaltsUtils SDK 分别使用 `Version="2.3.0-*"` 和 `Version="4.3.0-*"`，选择对应版本的最新预发布版或正式版。
+此策略纳入 Salts `2.3.0-rc.2` 与 SaltsUtils `4.3.0-rc.2`；实际版本以本轮 restore 输出为准。
+上游在该版本范围内发布后，重新运行上述恢复、配置和构建命令即可使用新包；升级基础版本时同步修改恢复脚本与 NuGet 项目中的版本范围。
 启用 ORM、dbtools 或 tidessqld 时，vcpkg 自动启用 `salts-utils` feature，
 提供新版包配置所需的 Lua 与 QuickJS。
 
 Use targets and CTest filters to select individual tools and tests:
+
+Windows builds use the project-level `turbodb_runtime_dependencies` task to
+copy external DLLs declared by enabled targets into the shared build `bin`
+directory (under the configuration directory for multi-config generators).
+The task deduplicates dependency paths and runs once before executable and
+shared/module library targets, including individual target builds. Modules do
+not copy DLLs in post-build commands. In-tree DLLs remain build outputs;
+dependencies without imported DLL metadata still use the preset runtime `PATH`.
+Install components and SDK/Studio staging retain their own package layouts.
 
 ```powershell
 cmake --build --preset win-release-user --target turbodb-postgresql
@@ -219,7 +229,7 @@ See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detai
 
 ## Build and package model
 
-TurboDB consumes the latest published stable **Salts.Native** and **SaltsUtils.Native** producer SDKs. Callers provide the resolved install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`.
+TurboDB consumes **Salts.Native** with `Version="2.3.0-*"` and **SaltsUtils.Native** with `Version="4.3.0-*"`, selecting the latest prerelease or stable release of each specified version. Callers provide the resolved install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`.
 
 The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient SDK; package selection happens before CMake and compatibility is enforced by exported targets and ABI/capability checks.
 

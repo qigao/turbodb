@@ -20,12 +20,6 @@ else()
     set_property(TARGET tidessqld PROPERTY INSTALL_RPATH "$ORIGIN/../lib")
   endif()
 endif()
-if(WIN32)
-  add_custom_command(TARGET tidessqld POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      $<TARGET_RUNTIME_DLLS:tidessqld> $<TARGET_FILE_DIR:tidessqld>
-    COMMAND_EXPAND_LISTS)
-endif()
 install(TARGETS tidessqld RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tidessqld)
 if(WIN32)
   install(FILES $<TARGET_RUNTIME_DLLS:tidessqld>

@@ -7,15 +7,7 @@ else()
   target_compile_options(turbodb-sqlite PRIVATE -Wall -Wextra -Wpedantic
                                                 -Werror)
 endif()
-if(WIN32)
-  add_custom_command(
-    TARGET turbodb-sqlite
-    POST_BUILD
-    COMMAND
-      ${CMAKE_COMMAND} -E copy_if_different
-      $<TARGET_RUNTIME_DLLS:turbodb-sqlite> $<TARGET_FILE_DIR:turbodb-sqlite>
-    COMMAND_EXPAND_LISTS)
-else()
+if(NOT WIN32)
   set_property(TARGET turbodb-sqlite PROPERTY INSTALL_RPATH "$ORIGIN/../lib")
 endif()
 install(TARGETS turbodb-sqlite RUNTIME_DEPENDENCY_SET
