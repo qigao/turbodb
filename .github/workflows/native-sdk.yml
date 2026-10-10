@@ -6,6 +6,9 @@ on:
       version:
         type: string
         default: ci
+      require_stable:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -74,7 +77,10 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}' -HostRid '${{ matrix.host }}'
+          TURBODB_REQUIRE_STABLE: ${{ inputs.require_stable }}
+        run: |
+          $stable = $env:TURBODB_REQUIRE_STABLE -eq 'true'
+          ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}' -HostRid '${{ matrix.host }}' -RequireStable:$stable
       - name: Configure on Unix
         if: runner.os != 'Windows'
         shell: bash
