@@ -80,6 +80,59 @@ jobs:
             mv "package/sdk/turbodb-sdk-$rid" "package/sdk/$rid"
           done
 
+      - name: Verify stable native SDK provenance and ELF SONAME closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          stable_salts=""
+          stable_utils=""
+          for rid in linux-x64 linux-arm64 macos-arm64 windows-x64 android-arm64-v8a; do
+            manifest="package/sdk/$rid/turbodb-sdk-manifest.txt"
+            test -f "$manifest"
+            salts="$(sed -n 's/^salts=//p' "$manifest")"
+            utils="$(sed -n 's/^saltsutils=//p' "$manifest")"
+            if [[ ! "$salts" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+               [[ ! "$utils" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Stable TurboDB.Native cannot publish RC SDK dependencies: rid=$rid salts=$salts saltsutils=$utils" >&2
+              exit 1
+            fi
+            if [[ -n "$stable_salts" && "$salts" != "$stable_salts" ]] ||
+               [[ -n "$stable_utils" && "$utils" != "$stable_utils" ]]; then
+              echo "Native producer versions disagree across RIDs: $rid" >&2
+              exit 1
+            fi
+            stable_salts="$salts"
+            stable_utils="$utils"
+          done
+
+          command -v readelf >/dev/null
+          wanted="libsalts.so.${stable_salts%.*}"
+          matching=0
+          while IFS= read -r -d '' library; do
+            while IFS= read -r needed; do
+              case "$needed" in
+                libsalts.so.*)
+                  if [[ "$needed" != "$wanted" ]]; then
+                    echo "TurboDB ELF NEEDED mismatch: $library requires $needed, stable Salts.Native=$stable_salts ($wanted)" >&2
+                    exit 1
+                  fi
+                  matching=$((matching + 1))
+                  ;;
+              esac
+            done < <(readelf -d "$library" | sed -nE 's/.*Shared library: \[([^]]+)\].*/\1/p')
+          done < <(find package/sdk/linux-x64 -type f -name '*.so*' -print0)
+          if (( matching == 0 )); then
+            echo "No Linux shared object proves the stable Salts native runtime dependency" >&2
+            exit 1
+          fi
+          {
+            echo "### Stable TurboDB.Native runtime graph"
+            echo
+            echo "- Salts.Native: $stable_salts"
+            echo "- SaltsUtils.Native: $stable_utils"
+            echo "- Linux NEEDED: $wanted ($matching imports)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
