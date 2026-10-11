@@ -3,7 +3,9 @@ param(
   [ValidateSet("linux-x64", "linux-arm64", "macos-arm64", "windows-x64", "android-arm64-v8a")]
   [string]$Rid,
   [Parameter(Mandatory = $true)]
-  [string]$Version
+  [string]$Version,
+  [Parameter(Mandatory = $true)]
+  [string]$InstallManifest
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,17 +21,11 @@ $stage = Join-Path $env:GITHUB_WORKSPACE "build/stage/sdk/$Rid"
 if (Test-Path -LiteralPath $stage) { throw "SDK staging directory already exists: $stage" }
 if (-not (Test-Path -LiteralPath $installed -PathType Container)) { throw "install tree is missing: $installed" }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-$platform = switch ($Rid) {
-  "windows-x64" { "windows" }
-  "linux-x64" { "linux" }
-  "linux-arm64" { "linux-arm64" }
-  "macos-arm64" { "macos-arm64" }
-  "android-arm64-v8a" { "android" }
+if (-not (Test-Path -LiteralPath $InstallManifest -PathType Leaf)) {
+  throw "missing install manifest: $InstallManifest"
 }
-$manifest = Join-Path $env:GITHUB_WORKSPACE "build/ci-$platform-release/install_manifest.txt"
-if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "missing install manifest: $manifest" }
 $prefix = [IO.Path]::GetFullPath($installed).Replace('\', '/').TrimEnd('/') + '/'
-foreach ($file in Get-Content -LiteralPath $manifest | Sort-Object -Unique) {
+foreach ($file in Get-Content -LiteralPath $InstallManifest | Sort-Object -Unique) {
   $absolute = [IO.Path]::GetFullPath($file).Replace('\', '/')
   if (-not $absolute.StartsWith($prefix, [StringComparison]::Ordinal)) {
     throw "installed file lies outside SDK prefix: $absolute"
