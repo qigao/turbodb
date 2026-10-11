@@ -72,9 +72,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line,
 
   main_window.ShowWindow(show_command);
   main_window.UpdateWindow();
+  message_loop.AddMessageFilter(&main_window);
+  message_loop.AddIdleHandler(&main_window);
 
   const int result = message_loop.Run();
 
+  message_loop.RemoveMessageFilter(&main_window);
+  message_loop.RemoveIdleHandler(&main_window);
   _Module.RemoveMessageLoop();
   _Module.Term();
   ::CoUninitialize();

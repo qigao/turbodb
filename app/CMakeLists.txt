@@ -6,6 +6,8 @@ if(NOT TARGET Orm::Cpp)
   message(FATAL_ERROR "TurboDB Studio requires the in-tree Orm::Cpp target")
 endif()
 
+enable_language(RC)
+
 # WTL uses ATL from the active Visual Studio toolchain. Recheck because a
 # Ninja build tree may be configured from a different developer environment.
 include(CheckIncludeFileCXX)
@@ -60,14 +62,21 @@ target_link_libraries(
     "${TURBODB_APP_SCINTILLA_LIBRARY}"
     "${TURBODB_APP_LEXILLA_LIBRARY}")
 
-add_executable(
-  turbodb-studio
-  WIN32
-  src/main.cpp
+set(turbodb_app_window_sources
+  src/studio.manifest
+  src/command_ids.h
+  src/command_toolbar.cpp
+  src/command_toolbar.h
   src/main_window.cpp
   src/main_window.h
   src/connection/connection_manager.cpp
   src/connection/connection_manager.h
+  src/connection/connection_config.cpp
+  src/connection/connection_config.h
+  src/connection/connection_dialog.cpp
+  src/connection/connection_dialog.h
+  src/connection/connection_dialog.rc
+  src/connection/connection_resource.h
   src/editor/scintilla_runtime.cpp
   src/editor/scintilla_runtime.h
   src/editor/sql_editor.cpp
@@ -88,7 +97,13 @@ add_executable(
   src/query/query_result_model.h
   src/results/result_workspace_view.cpp
   src/results/result_workspace_view.h
+  src/studio_colors.h
+  src/clipboard.h
+  src/workspace/query_notebook.cpp
+  src/workspace/query_notebook.h
   src/workspace/sql_workspace_session.h)
+
+add_executable(turbodb-studio WIN32 src/main.cpp ${turbodb_app_window_sources})
 
 target_include_directories(
   turbodb-studio
@@ -107,8 +122,10 @@ target_link_libraries(
   turbodb-studio
   PRIVATE
     Orm::Cpp
+    Salts::IniParser
     turbodb_app_editor_deps
     comctl32
+    comdlg32
     ole32)
 
 set_target_properties(
@@ -118,6 +135,23 @@ set_target_properties(
     OUTPUT_NAME "TurboDBStudio")
 
 if(BUILD_TESTS)
+  cmake_add_test(NAME turbodb-app-config-test TEST_NAME turbodb-app-config
+    SOURCES tests/connection_config_test.cpp src/connection/connection_config.cpp
+    INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    DEFS UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+    LIBS Salts::IniParser Salts::TinyTest
+    FOLDER "app/tests")
+
+  cmake_add_test(NAME turbodb-app-menu-test TEST_NAME turbodb-app-menu
+    SOURCES tests/main_window_menu_test.cpp ${turbodb_app_window_sources}
+    INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    DEFS UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+      "TURBODB_APP_SQLITE_PLUGIN_PATH=\"$<TARGET_FILE:orm_sqlite_driver>\""
+    LIBS Orm::Cpp turbodb_app_editor_deps Salts::TinyTest Salts::IniParser comctl32 comdlg32 ole32
+    FOLDER "app/tests")
+  add_dependencies(turbodb-app-menu-test orm_sqlite_driver)
+  set_tests_properties(turbodb-app-menu PROPERTIES TIMEOUT 60)
+
   add_executable(
     turbodb-app-language-test
     tests/sql_language_service_test.cpp

@@ -25,6 +25,22 @@ constexpr const char* kPostgresqlKeywords =
     "returning lateral ilike serial bigserial jsonb materialized concurrently "
     "tablespace unlogged generated identity";
 
+struct BuiltinFunction {
+  const char* name;
+  const char* signature;
+};
+
+// Portable forms supported by SQLite, PostgreSQL, and MySQL. This is UI help,
+// not overload resolution or a claim about user-defined functions.
+constexpr BuiltinFunction kFunctions[] = {
+    {"abs", "abs(value)"}, {"lower", "lower(text)"}, {"upper", "upper(text)"},
+    {"length", "length(value)"}, {"coalesce", "coalesce(value, ...)"},
+    {"nullif", "nullif(value1, value2)"},
+    {"replace", "replace(text, from_text, to_text)"},
+    {"substr", "substr(text, start [, length])"},
+    {"count", "count(expression | *)"}, {"sum", "sum(expression)"},
+    {"avg", "avg(expression)"}};
+
 std::string Lower(std::string_view text) {
   std::string result;
   result.reserve(text.size());
@@ -94,6 +110,8 @@ std::vector<std::string> SqlLanguageService::Complete(
   std::set<std::string> matches;
 
   AddWords(matches, KeywordList(session.provider()), normalized_prefix);
+  for (const auto& function : kFunctions)
+    if (HasPrefixInsensitive(function.name, normalized_prefix)) matches.emplace(function.name);
 
   for (const auto& relation : session.relations()) {
     if (HasPrefixInsensitive(relation.name, normalized_prefix)) {
@@ -124,6 +142,42 @@ std::vector<std::string> SqlLanguageService::Complete(
   }
 
   return {matches.begin(), matches.end()};
+}
+
+std::string SqlLanguageService::FunctionSignature(SqlProvider, std::string_view name) const {
+  for (const auto& function : kFunctions)
+    if (name.size() == std::char_traits<char>::length(function.name) &&
+        HasPrefixInsensitive(function.name, name))
+      return function.signature;
+  return {};
+}
+
+std::string SqlLanguageService::DescribeSymbol(const SqlWorkspaceSession& session,
+                                               std::string_view identifier) const {
+  if (identifier.empty()) return {};
+  const auto equal = [&](std::string_view value) {
+    return value.size() == identifier.size() && HasPrefixInsensitive(value, identifier);
+  };
+  std::string description;
+  std::size_t matches = 0;
+  const auto add = [&](const char* kind, const std::string& name) {
+    if (matches++ >= 4) return;
+    if (!description.empty()) description += '\n';
+    description += kind;
+    description += name;
+  };
+  for (const auto& relation : session.relations()) {
+    const std::string owner = relation.schema.empty() ? relation.name :
+        relation.schema + "." + relation.name;
+    if (equal(relation.name) || equal(owner))
+      add(relation.kind == RelationKind::view ? "View: " : "Table: ", owner);
+    for (const auto& column : relation.columns) {
+      if (equal(column) || equal(relation.name + "." + column) || equal(owner + "." + column))
+        add("Column: ", owner + "." + column);
+    }
+  }
+  if (matches > 4) description += "\nMore matches; qualify the name to narrow them.";
+  return description;
 }
 
 }  // namespace turbodb::app

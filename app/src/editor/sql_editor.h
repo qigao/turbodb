@@ -34,6 +34,7 @@ class SqlEditor final : public CWindowImpl<SqlEditor, CWindow> {
 
   BEGIN_MSG_MAP(SqlEditor)
     MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
+    MESSAGE_HANDLER(WM_CONTEXTMENU, OnContextMenu)
   END_MSG_MAP()
 
   void Bind(ScintillaRuntime* runtime, SqlWorkspaceSession* session,
@@ -53,22 +54,33 @@ class SqlEditor final : public CWindowImpl<SqlEditor, CWindow> {
 
   bool FindNext(std::string_view needle, bool match_case);
   bool RefreshLanguage();
+  void RefreshColors();
   void ShowCompletionItems(const std::vector<std::string>& items,
                            std::size_t prefix_bytes);
+  void HandleNotification(const NMHDR* header);
 
   void ClearDiagnosticMarkers();
   void MarkDiagnosticLine(std::size_t zero_based_line);
 
  private:
   LRESULT OnKeyDown(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+  LRESULT OnContextMenu(UINT, WPARAM, LPARAM, BOOL&);
 
   void ConfigureBaseEditor();
   void ConfigureStyles(SqlProvider provider);
+  void EnsureStyled(LRESULT end);
+  bool IsCode(LRESULT position) const;
+  bool RequestCompletion(bool explicit_request);
+  bool ShowParameterTip();
+  void ShowSymbolTip(LRESULT position, bool hover);
+  void CancelTip();
 
   ScintillaRuntime* runtime_ = nullptr;
   SqlWorkspaceSession* session_ = nullptr;
   const SqlLanguageService* language_service_ = nullptr;
   HWND command_target_ = nullptr;
+  bool hover_tip_ = false;
+  LRESULT hint_caret_ = -1;
 };
 
 }  // namespace turbodb::app
