@@ -159,23 +159,6 @@
             ]
         },
         {
-            "name": "linux-release-pg-e2e-user",
-            "displayName": "Release + PostgreSQL E2E tests (Linux)",
-            "inherits": [
-                "base-linux-pg-e2e",
-                "linux-release-user"
-            ],
-            "cacheVariables": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "CMAKE_PREFIX_PATH": "${sourceDir}/vcpkg_installed_pg/x64-linux",
-                "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release-pg"
-            },
-            "environment": {
-                "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed_pg",
-                "LD_LIBRARY_PATH": "${sourceDir}/build/linux-gcc-release-pg/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
-            }
-        },
-        {
             "name": "android-dependencies-debug",
             "hidden": true,
             "environment": {
@@ -236,10 +219,6 @@
             "configurePreset": "linux-release-user"
         },
         {
-            "name": "linux-release-pg-e2e-user",
-            "configurePreset": "linux-release-pg-e2e-user"
-        },
-        {
             "name": "install-win-dev-user",
             "configurePreset": "win-dev-user",
             "inherits": "base-install"
@@ -257,11 +236,6 @@
         {
             "name": "install-linux-release-user",
             "configurePreset": "linux-release-user",
-            "inherits": "base-install"
-        },
-        {
-            "name": "install-linux-release-pg-e2e-user",
-            "configurePreset": "linux-release-pg-e2e-user",
             "inherits": "base-install"
         },
         {
@@ -303,11 +277,6 @@
             "name": "linux-release-user",
             "inherits": "base-test",
             "configurePreset": "linux-release-user"
-        },
-        {
-            "name": "linux-release-pg-e2e-user",
-            "inherits": "base-test-pg-e2e",
-            "configurePreset": "linux-release-pg-e2e-user"
         }
     ]
 }

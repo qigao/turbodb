@@ -1,6 +1,6 @@
 {
   "name": "vcpkg-turbonet",
-  "version-semver": "2.3.3",
+  "version-semver": "2.3.4",
   "dependencies": [
     {
       "name": "pkgconf",

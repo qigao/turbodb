@@ -35,22 +35,6 @@ foreach ($file in Get-Content -LiteralPath $InstallManifest | Sort-Object -Uniqu
   Copy-Item -LiteralPath $file -Destination $destination
 }
 
-$tidessqld = switch ($Rid) {
-  "windows-x64" { Join-Path $stage "bin/tidessqld.exe" }
-  "linux-x64" { Join-Path $stage "bin/tidessqld" }
-  "linux-arm64" { Join-Path $stage "bin/tidessqld" }
-  "macos-arm64" { Join-Path $stage "bin/tidessqld" }
-  default { $null }
-}
-if ($tidessqld) {
-  if (-not (Test-Path -LiteralPath $tidessqld -PathType Leaf)) {
-    throw "host SDK is missing tidessqld: $tidessqld"
-  }
-} elseif ((Test-Path -LiteralPath (Join-Path $stage "bin/tidessqld") -PathType Leaf) -or
-         (Test-Path -LiteralPath (Join-Path $stage "bin/tidessqld.exe") -PathType Leaf)) {
-  throw "Android SDK must not contain tidessqld"
-}
-
 # Keep this list to the runtime closure of the shipped SQLite and PostgreSQL
 # drivers. Copying the entire vcpkg bin directory leaks unrelated tools and
 # libraries into the SDK. TLS and authentication digests use Salts; libpq is
@@ -84,7 +68,8 @@ if ($Rid -in @("linux-x64", "linux-arm64", "android-arm64-v8a")) {
 @(
   "package=TurboDB.Native", "version=$Version", "rid=$Rid", "profile=release",
   "salts=$env:SALTS_PACKAGE_VERSION", "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
-  "drivers=sqlite,postgresql,mysql", "source=$env:GITHUB_SHA"
+  "drivers=sqlite,postgresql,mysql", "source=$env:GITHUB_SHA",
+  "tidessql=OFF", "tidesdb=OFF"
   $runtimeManifest
 ) | Set-Content -LiteralPath (Join-Path $stage "turbodb-sdk-manifest.txt") -Encoding utf8NoBOM
 "TURBODB_ROOT=$($stage.Replace('\', '/'))" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
