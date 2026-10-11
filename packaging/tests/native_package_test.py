@@ -25,9 +25,7 @@ _LEGACY_CRYPTO_PREFIXES = (
 )
 
 _WINDOWS_RUNTIME_DLLS = {
-    "cnet.dll",
     "libpq.dll",
-    "salts.dll",
     "sqlite3.dll",
     "tedis.dll",
     "turbo_orm.dll",
@@ -56,15 +54,11 @@ class NativePackageTest(unittest.TestCase):
             "lib/cmake/TurboDB/TurboDBConfig.cmake",
             "lib/cmake/TurboDB/OrmTargets.cmake",
             "lib/cmake/TurboDB/TurboDBTargets.cmake",
-            "lib/cmake/TidesSQL/TidesSQLConfig.cmake",
-            "lib/cmake/tidesdb/TidesDBConfig.cmake",
             "include/shared/orm/orm_runtime.h",
             "include/shared/orm/orm_flow.hpp",
-            "include/tidessql/tidessql.h",
             "include/mysql/session_async.h",
             "include/mysql/session_script.h",
             "include/redis/redis_io.h",
-            "share/tidesdb/zstd/copyright",
         )
         for rid in ("linux-x64", "linux-arm64", "macos-arm64", "windows-x64", "android-arm64-v8a"):
             windows = rid == "windows-x64"
@@ -72,34 +66,18 @@ class NativePackageTest(unittest.TestCase):
             host = rid != "android-arm64-v8a"
             shared_suffix = "dylib" if macos else "so"
             core = "bin/turbo_orm.dll" if windows else f"lib/libturbo_orm.{shared_suffix}"
-            tidessql = (
-                "lib/turbodb_tidessql.lib"
-                if windows else "lib/libturbodb_tidessql.a"
-            )
             suffix = "dll" if windows else "so"
-            private_compression = (
-                ("lib/tidesdb/zstd.lib",)
-                if windows else ()
-            )
-            daemon = (
-                ("bin/tidessqld.exe" if windows else "bin/tidessqld",)
-                if host else ()
-            )
             dbtools = (("bin/dbtools.exe" if windows else "bin/dbtools",)
                        if host else ())
             drivers = tuple(
                 f"lib/turbodb/drivers/turbodb_driver_{driver}.{suffix}"
                 for driver in ("sqlite", "postgresql", "mysql")
             )
-            for relative in (*common, core, tidessql, *private_compression, *daemon,
-                             *dbtools, *drivers):
+            for relative in (*common, core, *dbtools, *drivers):
                 path = f"sdk/{rid}/{relative}"
                 with self.subTest(path=path):
                     self.assertTrue(path in self.files, f"Missing SDK file: {path}")
                     self.assertGreater(self.package.getinfo(path).file_size, 0)
-            for executable in ("bin/tidessqld", "bin/tidessqld.exe"):
-                if not host:
-                    self.assertNotIn(f"sdk/{rid}/{executable}", self.files)
             for executable in ("bin/dbtools", "bin/dbtools.exe"):
                 if not host:
                     self.assertNotIn(f"sdk/{rid}/{executable}", self.files)
@@ -129,6 +107,14 @@ class NativePackageTest(unittest.TestCase):
             and path.casefold().endswith(".dll")
         }
         self.assertEqual(_WINDOWS_RUNTIME_DLLS, runtime_dlls)
+
+    def test_tides_engines_are_not_packaged(self):
+        leaked = sorted(path for path in self.files
+                        if path.startswith("sdk/")
+                        and any(name in path.casefold()
+                                for name in ("tidesdb", "tidessql")))
+        self.assertEqual([], leaked,
+                         f"TidesDB/TidesSQL files must not be shipped: {leaked}")
 
     def test_github_dependencies_are_not_embedded(self):
         manifest = ET.fromstring(self.package.read("TurboDB.Native.nuspec"))

@@ -106,16 +106,6 @@
             ]
         },
         {
-            "name": "base-linux-pg-e2e",
-            "hidden": true,
-            "binaryDir": "${sourceDir}/build/linux-gcc-release-pg",
-            "cacheVariables": {
-                "BUILD_TESTS": "OFF",
-                "BUILD_E2E_TESTS": "ON",
-                "TURBODB_BUILD_TIDESSQL_SERVER": "OFF"
-            }
-        },
-        {
             "name": "ci-native-base",
             "hidden": true,
             "generator": "Ninja",
@@ -133,11 +123,12 @@
                 "BUILD_E2E_TESTS": false,
                 "BUILD_EXAMPLES": false,
                 "TURBODB_BUILD_ORM": true,
-                "TURBODB_BUILD_TIDESSQL": true,
+                "TURBODB_BUILD_TIDESSQL": false,
                 "TURBODB_BUILD_DBTOOLS": true,
                 "TIDESDB_BUILD_TESTS": false,
                 "TIDESDB_WITH_SNAPPY": false,
-                "TIDESDB_WITH_LZ4": false
+                "TIDESDB_WITH_LZ4": false,
+                "TURBODB_BUILD_TIDESSQL_SERVER": false
             }
         },
         {
@@ -161,8 +152,7 @@
                 "VCPKG_TARGET_TRIPLET": "$env{QIGAO_VCPKG_WINDOWS_TRIPLET}",
                 "VCPKG_HOST_TRIPLET": "$env{QIGAO_VCPKG_WINDOWS_HOST_TRIPLET}",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/$env{QIGAO_VCPKG_WINDOWS_TRIPLET}",
-                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/$env{QIGAO_VCPKG_WINDOWS_TRIPLET}/tools/pkgconf/pkgconf.exe",
-                "TURBODB_BUILD_TIDESSQL_SERVER": true
+                "PKG_CONFIG_EXECUTABLE": "$env{VCPKG_INSTALLED_DIR}/$env{QIGAO_VCPKG_WINDOWS_TRIPLET}/tools/pkgconf/pkgconf.exe"
             }
         },
         {
@@ -180,8 +170,7 @@
             },
             "cacheVariables": {
                 "VCPKG_TARGET_TRIPLET": "x64-linux",
-                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux",
-                "TURBODB_BUILD_TIDESSQL_SERVER": true
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-linux"
             }
         },
         {
@@ -216,22 +205,7 @@
             "cacheVariables": {
                 "VCPKG_TARGET_TRIPLET": "arm64-osx",
                 "CMAKE_OSX_ARCHITECTURES": "arm64",
-                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-osx",
-                "TURBODB_BUILD_TIDESSQL_SERVER": true
-            }
-        },
-        {
-            "name": "ci-linux-e2e-base",
-            "hidden": true,
-            "inherits": "ci-linux-base",
-            "binaryDir": "${sourceDir}/build/ci-linux-e2e",
-            "environment": {
-                "LD_LIBRARY_PATH": "${sourceDir}/build/ci-linux-e2e/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/x64-linux/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
-            },
-            "cacheVariables": {
-                "BUILD_TESTS": false,
-                "BUILD_E2E_TESTS": true,
-                "TURBODB_BUILD_TIDESSQL_SERVER": false
+                "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/arm64-osx"
             }
         },
         {
@@ -306,13 +280,6 @@
             ]
         },
         {
-            "name": "ci-linux-e2e",
-            "inherits": [
-                "ci-linux-e2e-base",
-                "ci-environment"
-            ]
-        },
-        {
             "name": "ci-android-release",
             "inherits": [
                 "ci-android-base",
@@ -371,15 +338,6 @@
             "inherits": "base-install"
         },
         {
-            "name": "ci-linux-e2e",
-            "configurePreset": "ci-linux-e2e"
-        },
-        {
-            "name": "install-ci-linux-e2e",
-            "configurePreset": "ci-linux-e2e",
-            "inherits": "base-install"
-        },
-        {
             "name": "ci-android-release",
             "configurePreset": "ci-android-release"
         },
@@ -390,27 +348,6 @@
         }
     ],
     "testPresets": [
-        {
-            "name": "base-test-e2e",
-            "hidden": true,
-            "inherits": "base-test",
-            "filter": {
-                "include": {
-                    "label": "e2e"
-                }
-            }
-        },
-        {
-            "name": "base-test-pg-e2e",
-            "hidden": true,
-            "inherits": "base-test-e2e",
-            "filter": {
-                "include": {
-                    "label": "e2e",
-                    "name": "^(dbtool_postgresql_live_test|orm_postgres_live|orm_owner_postgres|orm_owner_postgres_loss|orm_sql_validation_parity)$"
-                }
-            }
-        },
         {
             "name": "ci-windows-release",
             "inherits": "orm-test",
@@ -430,11 +367,6 @@
             "name": "ci-macos-arm64-release",
             "inherits": "orm-test",
             "configurePreset": "ci-macos-arm64-release"
-        },
-        {
-            "name": "ci-linux-e2e",
-            "inherits": "base-test-e2e",
-            "configurePreset": "ci-linux-e2e"
         }
     ]
 }
