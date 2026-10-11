@@ -65,9 +65,26 @@ if ($Rid -eq "windows-x64") {
     Copy-Item -LiteralPath $source -Destination (Join-Path $stage "bin")
   }
 }
+$runtimeManifest = @()
+if ($Rid -in @("linux-x64", "linux-arm64", "android-arm64-v8a")) {
+  if ([string]::IsNullOrWhiteSpace($env:SALTS_ROOT)) { throw "SALTS_ROOT is required" }
+  $saltsLibrary = Join-Path $env:SALTS_ROOT "lib/libsalts.so"
+  if (-not (Test-Path -LiteralPath $saltsLibrary -PathType Leaf)) {
+    throw "restored Salts runtime is missing: $saltsLibrary"
+  }
+  # Package versions do not define the runtime ABI; record the SDK's ELF SONAME.
+  $dynamic = & readelf -d $saltsLibrary
+  if ($LASTEXITCODE -ne 0) { throw "failed to read Salts runtime SONAME: $saltsLibrary" }
+  $sonames = @($dynamic | ForEach-Object {
+    if ($_ -match '\(SONAME\).*\[([^\]]+)\]') { $Matches[1] }
+  })
+  if ($sonames.Count -ne 1) { throw "expected one Salts runtime SONAME: $saltsLibrary" }
+  $runtimeManifest += "salts_soname=$($sonames[0])"
+}
 @(
   "package=TurboDB.Native", "version=$Version", "rid=$Rid", "profile=release",
   "salts=$env:SALTS_PACKAGE_VERSION", "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
   "drivers=sqlite,postgresql,mysql", "source=$env:GITHUB_SHA"
+  $runtimeManifest
 ) | Set-Content -LiteralPath (Join-Path $stage "turbodb-sdk-manifest.txt") -Encoding utf8NoBOM
 "TURBODB_ROOT=$($stage.Replace('\', '/'))" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8

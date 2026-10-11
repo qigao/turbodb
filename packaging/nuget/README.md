@@ -8,7 +8,7 @@
 
 正式包的消费项目应直接声明 `Salts.Native` 和 `SaltsUtils.Native` 的 `PackageReference Version="*"`，在 restore 时使用 `--no-cache --force-evaluate`，并核对安装树 manifest 中的运行库 ABI。RC 消费代码须使用与候选构建一致的版本系列及编译器。TurboDB 包不嵌入这两个 GitHub 包的传递依赖，直接浮动引用表达每轮获取最新稳定版本的要求，参见 [NuGet 依赖解析规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution)。
 
-SDK 恢复和暂存步骤只负责下载、复制及导出路径。依赖是否可用由构建和测试验证，不检查 Salts/SaltsUtils 的版本或 ABI 数值。实际解析的包版本仅用于定位安装目录和记录构建信息。
+SDK 恢复和暂存步骤负责下载、复制及导出路径，并记录实际解析的包版本；ELF 平台另记录恢复的 Salts 运行库中的 `DT_SONAME`，供打包时比较 TurboDB 的 `DT_NEEDED`。SONAME 由生产端库定义，不能从 NuGet 包版本推导，例如 Salts.Native 2.2.0 的 SONAME 是 `libsalts.so.2`。稳定发布要求依赖为稳定版；依赖是否可用由构建和正式测试验证。
 
 CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 `OrmConfig.cmake`。设置 `SALTS_ROOT`、`SALTS_UTILS_ROOT` 和 `TURBODB_ROOT` 指向匹配的平台安装树，以 `PATHS "$ENV{TURBODB_ROOT}" NO_DEFAULT_PATH` 查找 TurboDB。MySQL TLS 由 Salts::CNet 管理，认证摘要使用 Salts 的 provider-neutral crypto API；TurboDB SDK 不再随包携带 OpenSSL/BoringSSL。SaltsUtils 保留为运行时依赖，只有直接使用其 API 的客户端才需要查找它的 CMake package.
 
