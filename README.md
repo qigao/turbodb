@@ -128,8 +128,11 @@ Both groups reuse hidden presets in `CMakePresets.json` and `presets/*.json`
 for the vcpkg toolchain, platform settings, build options, install targets, and
 test filters. Keep machine-specific paths in `CMakeUserPresets.json`.
 
-The macOS ARM64 CI profile uses AppleClang to match the published Salts SDK,
-including TinyTest's native thread-local storage ABI.
+The macOS ARM64 candidate CI profile uses AppleClang for the Salts 2.3 RC SDK.
+Stable publication uses `ci-macos-arm64-gnu-release` with Homebrew GCC 15,
+matching the [stable Salts producer](https://github.com/qigao/salts/blob/v2.2.0/presets/Compilers.json)
+and TinyTest's emulated thread-local storage ABI. These compiler profiles use
+separate build directories and compiler-cache keys.
 
 CI 的共享 `setup-native` action 管理三类缓存：vcpkg 二进制包、ccache 编译结果、
 NuGet 包内容。vcpkg 继续使用 qigao/vcpkg-cache 的规范工具链与只读 NuGet feed，
@@ -273,7 +276,7 @@ See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detai
 
 ## Build and package model
 
-TurboDB consumes **Salts.Native** with `Version="2.3.0-*"` and **SaltsUtils.Native** with `Version="4.3.0-*"`, selecting the latest prerelease or stable release of each specified version. Callers provide the resolved install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`.
+Stable TurboDB publication and package consumers resolve **Salts.Native** and **SaltsUtils.Native** with `Version="*"`. Candidate CI uses `Version="2.3.0-*"` and `Version="4.3.0-*"` to exercise the RC series. Callers provide the resolved install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`; the SDK manifest records the native runtime ABI used by the package.
 
 The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient SDK; package selection happens before CMake and compatibility is enforced by exported targets and ABI/capability checks.
 
