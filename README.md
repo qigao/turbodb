@@ -128,11 +128,9 @@ Both groups reuse hidden presets in `CMakePresets.json` and `presets/*.json`
 for the vcpkg toolchain, platform settings, build options, install targets, and
 test filters. Keep machine-specific paths in `CMakeUserPresets.json`.
 
-The macOS ARM64 candidate CI profile uses AppleClang for the Salts 2.3 RC SDK.
-Stable publication uses `ci-macos-arm64-gnu-release` with Homebrew GCC 15,
-matching the [stable Salts producer](https://github.com/qigao/salts/blob/v2.2.0/presets/Compilers.json)
-and TinyTest's emulated thread-local storage ABI. These compiler profiles use
-separate build directories and compiler-cache keys.
+The macOS ARM64 CI and release profile uses AppleClang. The restored SDK must
+support this toolchain, including TinyTest's thread-local storage ABI; build or
+test failures stop publication.
 
 CI 的共享 `setup-native` action 管理三类缓存：vcpkg 二进制包、ccache 编译结果、
 NuGet 包内容。vcpkg 继续使用 qigao/vcpkg-cache 的规范工具链与只读 NuGet feed，
@@ -152,7 +150,7 @@ NuGet 仅缓存 payload，每轮仍重新解析 Salts/SaltsUtils/re2c 版本。
 新缓存前缀会首次冷启动；收益以 workflow 输出的命中统计为准。
 回滚时成套移除 CI launcher 配置和 `setup-native` 的 ccache 接入。
 
-Release 构建先恢复指定版本范围内最新发布的 Salts、SaltsUtils，以及最新稳定版宿主 re2c 包。安装 .NET SDK 8、
+Release 构建先恢复最新发布的 Salts、SaltsUtils（包括预发布版、不限定版本系列），以及最新稳定版宿主 re2c 包。安装 .NET SDK 8、
 PowerShell 7，并在父环境设置具有 `read:packages` 权限的 `GITHUB_TOKEN`。
 Windows 在 Visual Studio Developer PowerShell 中运行以下命令。
 共享 [vcpkg-cache](https://github.com/qigao/vcpkg-cache) checkout 位于
@@ -178,9 +176,8 @@ Android 使用独立的 `vcpkg_installed_android`，避免切换目标时移除�
 迁移为 `cmeta_*` / `CMETA_PLUGIN_*`，协程执行器使用 `coro_*`；插件入口改为
 `cmeta_plugin_query`，旧二进制插件不能混用。此次接入不迁移数据库文件或更改存储格式。
 
-Salts 与 SaltsUtils SDK 分别使用 `Version="2.3.0-*"` 和 `Version="4.3.0-*"`，选择对应版本的最新预发布版或正式版。
-此策略纳入 Salts `2.3.0-rc.2` 与 SaltsUtils `4.3.0-rc.2`；实际版本以本轮 restore 输出为准。
-上游在该版本范围内发布后，重新运行上述恢复、配置和构建命令即可使用新包；升级基础版本时同步修改恢复脚本与 NuGet 项目中的版本范围。
+Salts 与 SaltsUtils SDK 均使用 `Version="*-*"`，由 NuGet 选择 feed 中最新的预发布版或正式版，不限定基础版本或版本系列；实际版本以本轮 restore 输出为准。
+上游发布后，重新运行上述恢复、配置和构建命令即可使用新包，无需修改恢复脚本或 NuGet 项目的版本范围。
 启用 ORM、dbtools 或 tidessqld 时，vcpkg 自动启用 `salts-utils` feature，
 提供新版包配置所需的 Lua 与 QuickJS。
 
@@ -276,7 +273,7 @@ See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detai
 
 ## Build and package model
 
-Stable TurboDB publication and package consumers resolve **Salts.Native** and **SaltsUtils.Native** with `Version="*"`. Candidate CI uses `Version="2.3.0-*"` and `Version="4.3.0-*"` to exercise the RC series. Callers provide the resolved install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`; the SDK manifest records the native runtime ABI used by the package.
+TurboDB publication, CI, and package consumers resolve **Salts.Native** and **SaltsUtils.Native** with `Version="*-*"`, selecting the latest available release including prereleases without restricting the version series. Callers provide the resolved install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`; the SDK manifest records the producer versions and ELF SONAME used by the package.
 
 The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient SDK; package selection happens before CMake and compatibility is enforced by exported targets and ABI/capability checks.
 

@@ -4,7 +4,6 @@ param(
   [string]$Rid,
   [ValidateSet("linux-x64", "linux-arm64", "macos-arm64", "windows-x64")]
   [string]$HostRid,
-  [switch]$RequireStable,
   [switch]$Local
 )
 
@@ -37,11 +36,6 @@ $config = Join-Path $repositoryRoot "cmake/vcpkg-cache.nuget.config"
 $project = Join-Path $restoreRoot "qigao-turbodb-native-sdk.csproj"
 New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
 
-# Published TurboDB.Native packages must use a stable upstream SDK graph.
-# Candidate builds can still exercise the 2.3/4.3 RC cohort separately.
-$saltsVersionSpec = if ($RequireStable) { "*" } else { "2.3.0-*" }
-$utilsVersionSpec = if ($RequireStable) { "*" } else { "4.3.0-*" }
-
 @"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -49,8 +43,8 @@ $utilsVersionSpec = if ($RequireStable) { "*" } else { "4.3.0-*" }
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Salts.Native" Version="$saltsVersionSpec" />
-    <PackageReference Include="SaltsUtils.Native" Version="$utilsVersionSpec" />
+    <PackageReference Include="Salts.Native" Version="*-*" />
+    <PackageReference Include="SaltsUtils.Native" Version="*-*" />
     <PackageReference Include="Qigao.Re2c.Binary" Version="*" />
   </ItemGroup>
 </Project>
@@ -69,16 +63,6 @@ function Get-RestoredPackage([string]$name) {
 }
 $saltsPackage = Get-RestoredPackage "Salts.Native"
 $utilsPackage = Get-RestoredPackage "SaltsUtils.Native"
-if ($RequireStable) {
-  foreach ($entry in @(
-    @{ Package = "Salts.Native"; Version = (Split-Path $saltsPackage -Leaf) },
-    @{ Package = "SaltsUtils.Native"; Version = (Split-Path $utilsPackage -Leaf) }
-  )) {
-    if ($entry.Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
-      throw "stable TurboDB.Native publication requires stable $($entry.Package), resolved $($entry.Version)"
-    }
-  }
-}
 $saltsRoot = Join-Path $saltsPackage "sdk/$Rid"
 $utilsRoot = Join-Path $utilsPackage "sdk/$Rid"
 $re2cRoot = Join-Path (Get-RestoredPackage "Qigao.Re2c.Binary") "tools/$HostRid"

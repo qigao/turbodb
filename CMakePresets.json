@@ -306,18 +306,6 @@
             ]
         },
         {
-            "name": "ci-macos-arm64-gnu-release",
-            "description": "GNU compiler profile matching the stable Salts macOS SDK",
-            "inherits": [
-                "GccMac",
-                "ci-macos-arm64-release"
-            ],
-            "binaryDir": "${sourceDir}/build/${presetName}",
-            "environment": {
-                "DYLD_LIBRARY_PATH": "${sourceDir}/build/${presetName}/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/arm64-osx/lib${pathListSep}$env{SALTS_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$penv{DYLD_LIBRARY_PATH}"
-            }
-        },
-        {
             "name": "ci-linux-e2e",
             "inherits": [
                 "ci-linux-e2e-base",
@@ -383,15 +371,6 @@
             "inherits": "base-install"
         },
         {
-            "name": "ci-macos-arm64-gnu-release",
-            "configurePreset": "ci-macos-arm64-gnu-release"
-        },
-        {
-            "name": "install-ci-macos-arm64-gnu-release",
-            "configurePreset": "ci-macos-arm64-gnu-release",
-            "inherits": "base-install"
-        },
-        {
             "name": "ci-linux-e2e",
             "configurePreset": "ci-linux-e2e"
         },
@@ -451,11 +430,6 @@
             "name": "ci-macos-arm64-release",
             "inherits": "orm-test",
             "configurePreset": "ci-macos-arm64-release"
-        },
-        {
-            "name": "ci-macos-arm64-gnu-release",
-            "inherits": "orm-test",
-            "configurePreset": "ci-macos-arm64-gnu-release"
         },
         {
             "name": "ci-linux-e2e",

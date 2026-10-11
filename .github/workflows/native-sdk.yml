@@ -6,9 +6,6 @@ on:
       version:
         type: string
         default: ci
-      require_stable:
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -28,7 +25,7 @@ jobs:
           - os: macos-15
             rid: macos-arm64
             host: macos-arm64
-            preset: ${{ inputs.require_stable && 'ci-macos-arm64-gnu-release' || 'ci-macos-arm64-release' }}
+            preset: ci-macos-arm64-release
           - {os: windows-2025, rid: windows-x64, host: windows-x64, preset: ci-windows-release}
           - {os: ubuntu-24.04, rid: android-arm64-v8a, host: linux-x64, preset: ci-android-release}
     steps:
@@ -47,10 +44,6 @@ jobs:
         run: |
           set -euo pipefail
           brew install autoconf ninja
-          if [[ '${{ matrix.preset }}' == ci-macos-arm64-gnu-release ]]; then
-            brew install gcc@15
-            echo "$(brew --prefix gcc@15)/bin" >> "$GITHUB_PATH"
-          fi
       - name: Build bundled Lemon host tool
         if: matrix.rid == 'android-arm64-v8a'
         shell: bash
@@ -85,10 +78,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TURBODB_REQUIRE_STABLE: ${{ inputs.require_stable }}
-        run: |
-          $stable = $env:TURBODB_REQUIRE_STABLE -eq 'true'
-          ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}' -HostRid '${{ matrix.host }}' -RequireStable:$stable
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}' -HostRid '${{ matrix.host }}'
       - name: Configure on Unix
         if: runner.os != 'Windows'
         shell: bash

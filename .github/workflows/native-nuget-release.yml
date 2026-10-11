@@ -54,7 +54,6 @@ jobs:
     uses: ./.github/workflows/native-sdk.yml
     with:
       version: ${{ needs.metadata.outputs.version }}
-      require_stable: true
 
   pack:
     name: Pack TurboDB.Native
@@ -80,30 +79,29 @@ jobs:
             mv "package/sdk/turbodb-sdk-$rid" "package/sdk/$rid"
           done
 
-      - name: Verify stable native SDK provenance and ELF SONAME closure
+      - name: Verify native SDK provenance and ELF SONAME closure
         shell: bash
         run: |
           set -euo pipefail
-          stable_salts=""
-          stable_utils=""
+          producer_salts=""
+          producer_utils=""
           for rid in linux-x64 linux-arm64 macos-arm64 windows-x64 android-arm64-v8a; do
             manifest="package/sdk/$rid/turbodb-sdk-manifest.txt"
             test -f "$manifest"
             # Windows manifests use CRLF; the terminator is not part of the version.
             salts="$(sed -n 's/\r$//;s/^salts=//p' "$manifest")"
             utils="$(sed -n 's/\r$//;s/^saltsutils=//p' "$manifest")"
-            if [[ ! "$salts" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-               [[ ! "$utils" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "Stable TurboDB.Native cannot publish RC SDK dependencies: rid=$rid salts=$salts saltsutils=$utils" >&2
+            if [[ -z "$salts" || -z "$utils" ]]; then
+              echo "Missing native producer versions: rid=$rid salts=$salts saltsutils=$utils" >&2
               exit 1
             fi
-            if [[ -n "$stable_salts" && "$salts" != "$stable_salts" ]] ||
-               [[ -n "$stable_utils" && "$utils" != "$stable_utils" ]]; then
+            if [[ -n "$producer_salts" && "$salts" != "$producer_salts" ]] ||
+               [[ -n "$producer_utils" && "$utils" != "$producer_utils" ]]; then
               echo "Native producer versions disagree across RIDs: $rid" >&2
               exit 1
             fi
-            stable_salts="$salts"
-            stable_utils="$utils"
+            producer_salts="$salts"
+            producer_utils="$utils"
           done
 
           command -v readelf >/dev/null
@@ -119,7 +117,7 @@ jobs:
               case "$needed" in
                 libsalts.so.*)
                   if [[ "$needed" != "$wanted" ]]; then
-                    echo "TurboDB ELF NEEDED mismatch: $library requires $needed, stable Salts.Native=$stable_salts ($wanted)" >&2
+                    echo "TurboDB ELF NEEDED mismatch: $library requires $needed, Salts.Native=$producer_salts ($wanted)" >&2
                     exit 1
                   fi
                   matching=$((matching + 1))
@@ -128,14 +126,14 @@ jobs:
             done < <(readelf -d "$library" | sed -nE 's/.*Shared library: \[([^]]+)\].*/\1/p')
           done < <(find package/sdk/linux-x64 -type f -name '*.so*' -print0)
           if (( matching == 0 )); then
-            echo "No Linux shared object proves the stable Salts native runtime dependency" >&2
+            echo "No Linux shared object proves the Salts native runtime dependency" >&2
             exit 1
           fi
           {
-            echo "### Stable TurboDB.Native runtime graph"
+            echo "### TurboDB.Native runtime graph"
             echo
-            echo "- Salts.Native: $stable_salts"
-            echo "- SaltsUtils.Native: $stable_utils"
+            echo "- Salts.Native: $producer_salts"
+            echo "- SaltsUtils.Native: $producer_utils"
             echo "- Linux NEEDED: $wanted ($matching imports)"
           } >> "$GITHUB_STEP_SUMMARY"
 

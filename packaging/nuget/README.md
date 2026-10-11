@@ -4,11 +4,11 @@
 
 每个平台的安装树位于 `sdk/linux-x64`、`sdk/linux-arm64`、`sdk/macos-arm64`、`sdk/windows-x64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 的 `bin/tidessqld[.exe]` 提供独立 MySQL/TLS 服务并另含 dbtools；Android 只发布库。
 
-正式发布以 `Version="*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新稳定版，并检查五个平台的生产端版本一致及 Linux SONAME 依赖闭包。普通候选 CI 以 `Version="2.3.0-*"` 和 `Version="4.3.0-*"` 验证对应 RC 系列。两者均通过 `--no-cache --force-evaluate` 重新解析，不生成依赖锁文件；实际版本以本轮 restore 输出为准。每个安装树的 `turbodb-sdk-manifest.txt` 记录实际构建版本供诊断。稳定版 macOS SDK 使用匹配生产端的 GCC 15 profile；RC profile 使用 AppleClang，不能混用 TinyTest 的 TLS ABI。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`；libpq 不含 SSL，TLS 由 Salts::CNet 提供。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
+正式发布和普通 CI 均以 `Version="*-*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新发布版本，包括 RC，不限定版本系列。每轮通过 `--no-cache --force-evaluate` 重新解析，不生成依赖锁文件；实际版本以本轮 restore 输出为准。打包检查五个平台的生产端版本一致及 Linux SONAME 依赖闭包。每个安装树的 `turbodb-sdk-manifest.txt` 记录实际构建版本供诊断。macOS 使用 AppleClang；恢复的 SDK 必须支持该工具链，构建或测试失败会停止发布。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`；libpq 不含 SSL，TLS 由 Salts::CNet 提供。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
 
-正式包的消费项目应直接声明 `Salts.Native` 和 `SaltsUtils.Native` 的 `PackageReference Version="*"`，在 restore 时使用 `--no-cache --force-evaluate`，并核对安装树 manifest 中的运行库 ABI。RC 消费代码须使用与候选构建一致的版本系列及编译器。TurboDB 包不嵌入这两个 GitHub 包的传递依赖，直接浮动引用表达每轮获取最新稳定版本的要求，参见 [NuGet 依赖解析规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution)。
+正式包的消费项目应直接声明 `Salts.Native` 和 `SaltsUtils.Native` 的 `PackageReference Version="*-*"`，在 restore 时使用 `--no-cache --force-evaluate`，并核对安装树 manifest 中的运行库 ABI。TurboDB 包不嵌入这两个 GitHub 包的传递依赖，直接浮动引用表达每轮获取最新版本（含预发布版）的要求，参见 [NuGet 浮动版本规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution#floating-versions)。
 
-SDK 恢复和暂存步骤负责下载、复制及导出路径，并记录实际解析的包版本；ELF 平台另记录恢复的 Salts 运行库中的 `DT_SONAME`，供打包时比较 TurboDB 的 `DT_NEEDED`。SONAME 由生产端库定义，不能从 NuGet 包版本推导，例如 Salts.Native 2.2.0 的 SONAME 是 `libsalts.so.2`。稳定发布要求依赖为稳定版；依赖是否可用由构建和正式测试验证。
+SDK 恢复和暂存步骤负责下载、复制及导出路径，并记录实际解析的包版本；ELF 平台另记录恢复的 Salts 运行库中的 `DT_SONAME`，供打包时比较 TurboDB 的 `DT_NEEDED`。SONAME 由生产端库定义，不能从 NuGet 包版本推导，例如 Salts.Native 2.2.0 的 SONAME 是 `libsalts.so.2`。依赖是否可用由构建和正式测试验证，发布流程不排除预发布 SDK。
 
 CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 `OrmConfig.cmake`。设置 `SALTS_ROOT`、`SALTS_UTILS_ROOT` 和 `TURBODB_ROOT` 指向匹配的平台安装树，以 `PATHS "$ENV{TURBODB_ROOT}" NO_DEFAULT_PATH` 查找 TurboDB。MySQL TLS 由 Salts::CNet 管理，认证摘要使用 Salts 的 provider-neutral crypto API；TurboDB SDK 不再随包携带 OpenSSL/BoringSSL。SaltsUtils 保留为运行时依赖，只有直接使用其 API 的客户端才需要查找它的 CMake package.
 
@@ -16,7 +16,7 @@ CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 
 
 发布包将核心与三种驱动一起交付，客户端仍按需加载。当前仅支持 Driver ABI 2 / `TurboDb.Driver` 契约版本 4，旧 ABI 插件直接拒绝；升级时统一重编驱动 SDK 消费代码并成套替换核心与驱动。数据库格式不变。TidesDB ORM 驱动及其 `orm_tidesdb.h` 已移除；TidesSQL SDK 和底层 TidesDB 存储引擎继续随包交付。
 
-从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。正式包使用最新稳定的 Salts/SaltsUtils SDK。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
+从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。正式包使用最新发布的 Salts/SaltsUtils SDK，包括预发布版。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
 
 zstd 仅由 TidesDB 的生产端构建查找并私有链接。共享 TidesDB 库包含所需静态 zstd 代码；静态 TidesDB SDK 将最终链接所需的 archive 安装到 `lib/tidesdb`，由导出 target 按 SDK 安装前缀直接引用，并附带 `share/tidesdb/zstd/copyright`。`TidesDBConfig.cmake` 只加载导出文件和检查组件；消费项目无需查询或另装 zstd。此路径保留静态库最终链接所需的符号，SDK 移动目录后仍从自身安装树解析 archive，不改变压缩数据格式。
 
