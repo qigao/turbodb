@@ -89,8 +89,9 @@ jobs:
           for rid in linux-x64 linux-arm64 macos-arm64 windows-x64 android-arm64-v8a; do
             manifest="package/sdk/$rid/turbodb-sdk-manifest.txt"
             test -f "$manifest"
-            salts="$(sed -n 's/^salts=//p' "$manifest")"
-            utils="$(sed -n 's/^saltsutils=//p' "$manifest")"
+            # Windows manifests use CRLF; the terminator is not part of the version.
+            salts="$(sed -n 's/\r$//;s/^salts=//p' "$manifest")"
+            utils="$(sed -n 's/\r$//;s/^saltsutils=//p' "$manifest")"
             if [[ ! "$salts" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
                [[ ! "$utils" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Stable TurboDB.Native cannot publish RC SDK dependencies: rid=$rid salts=$salts saltsutils=$utils" >&2
