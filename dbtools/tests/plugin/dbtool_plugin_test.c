@@ -79,10 +79,18 @@ spec("schema Plugin admission and ownership") {
   }
 
   it("parses help without requiring a plugin") {
-    const char *argv[] = {"turbodb-sqlite", "--help"};
+    const char *argv[] = {"dbtools", "--help"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
-    check_equal(dbtool_cli_execute(2, argv, DBTOOL_DRIVER_SQLITE, NULL, &result, &error),
+    check_equal(dbtool_cli_execute(2, argv, NULL, NULL, &result, &error),
                 DBTOOL_STATUS_HELP);
+    const char *selectors[] = {"sqlite", "pg", "mysql"};
+    for (size_t i = 0u; i < sizeof(selectors) / sizeof(selectors[0]); ++i) {
+      const char *help[] = {"dbtools", "--driver", selectors[i], "--help"};
+      dbtool_driver_kind selected = DBTOOL_DRIVER_MYSQL;
+      check_equal(dbtool_cli_execute(4, help, &selected, NULL, &result, &error),
+                  DBTOOL_STATUS_HELP);
+      check_equal(selected, DBTOOL_DRIVER_MYSQL);
+    }
   }
 
   it("preserves closing state until an outstanding lease is released") {
@@ -119,15 +127,15 @@ spec("schema Plugin admission and ownership") {
     check_null(plugin.registry.impl);
   }
 
-  it("executes the existing CLI through an explicitly selected module") {
+  it("executes the unified CLI through an explicitly selected module") {
     const char sql[] = "begin; create table cli_test(id integer); commit;";
     char *file = tt_make_temp_file("dbtool-plugin", ".sql");
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--database",
                          ":memory:", "--file", file, "--plugin", DBTOOL_SCHEMA_FIXTURE};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     check_not_null(file);
     check_equal(tt_write_file(file, sql, sizeof(sql) - 1u), 0);
-    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, NULL, &result, &error),
+    check_equal(dbtool_cli_execute(11, argv, NULL, NULL, &result, &error),
                 DBTOOL_STATUS_OK);
     check_equal(result.statements, (uint64_t)3u);
     check_equal(tt_remove_file(file), 0);

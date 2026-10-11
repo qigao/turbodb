@@ -1,6 +1,6 @@
 # dbtools 与数据库驱动插件
 
-`turbodb-sqlite`、`turbodb-postgresql`、`turbodb-mysql` 通过已安装 SDK 的 `Salts::Plugin`
+统一入口 `dbtools --driver sqlite|pg|mysql` 通过已安装 SDK 的 `Salts::Plugin`
 加载数据库驱动。工具程序不直接链接 SQLite、libpq 或 ORM；数据库连接和脚本
 执行由 `turbodb_driver_sqlite`、`turbodb_driver_postgresql`、`turbodb_driver_mysql` 模块负责。
 同一个模块同时导出 `TurboDb.Driver` 和 `TurboDb.SchemaApply`，SQLite 还保留
@@ -12,6 +12,10 @@
 `TURBODB_SQLITE_PLUGIN`、`TURBODB_POSTGRESQL_PLUGIN` 或 `TURBODB_MYSQL_PLUGIN`。不搜索目录，不自动选用
 其他 ABI 或驱动。`--help` 不加载插件。
 
+`--driver` 必须位于 `schema apply` 前，只接受 `sqlite`、`pg`、`mysql`。
+`pg` 对应插件的规范 ID `postgresql`，成功输出仍使用 `driver=postgresql`。
+`dbtools --help` 和 `dbtools --driver pg --help` 均可查看帮助。
+
 参数绑定使用已安装 SaltsUtils 的 `Salts::CmdParser`。选项描述同时用于前置校验，
 使重复、未知、缺值参数继续返回 dbtools 错误，而不会触发解析库的进程退出。
 数值仍按正十进制及原有范围校验，帮助退出码为 0、参数错误为 2。
@@ -22,9 +26,9 @@ CmdParser 会加载工作目录的 `.env`，已有进程环境变量优先；插
 
 ```powershell
 cmake --preset win-release-user
-cmake --build --preset win-release-user --target turbodb-sqlite turbodb-postgresql
+cmake --build --preset win-release-user --target dbtools
 $plugin = (Resolve-Path build/Msvc-Release/bin/turbodb_driver_sqlite.dll).Path
-build/Msvc-Release/bin/turbodb-sqlite.exe schema apply `
+build/Msvc-Release/bin/dbtools.exe --driver sqlite schema apply `
   --plugin $plugin --database example.db `
   --file dbtools/tests/sqlite/fixtures/sqlite_schema.sql
 ```
@@ -42,12 +46,12 @@ CTest preset 已配置相应运行路径；直接运行工具时也要设置相�
 ## MySQL
 
 ```powershell
-cmake --build --preset win-release-user --target turbodb-mysql
+cmake --build --preset win-release-user --target dbtools
 $env:MYSQL_SCHEMA_CONNECTION = @'
 {"host":"127.0.0.1","port":3306,"username":"schema_user","password":"replace-me","database":"app","ca_file":"C:/certs/ca.pem","server_name":"db.example","timeout_ms":10000}
 '@
 $plugin = (Resolve-Path build/Msvc-Release/bin/turbodb_driver_mysql.dll).Path
-build/Msvc-Release/bin/turbodb-mysql.exe schema apply `
+build/Msvc-Release/bin/dbtools.exe --driver mysql schema apply `
   --plugin $plugin --conninfo-env MYSQL_SCHEMA_CONNECTION --file schema.sql
 ```
 
@@ -127,7 +131,7 @@ PostgreSQL E2E 使用 `TURBODB_DBTOOLS_PG_TEST_CONNINFO`；仅工具配置运行
 直接改用 ORM 查询不能保留整段 DDL 脚本语义；单独创建一套工具插件又会复制
 数据库模块的构建和部署边界。因此选择在同一驱动模块增加可选 schema 导出。
 
-现有 schema 实现移动到 `drivers/{sqlite,postgresql}/schema.c`，没有改写执行
+现有 schema 实现移动到 `orm/drivers/{sqlite,postgresql}/schema.c`，没有改写执行
 算法。加载、身份和 ABI 校验交给 Salts；宿主只管理一个有界 registry 和 lease。
 MySQL 新增 `mysql_session_execute_script`，独立的脚本 action 复用原有 TLS/认证、
 收发和关闭状态机，普通 ORM 预处理语句不启用多语句执行。相比另引入 libmysqlclient，
@@ -139,3 +143,9 @@ MySQL 新增 `mysql_session_execute_script`，独立的脚本 action 复用原�
 
 迁移时先部署带 schema 导出的驱动，再更新工具并配置路径，验证后替换旧工具。
 回滚需恢复旧工具与其静态后端构建；数据库格式没有变化，无需数据迁移。
+
+三个独立 CLI 入口现已合并为 `dbtools/main.c` 和一个 `dbtools` CMake target。
+部署时用 `dbtools` 替换 `turbodb-sqlite`、`turbodb-postgresql`、`turbodb-mysql`，
+分别在原 `schema apply` 前加入 `--driver sqlite`、`--driver pg`、`--driver mysql`。
+驱动仍在 ORM 模块内，工具按选择器加载同一 schema 导出；不改变插件 ABI、
+SQL 执行语义或数据库格式。回滚此入口合并时成套恢复原入口和 CMake 定义。

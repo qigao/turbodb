@@ -65,7 +65,15 @@ static void fake_reset(void) {
 }
 
 spec("standalone database tool CLI") {
+  static char *driver_script;
   before_each() { fake_reset(); }
+  after_each() {
+    if (driver_script != NULL) {
+      check_equal(tt_remove_file(driver_script), 0);
+      free(driver_script);
+      driver_script = NULL;
+    }
+  }
 
   it("maps usage, file, connection, SQL, and internal failures to distinct exits") {
     check_equal(dbtool_status_exit_code(DBTOOL_STATUS_OK), 0);
@@ -76,9 +84,75 @@ spec("standalone database tool CLI") {
     check_equal(dbtool_status_exit_code(DBTOOL_STATUS_INTERNAL_ERROR), 70);
   }
 
+  it("rejects missing, empty and unknown driver selectors before opening a driver") {
+    const char *missing[] = {"dbtools", "schema", "apply"};
+    const char *no_value[] = {"dbtools", "--driver"};
+    const char *empty[] = {"dbtools", "--driver", "", "schema", "apply"};
+    const char *unknown[] = {"dbtools", "--driver", "tidesdb", "schema", "apply"};
+    const char *const *commands[] = {missing, no_value, empty, unknown};
+    const int counts[] = {3, 2, 5, 5};
+    for (size_t i = 0u; i < sizeof(counts) / sizeof(counts[0]); ++i) {
+      dbtool_driver_kind selected = DBTOOL_DRIVER_MYSQL;
+      dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+      dbtool_error error = DBTOOL_ERROR_INIT;
+      check_equal(dbtool_cli_execute(counts[i], commands[i], &selected, &fake_ops,
+                                    &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
+      check_contains(error.message, "--driver");
+      check_equal(selected, DBTOOL_DRIVER_MYSQL);
+    }
+    check_equal(fake_state.open_calls, 0);
+  }
+
+  it("rejects a second driver selector before opening a driver") {
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply",
+                         "--file", "missing.sql", "--database", ":memory:",
+                         "--driver", "pg"};
+    dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+    dbtool_error error = DBTOOL_ERROR_INIT;
+    check_equal(dbtool_cli_execute(11, argv, NULL, &fake_ops, &result, &error),
+                DBTOOL_STATUS_INVALID_ARGUMENT);
+    check_contains(error.message, "duplicate option: --driver");
+    check_equal(fake_state.open_calls, 0);
+  }
+
+  it("selects all supported drivers and forwards their connection settings") {
+    const char *selectors[] = {"sqlite", "pg", "mysql"};
+    const char *identities[] = {"sqlite", "postgresql", "mysql"};
+    const dbtool_driver_kind kinds[] = {
+        DBTOOL_DRIVER_SQLITE, DBTOOL_DRIVER_POSTGRESQL, DBTOOL_DRIVER_MYSQL};
+    driver_script = tt_make_temp_file("dbtool-select", ".sql");
+    check_not_null(driver_script);
+    check_not_null(getenv("PATH"));
+    check_equal(tt_write_file(driver_script, "select 1;", 9u), 0);
+    for (size_t i = 0u; i < sizeof(kinds) / sizeof(kinds[0]); ++i) {
+      const char *argv[] = {"dbtools", "--driver", selectors[i], "schema", "apply",
+                           "--file", driver_script, i == 0u ? "--database" : "--conninfo-env",
+                           i == 0u ? ":memory:" : "PATH"};
+      dbtool_driver_kind selected = DBTOOL_DRIVER_SQLITE;
+      dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
+      dbtool_error error = DBTOOL_ERROR_INIT;
+      fake_reset();
+      check_equal(dbtool_cli_execute(9, argv, &selected, &fake_ops, &result, &error),
+                  DBTOOL_STATUS_OK);
+      check_equal(selected, kinds[i]);
+      check_equal(dbtool_cli_driver_name(selected), identities[i]);
+      if (i == 0u) {
+        check_equal(fake_state.config.database, ":memory:");
+        check_null(fake_state.config.conninfo);
+      } else {
+        check_null(fake_state.config.database);
+        check_equal(fake_state.config.conninfo, getenv("PATH"));
+      }
+      check_equal(fake_state.sql, "select 1;");
+      check_equal(fake_state.open_calls, 1);
+      check_equal(fake_state.apply_calls, 1);
+      check_equal(fake_state.close_calls, 1);
+    }
+  }
+
   it("forwards a validated SQLite schema invocation and closes once") {
     char *path = tt_make_temp_file("dbtool-cli", ".sql");
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply",
                           "--database",      ":memory:", "--file",
                           path,              "--max-script-bytes", "64",
                           "--busy-timeout-ms", "15"};
@@ -87,7 +161,7 @@ spec("standalone database tool CLI") {
 
     check_not_null(path);
     check_equal(tt_write_file(path, "select 1;", 9u), 0);
-    check_equal(dbtool_cli_execute(11, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(13, argv, NULL, &fake_ops,
                                    &result, &error),
                 DBTOOL_STATUS_OK);
     check_equal(fake_state.open_calls, 1);
@@ -103,13 +177,13 @@ spec("standalone database tool CLI") {
   }
 
   it("rejects an unknown option before opening the driver") {
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply",
                           "--database",      ":memory:", "--file",
                           "x.sql",           "--unknown", "1"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
 
-    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(11, argv, NULL, &fake_ops,
                                    &result, &error),
                 DBTOOL_STATUS_INVALID_ARGUMENT);
     check_equal(fake_state.open_calls, 0);
@@ -117,12 +191,12 @@ spec("standalone database tool CLI") {
   }
 
   it("rejects duplicate file options before opening the driver") {
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--database",
                           ":memory:", "--file", "a.sql", "--file", "b.sql"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
 
-    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(11, argv, NULL, &fake_ops,
                                    &result, &error),
                 DBTOOL_STATUS_INVALID_ARGUMENT);
     check_equal(fake_state.open_calls, 0);
@@ -130,26 +204,26 @@ spec("standalone database tool CLI") {
   }
 
   it("rejects duplicate plugin options before opening a driver") {
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--database",
                          ":memory:", "--file", "x.sql", "--plugin", "a",
                          "--plugin", "b"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
-    check_equal(dbtool_cli_execute(11, argv, DBTOOL_DRIVER_SQLITE, NULL, &result, &error),
+    check_equal(dbtool_cli_execute(13, argv, NULL, NULL, &result, &error),
                 DBTOOL_STATUS_INVALID_ARGUMENT);
     check_contains(error.message, "duplicate option: --plugin");
     check_equal(fake_state.open_calls, 0);
   }
 
   it("rejects an overflowing decimal limit") {
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply",
                           "--database",      ":memory:", "--file",
                           "x.sql", "--max-script-bytes",
                           "18446744073709551616"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
 
-    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(11, argv, NULL, &fake_ops,
                                    &result, &error),
                 DBTOOL_STATUS_INVALID_ARGUMENT);
     check_equal(fake_state.open_calls, 0);
@@ -162,17 +236,17 @@ spec("standalone database tool CLI") {
     check_not_null(path);
     check_equal(tt_write_file(path, "select 1;", 9u), 0);
     for (size_t i = 0u; i < sizeof(databases) / sizeof(databases[0]); ++i) {
-      const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--file", path,
+      const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--file", path,
                            "--database", databases[i]};
       dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
       dbtool_error error = DBTOOL_ERROR_INIT;
       fake_reset();
-      check_equal(dbtool_cli_execute(7, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+      check_equal(dbtool_cli_execute(9, argv, NULL, &fake_ops,
                                      &result, &error), DBTOOL_STATUS_OK);
       check_equal(fake_state.config.database, databases[i]);
       check_equal((const void *)fake_state.config.database, (const void *)databases[i]);
-      check_equal(argv[3], "--file");
-      check_equal(argv[5], "--database");
+      check_equal(argv[5], "--file");
+      check_equal(argv[7], "--database");
     }
     check_equal(tt_remove_file(path), 0);
     free(path);
@@ -180,13 +254,13 @@ spec("standalone database tool CLI") {
 
   it("keeps positive size_t limits beyond the CmdParser Windows integer range") {
     char *path = tt_make_temp_file("dbtool-size", ".sql");
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database", ":memory:",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--database", ":memory:",
                          "--file", path, "--max-script-bytes", "4294967295"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
     check_not_null(path);
     check_equal(tt_write_file(path, "select 1;", 9u), 0);
-    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(11, argv, NULL, &fake_ops,
                                    &result, &error), DBTOOL_STATUS_OK);
     check_equal(fake_state.apply_calls, 1);
     check_equal(tt_remove_file(path), 0);
@@ -194,14 +268,14 @@ spec("standalone database tool CLI") {
   }
 
   it("returns missing-value and empty-value failures without terminating the caller") {
-    const char *missing[] = {"turbodb-sqlite", "schema", "apply", "--file"};
-    const char *empty[] = {"turbodb-sqlite", "schema", "apply", "--file", ""};
+    const char *missing[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--file"};
+    const char *empty[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--file", ""};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
-    check_equal(dbtool_cli_execute(4, missing, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(6, missing, NULL, &fake_ops,
                                    &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
     check_contains(error.message, "requires one value");
-    check_equal(dbtool_cli_execute(5, empty, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(7, empty, NULL, &fake_ops,
                                    &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
     check_contains(error.message, "cannot be empty");
     check_equal(fake_state.open_calls, 0);
@@ -210,11 +284,11 @@ spec("standalone database tool CLI") {
   it("rejects non-positive non-decimal and overflowing SQLite timeouts") {
     const char *values[] = {"0", "-1", "+1", "1.5", " 1", "2147483648"};
     for (size_t i = 0u; i < sizeof(values) / sizeof(values[0]); ++i) {
-      const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--file", "missing.sql",
+      const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--file", "missing.sql",
                            "--database", ":memory:", "--busy-timeout-ms", values[i]};
       dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
       dbtool_error error = DBTOOL_ERROR_INIT;
-      check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+      check_equal(dbtool_cli_execute(11, argv, NULL, &fake_ops,
                                      &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
       check_contains(error.message, "invalid decimal");
     }
@@ -222,10 +296,10 @@ spec("standalone database tool CLI") {
   }
 
   it("requires explicit MySQL connection environment before reading the script") {
-    const char *argv[] = {"turbodb-mysql", "schema", "apply", "--file", "missing.sql"};
+    const char *argv[] = {"dbtools", "--driver", "mysql", "schema", "apply", "--file", "missing.sql"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
-    check_equal(dbtool_cli_execute(5, argv, DBTOOL_DRIVER_MYSQL, &fake_ops,
+    check_equal(dbtool_cli_execute(7, argv, NULL, &fake_ops,
                                    &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
     check_contains(error.message, "--conninfo-env");
     check_equal(fake_state.open_calls, 0);
@@ -233,14 +307,14 @@ spec("standalone database tool CLI") {
 
   it("forwards MySQL connection environment and script through the shared CLI") {
     char *path = tt_make_temp_file("dbtool-mysql-cli", ".sql");
-    const char *argv[] = {"turbodb-mysql", "schema", "apply", "--file", path,
+    const char *argv[] = {"dbtools", "--driver", "mysql", "schema", "apply", "--file", path,
                          "--conninfo-env", "PATH"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
     check_not_null(path);
     check_not_null(getenv("PATH"));
     check_equal(tt_write_file(path, "select 1;", 9u), 0);
-    check_equal(dbtool_cli_execute(7, argv, DBTOOL_DRIVER_MYSQL, &fake_ops,
+    check_equal(dbtool_cli_execute(9, argv, NULL, &fake_ops,
                                    &result, &error), DBTOOL_STATUS_OK);
     check_equal(fake_state.config.conninfo, getenv("PATH"));
     check_equal(fake_state.open_calls, 1);
@@ -250,18 +324,18 @@ spec("standalone database tool CLI") {
   }
 
   it("rejects SQLite-only options for MySQL") {
-    const char *argv[] = {"turbodb-mysql", "schema", "apply", "--file", "missing.sql",
+    const char *argv[] = {"dbtools", "--driver", "mysql", "schema", "apply", "--file", "missing.sql",
                          "--conninfo-env", "PATH", "--busy-timeout-ms", "5"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
-    check_equal(dbtool_cli_execute(9, argv, DBTOOL_DRIVER_MYSQL, &fake_ops,
+    check_equal(dbtool_cli_execute(11, argv, NULL, &fake_ops,
                                    &result, &error), DBTOOL_STATUS_INVALID_ARGUMENT);
     check_equal(fake_state.open_calls, 0);
   }
 
   it("does not close a driver whose open failed") {
     char *path = tt_make_temp_file("dbtool-open-fail", ".sql");
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--database",
                           ":memory:", "--file", path};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
@@ -269,7 +343,7 @@ spec("standalone database tool CLI") {
     check_not_null(path);
     check_equal(tt_write_file(path, "select 1;", 9u), 0);
     fake_state.open_status = DBTOOL_STATUS_CONNECTION_ERROR;
-    check_equal(dbtool_cli_execute(7, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(9, argv, NULL, &fake_ops,
                                    &result, &error),
                 DBTOOL_STATUS_CONNECTION_ERROR);
     check_equal(fake_state.open_calls, 1);
@@ -282,7 +356,7 @@ spec("standalone database tool CLI") {
 
   it("closes once when apply fails") {
     char *path = tt_make_temp_file("dbtool-apply-fail", ".sql");
-    const char *argv[] = {"turbodb-sqlite", "schema", "apply", "--database",
+    const char *argv[] = {"dbtools", "--driver", "sqlite", "schema", "apply", "--database",
                           ":memory:", "--file", path};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
@@ -290,7 +364,7 @@ spec("standalone database tool CLI") {
     check_not_null(path);
     check_equal(tt_write_file(path, "select 1;", 9u), 0);
     fake_state.apply_status = DBTOOL_STATUS_SQL_ERROR;
-    check_equal(dbtool_cli_execute(7, argv, DBTOOL_DRIVER_SQLITE, &fake_ops,
+    check_equal(dbtool_cli_execute(9, argv, NULL, &fake_ops,
                                    &result, &error),
                 DBTOOL_STATUS_SQL_ERROR);
     check_equal(fake_state.open_calls, 1);

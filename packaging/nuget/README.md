@@ -1,6 +1,6 @@
 # TurboDB.Native
 
-预编译 Release SDK，包含 ORM 核心、SQLite/PostgreSQL/MySQL/TidesDB 驱动，以及 MySQL 和 Redis 通用客户端。Windows/Linux/macOS 另发布独立 `tidessqld`；Redis 是独立客户端，不属于 ORM 驱动。
+预编译 Release SDK，包含 ORM 核心、SQLite/PostgreSQL/MySQL 驱动，以及 MySQL 和 Redis 通用客户端。Windows/Linux/macOS 另发布独立 `tidessqld`；Redis 是独立客户端，不属于 ORM 驱动。
 
 每个平台的安装树位于 `sdk/linux-x64`、`sdk/linux-arm64`、`sdk/macos-arm64`、`sdk/windows-x64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 的 `bin/tidessqld[.exe]` 提供独立 MySQL/TLS 服务并另含 dbtools；Android 只发布库。
 
@@ -14,7 +14,7 @@ CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 
 
 客户端按需链接 `Orm::C`、`Orm::Cpp`、`Orm::DriverABI`、`TurboDB::MySQL`、`TurboDB::Redis` 或 `TurboDB::SchemaABI`。驱动不通过链接自动加载：从 `TurboDB_DRIVER_DIR` 选择模块并调用 `orm_runtime_load_driver`。ORM 核心不直接依赖数据库客户端。
 
-发布包将核心与四种驱动一起交付，客户端仍按需加载。当前仅支持 Driver ABI 2 / `TurboDb.Driver` 契约版本 4，旧 ABI 插件直接拒绝；升级时统一重编驱动 SDK 消费代码并成套替换核心与驱动。数据库格式不变。
+发布包将核心与三种驱动一起交付，客户端仍按需加载。当前仅支持 Driver ABI 2 / `TurboDb.Driver` 契约版本 4，旧 ABI 插件直接拒绝；升级时统一重编驱动 SDK 消费代码并成套替换核心与驱动。数据库格式不变。TidesDB ORM 驱动及其 `orm_tidesdb.h` 已移除；TidesSQL SDK 和底层 TidesDB 存储引擎继续随包交付。
 
 从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。Salts/SaltsUtils 使用指定版本范围内的最新发布版本（含预发布版）。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
 

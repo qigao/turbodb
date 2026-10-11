@@ -91,6 +91,9 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-native
+        with:
+          platform: linux-x64
+          preset: ci-linux-e2e
 
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
@@ -203,6 +206,9 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-native
+        with:
+          platform: linux-x64
+          preset: ci-linux-e2e
 
       - name: Install Ninja
         shell: bash

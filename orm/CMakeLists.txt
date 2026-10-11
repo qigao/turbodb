@@ -106,10 +106,11 @@ cmake_install_headers(
   include/orm/orm_driver_plugin.h
   include/orm/orm_runtime.h
   include/orm/orm_sqlite.h
-  include/orm/orm_tidesdb.h
   DESTINATION
   ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 
 if(BUILD_TESTS OR BUILD_E2E_TESTS)
   add_subdirectory(tests)
 endif()
+
+add_subdirectory(drivers)

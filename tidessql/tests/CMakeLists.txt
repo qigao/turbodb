@@ -6,8 +6,17 @@ if(WIN32)
     string(APPEND TIDESSQL_TEST_RUNTIME_PATH
       ";PATH=path_list_prepend:$<TARGET_FILE_DIR:zstd::libzstd_shared>")
   endif()
+  if(TARGET Snappy::snappy)
+    string(APPEND TIDESSQL_TEST_RUNTIME_PATH
+      ";PATH=path_list_prepend:$<TARGET_FILE_DIR:Snappy::snappy>")
+  endif()
+  if(TARGET LZ4::lz4_shared)
+    string(APPEND TIDESSQL_TEST_RUNTIME_PATH
+      ";PATH=path_list_prepend:$<TARGET_FILE_DIR:LZ4::lz4_shared>")
+  endif()
 endif()
 add_subdirectory(api)
+add_subdirectory(storage)
 add_subdirectory(protocol)
 if(TURBODB_BUILD_TIDESSQL_SERVER)
   add_subdirectory(daemon)

@@ -6,6 +6,19 @@ if(NOT TARGET Orm::Cpp)
   message(FATAL_ERROR "TurboDB Studio requires the in-tree Orm::Cpp target")
 endif()
 
+# WTL uses ATL from the active Visual Studio toolchain. Recheck because a
+# Ninja build tree may be configured from a different developer environment.
+include(CheckIncludeFileCXX)
+unset(TURBODB_APP_HAS_ATL CACHE)
+check_include_file_cxx(atlbase.h TURBODB_APP_HAS_ATL)
+if(NOT TURBODB_APP_HAS_ATL)
+  message(FATAL_ERROR
+    "TurboDB Studio requires ATL (atlbase.h) in the active compiler environment. "
+    "Install Microsoft.VisualStudio.Component.VC.ATL for the selected Visual Studio "
+    "instance, then configure from its x64 developer environment. "
+    "When switching Visual Studio instances, run cmake --preset win-release-user --fresh.")
+endif()
+
 # The WTL, Scintilla, and Lexilla vcpkg ports do not expose one uniform CMake
 # package contract. Keep the adaptation local to the app so no GUI dependency
 # leaks into TurboDB libraries or dbtools.

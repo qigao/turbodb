@@ -27,7 +27,7 @@ execution begins on the first unit of demand.
 
 The active cursor is the fact source. No second result matrix is built in the
 ORM. PostgreSQL uses libpq single-row mode, SQLite advances the prepared
-statement, and TidesDB advances its iterator.
+statement, and MySQL advances its native result cursor.
 
 Each backend selects CSerde token kinds from its own native metadata. DataBind
 does not guess numeric or boolean values from arbitrary strings. PostgreSQL
@@ -89,16 +89,19 @@ table, including a nullable `open_async_cursor` callback.
 | `src/runtime/orm_runtime_plugin.c` | Driver admission, metadata snapshots and extension leases |
 | `src/runtime/orm_runtime_connection.c` | Leased connections, cursors and transactions |
 | `src/sql` | Database-independent SQL rendering |
-| `../drivers/<database>` | One native backend and its plugin CMake target |
+| `drivers/<database>` | One native backend and its plugin CMake target |
+| `drivers/tests` | Driver contracts, plugin fixtures and per-database tests |
 | `../mysql` | Standalone `TurboDB::MySQL` client library |
 | `driver-sdk` | The source-tree `Orm::DriverABI` target |
 
 Each implementation directory declares its own sources in `CMakeLists.txt`.
-The repository root builds `orm/`, then `drivers/`, then `orm/tests/`.
-`orm/CMakeLists.txt` declares only the generic core, C++ facade and driver ABI.
-The `drivers/` dispatcher builds SQLite, PostgreSQL, MySQL and TidesDB
-from their own directories. Native MySQL code belongs to the root `mysql/`
-library; its ORM adapter is in `drivers/mysql/`.
+`orm/CMakeLists.txt` builds the generic core, C++ facade and driver ABI, then
+registers the ORM tests and concrete adapters under `orm/drivers/`.
+The `orm/drivers/` dispatcher builds SQLite, PostgreSQL and MySQL
+from their own directories, followed by driver tests in `orm/drivers/tests/`.
+Native MySQL code belongs to the root `mysql/` library; its ORM adapter is in
+`orm/drivers/mysql/`. The shared schema ABI remains under `drivers/schema/`
+because independent database tools also consume it.
 The shared core owns no native database dependency; each plugin owns its
 native SDK links and install rule.
 The private test core recompiles the production target's source selection with
@@ -146,29 +149,31 @@ the database environment described below.
 
 ### 客户端按需使用驱动
 
-构建端提供完整的四个驱动；客户端链接 `Orm::C`（或 `Orm::Cpp`），只部署
+构建端提供完整的三个驱动；客户端链接 `Orm::C`（或 `Orm::Cpp`），只部署
 并显式加载需要的插件。一个 runtime 可以加载多个驱动；未加载的驱动不连接、
 不初始化，也不要求客户端链接其原生数据库库。选定插件使用的原生运行库仍需
 由客户端部署环境提供。
 
 插件文件名、`TurboDb.Driver` 契约及安装路径保持不变。每个插件拥有独立安装
-component：`OrmSqliteDriver`、`OrmPostgresqlDriver`、`OrmMysqlDriver`、
-`OrmTidesdbDriver`。这些 component 只选择插件产物，
+component：`OrmSqliteDriver`、`OrmPostgresqlDriver`、`OrmMysqlDriver`。
+这些 component 只选择插件产物，
 不会自动打包 ORM、Salts 或数据库原生运行库。
 
-本次目录调整选择将具体数据库实现移出 ORM，保留公共契约与通用适配代码在
-ORM 内。继续放在 `src/dbs/` 会让核心继续承担驱动构建职责；拆成独立仓库或
-新公共库则会引入当前不需要的版本与发布边界。目录调整不改变查询算法、
+本次目录调整将具体 ORM 驱动和驱动测试归入 `orm/drivers/`，公共契约与通用
+适配代码仍由 ORM 核心维护。根目录 `drivers/` 只保留 dbtools 也使用的共享
+schema 能力；拆成独立仓库或新公共库会引入当前不需要的版本与发布边界。
+所有源码、fixture 和 CMake 引用一起迁移；回滚时也应一起恢复旧路径。
+目录调整不改变查询算法、
 资源状态归属、错误码、插件 ABI 或运行时开销。
 
-迁移只涉及 CMake 源码引用：核心先定义，驱动随后定义，测试最后引用现有
-targets。驱动构建失败会直接终止构建，不产生自动降级路径。回退时应一起恢复
-目录和 CMake 引用，无须迁移数据库数据。验证覆盖四个插件构建、单驱动加载、
+迁移只涉及源码目录和 CMake 引用：核心及通用测试先定义，随后定义驱动及其
+专用测试。驱动构建失败会直接终止构建，不产生自动降级路径。回退时应一起恢复
+目录和 CMake 引用，无须迁移数据库数据。验证应覆盖三个插件构建、单驱动加载、
 多驱动共存的本地契约测试、核心 DLL 依赖检查及独立 E2E 构建。
 
 ### Runtime-loaded Drivers
 
-SQLite, PostgreSQL, MySQL and TidesDB ORM adapters are explicit `TurboDb.Driver` Plugin modules.
+SQLite, PostgreSQL and MySQL ORM adapters are explicit `TurboDb.Driver` Plugin modules.
 The application loads an exact module path into an `orm_runtime_t`, then
 connects by the canonical Plugin manifest ID. Runtime loading does not scan
 directories, infer aliases, retry older ABIs, or fall back to a built-in
@@ -319,14 +324,6 @@ must outlive that Publisher.
   affected-row parsing; explicit transactions and savepoints. Field OIDs select
   supported scalar token kinds; arbitrary-precision and unknown types remain
   strings instead of being narrowed.
-- TidesDB: the TidesSQL relational engine serves raw SQL and structured ORM
-  queries through row and command Publishers. Connections require explicit
-  `path` and `column_family`; use `sql_initialize=true` only to initialize a new
-  empty column family. Tables require explicit CREATE TABLE. The driver supports
-  SERIALIZABLE transactions and savepoints; live result cursors block transaction
-  completion. Query, scan and transaction budgets are enforced by TidesSQL.
-  The `sql_profile` selector and the ORMTDB KV format are not supported.
-  See the [TidesSQL contract](../tidessql/readme.md).
 
 MongoDB and Redis are intentionally not ORM backends: they do not implement the
 SQL contract expected by this layer. Use the independently selectable
@@ -354,18 +351,29 @@ unchanged.
 
 ## Build and test
 
-ORM builds SQLite, PostgreSQL, MySQL and TidesDB drivers together.
+ORM builds SQLite, PostgreSQL and MySQL drivers together.
 There are no per-database ORM build switches. `TURBODB_BUILD_ORM` and
 `TURBODB_BUILD_DBTOOLS` select the ORM and database-tool modules;
 `TURBODB_BUILD_REDIS` independently selects the standalone Redis client.
 The database tools always support SQLite and PostgreSQL. Enabling either module
 selects both vcpkg manifest features before toolchain initialization.
-The standalone Redis client and TidesDB are built from their repository modules;
+The standalone Redis client is built from its repository module;
 Salts and SaltsUtils come from the installed SDKs selected by the preset.
 Native database libraries stay outside the generic `Orm::C` link interface.
 
+The TidesDB ORM plugin and its `orm_tidesdb.h` maintenance interface have been
+removed. ORM can now build with TidesSQL disabled. Keeping the plugin would
+retain that build dependency; the chosen removal keeps TidesSQL and its TidesDB
+storage engine independently selectable. Applications using the removed driver
+must switch to the [TidesSQL SDK](../tidessql/readme.md) or connect through the
+MySQL driver to `tidessqld`. Existing database files and storage formats are
+unchanged. Storage, WAL fault and concurrency tests live in
+`tidessql/tests/storage/`; plugin-specific tests have been removed. To roll back,
+restore the plugin, header and test registrations together from the preceding
+revision and enable TidesSQL.
+
 The root `mysql/` directory provides the standalone `TurboDB::MySQL` static
-client and installed headers, without ORM dependencies. `drivers/mysql/`
+client and installed headers, without ORM dependencies. `orm/drivers/mysql/`
 owns the `orm_mysql_driver` MODULE and links that client; its output remains
 `turbodb_driver_mysql`. Both are built when `TURBODB_BUILD_ORM` is enabled.
 Native API tests live in `mysql/tests/`; ORM contract and integration tests
@@ -378,14 +386,14 @@ ctest --preset win-dev-user --output-on-failure
 ```
 
 `BUILD_TESTS` controls unit tests and local contract/integration checks.
-`orm/tests/CMakeLists.txt` dispatches to `abi/`, `driver/`, `flow/`,
+`orm/tests/CMakeLists.txt` dispatches to `abi/`, `flow/`,
 `integration/`, and `ownership/`, each with its own `CMakeLists.txt`.
-Driver tests are further grouped into `mysql/`, `postgresql/`, `sqlite/`,
-`tidesdb/`, and `cross_driver/`, each with its own `CMakeLists.txt`.
-Generic driver and runtime tests remain directly under `driver/`.
+`orm/drivers/tests/CMakeLists.txt` owns driver tests grouped into `mysql/`, `postgresql/`, `sqlite/`,
+and `cross_driver/`, each with its own `CMakeLists.txt`.
+Generic driver and runtime tests live directly under `orm/drivers/tests/`.
 Database-specific flow and ABI tests also have their own subdirectories.
-Integration tests are split into `integration/sqlite/` and
-`integration/tidesdb/`. Each directory declares its target sources and test
+Integration tests live in `integration/sqlite/` and, when `tidessqld` is built,
+`integration/mysql/`. Each directory declares its target sources and test
 properties directly; parent files only select and add the relevant directories.
 Shared test headers are provided by the `support/` interface target.
 `BUILD_E2E_TESTS` independently controls tests against external databases and
@@ -422,8 +430,7 @@ when E2E is enabled. MySQL handshake/auth parsing remains a unit test because
 it uses in-memory fixtures.
 
 The cursor and Publisher lifecycle tests use TinyTest; driver boundary tests use
-TinyMock where a native server is unnecessary. TidesDB also has a public
-end-to-end temporary-database test.
+TinyMock where a native server is unnecessary.
 
 Stream/Reactive 管道、MySQL/PostgreSQL 原生异步与 SQLite 后台行查询的 API、调度、
 背压与关闭约束见 [Stream / Async](stream-async.md)。

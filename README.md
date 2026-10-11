@@ -89,13 +89,15 @@ Stream delivery remains at-least-once. Consumers must project idempotently and a
 
 ## Standalone DDL SQL tools
 
-`turbodb-sqlite` and `turbodb-postgresql` execute database bootstrap/schema SQL directly through native drivers.
+`dbtools --driver sqlite|pg|mysql` executes database bootstrap/schema SQL through
+dynamically loaded database drivers. Salts Plugin validates the module ABI and
+the CMeta-reflected `TurboDb.SchemaApply` contract before opening a connection.
 
-They are intentionally narrow:
+The tool supports:
 
 - command: `schema apply`;
 - no migration diff/history engine;
-- no runtime driver-plugin loading;
+- explicit driver-plugin loading via `--plugin` or the selected driver's environment variable;
 - no implicit outer transaction;
 - no stdin execution;
 - no automatic retry or backend fallback.
@@ -104,9 +106,12 @@ They are intentionally narrow:
 
 Windows development and Release use `win-dev-user` and `win-release-user`.
 The standard profiles build the database tools and SQLite/PostgreSQL/MySQL clients.
-ORM, TidesSQL, TidesDB, and `tidessqld` are opt-in. With the standard profiles,
-set both `TURBODB_BUILD_ORM=ON` and `TURBODB_BUILD_TIDESSQL=ON` to build ORM
-and its TidesDB driver. Enable `TURBODB_BUILD_TIDESSQL_SERVER=ON` to build
+`win-release-user` also enables TurboDB Studio and the ORM with its
+SQLite/PostgreSQL/MySQL drivers. Other desktop user profiles can enable ORM
+with `TURBODB_BUILD_ORM=ON`. CI profiles do not inherit this Studio setting.
+TidesSQL, TidesDB, and `tidessqld` remain opt-in for desktop user profiles.
+Set `TURBODB_BUILD_TIDESSQL=ON` to build TidesSQL and its TidesDB storage engine.
+Enable `TURBODB_BUILD_TIDESSQL_SERVER=ON` to build
 `tidessqld` as well.
 
 Presets are organized by how they are used:
@@ -125,6 +130,24 @@ test filters. Keep machine-specific paths in `CMakeUserPresets.json`.
 
 The macOS ARM64 CI profile uses AppleClang to match the published Salts SDK,
 including TinyTest's native thread-local storage ABI.
+
+CI 的共享 `setup-native` action 管理三类缓存：vcpkg 二进制包、ccache 编译结果、
+NuGet 包内容。vcpkg 继续使用 qigao/vcpkg-cache 的规范工具链与只读 NuGet feed，
+本地 L1 按宿主 OS/架构、目标 RID、共享契约版本/修订和项目依赖清单恢复，
+每次 run/job 单独保存；恢复到其他清单的包仍由 vcpkg ABI hash 决定是否可用。
+
+`ci-*` preset 使用 `CMAKE_C_COMPILER_LAUNCHER` / `CMAKE_CXX_COMPILER_LAUNCHER`
+接入 ccache，保留 MSVC/GCC/AppleClang 和 Android NDK 的选择。ccache 的安装、
+恢复/保存、2 GiB 容量及命中统计由固定 SHA 的
+[ccache-action](https://github.com/hendrikmuhs/ccache-action) 提供；缓存按目标 RID、
+preset、共享缓存修订和构建配置隔离，分别保存各 job 的结果。
+这复用现成的跨平台 action，避免另写缓存安装和生命周期脚本。
+编译器按内容校验，源码、头文件和编译选项继续由
+[ccache](https://ccache.dev/manual/latest.html) 校验；不放宽其一致性检查。
+NuGet 仅缓存 payload，每轮仍重新解析 Salts/SaltsUtils/re2c 版本。
+不缓存 CMake build tree 或 SDK 安装目录，也不缩减完整构建和 CTest 范围。
+新缓存前缀会首次冷启动；收益以 workflow 输出的命中统计为准。
+回滚时成套移除 CI launcher 配置和 `setup-native` 的 ccache 接入。
 
 Release 构建先恢复指定版本范围内最新发布的 Salts、SaltsUtils，以及最新稳定版宿主 re2c 包。安装 .NET SDK 8、
 PowerShell 7，并在父环境设置具有 `read:packages` 权限的 `GITHUB_TOKEN`。
@@ -170,7 +193,7 @@ dependencies without imported DLL metadata still use the preset runtime `PATH`.
 Install components and SDK/Studio staging retain their own package layouts.
 
 ```powershell
-cmake --build --preset win-release-user --target turbodb-postgresql
+cmake --build --preset win-release-user --target dbtools
 ctest --preset win-release-user -R "^dbtool_" --output-on-failure
 ```
 
@@ -190,7 +213,8 @@ ctest --preset win-release-user -L "^tidessql$" --output-on-failure
 ### SQLite
 
 ```powershell
-turbodb-sqlite schema apply `
+dbtools --driver sqlite schema apply `
+  --plugin C:/sdk/lib/turbodb/drivers/turbodb_driver_sqlite.dll `
   --database .\app.db `
   --file .\bootstrap.sqlite.sql
 ```
@@ -202,12 +226,18 @@ Connection information can be provided through a caller-selected environment var
 ```powershell
 $env:APP_PG_CONNINFO = 'host=127.0.0.1 dbname=app user=app'
 
-turbodb-postgresql schema apply `
+dbtools --driver pg schema apply `
+  --plugin C:/sdk/lib/turbodb/drivers/turbodb_driver_postgresql.dll `
   --file .\bootstrap.postgresql.sql `
   --conninfo-env APP_PG_CONNINFO
 ```
 
 Without `--conninfo-env`, libpq's standard environment, service, and `.pgpass` behavior applies.
+
+Use `--driver mysql` for MySQL. Plugin paths must be absolute; omit `--plugin`
+only when `TURBODB_SQLITE_PLUGIN`, `TURBODB_POSTGRESQL_PLUGIN`, or
+`TURBODB_MYSQL_PLUGIN` supplies the selected module path. See
+[dbtools usage and deployment](dbtools/readme.md) for MySQL connection settings.
 
 The default SQL script limit is 16 MiB and can be changed explicitly with `--max-script-bytes`. SQLite also supports `--busy-timeout-ms`, defaulting to 5000 ms.
 
@@ -249,7 +279,7 @@ The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` 
 
 Salts owns canonical CMeta reflection plus Plugin publication, loading, lifecycle, and leases. The plugin ABI epoch follows the installed Salts SDK and must match between host and modules. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
 
-The `TURBODB_BUILD_ORM`, `TURBODB_BUILD_REDIS` and `TURBODB_BUILD_DBTOOLS` switches select modules. `TURBODB_BUILD_ORM` is off by default and builds SQLite, PostgreSQL, MySQL and TidesDB drivers together when enabled; consumers choose which plugins to load at runtime. Redis remains an independently selectable native client because it does not provide the SQL contract required by the ORM. MongoDB is not included. The generic `Orm::C` target does not link database clients.
+The `TURBODB_BUILD_ORM`, `TURBODB_BUILD_REDIS` and `TURBODB_BUILD_DBTOOLS` switches select modules. `TURBODB_BUILD_ORM` is off by default and builds SQLite, PostgreSQL and MySQL drivers together when enabled; consumers choose which plugins to load at runtime. Redis remains an independently selectable native client because it does not provide the SQL contract required by the ORM. MongoDB is not included. The generic `Orm::C` target does not link database clients.
 
 ## Design principles
 

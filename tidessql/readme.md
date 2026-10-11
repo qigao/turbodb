@@ -701,9 +701,8 @@ cmake --build --preset install-win-release-user
 example CF，查询并打印 `42`；之后使用 `tidessql_example DATABASE` 打开。
 重复初始化已有 CF 会返回错误，不会覆写数据。
 
-`drivers/tidesdb` 负责插件注册、结构化 ORM plan 的 MySQL 渲染和
-CFlow/CSerde 结果编码；`relational_backend.c` 通过这些入口适配，不再保存
-连接或事务状态。直接入口的完整使用与生命周期验证见
+TidesDB ORM 插件及其专用维护接口已移除。应用可以直接使用 TidesSQL SDK，
+或通过 MySQL ORM 驱动连接 `tidessqld`。直接入口的完整使用与生命周期验证见
 [connection_test.c](tests/integration/connection_test.c)，该测试只链接引擎和 TinyTest，
 不依赖 ORM runtime 或插件。拆分决策和迁移顺序见
 [模块边界](design.md#tidessql-模块边界与迁移)。
@@ -716,8 +715,9 @@ cmake --build --preset win-release-user
 ctest --preset win-release-user -R "^(orm_|tidessql_)" --output-on-failure -j 2
 ```
 
-验证范围包括直接连接入口、核心单元/原生集成、ORM 插件、事务 owner、
-关系结果所有权与原生 WAL 故障。原生故障测试只链接
+验证范围包括直接连接入口、核心单元/原生集成与原生 WAL 故障。
+存储、WAL 故障和并发测试位于 `tests/storage/`，使用 `tidessql` CTest 标签。
+原生故障测试只链接
 故障版 native core，避免生产 TidesDB 依赖混入后使故障注入失效。
 公共 C/C++ 调用、ABI 拒绝、checked cleanup 和 ORM DTO 兼容性也纳入正式测试。
 2026-10-05 的 `win-release-user` 完整构建与上述 94 项 CTest 全部通过；

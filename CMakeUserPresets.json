@@ -110,6 +110,8 @@
         {
             "name": "win-release-user",
             "cacheVariables": {
+                "TURBODB_BUILD_APP": "ON",
+                "TURBODB_BUILD_ORM": "ON",
                 "CMAKE_PREFIX_PATH": "$env{VCPKG_INSTALLED_DIR}/x64-windows",
                 "CMAKE_INSTALL_PREFIX": "$env{PKG_ROOT}/turbodb/release"
             },

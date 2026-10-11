@@ -13,7 +13,6 @@ enum class SqlProvider {
   sqlite,
   mysql,
   postgresql,
-  tidesdb,
 };
 
 enum class WorkspaceExecutionState {

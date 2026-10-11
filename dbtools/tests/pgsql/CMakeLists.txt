@@ -1,7 +1,7 @@
 if(BUILD_TESTS)
   find_package(PostgreSQL REQUIRED)
   add_executable(dbtool_postgresql_test dbtool_postgresql_test.c
-                                        fake_libpq.c ../../../drivers/postgresql/schema.c)
+                                        fake_libpq.c ../../../orm/drivers/postgresql/schema.c)
   target_link_libraries(dbtool_postgresql_test
                         PRIVATE turbodb_schema_support Salts::TinyTest)
   target_include_directories(

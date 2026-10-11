@@ -23,7 +23,7 @@ cmake_add_test(
     Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
-    ${ORM_SOURCE_DIR}/../drivers/sqlite)
+    ${ORM_SOURCE_DIR}/drivers/sqlite)
 
 set_property(TARGET orm_sqlite_flow_test PROPERTY LINKER_LANGUAGE CXX)
 

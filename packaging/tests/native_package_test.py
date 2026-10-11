@@ -85,11 +85,14 @@ class NativePackageTest(unittest.TestCase):
                 ("bin/tidessqld.exe" if windows else "bin/tidessqld",)
                 if host else ()
             )
+            dbtools = (("bin/dbtools.exe" if windows else "bin/dbtools",)
+                       if host else ())
             drivers = tuple(
                 f"lib/turbodb/drivers/turbodb_driver_{driver}.{suffix}"
-                for driver in ("sqlite", "postgresql", "mysql", "tidesdb")
+                for driver in ("sqlite", "postgresql", "mysql")
             )
-            for relative in (*common, core, tidessql, *private_compression, *daemon, *drivers):
+            for relative in (*common, core, tidessql, *private_compression, *daemon,
+                             *dbtools, *drivers):
                 path = f"sdk/{rid}/{relative}"
                 with self.subTest(path=path):
                     self.assertTrue(path in self.files, f"Missing SDK file: {path}")
@@ -97,10 +100,22 @@ class NativePackageTest(unittest.TestCase):
             for executable in ("bin/tidessqld", "bin/tidessqld.exe"):
                 if not host:
                     self.assertNotIn(f"sdk/{rid}/{executable}", self.files)
+            for executable in ("bin/dbtools", "bin/dbtools.exe"):
+                if not host:
+                    self.assertNotIn(f"sdk/{rid}/{executable}", self.files)
+            for driver in ("sqlite", "postgresql", "mysql"):
+                for extension in ("", ".exe"):
+                    self.assertNotIn(f"sdk/{rid}/bin/turbodb-{driver}{extension}",
+                                     self.files)
             redis_driver = (
                 f"sdk/{rid}/lib/turbodb/drivers/turbodb_driver_redis.{suffix}"
             )
             self.assertNotIn(redis_driver, self.files)
+            self.assertNotIn(
+                f"sdk/{rid}/lib/turbodb/drivers/turbodb_driver_tidesdb.{suffix}",
+                self.files,
+            )
+            self.assertNotIn(f"sdk/{rid}/include/shared/orm/orm_tidesdb.h", self.files)
             leaked_crypto = _find_legacy_crypto_files(self.files, rid)
             self.assertEqual([], leaked_crypto,
                              f"Legacy OpenSSL/BoringSSL files leaked: {leaked_crypto}")

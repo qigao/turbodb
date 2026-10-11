@@ -111,10 +111,10 @@ cmake_add_test(
   FOLDER "orm/tests/e2e/postgresql"
   TEST_NAME orm_postgres_direct_tls_binding_mismatch
   SOURCES postgres_direct_tls_binding_mismatch_test.c
-    ${ORM_SOURCE_DIR}/../drivers/postgresql/postgres_direct_tls_bridge.c
+    ${ORM_SOURCE_DIR}/drivers/postgresql/postgres_direct_tls_bridge.c
   LIBS PostgreSQL::PostgreSQL Salts::CNet Salts::Platform Salts::TinyTest
   INCLUDES ${ORM_SOURCE_DIR}/include/orm
-    ${ORM_SOURCE_DIR}/../drivers/postgresql)
+    ${ORM_SOURCE_DIR}/drivers/postgresql)
 set_tests_properties(
   orm_postgres_direct_tls_binding_mismatch
   PROPERTIES LABELS e2e RUN_SERIAL TRUE TIMEOUT 60)

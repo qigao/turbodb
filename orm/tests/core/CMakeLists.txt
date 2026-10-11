@@ -1,9 +1,9 @@
 # Recompile the production source selection with the private static ABI.
 get_target_property(orm_core_sources turbo_orm SOURCES)
 add_library(orm_c_test_static STATIC ${orm_core_sources})
-target_sources(orm_c_test_static PRIVATE ${ORM_SOURCE_DIR}/../drivers/sqlite/backend.c
-                                         ${ORM_SOURCE_DIR}/../drivers/sqlite/async.c
-                                         ${ORM_SOURCE_DIR}/../drivers/sqlite/orm_sqlite_cursor.c)
+target_sources(orm_c_test_static PRIVATE ${ORM_SOURCE_DIR}/drivers/sqlite/backend.c
+                                         ${ORM_SOURCE_DIR}/drivers/sqlite/async.c
+                                         ${ORM_SOURCE_DIR}/drivers/sqlite/orm_sqlite_cursor.c)
 # Internal tests that compile cursor/backend sources directly must see the
 # same opaque-handle layout as the static core. This definition is not part of
 # the installed Orm::C/Orm::Cpp interface.

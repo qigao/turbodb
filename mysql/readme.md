@@ -1,7 +1,7 @@
 # MySQL 通用客户端
 
 `TurboDB::MySQL` 提供独立于 ORM 的静态客户端库。`mysql/` 拥有协议编解码、
-认证、CNet 会话、参数绑定、事务、逐行结果和 CSerde 行读取；`drivers/mysql/`
+认证、CNet 会话、参数绑定、事务、逐行结果和 CSerde 行读取；`orm/drivers/mysql/`
 负责 ORM 查询计划、错误转换、游标适配、schema 工具适配及 Salts 插件入口。
 
 客户端包含 `turbodb_mysql.h` 并链接 `TurboDB::MySQL`，不需要 ORM 头文件、

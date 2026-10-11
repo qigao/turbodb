@@ -72,6 +72,6 @@ if ($Rid -eq "windows-x64") {
 @(
   "package=TurboDB.Native", "version=$Version", "rid=$Rid", "profile=release",
   "salts=$env:SALTS_PACKAGE_VERSION", "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
-  "drivers=sqlite,postgresql,mysql,tidesdb", "source=$env:GITHUB_SHA"
+  "drivers=sqlite,postgresql,mysql", "source=$env:GITHUB_SHA"
 ) | Set-Content -LiteralPath (Join-Path $stage "turbodb-sdk-manifest.txt") -Encoding utf8NoBOM
 "TURBODB_ROOT=$($stage.Replace('\', '/'))" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8

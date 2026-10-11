@@ -13,7 +13,6 @@
           "name": "^orm_"
         },
         "exclude": {
-          "name": "^orm_tidesdb_",
           "label": "^(benchmark|tidessql)$"
         }
       }

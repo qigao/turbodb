@@ -1,4 +1,4 @@
-#include "../../../drivers/sqlite/schema.h"
+#include "../../../orm/drivers/sqlite/schema.h"
 #include <salts/plugin.h>
 
 static const cmeta_plugin_export exports[] = {{

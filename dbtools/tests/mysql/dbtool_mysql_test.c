@@ -33,7 +33,7 @@ static mysql_session_status_t test_execute(const mysql_session_config_t *config,
   return (mysql_session_status_t)script_execute(config, sql, size, limit, count, error);
 }
 #define mysql_session_execute_script test_execute
-#include "../../../drivers/mysql/schema.c"
+#include "../../../orm/drivers/mysql/schema.c"
 #undef mysql_session_execute_script
 
 static const char connection_json[] =

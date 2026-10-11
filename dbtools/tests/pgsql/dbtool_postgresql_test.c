@@ -1,4 +1,4 @@
-#include "../../../drivers/postgresql/schema.h"
+#include "../../../orm/drivers/postgresql/schema.h"
 
 #include "fake_libpq.h"
 

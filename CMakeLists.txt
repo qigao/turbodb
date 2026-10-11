@@ -7,7 +7,7 @@ include(CMakeOptions.cmake)
 
 project(
   TurboDB
-  VERSION 2.3.2
+  VERSION 2.4.0
   DESCRIPTION "C/C++ database libraries"
   HOMEPAGE_URL "https://github.com/qigao/turbodb"
   LANGUAGES C CXX)
@@ -35,9 +35,10 @@ endif()
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "cmake")
 
-# Enable testing
-include(CTest)
-enable_testing()
+# Register tests selected by the project options.
+if(BUILD_TESTS OR BUILD_E2E_TESTS)
+  enable_testing()
+endif()
 
 include(GNUInstallDirs)
 include(Sanitizers)
@@ -108,13 +109,10 @@ endif()
 if(TURBODB_BUILD_TIDESSQL AND NOT TURBODB_BUILD_SQLPARSER)
   message(FATAL_ERROR "TidesSQL requires TURBODB_BUILD_SQLPARSER=ON")
 endif()
-if(TURBODB_BUILD_ORM AND NOT TURBODB_BUILD_TIDESSQL)
-  message(FATAL_ERROR "The TidesDB ORM driver requires TURBODB_BUILD_TIDESSQL=ON")
-endif()
 if(TURBODB_BUILD_TIDESSQL_SERVER AND NOT TURBODB_BUILD_TIDESSQL)
   message(FATAL_ERROR "tidessqld requires TURBODB_BUILD_TIDESSQL=ON")
 endif()
-if(TURBODB_BUILD_ORM OR TURBODB_BUILD_TIDESSQL)
+if(TURBODB_BUILD_TIDESSQL)
   add_subdirectory(tidesdb)
 endif()
 if(TURBODB_BUILD_TIDESSQL)
@@ -132,7 +130,6 @@ endif()
 if(TURBODB_BUILD_ORM)
   add_subdirectory(mysql)
   add_subdirectory(orm)
-  add_subdirectory(drivers)
 endif()
 
 if(TURBODB_BUILD_APP)

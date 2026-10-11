@@ -53,7 +53,6 @@ SqlProvider ConnectionManager::ProviderFromId(const std::string& id) noexcept {
   if (id == "sqlite") return SqlProvider::sqlite;
   if (id == "mysql") return SqlProvider::mysql;
   if (id == "postgresql") return SqlProvider::postgresql;
-  if (id == "tidesdb") return SqlProvider::tidesdb;
   return SqlProvider::unknown;
 }
 

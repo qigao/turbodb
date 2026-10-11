@@ -1,9 +1,12 @@
 name: Native build dependencies
-description: Restore shared vcpkg binaries and reusable NuGet payloads while resolving SDK versions afresh.
+description: Restore vcpkg binaries, compiler outputs, and NuGet payloads while resolving SDK versions afresh.
 inputs:
   platform:
-    description: Separate cache writers for cross-compilation matrix entries.
-    default: host
+    description: Target RID used to separate native and cross-compilation caches.
+    required: true
+  preset:
+    description: Configure preset used to separate compiler cache profiles.
+    required: true
 runs:
   using: composite
   steps:
@@ -17,12 +20,25 @@ runs:
     - uses: actions/cache@v4
       with:
         path: ${{ env.VCPKG_BINARY_CACHE }}
-        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ github.run_id }}-${{ github.job }}-${{ inputs.platform }}
+        key: vcpkg-l1-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ steps.vcpkg.outputs.contract_version }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'app/vcpkg-ports/**') }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
         restore-keys: |
-          vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg.outputs.cache_revision }}-
+          vcpkg-l1-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ steps.vcpkg.outputs.contract_version }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'app/vcpkg-ports/**') }}-
+          vcpkg-l1-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ steps.vcpkg.outputs.contract_version }}-${{ steps.vcpkg.outputs.cache_revision }}-
+    # This action owns ccache installation, restore/save, capacity, and statistics.
+    # The CI presets use the launcher without replacing the selected compiler.
+    - uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
+      env:
+        CCACHE_COMPILERCHECK: content
+      with:
+        variant: ccache
+        max-size: 2G
+        key: turbodb-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ inputs.preset }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'CMakeOptions.cmake', 'CMakePresets.json', 'presets/*.json') }}-${{ github.job }}
+        restore-keys: |
+          turbodb-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ inputs.preset }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'CMakeOptions.cmake', 'CMakePresets.json', 'presets/*.json') }}
+        update-package-index: true
     - uses: actions/cache@v4
       with:
         path: ${{ runner.temp }}/qigao-nuget
-        key: native-nuget-${{ runner.os }}-${{ github.run_id }}-${{ github.job }}-${{ inputs.platform }}
+        key: native-nuget-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ hashFiles('cmake/ci/restore-native-sdks.ps1') }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
         restore-keys: |
-          native-nuget-${{ runner.os }}-
+          native-nuget-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ hashFiles('cmake/ci/restore-native-sdks.ps1') }}-

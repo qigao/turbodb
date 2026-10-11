@@ -19,6 +19,7 @@ enum {
 };
 
 typedef struct dbtool_cli_options {
+  dbtool_driver_kind driver;
   const char *file;
   const char *database;
   const char *conninfo_environment;
@@ -68,13 +69,15 @@ static dbtool_status dbtool_cli_read_options(
   dbtool_status status = DBTOOL_STATUS_OK;
   char message[DBTOOL_ERROR_MESSAGE_CAPACITY];
 
-  for (int i = 3; i < argc; i += 2) {
+  for (int i = 5; i < argc; i += 2) {
     const char *name = argv[i];
     uint32_t index;
     if (name == NULL || i + 1 >= argc || argv[i + 1] == NULL)
       return dbtool_cli_fail(error, "option requires one value");
     if (argv[i + 1][0] == '\0')
       return dbtool_cli_fail(error, "option value cannot be empty");
+    if (strcmp(name, "--driver") == 0)
+      return dbtool_cli_fail(error, "duplicate option: --driver");
     for (index = 0u; index < count; ++index)
       if (strncmp(name, "--", 2u) == 0 && strcmp(name + 2, descriptors[index].name) == 0)
         break;
@@ -133,9 +136,9 @@ cleanup:
 }
 
 static dbtool_status dbtool_cli_parse(int argc, const char *const *argv,
-                                      dbtool_driver_kind driver,
                                       dbtool_cli_options *options,
                                       dbtool_error *error) {
+  dbtool_driver_kind driver;
   char *file = NULL, *plugin = NULL, *maximum = NULL, *connection = NULL, *busy = NULL;
   CmdArgerDesc descriptors[DBTOOL_CLI_OPTION_CAPACITY] = {
       cmd_arger_required(cmd_arger_desc_string(&file, "file", "SQL script path")),
@@ -147,7 +150,18 @@ static dbtool_status dbtool_cli_parse(int argc, const char *const *argv,
   if (argc == 2 && argv != NULL && argv[1] != NULL && strcmp(argv[1], "--help") == 0)
     return DBTOOL_STATUS_HELP;
   if (argc < 3 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
-      argv[2] == NULL || strcmp(argv[1], "schema") != 0 || strcmp(argv[2], "apply") != 0)
+      strcmp(argv[1], "--driver") != 0)
+    return dbtool_cli_fail(error, "required option: --driver sqlite|pg|mysql");
+  if (argv[2] == NULL || argv[2][0] == '\0')
+    return dbtool_cli_fail(error, "--driver requires one non-empty value");
+  if (strcmp(argv[2], "sqlite") == 0) driver = DBTOOL_DRIVER_SQLITE;
+  else if (strcmp(argv[2], "pg") == 0) driver = DBTOOL_DRIVER_POSTGRESQL;
+  else if (strcmp(argv[2], "mysql") == 0) driver = DBTOOL_DRIVER_MYSQL;
+  else return dbtool_cli_fail(error, "unknown --driver: expected sqlite, pg or mysql");
+  if (argc == 4 && argv[3] != NULL && strcmp(argv[3], "--help") == 0)
+    return DBTOOL_STATUS_HELP;
+  if (argc < 5 || argv[3] == NULL || argv[4] == NULL ||
+      strcmp(argv[3], "schema") != 0 || strcmp(argv[4], "apply") != 0)
     return dbtool_cli_fail(error, "expected command: schema apply");
   if (driver == DBTOOL_DRIVER_SQLITE) {
     descriptors[count++] = cmd_arger_required(
@@ -163,6 +177,7 @@ static dbtool_status dbtool_cli_parse(int argc, const char *const *argv,
   if (status != DBTOOL_STATUS_OK) return status;
 
   memset(options, 0, sizeof(*options));
+  options->driver = driver;
   options->file = file;
   options->plugin = plugin;
   if (driver == DBTOOL_DRIVER_SQLITE) options->database = connection;
@@ -185,7 +200,7 @@ static dbtool_status dbtool_cli_parse(int argc, const char *const *argv,
 }
 
 dbtool_status dbtool_cli_execute(int argc, const char *const *argv,
-                                 dbtool_driver_kind driver,
+                                 dbtool_driver_kind *selected_driver,
                                  const dbtool_schema_driver_ops *ops,
                                  dbtool_apply_result *result,
                                  dbtool_error *error) {
@@ -206,9 +221,11 @@ dbtool_status dbtool_cli_execute(int argc, const char *const *argv,
                      0, "invalid schema driver contract");
     return DBTOOL_STATUS_INVALID_ARGUMENT;
   }
-  status = dbtool_cli_parse(argc, argv, driver, &options, error);
+  status = dbtool_cli_parse(argc, argv, &options, error);
   if (status != DBTOOL_STATUS_OK)
     return status;
+  if (selected_driver != NULL)
+    *selected_driver = options.driver;
 
   config.database = options.database;
   config.busy_timeout_ms = options.busy_timeout_ms;
@@ -223,11 +240,10 @@ dbtool_status dbtool_cli_execute(int argc, const char *const *argv,
   if (status != DBTOOL_STATUS_OK)
     return status;
   if (ops == NULL) {
-    const char *driver_id = driver == DBTOOL_DRIVER_SQLITE ? "sqlite" :
-                            driver == DBTOOL_DRIVER_MYSQL ? "mysql" : "postgresql";
+    const char *driver_id = dbtool_cli_driver_name(options.driver);
     const char *path = options.plugin != NULL ? options.plugin :
-        getenv(driver == DBTOOL_DRIVER_SQLITE ? "TURBODB_SQLITE_PLUGIN" :
-               driver == DBTOOL_DRIVER_MYSQL ? "TURBODB_MYSQL_PLUGIN" :
+        getenv(options.driver == DBTOOL_DRIVER_SQLITE ? "TURBODB_SQLITE_PLUGIN" :
+               options.driver == DBTOOL_DRIVER_MYSQL ? "TURBODB_MYSQL_PLUGIN" :
                                                "TURBODB_POSTGRESQL_PLUGIN");
     status = dbtool_plugin_load(&plugin, path, driver_id, error);
     if (status != DBTOOL_STATUS_OK)
@@ -265,31 +281,28 @@ cleanup:
   return status;
 }
 
-void dbtool_cli_print_help(dbtool_driver_kind driver, const char *program) {
-  const char *name = program != NULL ? program : "turbodb-driver";
-  if (driver == DBTOOL_DRIVER_SQLITE) {
-    (void)fprintf(stdout,
-                  "Usage: %s schema apply --database <path> --file <sql> "
-                  "[--max-script-bytes <n>] [--busy-timeout-ms <n>] "
-                  "[--plugin <absolute-path>]\n"
-                  "Plugin: --plugin or TURBODB_SQLITE_PLUGIN is required.\n",
-                  name);
-  } else if (driver == DBTOOL_DRIVER_MYSQL) {
-    (void)fprintf(stdout,
-                  "Usage: %s schema apply --file <sql> --conninfo-env <name> "
-                  "[--max-script-bytes <n>] [--plugin <absolute-path>]\n"
-                  "Plugin: --plugin or TURBODB_MYSQL_PLUGIN is required.\n"
-                  "Connection: JSON with host, username, password, database, "
-                  "ca_file, server_name; optional port and timeout_ms.\n",
-                  name);
-  } else {
-    (void)fprintf(stdout,
-                  "Usage: %s schema apply --file <sql> "
-                  "[--conninfo-env <name>] [--max-script-bytes <n>] "
-                  "[--plugin <absolute-path>]\n"
-                  "Plugin: --plugin or TURBODB_POSTGRESQL_PLUGIN is required.\n",
-                  name);
+const char *dbtool_cli_driver_name(dbtool_driver_kind driver) {
+  switch (driver) {
+    case DBTOOL_DRIVER_SQLITE: return "sqlite";
+    case DBTOOL_DRIVER_POSTGRESQL: return "postgresql";
+    case DBTOOL_DRIVER_MYSQL: return "mysql";
+    default: return NULL;
   }
+}
+
+void dbtool_cli_print_help(const char *program) {
+  const char *name = program != NULL ? program : "dbtools";
+  (void)fprintf(stdout,
+    "Usage: %s --driver <sqlite|pg|mysql> schema apply --file <sql>\n"
+    "  Common: [--plugin <absolute-path>] [--max-script-bytes <n>]\n"
+    "  sqlite: --database <path> [--busy-timeout-ms <n>]\n"
+    "  pg:     [--conninfo-env <name>]\n"
+    "  mysql:  --conninfo-env <name>\n"
+    "Plugin: --plugin or TURBODB_SQLITE_PLUGIN / TURBODB_POSTGRESQL_PLUGIN /\n"
+    "        TURBODB_MYSQL_PLUGIN is required for the selected driver.\n"
+    "MySQL connection: JSON with host, username, password, database, ca_file,\n"
+    "                  server_name; optional port and timeout_ms.\n",
+    name);
 }
 
 void dbtool_cli_print_error(const dbtool_error *error) {

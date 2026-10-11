@@ -119,8 +119,13 @@
             "name": "ci-native-base",
             "hidden": true,
             "generator": "Ninja",
+            "environment": {
+                "CCACHE_COMPILERCHECK": "content"
+            },
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+                "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
                 "VCPKG_MANIFEST_MODE": true,
                 "VCPKG_APPLOCAL_DEPS": false,
                 "VCPKG_INSTALLED_DIR": "$env{VCPKG_INSTALLED_DIR}",
@@ -128,6 +133,7 @@
                 "BUILD_E2E_TESTS": false,
                 "BUILD_EXAMPLES": false,
                 "TURBODB_BUILD_ORM": true,
+                "TURBODB_BUILD_TIDESSQL": true,
                 "TURBODB_BUILD_DBTOOLS": true,
                 "TIDESDB_BUILD_TESTS": false,
                 "TIDESDB_WITH_SNAPPY": false,

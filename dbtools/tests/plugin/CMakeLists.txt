@@ -1,7 +1,7 @@
 find_package(SQLite3 REQUIRED)
 
 add_library(dbtool_schema_fixture MODULE schema_fixture.c
-  ../../../drivers/sqlite/schema.c)
+  ../../../orm/drivers/sqlite/schema.c)
 target_link_libraries(dbtool_schema_fixture PRIVATE turbodb_schema_support SQLite::SQLite3)
 set_target_properties(dbtool_schema_fixture PROPERTIES
   PREFIX "" C_VISIBILITY_PRESET hidden FOLDER "dbtools/tests/plugin")

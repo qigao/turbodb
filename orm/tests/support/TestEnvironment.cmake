@@ -17,20 +17,6 @@ if(WIN32)
   endif()
   string(APPEND ORM_TEST_RUNTIME_PATH
          ";PATH=path_list_prepend:$<TARGET_FILE_DIR:PostgreSQL::PostgreSQL>")
-  string(APPEND ORM_TEST_RUNTIME_PATH
-         ";PATH=path_list_prepend:$<TARGET_FILE_DIR:TidesDB::tidesdb>")
-  if(TARGET zstd::libzstd_shared)
-    string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:zstd::libzstd_shared>")
-  endif()
-  if(TARGET Snappy::snappy)
-    string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:Snappy::snappy>")
-  endif()
-  if(TARGET LZ4::lz4_shared)
-    string(APPEND ORM_TEST_RUNTIME_PATH
-           ";PATH=path_list_prepend:$<TARGET_FILE_DIR:LZ4::lz4_shared>")
-  endif()
 
   if(EXISTS "${CMAKE_C_COMPILER}")
     get_filename_component(ORM_TEST_VC_BIN_DIR "${CMAKE_C_COMPILER}" DIRECTORY)

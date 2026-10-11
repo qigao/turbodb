@@ -22,13 +22,24 @@ option.
 
 ## Build
 
-Configure on Windows with the repository vcpkg toolchain and:
+From a Visual Studio developer environment, use the Windows Release user
+preset. It enables Studio and its required ORM drivers through the repository
+vcpkg manifest. This setting belongs to the user preset; CI profiles remain
+separate.
+
+WTL also requires ATL from the selected Visual Studio installation. Install
+**C++ ATL for latest v143 build tools (x86 & x64)**
+(`Microsoft.VisualStudio.Component.VC.ATL`) through Visual Studio Installer
+if that instance lacks `atlbase.h`; the vcpkg WTL package does not supply ATL.
+See the [Visual Studio component list](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022).
+With multiple VS installations, configure and build from the same instance's
+x64 developer environment. When switching instances, use
+`cmake --preset win-release-user --fresh` to replace the cached compiler.
 
 ~~~powershell
-cmake -S . -B build/app `
-  -DTURBODB_BUILD_APP=ON `
-  -DTURBODB_BUILD_ORM=ON
-cmake --build build/app --target turbodb-studio
+cmake --preset win-release-user
+cmake --build --preset win-release-user --target turbodb-studio
+ctest --preset win-release-user -R "^turbodb-app-" --output-on-failure
 ~~~
 
 The first slice provides the frame and pane ownership boundaries only:

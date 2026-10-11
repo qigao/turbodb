@@ -16,7 +16,7 @@ static cflow_admission_status test_post(cflow_executor *executor,
                      : cflow_executor_try_post(executor, fn, user);
 }
 #define cflow_executor_try_post test_post
-#include "../../../../drivers/sqlite/async.c"
+#include "../../../drivers/sqlite/async.c"
 #undef cflow_executor_try_post
 
 enum { TEST_WAIT_ATTEMPTS = 5000, TEST_TIMEOUT_TICKS = 100000 };

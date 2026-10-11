@@ -1,5 +1,10 @@
 # TidesDB SQL 执行层设计
 
+2026-10-11 决策：移除 TidesDB ORM 驱动及其专用维护接口，ORM 不再要求
+启用 TidesSQL。底层 TidesDB 和 TidesSQL SDK 保留；独立存储/WAL/并发测试
+迁至 `tests/storage/`。下文提及 `orm_tidesdb_driver` 和旧 ORM 测试路径的内容
+属于历史实施记录，当前迁移与回滚说明见 [ORM 构建说明](../orm/readme.md#build-and-test)。
+
 2026-10-06 rebase 决策：保留 `master` 的 Salts 摘要接口、无 SSL libpq 和随构建
 SDK 匹配的 Plugin ABI epoch；TidesSQL 服务端保留 GmSSL 密码验证实现。公开导出
 不再解析或打包 GmSSL 开发文件，Windows 只暂存 libpq/sqlite3 的 vcpkg DLL。
@@ -1452,7 +1457,7 @@ TidesDB ORM 插件只有 TidesSQL 关系执行路径。raw SQL 直接进入公�
 
 | 当前事实 | 代码与影响 |
 | --- | --- |
-| 插件工厂直接创建关系适配器 | [plugin.c](../drivers/tidesdb/plugin.c)、[relational_backend.c](../drivers/tidesdb/relational_backend.c) |
+| 插件工厂直接创建关系适配器（历史实现，已移除） | 旧路径 `drivers/tidesdb/plugin.c`、`drivers/tidesdb/relational_backend.c` |
 | 配置、会话、事务与结果由引擎拥有 | [connection.c](src/connection.c)；ORM 不维护状态副本 |
 | Catalog 与关系行共享同一 CF 事务 | [catalog_store.h](src/catalog_store.h)、[relation.h](src/relation.h) |
 | 结构化计划只负责 ORM 的单表查询入口 | [orm_mysql_render.c](../orm/src/sql/orm_mysql_render.c)；完整 SQL 不压平到 ORM plan |

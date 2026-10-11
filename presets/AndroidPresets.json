@@ -13,7 +13,7 @@
                 "CMAKE_SYSTEM_NAME": "Android",
                 "ANDROID_STL": "c++_shared",
                 "ANDROID_PLATFORM": "android-24",
-                "BUILD_TESTING": false
+                "BUILD_TESTS": false
             }
         },
         {
@@ -40,7 +40,6 @@
             "cacheVariables": {
                 "ANDROID_ABI": "arm64-v8a",
                 "VCPKG_TARGET_TRIPLET": "arm64-android",
-                "ENABLE_TESTS": false,
                 "BUILD_TESTS": "OFF",
                 "BUILD_EXAMPLES": "OFF"
             }
@@ -53,7 +52,6 @@
             "cacheVariables": {
                 "ANDROID_ABI": "arm64-v8a",
                 "VCPKG_TARGET_TRIPLET": "arm64-android",
-                "ENABLE_TESTS": false,
                 "BUILD_TESTS": "OFF",
                 "BUILD_EXAMPLES": "OFF",
                 "BUILD_BENCHMARKS": "OFF"
@@ -67,7 +65,6 @@
             "cacheVariables": {
                 "ANDROID_ABI": "x86_64",
                 "VCPKG_TARGET_TRIPLET": "x64-android",
-                "ENABLE_TESTS": false,
                 "BUILD_TESTS": "OFF",
                 "BUILD_EXAMPLES": "OFF"
             }
@@ -80,7 +77,6 @@
             "cacheVariables": {
                 "ANDROID_ABI": "x86_64",
                 "VCPKG_TARGET_TRIPLET": "x64-android",
-                "ENABLE_TESTS": false,
                 "BUILD_TESTS": "OFF",
                 "BUILD_EXAMPLES": "OFF"
             }
@@ -93,7 +89,6 @@
             "cacheVariables": {
                 "ANDROID_ABI": "x86",
                 "VCPKG_TARGET_TRIPLET": "x86-android",
-                "ENABLE_TESTS": false,
                 "BUILD_TESTS": "OFF",
                 "BUILD_EXAMPLES": "OFF"
             }
@@ -106,7 +101,6 @@
             "cacheVariables": {
                 "ANDROID_ABI": "x86",
                 "VCPKG_TARGET_TRIPLET": "x86-android",
-                "ENABLE_TESTS": false,
                 "BUILD_TESTS": "OFF",
                 "BUILD_EXAMPLES": "OFF"
             }
