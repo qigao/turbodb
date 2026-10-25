@@ -31,6 +31,14 @@ _WINDOWS_RUNTIME_DLLS = {
     "turbo_orm.dll",
 }
 
+_WINDOWS_DRIVER_DLLS = {
+    "libpq.dll",
+    "sqlite3.dll",
+    "turbodb_driver_mysql.dll",
+    "turbodb_driver_postgresql.dll",
+    "turbodb_driver_sqlite.dll",
+}
+
 
 def _find_legacy_crypto_files(files, rid):
     prefixes = tuple(
@@ -107,6 +115,16 @@ class NativePackageTest(unittest.TestCase):
             and path.casefold().endswith(".dll")
         }
         self.assertEqual(_WINDOWS_RUNTIME_DLLS, runtime_dlls)
+
+        windows_drivers = "sdk/windows-x64/lib/turbodb/drivers/"
+        driver_dlls = {
+            path[len(windows_drivers):].casefold()
+            for path in self.files
+            if path.casefold().startswith(windows_drivers)
+            and "/" not in path[len(windows_drivers):]
+            and path.casefold().endswith(".dll")
+        }
+        self.assertEqual(_WINDOWS_DRIVER_DLLS, driver_dlls)
 
     def test_tides_engines_are_not_packaged(self):
         leaked = sorted(path for path in self.files

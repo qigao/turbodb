@@ -41,12 +41,20 @@ foreach ($file in Get-Content -LiteralPath $InstallManifest | Sort-Object -Uniqu
 # built without its own SSL provider.
 if ($Rid -eq "windows-x64") {
   $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/$env:QIGAO_VCPKG_WINDOWS_TRIPLET/bin"
+  $driverDirectory = Join-Path $stage "lib/turbodb/drivers"
+  if (-not (Test-Path -LiteralPath $driverDirectory -PathType Container)) {
+    throw "installed Windows driver directory is missing: $driverDirectory"
+  }
   foreach ($runtimeDll in @("libpq.dll", "sqlite3.dll")) {
     $source = Join-Path $vcpkgBin $runtimeDll
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
       throw "required Windows driver runtime is missing: $source"
     }
+    # dbtools links the database clients directly, while Salts Plugin loads an
+    # explicit driver path with DLL_LOAD_DIR | DEFAULT_DIRS. Keep one copy in
+    # bin for executables and one beside the driver modules for secure loading.
     Copy-Item -LiteralPath $source -Destination (Join-Path $stage "bin")
+    Copy-Item -LiteralPath $source -Destination $driverDirectory
   }
 }
 $runtimeManifest = @()
