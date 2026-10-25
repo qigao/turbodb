@@ -1,6 +1,6 @@
 # TurboDB.Native
 
-预编译 Release SDK，包含 ORM 核心、SQLite/PostgreSQL/MySQL 驱动，以及 MySQL 和 Redis 通用客户端。Redis 是独立客户端，不属于 ORM 驱动。2.3.4 发布包不包含 TidesDB、TidesSQL 或 `tidessqld`。
+预编译 Release SDK，包含 ORM 核心、SQLite/PostgreSQL/MySQL 驱动，以及 MySQL 和 Redis 通用客户端。Redis 是独立客户端，不属于 ORM 驱动。2.3.4 及后续发布包不包含 TidesDB、TidesSQL 或 `tidessqld`。
 
 每个平台的安装树位于 `sdk/linux-x64`、`sdk/linux-arm64`、`sdk/macos-arm64`、`sdk/windows-x64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 另含 dbtools；Android 只发布库。
 
