@@ -4,7 +4,7 @@
 
 每个平台的安装树位于 `sdk/linux-x64`、`sdk/linux-arm64`、`sdk/macos-arm64`、`sdk/windows-x64` 或 `sdk/android-arm64-v8a`。所有平台的驱动位于 `lib/turbodb/drivers`。Windows/Linux/macOS 另含 dbtools；Android 只发布库。
 
-正式发布和普通 CI 均以 `Version="*-*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新发布版本，包括 RC，不限定版本系列。每轮通过 `--no-cache --force-evaluate` 重新解析，不生成依赖锁文件；实际版本以本轮 restore 输出为准。打包检查五个平台的生产端版本一致及 Linux SONAME 依赖闭包。每个安装树的 `turbodb-sdk-manifest.txt` 记录实际构建版本供诊断。macOS 使用 AppleClang；恢复的 SDK 必须支持该工具链，构建或测试失败会停止发布。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`；libpq 不含 SSL，TLS 由 Salts::CNet 提供。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
+正式发布和普通 CI 均以 `Version="*-*"` 获取 Salts.Native 和 SaltsUtils.Native 的最新发布版本，包括 RC，不限定版本系列。每轮通过 `--no-cache --force-evaluate` 重新解析，不生成依赖锁文件；实际版本以本轮 restore 输出为准。打包检查五个平台的生产端版本一致及 Linux SONAME 依赖闭包。每个安装树的 `turbodb-sdk-manifest.txt` 记录实际构建版本供诊断。macOS 使用 AppleClang；恢复的 SDK 必须支持该工具链，构建或测试失败会停止发布。Windows 安装树只从 vcpkg 复制 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`：`bin` 中的副本供 dbtools 使用，`lib/turbodb/drivers` 中的副本与显式加载的驱动模块同目录，符合 Salts Plugin 的安全依赖搜索契约；libpq 不含 SSL，TLS 由 Salts::CNet 提供。Salts/SaltsUtils 由对应 NuGet 包提供；运行时应把对应平台 SDK 的 `bin`（Windows）或 `lib`（Linux/macOS）加入对应平台的运行时库搜索路径。Android 应将使用的驱动及其共享库依赖随应用打包。
 
 正式包的消费项目应直接声明 `Salts.Native` 和 `SaltsUtils.Native` 的 `PackageReference Version="*-*"`，在 restore 时使用 `--no-cache --force-evaluate`，并核对安装树 manifest 中的运行库 ABI。TurboDB 包不嵌入这两个 GitHub 包的传递依赖，直接浮动引用表达每轮获取最新版本（含预发布版）的要求，参见 [NuGet 浮动版本规则](https://learn.microsoft.com/en-us/nuget/concepts/dependency-resolution#floating-versions)。
 
@@ -18,7 +18,7 @@ CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`，不再提供独立的 
 
 从旧包迁移时，将 `find_package(Orm)` 改为 `find_package(TurboDB)`，保留原有 `Orm::*` 链接目标，并使用 `TurboDB_DRIVER_DIR` 定位模块。正式包使用最新发布的 Salts/SaltsUtils SDK，包括预发布版。Driver 只随包部署，不自动加载；应用按需显式调用 `orm_runtime_load_driver()`。缺失依赖、错误 module path 或 ABI 不匹配直接失败，不提供 consumer harness、兼容回退或旧依赖降级。
 
-包内容断言位于 `packaging/tests/native_package_test.py`，使用 Python 标准库 unittest，覆盖五个平台的 ORM 核心、驱动、dbtools、公开头文件及 NuGet 依赖，并拒绝 TidesDB/TidesSQL SDK 文件。测试还精确约束 Windows `bin` 的 DLL 集合，防止把 vcpkg 的无关工具库带入发布包。打包后在仓库根目录运行：
+包内容断言位于 `packaging/tests/native_package_test.py`，使用 Python 标准库 unittest，覆盖五个平台的 ORM 核心、驱动、dbtools、公开头文件及 NuGet 依赖，并拒绝 TidesDB/TidesSQL SDK 文件。测试还精确约束 Windows `bin` 与驱动目录的 DLL 集合，既保证安全加载闭包，也防止把 vcpkg 的无关工具库带入发布包。打包后在仓库根目录运行：
 
 ```bash
 TURBODB_NUPKG="dist/TurboDB.Native.${version}.nupkg" \
