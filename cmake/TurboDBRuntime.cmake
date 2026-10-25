@@ -22,6 +22,55 @@ while(_turbodb_runtime_directories)
   endforeach()
 endwhile()
 
+# CMake's FindSQLite3/FindPostgreSQL modules model the Windows import libraries
+# as UNKNOWN imported targets. TARGET_RUNTIME_DLLS therefore cannot infer the
+# matching DLLs. Keep them beside the driver modules: Salts intentionally loads
+# explicit Plugin paths with DLL_LOAD_DIR | DEFAULT_DIRS and does not broaden
+# dependency lookup to PATH.
+if(WIN32 AND TARGET orm_sqlite_driver)
+  get_filename_component(_turbodb_sqlite_lib_dir "${SQLite3_LIBRARY}" DIRECTORY)
+  get_filename_component(_turbodb_sqlite_prefix "${_turbodb_sqlite_lib_dir}"
+                         DIRECTORY)
+  set(_turbodb_sqlite_runtime "${_turbodb_sqlite_prefix}/bin/sqlite3.dll")
+  if(NOT EXISTS "${_turbodb_sqlite_runtime}")
+    message(FATAL_ERROR
+            "SQLite driver runtime DLL is missing: ${_turbodb_sqlite_runtime}")
+  endif()
+  list(APPEND _turbodb_runtime_dlls "${_turbodb_sqlite_runtime}")
+endif()
+
+if(WIN32 AND TARGET orm_postgresql_driver)
+  foreach(_config IN ITEMS DEBUG RELEASE)
+    if(PostgreSQL_LIBRARY_${_config})
+      get_filename_component(_turbodb_postgresql_lib_dir_${_config}
+                             "${PostgreSQL_LIBRARY_${_config}}" DIRECTORY)
+      get_filename_component(_turbodb_postgresql_prefix_${_config}
+                             "${_turbodb_postgresql_lib_dir_${_config}}"
+                             DIRECTORY)
+      set(_turbodb_postgresql_runtime_${_config}
+          "${_turbodb_postgresql_prefix_${_config}}/bin/libpq.dll")
+      if(NOT EXISTS "${_turbodb_postgresql_runtime_${_config}}")
+        message(
+          FATAL_ERROR
+            "PostgreSQL driver runtime DLL is missing: ${_turbodb_postgresql_runtime_${_config}}"
+        )
+      endif()
+    endif()
+  endforeach()
+  if(_turbodb_postgresql_runtime_DEBUG AND
+     _turbodb_postgresql_runtime_RELEASE)
+    list(
+      APPEND _turbodb_runtime_dlls
+      "$<$<CONFIG:Debug>:${_turbodb_postgresql_runtime_DEBUG}>$<$<NOT:$<CONFIG:Debug>>:${_turbodb_postgresql_runtime_RELEASE}>"
+    )
+  elseif(_turbodb_postgresql_runtime_RELEASE)
+    list(APPEND _turbodb_runtime_dlls
+         "${_turbodb_postgresql_runtime_RELEASE}")
+  elseif(_turbodb_postgresql_runtime_DEBUG)
+    list(APPEND _turbodb_runtime_dlls "${_turbodb_postgresql_runtime_DEBUG}")
+  endif()
+endif()
+
 if(_turbodb_runtime_targets)
   # file(GENERATE) resolves paths without making the copy task depend on the
   # consumers. In-tree DLLs remain owned by their build targets.
