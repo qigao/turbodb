@@ -62,6 +62,12 @@ set_target_properties(
   PROPERTIES
              LINKER_LANGUAGE C
              C_VISIBILITY_PRESET hidden)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # The core DSO owns every private static dependency it uses.  Reject a
+  # producer build that leaves CSTL calls for a downstream executable to
+  # resolve; current Salts SDKs intentionally keep those symbols hidden.
+  target_link_options(turbo_orm PRIVATE "LINKER:-z,defs")
+endif()
 target_compile_features(orm_cpp INTERFACE cxx_std_17)
 target_include_directories(
   orm_cpp INTERFACE $<BUILD_INTERFACE:${ORM_SOURCE_DIR}/include/orm>

@@ -152,6 +152,20 @@ jobs:
           ./cmake/ci/stage-native-sdk.ps1
           -Rid '${{ matrix.rid }}' -Version '${{ inputs.version }}'
           -InstallManifest '${{ github.workspace }}/build/${{ matrix.preset }}/install_manifest.txt'
+      - name: Audit Linux ORM DSO closure
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          library="build/stage/sdk/linux-x64/lib/libturbo_orm.so"
+          test -f "$library"
+          if readelf --dyn-syms --wide "$library" |
+             grep -Eq '[[:space:]]UND[[:space:]].*\bvec_[[:alnum:]_]*($|@)'; then
+            echo "libturbo_orm.so leaks unresolved private CSTL symbols" >&2
+            readelf --dyn-syms --wide "$library" |
+              grep -E '[[:space:]]UND[[:space:]].*\bvec_[[:alnum:]_]*($|@)' >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: turbodb-sdk-${{ matrix.rid }}
