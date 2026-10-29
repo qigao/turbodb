@@ -51,10 +51,50 @@ projection schema registration, atomic `index_generation`, migration, ACL
 filters and Graph-specific API are still separate acceptance tasks. No
 production TurboAgent owner change.
 
+## M1b: explicit revision-bound FTS5 projection (experimental)
+
+The opt-in `TURBODB_REVISION_OPEN_FTS5` profile upgrades an admitted v1
+database to **v2** only with explicit writable `OPEN_CREATE`, in one SQLite
+transaction. FTS5 is mandatory for this mode: unsupported builds error rather
+than falling back to LIKE, and unprofiled v1 clients reject the v2 DB.
+
+`turbodb_revision_write_project_text` attaches a UTF-8 full-text entry to
+the exact un-deleted `(namespace, binary-key, commit_seq)` created by
+`write_put` earlier in the **same** writer transaction. Text documents, FTS5
+tokens, Graph-style edge keys and a Generation Head are published together by
+the existing `turbodb_revision_write_publish` commit and request_id.
+
+`turbodb_revision_read_search_text` returns bounded candidates only when the
+FTS row is from the latest retained revision of that exact key *as of* the
+parent read's historical sequence; an earlier matching revision is never
+returned as the current content. It uses the existing owned-value/borrrowed-key
+scan cursor and scoped namespace, with row/bytes/VM work caps. It does not
+offer global rank scores or authority grants.
+
+The v2 DDL is **fixed, library-owned and typed**. Strict schema admission
+compares the entire SQLite schema, including FTS5 shadow tables, with a fresh
+canonical in-memory schema. Unknown triggers/views or forged same-name objects
+are rejected. No raw SQLite pointer, arbitrary SQL registration, second
+parser, or dynamic model-provided schema is exposed to the Agent.
+
+### M1b limitations
+
+- Graph adjacency is stored as **host-encoded revisioned B-tree keys**, not
+  an unrestricted Graph query-language engine. Agent still owns SourceRevision,
+  Graph edge provenance, ACL, source catalog and generation interpretation.
+- Graph/FTS queries in a multi-tenant deployment still require Host authority
+  filtering, audit and end-to-end data isolation; namespace is a trusted
+  storage scope, not an authorization service.
+- Existing v1 retained values are **not** silently retroactively FTS-indexed.
+  Re-extraction/reindex must be an explicit Agent operation with a new revision.
+- M1b is not a complete TurboAgent migration; it does not provide vector/HNSW,
+  durable domain schema APIs, corpus import, GC, or production cutover.
+
 ## Not yet implemented; do not use as TurboAgent's production index owner
 
-- Same-transaction domain projection registration for FTS5/Graph/vector
-  indexes and atomic `index_generation` publication.
+- Arbitrary domain projection registration; M1b intentionally provides only a
+  **typed built-in** revision-bound FTS5 projection and generic Graph keys.
+  TurboAgent must still validate its generation/evidence protocol.
 - Migration of existing KnowledgeStore/VectorStore/RuntimeStore files.
 - Historical revision garbage collection, compaction and pin-aware retention.
 - Fault-injected `xWrite` / `xSync`, crash-boundary and multiple-process CI.

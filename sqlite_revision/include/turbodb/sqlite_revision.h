@@ -11,6 +11,8 @@ extern "C" {
 #define TURBODB_REVISION_OPEN_CREATE UINT32_C(1)
 #define TURBODB_REVISION_OPEN_READ_ONLY UINT32_C(2)
 #define TURBODB_REVISION_OPEN_WAL UINT32_C(4)
+/* Explicit v2 FTS5 text projection; v1->v2 migration requires CREATE. */
+#define TURBODB_REVISION_OPEN_FTS5 UINT32_C(8)
 #define TURBODB_REVISION_EXPECT_ABSENT UINT64_C(0)
 #define TURBODB_REVISION_EXPECT_ANY UINT64_MAX
 
@@ -121,6 +123,22 @@ turbodb_status_t turbodb_revision_scan_next(
     turbodb_revision_scan_t *scan, turbodb_blob_t *out_key,
     turbodb_revision_value_t **out_value, turbodb_error_t *error);
 void turbodb_revision_scan_close(turbodb_revision_scan_t *scan);
+
+/* A typed full-text projection on a value added by write_put() to the SAME
+ * revision batch. No model-provided SQL/DDL, no hidden LIKE fallback.
+ * Abort the entire batch after an error; all FTS rows are transaction-bound. */
+turbodb_status_t turbodb_revision_write_project_text(
+    turbodb_revision_write_t *write, turbodb_string_view_t ns,
+    turbodb_blob_t key, turbodb_string_view_t text, turbodb_error_t *error);
+
+/* A revision-scoped FTS5 MATCH result reuses scan_next()/scan_close(),
+ * including bounded rows/bytes/VM steps, a borrowed binary key and an
+ * independently owned version payload. Prefix/FTS cursors are exclusive
+ * within one parent read transaction. */
+turbodb_status_t turbodb_revision_read_search_text(
+    turbodb_revision_read_t *read, turbodb_string_view_t ns,
+    turbodb_string_view_t query, const turbodb_revision_scan_config_t *config,
+    turbodb_revision_scan_t **out_scan, turbodb_error_t *error);
 
 /* A successful get returns independently owned bytes, even for an empty blob.
  * Tombstones are represented by is_deleted=1, bytes=NULL, length=0. */

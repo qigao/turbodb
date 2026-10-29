@@ -85,6 +85,41 @@ int main(int argc, char **argv) {
   if (sequence != 1) return 6;
   CHECK(turbodb_revision_db_close(db, &err));
   db = NULL;
+
+  /* M1b: installed SDK must export the explicit FTS5 projection functions,
+   * not merely the M0/M1a revision and prefix symbols. */
+  (void)remove(path);
+  cfg.flags = TURBODB_REVISION_OPEN_CREATE | TURBODB_REVISION_OPEN_FTS5;
+  CHECK(turbodb_revision_db_open(&cfg, &db, &err));
+  CHECK(turbodb_revision_begin_write(db, blob_view("fts-sdk-1", 9), &write, &err));
+  CHECK(turbodb_revision_write_put(write, turbodb_view("sdk"),
+                                   blob_view("file", 4),
+                                   blob_view("payload", 7),
+                                   TURBODB_REVISION_EXPECT_ABSENT, &err));
+  CHECK(turbodb_revision_write_project_text(write, turbodb_view("sdk"),
+                                            blob_view("file",4),
+                                            turbodb_view("river forest"), &err));
+  CHECK(turbodb_revision_write_publish(write, &sequence, &err));
+  write = NULL;
+  CHECK(turbodb_revision_begin_read(db, sequence, &read, &err));
+  turbodb_revision_scan_config_init(&scan_cfg);
+  CHECK(turbodb_revision_read_search_text(read, turbodb_view("sdk"),
+                                          turbodb_view("river"),
+                                          &scan_cfg, &scan, &err));
+  CHECK(turbodb_revision_scan_next(scan, &matched_key, &value, &err));
+  bytes = turbodb_revision_value_bytes(value);
+  if (matched_key.size != 4 || memcmp(matched_key.data,"file",4) != 0 ||
+      bytes.size != 7 || memcmp(bytes.data,"payload",7) != 0) return 10;
+  turbodb_revision_value_destroy(value);
+  value = NULL;
+  if (turbodb_revision_scan_next(scan, &matched_key, &value, &err) !=
+      TURBODB_STATUS_NOT_FOUND) return 11;
+  turbodb_revision_scan_close(scan);
+  scan = NULL;
+  turbodb_revision_read_close(read);
+  read = NULL;
+  CHECK(turbodb_revision_db_close(db, &err));
+  db = NULL;
   (void)remove(path);
   (void)puts("Installed TurboDB::SqliteRevision C11 consumer PASS");
   return 0;

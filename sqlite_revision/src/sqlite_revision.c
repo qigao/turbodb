@@ -10,6 +10,8 @@
 
 #define REVISION_APPLICATION_ID 0x54445256 /* 'TDRV' */
 #define REVISION_SCHEMA_VERSION 1
+#define REVISION_FTS_SCHEMA_VERSION 2
+#define REVISION_MAX_FTS_QUERY 1024u
 #define REVISION_DEFAULT_MAX_DB (UINT64_C(256) * 1024 * 1024)
 #define REVISION_DEFAULT_MAX_VALUE (UINT64_C(16) * 1024 * 1024)
 #define REVISION_DEFAULT_MAX_BATCH_BYTES (UINT64_C(64) * 1024 * 1024)
@@ -37,6 +39,21 @@
   "FOREIGN KEY(commit_seq) REFERENCES revision_commits(commit_seq)) WITHOUT ROWID"
 #define REVISION_INDEX_DDL \
   "CREATE INDEX revision_changes_by_commit ON revision_values(commit_seq,namespace,item_key)"
+#define REVISION_SEARCH_DOC_DDL \
+  "CREATE TABLE revision_search_documents(" \
+  "rowid INTEGER PRIMARY KEY, namespace TEXT NOT NULL, item_key BLOB NOT NULL," \
+  "commit_seq INTEGER NOT NULL, body TEXT NOT NULL," \
+  "UNIQUE(namespace,item_key,commit_seq)," \
+  "FOREIGN KEY(namespace,item_key,commit_seq)" \
+  " REFERENCES revision_values(namespace,item_key,commit_seq))"
+#define REVISION_FTS_DDL \
+  "CREATE VIRTUAL TABLE revision_search_fts USING fts5(" \
+  "body,content='revision_search_documents',content_rowid='rowid')"
+#define REVISION_CORE_DDL \
+  REVISION_COMMITS_DDL ";" REVISION_VALUES_DDL ";" \
+  REVISION_HEADS_DDL ";" REVISION_INDEX_DDL ";"
+#define REVISION_FTS_EXTENSION_DDL \
+  REVISION_SEARCH_DOC_DDL ";" REVISION_FTS_DDL ";"
 
 struct turbodb_revision_db_s {
   sqlite3 *sql;
@@ -49,6 +66,7 @@ struct turbodb_revision_db_s {
   size_t active_reads;
   int active_write;
   int quarantined;
+  int fts_enabled;
 };
 struct turbodb_revision_read_s {
   turbodb_revision_db_t *owner;
@@ -382,6 +400,56 @@ void turbodb_revision_scan_close(turbodb_revision_scan_t *scan) {
   free(scan);
 }
 
+/* Compare the whole canonical schema, including SQLite-created FTS5 shadow
+ * objects, against a fresh in-memory clone using the same SQLite library.
+ * No model-supplied schema or SQL enters this storage owner. */
+static turbodb_status_t verify_fts_schema(sqlite3 *db, turbodb_error_t *error) {
+  sqlite3 *expected = NULL;
+  sqlite3_stmt *wanted = NULL, *actual = NULL;
+  turbodb_status_t status = TURBODB_STATUS_OK;
+  int rc = sqlite3_open_v2(":memory:", &expected,
+              SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL);
+  if (rc != SQLITE_OK) {
+    status = fail_sql(expected, rc, error);
+    goto done;
+  }
+  status = execute(expected, REVISION_CORE_DDL REVISION_FTS_EXTENSION_DDL, error);
+  if (status != TURBODB_STATUS_OK) goto done;
+  const char *query =
+      "SELECT name,type,sql FROM sqlite_master "
+      "WHERE substr(name,1,7)!='sqlite_' ORDER BY name";
+  status = prepare(expected, query, &wanted, error);
+  if (status != TURBODB_STATUS_OK) goto done;
+  status = prepare(db, query, &actual, error);
+  if (status != TURBODB_STATUS_OK) goto done;
+  for (uint32_t count = 0; count < 32; ++count) {
+    const int wa = sqlite3_step(wanted), ac = sqlite3_step(actual);
+    if (wa == SQLITE_DONE && ac == SQLITE_DONE) goto done;
+    if (wa != SQLITE_ROW || ac != SQLITE_ROW) {
+      status = result(error, wa == SQLITE_DONE || ac == SQLITE_DONE ?
+                            TURBODB_STATUS_UNSUPPORTED : TURBODB_STATUS_DATASTORE_ERROR,
+                      "unexpected revision projection schema objects");
+      goto done;
+    }
+    for (int col = 0; col < 3; ++col) {
+      const char *lhs = (const char *)sqlite3_column_text(wanted,col);
+      const char *rhs = (const char *)sqlite3_column_text(actual,col);
+      if (!lhs || !rhs || strcmp(lhs,rhs)) {
+        status = result(error, TURBODB_STATUS_UNSUPPORTED,
+                        "revision projection schema does not match canonical v2");
+        goto done;
+      }
+    }
+  }
+  status = result(error, TURBODB_STATUS_LIMIT_EXCEEDED,
+                  "revision projection schema object budget exceeded");
+done:
+  if (wanted) (void)sqlite3_finalize(wanted);
+  if (actual) (void)sqlite3_finalize(actual);
+  if (expected) (void)sqlite3_close(expected);
+  return status;
+}
+
 void turbodb_revision_open_config_init(turbodb_revision_open_config_t *config) {
   if (!config) return;
   memset(config, 0, sizeof(*config));
@@ -410,7 +478,8 @@ turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *
       cfg->busy_timeout_ms > INT_MAX ||
       (cfg->flags & ~(TURBODB_REVISION_OPEN_CREATE |
                       TURBODB_REVISION_OPEN_READ_ONLY |
-                      TURBODB_REVISION_OPEN_WAL)) != 0 ||
+                      TURBODB_REVISION_OPEN_WAL |
+                      TURBODB_REVISION_OPEN_FTS5)) != 0 ||
       ((cfg->flags & TURBODB_REVISION_OPEN_CREATE) &&
        (cfg->flags & TURBODB_REVISION_OPEN_READ_ONLY)) ||
       (cfg->path.len == 8 && memcmp(cfg->path.data, ":memory:", 8) == 0) ||
@@ -448,9 +517,19 @@ turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *
   if (status != TURBODB_STATUS_OK) goto fail;
   const int is_new = app_id == 0 && version == 0 && objects == 0 &&
                      (cfg->flags & TURBODB_REVISION_OPEN_CREATE);
-  if (!is_new && (app_id != REVISION_APPLICATION_ID || version != REVISION_SCHEMA_VERSION)) {
+  const int want_fts = (cfg->flags & TURBODB_REVISION_OPEN_FTS5) != 0;
+  if (!is_new && (app_id != REVISION_APPLICATION_ID ||
+      (version != REVISION_SCHEMA_VERSION && version != REVISION_FTS_SCHEMA_VERSION))) {
     status = result(error, TURBODB_STATUS_UNSUPPORTED, "foreign or unsupported SQLite schema");
     goto fail;
+  }
+  if (!is_new && ((version == REVISION_FTS_SCHEMA_VERSION) != want_fts)) {
+    if (!(version == REVISION_SCHEMA_VERSION && want_fts && !readonly &&
+          (cfg->flags & TURBODB_REVISION_OPEN_CREATE))) {
+      status = result(error, TURBODB_STATUS_UNSUPPORTED,
+                      "explicit FTS5 profile and migration admission required");
+      goto fail;
+    }
   }
   if (readonly && is_new) {
     status = result(error, TURBODB_STATUS_UNSUPPORTED, "read-only cannot initialize schema");
@@ -474,22 +553,41 @@ turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *
     if (status != TURBODB_STATUS_OK) goto fail;
   }
   if (is_new) {
-    status = execute(db->sql,
-      "BEGIN IMMEDIATE;"
-      REVISION_COMMITS_DDL ";"
-      REVISION_VALUES_DDL ";"
-      REVISION_HEADS_DDL ";"
-      REVISION_INDEX_DDL ";"
-      "PRAGMA application_id=1413763670;" /* 0x54445256 */
-      "PRAGMA user_version=1;"
-      "COMMIT;", error);
+    status = execute(db->sql, "BEGIN IMMEDIATE;" REVISION_CORE_DDL, error);
+    if (status == TURBODB_STATUS_OK && want_fts)
+      status = execute(db->sql, REVISION_FTS_EXTENSION_DDL, error);
+    if (status == TURBODB_STATUS_OK)
+      status = execute(db->sql,
+            want_fts ? "PRAGMA application_id=1413763670;PRAGMA user_version=2;" :
+                       "PRAGMA application_id=1413763670;PRAGMA user_version=1;", error);
+    if (status == TURBODB_STATUS_OK)
+      status = execute(db->sql, "COMMIT", error);
     if (status != TURBODB_STATUS_OK) {
       (void)sqlite3_exec(db->sql, "ROLLBACK", NULL, NULL, NULL);
       goto fail;
     }
+    version = want_fts ? REVISION_FTS_SCHEMA_VERSION : REVISION_SCHEMA_VERSION;
+  } else if (version == REVISION_SCHEMA_VERSION && want_fts) {
+    /* Upgrade is explicit, atomic and retains all v1 historical rows. */
+    status = verify_schema(db->sql, error);
+    if (status != TURBODB_STATUS_OK) goto fail;
+    status = execute(db->sql, "BEGIN IMMEDIATE", error);
+    if (status != TURBODB_STATUS_OK) goto fail;
+    status = execute(db->sql, REVISION_FTS_EXTENSION_DDL
+                                    "PRAGMA user_version=2;", error);
+    if (status == TURBODB_STATUS_OK)
+      status = verify_fts_schema(db->sql, error);
+    if (status == TURBODB_STATUS_OK)
+      status = execute(db->sql, "COMMIT", error);
+    if (status != TURBODB_STATUS_OK) {
+      (void)sqlite3_exec(db->sql, "ROLLBACK", NULL, NULL, NULL);
+      goto fail;
+    }
+    version = REVISION_FTS_SCHEMA_VERSION;
   }
-  status = verify_schema(db->sql, error);
+  status = want_fts ? verify_fts_schema(db->sql,error) : verify_schema(db->sql,error);
   if (status != TURBODB_STATUS_OK) goto fail;
+  db->fts_enabled = want_fts;
   if (!readonly) {
     sqlite3_int64 page_size = 0, page_count = 0;
     status = pragma_integer(db->sql, "PRAGMA page_size", &page_size, error);
@@ -838,6 +936,144 @@ void turbodb_revision_write_abort(turbodb_revision_write_t *write) {
   (void)sqlite3_exec(db->sql, "ROLLBACK", NULL, NULL, NULL);
   db->active_write = 0;
   free(write);
+}
+
+/* Trusted, typed text projection for an immutable value staged in this
+ * transaction. Graph edges and generation markers are ordinary revision keys:
+ * a single SQLite COMMIT therefore publishes all three atomically. */
+turbodb_status_t turbodb_revision_write_project_text(
+    turbodb_revision_write_t *write, turbodb_string_view_t ns,
+    turbodb_blob_t key, turbodb_string_view_t body, turbodb_error_t *error) {
+  if (!write) return result(error, TURBODB_STATUS_INVALID_ARGUMENT,
+                            "null projection transaction");
+  turbodb_revision_db_t *db = write->owner;
+  if (write->poisoned) return result(error, TURBODB_STATUS_INVALID_STATE,
+                                     "abort failed revision write");
+  if (!db->fts_enabled || !is_view(ns,REVISION_MAX_NAMESPACE) ||
+      !is_blob(key,REVISION_MAX_KEY) ||
+      !body.data || body.len == 0 || body.len > db->max_value_bytes ||
+      body.len > INT_MAX || memchr(body.data,0,body.len)) {
+    write->poisoned = 1;
+    return result(error, TURBODB_STATUS_INVALID_ARGUMENT,
+                  "invalid FTS5 projection input/profile");
+  }
+  const uint64_t needed=(uint64_t)ns.len + key.size + body.len;
+  if (write->operations >= db->max_batch_operations ||
+      needed > db->max_batch_bytes - write->used_bytes) {
+    write->poisoned = 1;
+    return result(error, TURBODB_STATUS_LIMIT_EXCEEDED,
+                  "revision projection budget exceeded");
+  }
+  turbodb_status_t status;
+  sqlite3_stmt *stmt = NULL;
+  int rc;
+  status = prepare(db->sql,
+       "SELECT is_deleted FROM revision_values WHERE namespace=?1 "
+       "AND item_key=?2 AND commit_seq=?3", &stmt, error);
+  if (status != TURBODB_STATUS_OK) goto fail;
+  rc=bind_text(stmt,1,ns);
+  if (rc==SQLITE_OK) rc=bind_blob(stmt,2,key);
+  if (rc==SQLITE_OK) rc=sqlite3_bind_int64(stmt,3,(sqlite3_int64)write->sequence);
+  if (rc!=SQLITE_OK) {status=fail_sql(db->sql,rc,error);goto fail;}
+  rc=sqlite3_step(stmt);
+  if (rc!=SQLITE_ROW || sqlite3_column_int(stmt,0)!=0) {
+    status=rc==SQLITE_DONE || rc==SQLITE_ROW ?
+      result(error,TURBODB_STATUS_CONSTRAINT,
+             "projection requires an undeleted value in this commit") :
+      fail_sql(db->sql,rc,error);
+    goto fail;
+  }
+  rc=sqlite3_finalize(stmt);stmt=NULL;
+  if (rc!=SQLITE_OK) {status=fail_sql(db->sql,rc,error);goto fail;}
+  status=prepare(db->sql,
+       "INSERT INTO revision_search_documents(namespace,item_key,commit_seq,body) "
+       "VALUES(?1,?2,?3,?4)", &stmt,error);
+  if (status!=TURBODB_STATUS_OK) goto fail;
+  rc=bind_text(stmt,1,ns);
+  if (rc==SQLITE_OK) rc=bind_blob(stmt,2,key);
+  if (rc==SQLITE_OK) rc=sqlite3_bind_int64(stmt,3,(sqlite3_int64)write->sequence);
+  if (rc==SQLITE_OK) rc=bind_text(stmt,4,body);
+  if (rc==SQLITE_OK) rc=sqlite3_step(stmt);
+  if (rc!=SQLITE_DONE) {status=fail_sql(db->sql,rc,error);goto fail;}
+  rc=sqlite3_finalize(stmt);stmt=NULL;
+  if (rc!=SQLITE_OK) {status=fail_sql(db->sql,rc,error);goto fail;}
+  const sqlite3_int64 rowid=sqlite3_last_insert_rowid(db->sql);
+  if (rowid<=0) {
+    status=result(error,TURBODB_STATUS_DATASTORE_ERROR,"invalid FTS row ID");
+    goto fail;
+  }
+  status=prepare(db->sql,
+        "INSERT INTO revision_search_fts(rowid,body) VALUES(?1,?2)",
+        &stmt,error);
+  if (status!=TURBODB_STATUS_OK) goto fail;
+  rc=sqlite3_bind_int64(stmt,1,rowid);
+  if (rc==SQLITE_OK) rc=bind_text(stmt,2,body);
+  if (rc==SQLITE_OK) rc=sqlite3_step(stmt);
+  if (rc!=SQLITE_DONE) {status=fail_sql(db->sql,rc,error);goto fail;}
+  rc=sqlite3_finalize(stmt);stmt=NULL;
+  if (rc!=SQLITE_OK) {status=fail_sql(db->sql,rc,error);goto fail;}
+  write->used_bytes+=needed;
+  write->operations++;
+  return result(error,TURBODB_STATUS_OK,NULL);
+fail:
+  if (stmt) (void)sqlite3_finalize(stmt);
+  write->poisoned=1;
+  return status;
+}
+
+/* FTS5 MATCH candidates are rejoined to the exact immutable revision
+ * selected by the parent's as_of_seq. No LIKE fallback or global rank
+ * leakage; return binary keys and owned values through scan_next(). */
+turbodb_status_t turbodb_revision_read_search_text(
+    turbodb_revision_read_t *read, turbodb_string_view_t ns,
+    turbodb_string_view_t query, const turbodb_revision_scan_config_t *cfg,
+    turbodb_revision_scan_t **out_scan, turbodb_error_t *error) {
+  if (out_scan) *out_scan=NULL;
+  if (!read || !out_scan || !cfg ||
+      cfg->struct_size != sizeof(*cfg) ||
+      cfg->abi_version != TURBODB_REVISION_SCAN_ABI_VERSION ||
+      !read->owner->fts_enabled ||
+      !is_view(ns,REVISION_MAX_NAMESPACE) ||
+      !is_view(query,REVISION_MAX_FTS_QUERY) ||
+      cfg->max_items==0 || cfg->max_items>REVISION_SCAN_MAX_ITEMS ||
+      cfg->max_result_bytes==0 || cfg->max_result_bytes>REVISION_SCAN_MAX_BYTES ||
+      cfg->max_vm_steps<100 || cfg->max_vm_steps>REVISION_SCAN_MAX_VM_STEPS)
+    return result(error,TURBODB_STATUS_INVALID_ARGUMENT,
+                  "invalid FTS search config/profile");
+  if (read->scan)
+    return result(error,TURBODB_STATUS_BUSY,"close active cursor before FTS query");
+  turbodb_revision_scan_t *scan=calloc(1,sizeof(*scan));
+  if (!scan) return result(error,TURBODB_STATUS_OUT_OF_MEMORY,"allocate FTS cursor");
+  scan->read=read;
+  scan->max_items=cfg->max_items;
+  scan->max_bytes=cfg->max_result_bytes;
+  scan->vm_steps_left=cfg->max_vm_steps;
+  turbodb_status_t status=prepare(read->sql,
+    "SELECT v.item_key,v.commit_seq,v.is_deleted,v.payload "
+    "FROM revision_search_fts "
+    "JOIN revision_search_documents AS d ON d.rowid=revision_search_fts.rowid "
+    "JOIN revision_values AS v ON v.namespace=d.namespace AND "
+    "v.item_key=d.item_key AND v.commit_seq=d.commit_seq "
+    "WHERE revision_search_fts MATCH ?1 AND d.namespace=?2 "
+    "AND d.commit_seq<=?3 AND d.commit_seq=("
+    "SELECT MAX(h.commit_seq) FROM revision_values AS h "
+    "WHERE h.namespace=d.namespace AND h.item_key=d.item_key "
+    "AND h.commit_seq<=?3) ORDER BY v.item_key",
+    &scan->stmt,error);
+  if (status!=TURBODB_STATUS_OK) {free(scan);return status;}
+  int rc=bind_text(scan->stmt,1,query);
+  if (rc==SQLITE_OK) rc=bind_text(scan->stmt,2,ns);
+  if (rc==SQLITE_OK) rc=sqlite3_bind_int64(scan->stmt,3,(sqlite3_int64)read->sequence);
+  if (rc!=SQLITE_OK) {
+    status=fail_sql(read->sql,rc,error);
+    (void)sqlite3_finalize(scan->stmt);
+    free(scan);
+    return status;
+  }
+  read->scan=scan;
+  sqlite3_progress_handler(read->sql,100,revision_scan_progress,scan);
+  *out_scan=scan;
+  return result(error,TURBODB_STATUS_OK,NULL);
 }
 
 turbodb_status_t turbodb_revision_inspect_request(turbodb_revision_db_t *db,

@@ -34,4 +34,11 @@ if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
     COMMAND turbodb_sqlite_revision_prefix_test
       "${CMAKE_CURRENT_BINARY_DIR}/revision-prefix-test.db")
   set_tests_properties(turbodb-sqlite-revision-prefix PROPERTIES TIMEOUT 20)
+  add_executable(turbodb_sqlite_revision_projection_test tests/sqlite_revision_projection_test.c)
+  target_link_libraries(turbodb_sqlite_revision_projection_test
+    PRIVATE TurboDB::SqliteRevision SQLite::SQLite3)
+  add_test(NAME turbodb-sqlite-revision-projection
+    COMMAND turbodb_sqlite_revision_projection_test
+            "${CMAKE_CURRENT_BINARY_DIR}/revision-projection-test.db")
+  set_tests_properties(turbodb-sqlite-revision-projection PROPERTIES TIMEOUT 20)
 endif()
