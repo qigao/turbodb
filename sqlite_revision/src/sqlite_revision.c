@@ -518,6 +518,11 @@ turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *
   const int is_new = app_id == 0 && version == 0 && objects == 0 &&
                      (cfg->flags & TURBODB_REVISION_OPEN_CREATE);
   const int want_fts = (cfg->flags & TURBODB_REVISION_OPEN_FTS5) != 0;
+  if (want_fts && sqlite3_compileoption_used("ENABLE_FTS5") == 0) {
+    status = result(error, TURBODB_STATUS_UNSUPPORTED,
+                    "Revision SQLite v2 requires SQLite compiled with FTS5");
+    goto fail;
+  }
   if (!is_new && (app_id != REVISION_APPLICATION_ID ||
       (version != REVISION_SCHEMA_VERSION && version != REVISION_FTS_SCHEMA_VERSION))) {
     status = result(error, TURBODB_STATUS_UNSUPPORTED, "foreign or unsupported SQLite schema");

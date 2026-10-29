@@ -36,6 +36,11 @@ if(TURBODB_BUILD_ORM OR TURBODB_BUILD_SQLITE_REVISION OR
    (TURBODB_BUILD_SQLPARSER AND BUILD_TESTS))
   list(APPEND VCPKG_MANIFEST_FEATURES sqlite)
 endif()
+if(TURBODB_BUILD_SQLITE_REVISION)
+  # V2 text projection is an explicit mandatory capability. vcpkg-cache
+  # selects the sqlite3[fts5] binary/source ABI, not system SQLite fallback.
+  list(APPEND VCPKG_MANIFEST_FEATURES sqlite-fts5)
+endif()
 if(TURBODB_BUILD_ORM OR
    (TURBODB_BUILD_DBTOOLS AND (BUILD_TESTS OR BUILD_E2E_TESTS)))
   list(APPEND VCPKG_MANIFEST_FEATURES postgresql)

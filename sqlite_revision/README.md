@@ -85,6 +85,10 @@ parser, or dynamic model-provided schema is exposed to the Agent.
 - Graph/FTS queries in a multi-tenant deployment still require Host authority
   filtering, audit and end-to-end data isolation; namespace is a trusted
   storage scope, not an authorization service.
+- Building `TurboDB::SqliteRevision` now selects the `sqlite-fts5` manifest
+  feature to request `sqlite3[fts5]` from vcpkg-cache. Runtime admission
+  checks `SQLITE_ENABLE_FTS5` explicitly: unsupported SQLite returns
+  `TURBODB_STATUS_UNSUPPORTED`; no fallback to LIKE or another provider.
 - Existing v1 retained values are **not** silently retroactively FTS-indexed.
   Re-extraction/reindex must be an explicit Agent operation with a new revision.
 - M1b is not a complete TurboAgent migration; it does not provide vector/HNSW,
