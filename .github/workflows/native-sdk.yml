@@ -148,6 +148,59 @@ jobs:
         run: |
           cmake --build --preset install-ci-windows-release --parallel 4
           if errorlevel 1 exit /b 1
+      - name: Qualify installed Revisioned SQLite C11 consumer
+        if: matrix.rid != 'android-arm64-v8a'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cacheFile = Join-Path $env:GITHUB_WORKSPACE 'build/${{ matrix.preset }}/CMakeCache.txt'
+          $cache = @{}
+          foreach ($line in Get-Content -LiteralPath $cacheFile) {
+            if ($line -match '^([A-Za-z0-9_]+):[^=]+=(.*)$') {
+              $cache[$matches[1]] = $matches[2]
+            }
+          }
+          foreach ($required in @('CMAKE_INSTALL_PREFIX','CMAKE_TOOLCHAIN_FILE',
+                                  'VCPKG_TARGET_TRIPLET','VCPKG_INSTALLED_DIR')) {
+            if ([string]::IsNullOrWhiteSpace($cache[$required])) {
+              throw "Revision SDK consumer missing CMake cache value: $required"
+            }
+          }
+          $prefix = $cache['CMAKE_INSTALL_PREFIX']
+          $triplet = $cache['VCPKG_TARGET_TRIPLET']
+          $installedDir = $cache['VCPKG_INSTALLED_DIR']
+          $sdkConfigDir = Join-Path $prefix 'lib/cmake/TurboDB'
+          if (-not (Test-Path -LiteralPath $sdkConfigDir)) {
+            throw "TurboDB installed config missing: $sdkConfigDir"
+          }
+          $source = Join-Path $env:GITHUB_WORKSPACE 'sqlite_revision/tests/installed'
+          $build = Join-Path $env:RUNNER_TEMP 'revision-installed-consumer'
+          & cmake -S $source -B $build -G Ninja `
+            '-DCMAKE_BUILD_TYPE=Release' `
+            "-DCMAKE_TOOLCHAIN_FILE=$($cache['CMAKE_TOOLCHAIN_FILE'])" `
+            "-DVCPKG_TARGET_TRIPLET=$triplet" `
+            "-DVCPKG_INSTALLED_DIR=$installedDir" `
+            "-DCMAKE_PREFIX_PATH=$prefix" `
+            "-DTurboDB_DIR=$sdkConfigDir"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Revision C11 configure failed' }
+          & cmake --build $build --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Revision C11 link failed' }
+          if ($IsWindows) {
+            $env:PATH = (Join-Path $installedDir "$triplet/bin") + ';' +
+              (Join-Path $env:SALTS_ROOT 'bin') + ';' + $env:PATH
+            $exe = Join-Path $build 'turbodb_revision_installed_consumer.exe'
+          } else {
+            $libs = (Join-Path $installedDir "$triplet/lib") + ':' +
+              (Join-Path $env:SALTS_ROOT 'lib')
+            if ($IsMacOS) {
+              $env:DYLD_LIBRARY_PATH = $libs + ':' + $env:DYLD_LIBRARY_PATH
+            } else {
+              $env:LD_LIBRARY_PATH = $libs + ':' + $env:LD_LIBRARY_PATH
+            }
+            $exe = Join-Path $build 'turbodb_revision_installed_consumer'
+          }
+          & $exe (Join-Path $env:RUNNER_TEMP 'revision-installed-consumer.db')
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Revision C11 runtime contract failed' }
       - name: Stage native SDK
         shell: pwsh
         run: >-
