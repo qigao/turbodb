@@ -46,6 +46,8 @@ enum {
   /* Final native cleanup failed. The owner is quarantined; this is not a
    * retryable close result and resources may remain pinned until process exit. */
   TURBODB_STATUS_CLEANUP_FAILED = 17,
+  /* Bounded revision catalog key/request does not exist; distinct from SQL failure. */
+  TURBODB_STATUS_NOT_FOUND = 18,
 };
 
 typedef int32_t turbodb_value_kind_t;

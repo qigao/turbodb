@@ -6,6 +6,7 @@ option(BUILD_TESTS "Build test suite" ON)
 option(BUILD_E2E_TESTS "Build end-to-end tests against external databases" OFF)
 
 option(TURBODB_BUILD_ORM "Build ORM libraries and database drivers" OFF)
+option(TURBODB_BUILD_SQLITE_REVISION "Build C11 revision-aware SQLite storage" OFF)
 option(TURBODB_BUILD_REDIS "Build the standalone Redis client" ON)
 option(TURBODB_BUILD_DBTOOLS "Build standalone database tools" ON)
 option(TURBODB_BUILD_SQLPARSER "Build the standalone re2c/Lemon SQL parser" ON)
@@ -30,7 +31,7 @@ set(VCPKG_MANIFEST_FEATURES "")
 if(TURBODB_BUILD_ORM OR TURBODB_BUILD_DBTOOLS OR TURBODB_BUILD_TIDESSQL_SERVER)
   list(APPEND VCPKG_MANIFEST_FEATURES salts-utils)
 endif()
-if(TURBODB_BUILD_ORM OR
+if(TURBODB_BUILD_ORM OR TURBODB_BUILD_SQLITE_REVISION OR
    (TURBODB_BUILD_DBTOOLS AND (BUILD_TESTS OR BUILD_E2E_TESTS)) OR
    (TURBODB_BUILD_SQLPARSER AND BUILD_TESTS))
   list(APPEND VCPKG_MANIFEST_FEATURES sqlite)

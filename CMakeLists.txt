@@ -102,6 +102,10 @@ endif()
 
 include(FindTools)
 
+if(TURBODB_BUILD_SQLITE_REVISION)
+  add_subdirectory(sqlite_revision)
+endif()
+
 if(TURBODB_BUILD_SQLPARSER)
   add_subdirectory(sqlparser)
 endif()
@@ -144,7 +148,7 @@ if(WIN32)
   include(TurboDBRuntime)
 endif()
 
-if(TURBODB_BUILD_ORM OR TURBODB_BUILD_REDIS OR TURBODB_BUILD_DBTOOLS OR
+if(TURBODB_BUILD_ORM OR TURBODB_BUILD_SQLITE_REVISION OR TURBODB_BUILD_REDIS OR TURBODB_BUILD_DBTOOLS OR
    TURBODB_BUILD_SQLPARSER OR TURBODB_BUILD_TIDESSQL_SERVER)
   include(CMakePackageConfigHelpers)
   configure_package_config_file(
