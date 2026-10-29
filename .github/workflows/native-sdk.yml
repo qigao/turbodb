@@ -85,11 +85,12 @@ jobs:
         run: |
           set -euo pipefail
           if [[ '${{ matrix.rid }}' == android-arm64-v8a ]]; then
-            cmake --preset '${{ matrix.preset }}' -DTURBODB_BUILD_SQLITE_REVISION=ON \
+            cmake --preset '${{ matrix.preset }}' \
               -DLEMON_EXECUTABLE="$TURBODB_HOST_LEMON" \
               -DTURBODB_BUILD_SQLITE_REVISION=ON
           else
-            cmake --preset '${{ matrix.preset }}'
+            cmake --preset '${{ matrix.preset }}' \
+              -DTURBODB_BUILD_SQLITE_REVISION=ON
           fi
       - name: Configure on Windows
         if: runner.os == 'Windows'
