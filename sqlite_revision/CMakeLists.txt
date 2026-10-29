@@ -20,4 +20,11 @@ if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
     COMMAND turbodb_sqlite_revision_native_test
             "${CMAKE_CURRENT_BINARY_DIR}/revision-native-test.db")
   set_tests_properties(turbodb-sqlite-revision-native PROPERTIES TIMEOUT 20)
+  add_executable(turbodb_sqlite_revision_fault_test tests/sqlite_revision_fault_test.c)
+  target_link_libraries(turbodb_sqlite_revision_fault_test
+    PRIVATE TurboDB::SqliteRevision SQLite::SQLite3)
+  add_test(NAME turbodb-sqlite-revision-fault-vfs
+    COMMAND turbodb_sqlite_revision_fault_test
+      "${CMAKE_CURRENT_BINARY_DIR}/revision-fault-test.db")
+  set_tests_properties(turbodb-sqlite-revision-fault-vfs PROPERTIES TIMEOUT 20)
 endif()
