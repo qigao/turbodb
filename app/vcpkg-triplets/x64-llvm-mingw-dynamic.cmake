@@ -6,3 +6,8 @@ set(VCPKG_LIBRARY_LINKAGE dynamic)
 set(VCPKG_CMAKE_SYSTEM_NAME MinGW)
 set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE
     "${CMAKE_CURRENT_LIST_DIR}/../cmake/llvm-mingw-windows.cmake")
+
+# vcpkg isolates port/compiler-detection environments. This exact compiler
+# root must cross that boundary as a tracked input, otherwise the chainload
+# toolchain fails before any Studio or editor source can be compiled.
+set(VCPKG_ENV_PASSTHROUGH TURBODB_LLVM_MINGW_BIN)
