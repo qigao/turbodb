@@ -64,6 +64,13 @@ the exact un-deleted `(namespace, binary-key, commit_seq)` created by
 tokens, Graph-style edge keys and a Generation Head are published together by
 the existing `turbodb_revision_write_publish` commit and request_id.
 
+`turbodb_revision_read_search_text` now takes a nonempty **authorized binary key prefix**
+together with the namespace, and applies a lexicographic key range in SQL
+before returning hits. Prefix end bounds use the same binary successor
+helper as M1a (NUL/0xff safe). It is still a storage filter: only the Host
+can authorize the selected tenant/source prefix. Arbitrary unscoped FTS5
+queries are rejected rather than widened or retried.
+
 `turbodb_revision_read_search_text` returns bounded candidates only when the
 FTS row is from the latest retained revision of that exact key *as of* the
 parent read's historical sequence; an earlier matching revision is never

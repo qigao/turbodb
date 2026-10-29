@@ -136,7 +136,7 @@ static int verify_projected_fault(const char *original) {
  turbodb_revision_value_destroy(value);value=NULL;
  turbodb_revision_scan_config_init(&scan_config);
  OP(turbodb_revision_read_search_text(read,turbodb_view("source"),
-       turbodb_view("sky"),&scan_config,&scan,&err),TURBODB_STATUS_OK);
+       blob("file",4),turbodb_view("sky"),&scan_config,&scan,&err),TURBODB_STATUS_OK);
  status=turbodb_revision_scan_next(scan,&key,&value,&err);
  CHECK(status==(committed?TURBODB_STATUS_OK:TURBODB_STATUS_NOT_FOUND));
  if(committed) {

@@ -248,6 +248,17 @@ static int revision_scan_progress(void *context) {
   return 0;
 }
 
+/* Exclusive byte-wise upper bound shared by prefix and lexical queries.
+ * All-0xff prefixes have no finite successor and use an open upper range. */
+static size_t revision_prefix_successor(turbodb_blob_t prefix,
+                                        unsigned char successor[REVISION_MAX_KEY]) {
+  memcpy(successor, prefix.data, prefix.size);
+  size_t upper_len = prefix.size;
+  while (upper_len && successor[upper_len - 1] == UINT8_MAX) upper_len--;
+  if (upper_len) successor[upper_len - 1]++;
+  return upper_len;
+}
+
 turbodb_status_t turbodb_revision_read_scan_prefix(
     turbodb_revision_read_t *read, turbodb_string_view_t ns,
     turbodb_blob_t key_prefix, const turbodb_revision_scan_config_t *cfg,
@@ -277,10 +288,7 @@ turbodb_status_t turbodb_revision_read_scan_prefix(
    * range, including embedded NUL. For an all-FF prefix no finite successor
    * exists; every key >= prefix shares that all-FF prefix. */
   unsigned char successor[REVISION_MAX_KEY];
-  memcpy(successor, key_prefix.data, key_prefix.size);
-  size_t upper_len = key_prefix.size;
-  while (upper_len && successor[upper_len - 1] == UINT8_MAX) upper_len--;
-  if (upper_len) successor[upper_len - 1]++;
+  size_t upper_len = revision_prefix_successor(key_prefix, successor);
 
   turbodb_status_t status = prepare(read->sql,
       "SELECT v.item_key,v.commit_seq,v.is_deleted,v.payload FROM revision_values AS v "
@@ -1031,7 +1039,8 @@ fail:
  * leakage; return binary keys and owned values through scan_next(). */
 turbodb_status_t turbodb_revision_read_search_text(
     turbodb_revision_read_t *read, turbodb_string_view_t ns,
-    turbodb_string_view_t query, const turbodb_revision_scan_config_t *cfg,
+    turbodb_blob_t authorized_prefix, turbodb_string_view_t query,
+    const turbodb_revision_scan_config_t *cfg,
     turbodb_revision_scan_t **out_scan, turbodb_error_t *error) {
   if (out_scan) *out_scan=NULL;
   if (!read || !out_scan || !cfg ||
@@ -1039,6 +1048,7 @@ turbodb_status_t turbodb_revision_read_search_text(
       cfg->abi_version != TURBODB_REVISION_SCAN_ABI_VERSION ||
       !read->owner->fts_enabled ||
       !is_view(ns,REVISION_MAX_NAMESPACE) ||
+      !is_blob(authorized_prefix,REVISION_MAX_KEY) ||
       !is_view(query,REVISION_MAX_FTS_QUERY) ||
       cfg->max_items==0 || cfg->max_items>REVISION_SCAN_MAX_ITEMS ||
       cfg->max_result_bytes==0 || cfg->max_result_bytes>REVISION_SCAN_MAX_BYTES ||
@@ -1060,7 +1070,8 @@ turbodb_status_t turbodb_revision_read_search_text(
     "JOIN revision_values AS v ON v.namespace=d.namespace AND "
     "v.item_key=d.item_key AND v.commit_seq=d.commit_seq "
     "WHERE revision_search_fts MATCH ?1 AND d.namespace=?2 "
-    "AND d.commit_seq<=?3 AND d.commit_seq=("
+    "AND d.commit_seq<=?3 AND d.item_key>=?4 "
+    "AND (?5 IS NULL OR d.item_key<?5) AND d.commit_seq=("
     "SELECT MAX(h.commit_seq) FROM revision_values AS h "
     "WHERE h.namespace=d.namespace AND h.item_key=d.item_key "
     "AND h.commit_seq<=?3) ORDER BY v.item_key",
@@ -1069,6 +1080,12 @@ turbodb_status_t turbodb_revision_read_search_text(
   int rc=bind_text(scan->stmt,1,query);
   if (rc==SQLITE_OK) rc=bind_text(scan->stmt,2,ns);
   if (rc==SQLITE_OK) rc=sqlite3_bind_int64(scan->stmt,3,(sqlite3_int64)read->sequence);
+  unsigned char successor[REVISION_MAX_KEY];
+  const size_t upper_len = revision_prefix_successor(authorized_prefix, successor);
+  if (rc==SQLITE_OK) rc=bind_blob(scan->stmt,4,authorized_prefix);
+  if (rc==SQLITE_OK) rc=upper_len ?
+      sqlite3_bind_blob(scan->stmt,5,successor,(int)upper_len,SQLITE_TRANSIENT) :
+      sqlite3_bind_null(scan->stmt,5);
   if (rc!=SQLITE_OK) {
     status=fail_sql(read->sql,rc,error);
     (void)sqlite3_finalize(scan->stmt);

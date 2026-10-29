@@ -104,6 +104,7 @@ int main(int argc, char **argv) {
   CHECK(turbodb_revision_begin_read(db, sequence, &read, &err));
   turbodb_revision_scan_config_init(&scan_cfg);
   CHECK(turbodb_revision_read_search_text(read, turbodb_view("sdk"),
+                                          blob_view("file", 4),
                                           turbodb_view("river"),
                                           &scan_cfg, &scan, &err));
   CHECK(turbodb_revision_scan_next(scan, &matched_key, &value, &err));

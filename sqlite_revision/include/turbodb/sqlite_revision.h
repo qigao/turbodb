@@ -131,13 +131,19 @@ turbodb_status_t turbodb_revision_write_project_text(
     turbodb_revision_write_t *write, turbodb_string_view_t ns,
     turbodb_blob_t key, turbodb_string_view_t text, turbodb_error_t *error);
 
-/* A revision-scoped FTS5 MATCH result reuses scan_next()/scan_close(),
- * including bounded rows/bytes/VM steps, a borrowed binary key and an
+/* A revision-scoped FTS5 MATCH result requires a **nonempty, host-selected
+ * binary key prefix** in addition to the namespace. Both filters are applied
+ * by SQLite before returning rows; unscoped text retrieval is unsupported.
+ * The prefix is a storage filter, NOT an authority grant. Host/Agent must
+ * authorize the requested scope independently. No automatic fallback.
+ * Reuses scan_next()/scan_close(), with bounded rows/bytes/VM steps,
+ * a borrowed binary key and an
  * independently owned version payload. Prefix/FTS cursors are exclusive
  * within one parent read transaction. */
 turbodb_status_t turbodb_revision_read_search_text(
     turbodb_revision_read_t *read, turbodb_string_view_t ns,
-    turbodb_string_view_t query, const turbodb_revision_scan_config_t *config,
+    turbodb_blob_t authorized_prefix, turbodb_string_view_t query,
+    const turbodb_revision_scan_config_t *config,
     turbodb_revision_scan_t **out_scan, turbodb_error_t *error);
 
 /* A successful get returns independently owned bytes, even for an empty blob.

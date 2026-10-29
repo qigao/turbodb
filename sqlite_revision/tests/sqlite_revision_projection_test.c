@@ -23,7 +23,8 @@ static int query(turbodb_revision_db_t *db, uint64_t at,
   turbodb_revision_value_t *val=NULL;
   turbodb_blob_t key={NULL,0};
   CALL(turbodb_revision_begin_read(db,at,&r,&err),TURBODB_STATUS_OK);
-  CALL(turbodb_revision_read_search_text(r,text(ns),text(term),&cfg,&scan,&err),
+  CALL(turbodb_revision_read_search_text(r,text(ns),
+       blob("file-",5),text(term),&cfg,&scan,&err),
        TURBODB_STATUS_OK);
   if (match) {
     CALL(turbodb_revision_scan_next(scan,&key,&val,&err),TURBODB_STATUS_OK);
@@ -80,6 +81,12 @@ static int run(const char *path) {
        TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_project_text(w,text("source"),blob("file-A"),
        text("fresh lake description"),&err),TURBODB_STATUS_OK);
+  /* Another matching document in the SAME namespace must not leak outside
+   * the authorized binary key prefix selected by the Host. */
+  CALL(turbodb_revision_write_put(w,text("source"),blob("other-Z"),blob("raw-other"),
+       TURBODB_REVISION_EXPECT_ABSENT,&err),TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_project_text(w,text("source"),blob("other-Z"),
+       text("fresh lake description"),&err),TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_put(w,text("graph"),blob("out/A:B"),blob("evidence-2"),
        TURBODB_REVISION_EXPECT_ABSENT,&err),TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_put(w,text("graph"),blob("in/B:A"),blob("evidence-2"),
@@ -89,6 +96,21 @@ static int run(const char *path) {
   CALL(turbodb_revision_write_publish(w,&seq,&err),TURBODB_STATUS_OK);w=NULL;
   CHECK(seq==2);
   CHECK(!query(db,2,"source","lake",1));
+  /* Scope/key prefix is a hard SQL filter, not a result post-filter. */
+  turbodb_revision_scan_config_init(&sc);
+  CALL(turbodb_revision_begin_read(db,2,&r,&err),TURBODB_STATUS_OK);
+  CALL(turbodb_revision_read_search_text(r,text("source"),
+       blob("other-"),text("lake"),&sc,&scan,&err),TURBODB_STATUS_OK);
+  CALL(turbodb_revision_scan_next(scan,&key,&val,&err),TURBODB_STATUS_OK);
+  CHECK(key.size==7 && memcmp(key.data,"other-Z",7)==0);
+  turbodb_revision_value_destroy(val);val=NULL;
+  CALL(turbodb_revision_scan_next(scan,&key,&val,&err),TURBODB_STATUS_NOT_FOUND);
+  turbodb_revision_scan_close(scan);scan=NULL;
+  CALL(turbodb_revision_read_search_text(r,text("source"),
+       (turbodb_blob_t){NULL,0},text("lake"),&sc,&scan,&err),
+       TURBODB_STATUS_INVALID_ARGUMENT);
+  CHECK(scan==NULL);
+  turbodb_revision_read_close(r);r=NULL;
   CHECK(!query(db,1,"source","lake",0));
   CHECK(!query(db,2,"graph","lake",0));
   turbodb_revision_scan_config_init(&sc);
