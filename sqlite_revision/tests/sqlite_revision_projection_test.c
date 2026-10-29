@@ -24,7 +24,7 @@ static int query(turbodb_revision_db_t *db, uint64_t at,
   turbodb_blob_t key={NULL,0};
   CALL(turbodb_revision_begin_read(db,at,&r,&err),TURBODB_STATUS_OK);
   CALL(turbodb_revision_read_search_text(r,text(ns),
-       blob("file-",5),text(term),&cfg,&scan,&err),
+       blob("file-"),text(term),&cfg,&scan,&err),
        TURBODB_STATUS_OK);
   if (match) {
     CALL(turbodb_revision_scan_next(scan,&key,&val,&err),TURBODB_STATUS_OK);
