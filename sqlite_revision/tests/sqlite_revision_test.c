@@ -270,11 +270,69 @@ static int verify_bounded_batch(const char *path) {
   return 0;
 }
 
+/* A DELETE-journal reader's SHARED lock makes COMMIT return SQLITE_BUSY.
+ * The outcome is known (no publication), not COMMIT_UNKNOWN. */
+static int verify_busy_commit_abort(const char *path) {
+  turbodb_revision_open_config_t cfg;
+  turbodb_revision_db_t *db = NULL;
+  turbodb_revision_write_t *write = NULL;
+  turbodb_revision_read_t *read = NULL;
+  turbodb_revision_value_t *value = NULL;
+  turbodb_error_t err;
+  uint64_t sequence = 0;
+  turbodb_error_init(&err);
+  turbodb_revision_open_config_init(&cfg);
+  cfg.path = turbodb_view(path);
+  cfg.flags = TURBODB_REVISION_OPEN_CREATE;
+  cfg.busy_timeout_ms = 10;
+  (void)remove(path);
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_begin_write(db, (turbodb_blob_t){"lock-1", 6},
+                                    &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_put(write, turbodb_view("ns"),
+       (turbodb_blob_t){"key", 3}, (turbodb_blob_t){"old", 3},
+       TURBODB_REVISION_EXPECT_ABSENT, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_publish(write, &sequence, &err), TURBODB_STATUS_OK);
+  write = NULL;
+  CHECK(sequence == 1);
+
+  CALL(turbodb_revision_begin_read(db, 0, &read, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_read_get(read, turbodb_view("ns"),
+       (turbodb_blob_t){"key", 3}, &value, &err), TURBODB_STATUS_OK);
+  CHECK(turbodb_revision_value_bytes(value).size == 3);
+  CHECK(memcmp(turbodb_revision_value_bytes(value).data, "old", 3) == 0);
+  turbodb_revision_value_destroy(value); value = NULL;
+
+  CALL(turbodb_revision_begin_write(db, (turbodb_blob_t){"lock-2", 6},
+                                    &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_put(write, turbodb_view("ns"),
+       (turbodb_blob_t){"key", 3}, (turbodb_blob_t){"new", 3},
+       1, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_publish(write, &sequence, &err),
+       TURBODB_STATUS_BUSY);
+  turbodb_revision_write_abort(write); write = NULL;
+  turbodb_revision_read_close(read); read = NULL;
+
+  CALL(turbodb_revision_inspect_request(db, (turbodb_blob_t){"lock-2", 6},
+       &sequence, &err), TURBODB_STATUS_NOT_FOUND);
+  CALL(turbodb_revision_begin_read(db, 0, &read, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_read_get(read, turbodb_view("ns"),
+       (turbodb_blob_t){"key", 3}, &value, &err), TURBODB_STATUS_OK);
+  CHECK(turbodb_revision_value_bytes(value).size == 3);
+  CHECK(memcmp(turbodb_revision_value_bytes(value).data, "old", 3) == 0);
+  turbodb_revision_value_destroy(value); value = NULL;
+  turbodb_revision_read_close(read); read = NULL;
+  CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_OK);
+  (void)remove(path);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   const char *path = argc > 1 ? argv[1] : "sqlite_revision_native_test.db";
   int rc = run(path);
   if (!rc) rc = verify_strict_schema_admission(path);
   if (!rc) rc = verify_bounded_batch(path);
+  if (!rc) rc = verify_busy_commit_abort(path);
   if (!rc) puts("SQLite revision native C11 contract PASS");
   return rc;
 }
