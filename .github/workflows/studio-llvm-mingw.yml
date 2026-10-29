@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: qigao/vcpkg-cache
-          ref: 984f550b7f3e8a37dc96c5cf909479bb3d68646a
+          ref: d356c7c6e14702440214e9505e6142d393c09acc
           path: tools/vcpkg-cache
           persist-credentials: false
       - uses: actions/setup-python@v5
