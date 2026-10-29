@@ -44,13 +44,24 @@ if(TURBODB_BUILD_APP)
   if(NOT EXISTS "${TURBODB_WTL_PORT_DIR}/portfile.cmake" OR
      NOT EXISTS "${TURBODB_WTL_PORT_DIR}/vcpkg.json")
     message(FATAL_ERROR
-      "Studio requires TURBODB_WTL_PORT_DIR pointing to pinned "
-      "qigao/vcpkg-cache@8359cdbd/ports/wtl; do not select another WTL source")
+      "Studio requires original wtl@10.0.10320#7 from qigao/vcpkg-cache; "
+      "do not select another WTL source")
+  endif()
+  # Keep the original zstd source/provider. This separate canonical port
+  # includes the CMake-4.4 C-only/llvm-mingw guard from vcpkg-cache PR #241;
+  # no source fork, flag-suppression workaround, or library replacement.
+  set(TURBODB_ZSTD_PORT_DIR "" CACHE PATH
+      "Canonical qigao/vcpkg-cache zstd port with C-only CXX guard")
+  if(NOT EXISTS "${TURBODB_ZSTD_PORT_DIR}/portfile.cmake" OR
+     NOT EXISTS "${TURBODB_ZSTD_PORT_DIR}/vcpkg.json")
+    message(FATAL_ERROR
+      "Studio requires TURBODB_ZSTD_PORT_DIR at the pinned vcpkg-cache port")
   endif()
   list(APPEND VCPKG_MANIFEST_FEATURES app)
   list(APPEND VCPKG_OVERLAY_PORTS
        "${CMAKE_CURRENT_LIST_DIR}/app/vcpkg-ports"
-       "${TURBODB_WTL_PORT_DIR}")
+       "${TURBODB_WTL_PORT_DIR}"
+       "${TURBODB_ZSTD_PORT_DIR}")
 endif()
 
 option(ENABLE_SANITIZER_ADDRESS "Enable AddressSanitizer" OFF)

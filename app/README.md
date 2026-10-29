@@ -31,9 +31,13 @@ Use the pinned original components:
 - OpenATL source HEAD `d943697d5b2b39c4f26406e0959ef01a53d42f1e`
   through CMake FetchContent; there is **no installed OpenATL SDK** and no
   dependency on Microsoft ATL or Visual Studio.
-- Original `wtl@10.0.10320#7` from qigao/vcpkg-cache
-  `8359cdbdf25c1f58cfc7230cc6318dc2fdb804fb`; set
-  `TURBODB_WTL_PORT_DIR` to that checkout's `ports/wtl`.
+- Original `wtl@10.0.10320#7`, unchanged from qigao/vcpkg-cache
+  `8359cdbdf25c1f58cfc7230cc6318dc2fdb804fb`. For the
+  current Studio dependency experiment checkout
+  `qigao/vcpkg-cache@${ref}` (Draft PR #241) which retains
+  the same WTL port and repairs one C-only zstd CMake compiler check.
+  Supply `TURBODB_WTL_PORT_DIR` and `TURBODB_ZSTD_PORT_DIR` from
+  that same exact checkout. This is not a new zstd source/provider.
 - llvm-mingw 20261020 UCRT; set `TURBODB_LLVM_MINGW_BIN` to its `bin`.
 - App-only Scintilla 5.5.8 and Lexilla 5.4.6, built by the same
   llvm-mingw triplet rather than linking their MSVC libraries.
@@ -51,6 +55,7 @@ cmake -S . -B build/studio-llvm -G Ninja `
   -DVCPKG_TARGET_TRIPLET=x64-llvm-mingw-dynamic `
   -DVCPKG_OVERLAY_TRIPLETS="$PWD/app/vcpkg-triplets" `
   -DTURBODB_WTL_PORT_DIR="$PWD/tools/vcpkg-cache/ports/wtl" `
+  -DTURBODB_ZSTD_PORT_DIR="$PWD/tools/vcpkg-cache/ports/zstd" `
   -DTURBODB_BUILD_APP=ON -DTURBODB_BUILD_ORM=ON `
   -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_BUILD_REDIS=OFF `
   -DTURBODB_BUILD_SQLPARSER=OFF -DBUILD_TESTS=ON

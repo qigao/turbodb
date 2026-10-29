@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: qigao/vcpkg-cache
-          ref: 8359cdbdf25c1f58cfc7230cc6318dc2fdb804fb
+          ref: ${ref}
           path: tools/vcpkg-cache
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -80,6 +80,7 @@ jobs:
           $installed=Join-Path $env:GITHUB_WORKSPACE 'build/studio-vcpkg-installed'
           $triplets=Join-Path $env:GITHUB_WORKSPACE 'app/vcpkg-triplets'
           $wtl=Join-Path $env:GITHUB_WORKSPACE 'tools/vcpkg-cache/ports/wtl'
+          $zstd=Join-Path $env:GITHUB_WORKSPACE 'tools/vcpkg-cache/ports/zstd'
           & cmake -S . -B build/studio-llvm -G Ninja `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             '-DCMAKE_BUILD_TYPE=Release' `
@@ -88,6 +89,7 @@ jobs:
             '-DVCPKG_HOST_TRIPLET=x64-windows' `
             "-DVCPKG_OVERLAY_TRIPLETS=$triplets" `
             "-DTURBODB_WTL_PORT_DIR=$wtl" `
+            "-DTURBODB_ZSTD_PORT_DIR=$zstd" `
             '-DTURBODB_BUILD_APP=ON' '-DTURBODB_BUILD_ORM=ON' `
             '-DTURBODB_BUILD_DBTOOLS=OFF' '-DTURBODB_BUILD_REDIS=OFF' `
             '-DTURBODB_BUILD_SQLPARSER=OFF' '-DTURBODB_BUILD_TIDESSQL=OFF' `
