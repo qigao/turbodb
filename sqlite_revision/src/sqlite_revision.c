@@ -54,6 +54,7 @@ struct turbodb_revision_read_s {
   turbodb_revision_db_t *owner;
   sqlite3 *sql;
   uint64_t sequence;
+  turbodb_revision_scan_t *scan;
 };
 struct turbodb_revision_write_s {
   turbodb_revision_db_t *owner;
@@ -186,6 +187,201 @@ static turbodb_status_t verify_schema(sqlite3 *sql, turbodb_error_t *error) {
     return fail_sql(sql, rc, error);
   return status;
 }
+/* Ordered B-tree prefix traversal over immutable revisions.
+ * This is a borrowed-key, independently-owned-value cursor. It has no model-
+ * supplied SQL or writes, and shares the parent read's pinned SQLite snapshot. */
+#define REVISION_SCAN_ABI_VERSION UINT32_C(1)
+#define REVISION_SCAN_DEFAULT_MAX_ITEMS UINT32_C(128)
+#define REVISION_SCAN_MAX_ITEMS UINT32_C(4096)
+#define REVISION_SCAN_DEFAULT_MAX_BYTES (UINT64_C(1) * 1024 * 1024)
+#define REVISION_SCAN_MAX_BYTES (UINT64_C(64) * 1024 * 1024)
+#define REVISION_SCAN_DEFAULT_MAX_VM_STEPS UINT64_C(1000000)
+#define REVISION_SCAN_MAX_VM_STEPS UINT64_C(100000000)
+
+struct turbodb_revision_scan_s {
+  turbodb_revision_read_t *read;
+  sqlite3_stmt *stmt;
+  uint64_t used_bytes;
+  uint64_t vm_steps_left;
+  uint32_t items;
+  uint32_t max_items;
+  uint64_t max_bytes;
+  int done;
+  int expired;
+};
+
+void turbodb_revision_scan_config_init(turbodb_revision_scan_config_t *config) {
+  if (!config) return;
+  memset(config, 0, sizeof(*config));
+  config->struct_size = (uint32_t)sizeof(*config);
+  config->abi_version = REVISION_SCAN_ABI_VERSION;
+  config->max_items = REVISION_SCAN_DEFAULT_MAX_ITEMS;
+  config->max_result_bytes = REVISION_SCAN_DEFAULT_MAX_BYTES;
+  config->max_vm_steps = REVISION_SCAN_DEFAULT_MAX_VM_STEPS;
+}
+
+static int revision_scan_progress(void *context) {
+  turbodb_revision_scan_t *scan = (turbodb_revision_scan_t *)context;
+  if (scan->vm_steps_left < UINT64_C(100)) {
+    scan->expired = 1;
+    return 1;
+  }
+  scan->vm_steps_left -= UINT64_C(100);
+  return 0;
+}
+
+turbodb_status_t turbodb_revision_read_scan_prefix(
+    turbodb_revision_read_t *read, turbodb_string_view_t ns,
+    turbodb_blob_t key_prefix, const turbodb_revision_scan_config_t *cfg,
+    turbodb_revision_scan_t **out_scan, turbodb_error_t *error) {
+  if (out_scan) *out_scan = NULL;
+  if (!read || !out_scan || !cfg ||
+      cfg->struct_size != sizeof(*cfg) ||
+      cfg->abi_version != REVISION_SCAN_ABI_VERSION ||
+      !is_view(ns, REVISION_MAX_NAMESPACE) ||
+      !is_blob(key_prefix, REVISION_MAX_KEY) ||
+      cfg->max_items == 0 || cfg->max_items > REVISION_SCAN_MAX_ITEMS ||
+      cfg->max_result_bytes == 0 || cfg->max_result_bytes > REVISION_SCAN_MAX_BYTES ||
+      cfg->max_vm_steps < UINT64_C(100) ||
+      cfg->max_vm_steps > REVISION_SCAN_MAX_VM_STEPS)
+    return result(error, TURBODB_STATUS_INVALID_ARGUMENT, "invalid prefix scan config");
+  if (read->scan)
+    return result(error, TURBODB_STATUS_BUSY, "one prefix scan per snapshot");
+
+  turbodb_revision_scan_t *scan = (turbodb_revision_scan_t *)calloc(1, sizeof(*scan));
+  if (!scan) return result(error, TURBODB_STATUS_OUT_OF_MEMORY, "allocate prefix scan");
+  scan->read = read;
+  scan->max_items = cfg->max_items;
+  scan->max_bytes = cfg->max_result_bytes;
+  scan->vm_steps_left = cfg->max_vm_steps;
+
+  /* The lexicographic exclusive successor of a binary prefix bounds the B-tree
+   * range, including embedded NUL. For an all-FF prefix no finite successor
+   * exists; every key >= prefix shares that all-FF prefix. */
+  unsigned char successor[REVISION_MAX_KEY];
+  memcpy(successor, key_prefix.data, key_prefix.size);
+  size_t upper_len = key_prefix.size;
+  while (upper_len && successor[upper_len - 1] == UINT8_MAX) upper_len--;
+  if (upper_len) successor[upper_len - 1]++;
+
+  turbodb_status_t status = prepare(read->sql,
+      "SELECT v.item_key,v.commit_seq,v.is_deleted,v.payload FROM revision_values AS v "
+      "WHERE v.namespace=?1 AND v.item_key>=?2 "
+      "AND (?3 IS NULL OR v.item_key<?3) "
+      "AND v.commit_seq=(SELECT MAX(h.commit_seq) FROM revision_values AS h "
+      "WHERE h.namespace=v.namespace AND h.item_key=v.item_key AND "
+      "h.commit_seq<=?4) ORDER BY v.item_key", &scan->stmt, error);
+  if (status != TURBODB_STATUS_OK) { free(scan); return status; }
+  int rc = bind_text(scan->stmt, 1, ns);
+  if (rc == SQLITE_OK) rc = bind_blob(scan->stmt, 2, key_prefix);
+  if (rc == SQLITE_OK) rc = upper_len ?
+      sqlite3_bind_blob(scan->stmt, 3, successor, (int)upper_len, SQLITE_TRANSIENT) :
+      sqlite3_bind_null(scan->stmt, 3);
+  if (rc == SQLITE_OK)
+    rc = sqlite3_bind_int64(scan->stmt, 4, (sqlite3_int64)read->sequence);
+  if (rc != SQLITE_OK) {
+    status = fail_sql(read->sql, rc, error);
+    (void)sqlite3_finalize(scan->stmt);
+    free(scan);
+    return status;
+  }
+  read->scan = scan;
+  sqlite3_progress_handler(read->sql, 100, revision_scan_progress, scan);
+  *out_scan = scan;
+  return result(error, TURBODB_STATUS_OK, NULL);
+}
+
+turbodb_status_t turbodb_revision_scan_next(
+    turbodb_revision_scan_t *scan, turbodb_blob_t *out_key,
+    turbodb_revision_value_t **out_value, turbodb_error_t *error) {
+  if (out_key) *out_key = (turbodb_blob_t){NULL, 0};
+  if (out_value) *out_value = NULL;
+  if (!scan || !out_key || !out_value)
+    return result(error, TURBODB_STATUS_INVALID_ARGUMENT, "invalid scan output");
+  if (scan->done)
+    return result(error, TURBODB_STATUS_NOT_FOUND, "end of prefix scan");
+  if (scan->expired)
+    return result(error, TURBODB_STATUS_LIMIT_EXCEEDED, "SQLite scan VM budget exhausted");
+
+  const int rc = sqlite3_step(scan->stmt);
+  if (rc == SQLITE_DONE) {
+    scan->done = 1;
+    return result(error, TURBODB_STATUS_NOT_FOUND, "end of prefix scan");
+  }
+  if (rc == SQLITE_INTERRUPT && scan->expired)
+    return result(error, TURBODB_STATUS_LIMIT_EXCEEDED, "SQLite scan VM budget exhausted");
+  if (rc != SQLITE_ROW) return fail_sql(scan->read->sql, rc, error);
+  if (scan->items >= scan->max_items) {
+    scan->expired = 1;
+    return result(error, TURBODB_STATUS_LIMIT_EXCEEDED, "prefix row budget exceeded");
+  }
+  if (sqlite3_column_type(scan->stmt, 0) != SQLITE_BLOB ||
+      sqlite3_column_type(scan->stmt, 1) != SQLITE_INTEGER ||
+      sqlite3_column_type(scan->stmt, 2) != SQLITE_INTEGER) {
+    scan->expired = 1;
+    return result(error, TURBODB_STATUS_DATASTORE_ERROR, "corrupt prefix scan row");
+  }
+  int key_len = sqlite3_column_bytes(scan->stmt, 0);
+  sqlite3_int64 seq = sqlite3_column_int64(scan->stmt, 1);
+  int deleted = sqlite3_column_int(scan->stmt, 2);
+  int body_len = sqlite3_column_bytes(scan->stmt, 3);
+  if (key_len <= 0 || key_len > (int)REVISION_MAX_KEY ||
+      seq <= 0 || seq > (sqlite3_int64)scan->read->sequence ||
+      (deleted != 0 && deleted != 1) || body_len < 0 ||
+      (uint64_t)body_len > scan->read->owner->max_value_bytes ||
+      (deleted && sqlite3_column_type(scan->stmt, 3) != SQLITE_NULL) ||
+      (!deleted && sqlite3_column_type(scan->stmt, 3) != SQLITE_BLOB)) {
+    scan->expired = 1;
+    return result(error, TURBODB_STATUS_DATASTORE_ERROR, "invalid persisted prefix value");
+  }
+  const uint64_t bytes = (uint64_t)key_len + (uint64_t)body_len;
+  if (bytes > scan->max_bytes - scan->used_bytes) {
+    scan->expired = 1;
+    return result(error, TURBODB_STATUS_LIMIT_EXCEEDED, "prefix byte budget exceeded");
+  }
+  const void *key_data = sqlite3_column_blob(scan->stmt, 0);
+  if (!key_data) {
+    scan->expired = 1;
+    return result(error, TURBODB_STATUS_DATASTORE_ERROR, "null persisted key");
+  }
+  turbodb_revision_value_t *value = (turbodb_revision_value_t *)calloc(1, sizeof(*value));
+  if (!value) return result(error, TURBODB_STATUS_OUT_OF_MEMORY, "allocate scan result");
+  value->sequence = (uint64_t)seq;
+  value->deleted = deleted;
+  if (!deleted) {
+    value->data = (unsigned char *)malloc(body_len ? (size_t)body_len : 1u);
+    if (!value->data) {
+      free(value);
+      return result(error, TURBODB_STATUS_OUT_OF_MEMORY, "allocate scan bytes");
+    }
+    if (body_len) {
+      const void *body = sqlite3_column_blob(scan->stmt, 3);
+      if (!body) {
+        free(value->data);
+        free(value);
+        scan->expired = 1;
+        return result(error, TURBODB_STATUS_DATASTORE_ERROR, "null persisted scan data");
+      }
+      memcpy(value->data, body, (size_t)body_len);
+    }
+    value->size = (size_t)body_len;
+  }
+  scan->used_bytes += bytes;
+  scan->items++;
+  *out_key = (turbodb_blob_t){key_data, (size_t)key_len};
+  *out_value = value;
+  return result(error, TURBODB_STATUS_OK, NULL);
+}
+
+void turbodb_revision_scan_close(turbodb_revision_scan_t *scan) {
+  if (!scan) return;
+  turbodb_revision_read_t *read = scan->read;
+  sqlite3_progress_handler(read->sql, 0, NULL, NULL);
+  (void)sqlite3_finalize(scan->stmt);
+  read->scan = NULL;
+  free(scan);
+}
+
 void turbodb_revision_open_config_init(turbodb_revision_open_config_t *config) {
   if (!config) return;
   memset(config, 0, sizeof(*config));
@@ -388,6 +584,7 @@ uint64_t turbodb_revision_read_sequence(const turbodb_revision_read_t *read) {
 }
 void turbodb_revision_read_close(turbodb_revision_read_t *read) {
   if (!read) return;
+  if (read->scan) turbodb_revision_scan_close(read->scan);
   (void)sqlite3_exec(read->sql, "ROLLBACK", NULL, NULL, NULL);
   (void)sqlite3_close_v2(read->sql);
   read->owner->active_reads--;
@@ -402,6 +599,8 @@ turbodb_status_t turbodb_revision_read_get(turbodb_revision_read_t *read,
   if (out_value) *out_value = NULL;
   if (!read || !out_value || !valid_key(ns, key))
     return result(error, TURBODB_STATUS_INVALID_ARGUMENT, "invalid read key");
+  if (read->scan)
+    return result(error, TURBODB_STATUS_BUSY, "close active prefix cursor before get");
   sqlite3_stmt *stmt = NULL;
   turbodb_status_t status = prepare(read->sql,
      "SELECT commit_seq,is_deleted,payload FROM revision_values WHERE namespace=?1 "

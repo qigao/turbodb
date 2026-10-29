@@ -18,6 +18,7 @@ typedef struct turbodb_revision_db_s turbodb_revision_db_t;
 typedef struct turbodb_revision_read_s turbodb_revision_read_t;
 typedef struct turbodb_revision_write_s turbodb_revision_write_t;
 typedef struct turbodb_revision_value_s turbodb_revision_value_t;
+typedef struct turbodb_revision_scan_s turbodb_revision_scan_t;
 
 typedef struct turbodb_revision_open_config_s {
   uint32_t struct_size;
@@ -89,6 +90,37 @@ turbodb_status_t turbodb_revision_inspect_request(turbodb_revision_db_t *db,
                                                   turbodb_blob_t request_id,
                                                   uint64_t *out_commit_seq,
                                                   turbodb_error_t *error);
+
+/* Historical, scope-bound, ordered B-tree prefix traversal.
+ * A scan pins the parent read's SQLite snapshot and requires a nonempty binary
+ * key prefix; no automatic graph traversal or unbounded directory enumeration.
+ * Byte/row/VM budgets must all be finite. Entries include the latest tombstone
+ * when deleted as-of the selected sequence, never silently rewrite history.
+ *
+ * Output key is BORROWED until next/close; output value is independent and
+ * must be destroyed by turbodb_revision_value_destroy(). No read_get while a
+ * prefix cursor is open. read_close drains/closes an outstanding scan.
+ * NEXT returns NOT_FOUND at end, LIMIT_EXCEEDED for truncation/VM budget.
+ * On LIMIT_EXCEEDED, results are partial, never asserted complete.
+ */
+#define TURBODB_REVISION_SCAN_ABI_VERSION UINT32_C(1)
+typedef struct turbodb_revision_scan_config_s {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  uint32_t max_items;
+  uint64_t max_result_bytes;
+  uint64_t max_vm_steps;
+} turbodb_revision_scan_config_t;
+
+void turbodb_revision_scan_config_init(turbodb_revision_scan_config_t *config);
+turbodb_status_t turbodb_revision_read_scan_prefix(
+    turbodb_revision_read_t *read, turbodb_string_view_t ns,
+    turbodb_blob_t key_prefix, const turbodb_revision_scan_config_t *config,
+    turbodb_revision_scan_t **out_scan, turbodb_error_t *error);
+turbodb_status_t turbodb_revision_scan_next(
+    turbodb_revision_scan_t *scan, turbodb_blob_t *out_key,
+    turbodb_revision_value_t **out_value, turbodb_error_t *error);
+void turbodb_revision_scan_close(turbodb_revision_scan_t *scan);
 
 /* A successful get returns independently owned bytes, even for an empty blob.
  * Tombstones are represented by is_deleted=1, bytes=NULL, length=0. */

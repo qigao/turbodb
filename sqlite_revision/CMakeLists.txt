@@ -27,4 +27,11 @@ if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
     COMMAND turbodb_sqlite_revision_fault_test
       "${CMAKE_CURRENT_BINARY_DIR}/revision-fault-test.db")
   set_tests_properties(turbodb-sqlite-revision-fault-vfs PROPERTIES TIMEOUT 20)
+  add_executable(turbodb_sqlite_revision_prefix_test tests/sqlite_revision_prefix_test.c)
+  target_link_libraries(turbodb_sqlite_revision_prefix_test
+    PRIVATE TurboDB::SqliteRevision)
+  add_test(NAME turbodb-sqlite-revision-prefix
+    COMMAND turbodb_sqlite_revision_prefix_test
+      "${CMAKE_CURRENT_BINARY_DIR}/revision-prefix-test.db")
+  set_tests_properties(turbodb-sqlite-revision-prefix PROPERTIES TIMEOUT 20)
 endif()

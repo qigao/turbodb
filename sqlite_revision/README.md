@@ -26,6 +26,31 @@ fork SQLite, implement a second pager, or depend on ORM/Studio.
 - New database identity `application_id=TDRV`, `user_version=1`. Unknown
   foreign/unversioned databases are rejected rather than modified.
 
+## M1a — versioned SQLite B-tree prefix retrieval (proposed)
+
+[TurboDB #222](https://github.com/qigao/turbodb/issues/222) first slice
+adds a read-only, bounded `turbodb_revision_read_scan_prefix()` over the
+**existing** `revision_values(namespace,item_key,commit_seq)` primary-key
+B-tree, without a new table, pager, file, or SQL parser.
+
+- A nonempty **binary** key prefix defines an ordered range; the exclusive
+  lexicographic successor supports embedded NUL and all-`0xff` prefixes.
+- The scan resolves each key's latest immutable version at the parent
+  read's `as_of_seq`; tombstones are returned explicitly.
+- The key view is borrowed until `scan_next`/`scan_close`, while the
+  value is caller-owned and released via `turbodb_revision_value_destroy`.
+  At most one scan per read; parent `read_close` drains the cursor.
+- Explicit row, payload-byte, and SQLite VM-operation budgets. Reaching any
+  limit returns `LIMIT_EXCEEDED` rather than claiming a complete search.
+- This is the ordered B-tree primitive usable for application-generated Graph
+  outgoing/reverse edge keys and FileCatalog prefixes. Graph identity/authority
+  policy and key encoding still belong to TurboAgent.
+
+**Not a completed M1 Graph/FTS projection.** FTS5 virtual tables, trusted
+projection schema registration, atomic `index_generation`, migration, ACL
+filters and Graph-specific API are still separate acceptance tasks. No
+production TurboAgent owner change.
+
 ## Not yet implemented; do not use as TurboAgent's production index owner
 
 - Same-transaction domain projection registration for FTS5/Graph/vector
