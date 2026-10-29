@@ -22,6 +22,7 @@ fork SQLite, implement a second pager, or depend on ORM/Studio.
   No automatic retries, implicit commits, or unsafe fallback.
 - Independent `READ_ONLY`/`CREATE`/`WAL` policies; default rollback journal
   with `synchronous=FULL`, explicit per-value and main DB page budgets.
+- Every write is bounded by configured **batch operation count and cumulative namespace/key/value bytes**; an exceeded budget poisons the transaction and requires abort.
 - New database identity `application_id=TDRV`, `user_version=1`. Unknown
   foreign/unversioned databases are rejected rather than modified.
 

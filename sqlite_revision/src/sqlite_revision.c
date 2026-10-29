@@ -12,6 +12,10 @@
 #define REVISION_SCHEMA_VERSION 1
 #define REVISION_DEFAULT_MAX_DB (UINT64_C(256) * 1024 * 1024)
 #define REVISION_DEFAULT_MAX_VALUE (UINT64_C(16) * 1024 * 1024)
+#define REVISION_DEFAULT_MAX_BATCH_BYTES (UINT64_C(64) * 1024 * 1024)
+#define REVISION_DEFAULT_MAX_BATCH_OPERATIONS UINT32_C(1024)
+#define REVISION_MAX_BATCH_BYTES (UINT64_C(1024) * 1024 * 1024)
+#define REVISION_MAX_BATCH_OPERATIONS UINT32_C(65536)
 #define REVISION_MAX_NAMESPACE 1024u
 #define REVISION_MAX_KEY 4096u
 #define REVISION_MAX_REQUEST_ID 256u
@@ -40,6 +44,8 @@ struct turbodb_revision_db_s {
   uint32_t flags;
   uint32_t busy_timeout_ms;
   uint64_t max_value_bytes;
+  uint64_t max_batch_bytes;
+  uint32_t max_batch_operations;
   size_t active_reads;
   int active_write;
   int quarantined;
@@ -52,6 +58,8 @@ struct turbodb_revision_read_s {
 struct turbodb_revision_write_s {
   turbodb_revision_db_t *owner;
   uint64_t sequence;
+  uint64_t used_bytes;
+  uint32_t operations;
   int poisoned;
 };
 struct turbodb_revision_value_s {
@@ -186,6 +194,8 @@ void turbodb_revision_open_config_init(turbodb_revision_open_config_t *config) {
   config->busy_timeout_ms = 250u;
   config->max_database_bytes = REVISION_DEFAULT_MAX_DB;
   config->max_value_bytes = REVISION_DEFAULT_MAX_VALUE;
+  config->max_batch_bytes = REVISION_DEFAULT_MAX_BATCH_BYTES;
+  config->max_batch_operations = REVISION_DEFAULT_MAX_BATCH_OPERATIONS;
 }
 
 turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *cfg,
@@ -197,6 +207,10 @@ turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *
       !is_view(cfg->path, 4096u) || cfg->max_database_bytes < 65536 ||
       cfg->max_database_bytes > INT64_MAX ||
       cfg->max_value_bytes == 0 || cfg->max_value_bytes > INT_MAX - 4096 ||
+      cfg->max_batch_operations == 0 ||
+      cfg->max_batch_operations > REVISION_MAX_BATCH_OPERATIONS ||
+      cfg->max_batch_bytes == 0 ||
+      cfg->max_batch_bytes > REVISION_MAX_BATCH_BYTES ||
       cfg->busy_timeout_ms > INT_MAX ||
       (cfg->flags & ~(TURBODB_REVISION_OPEN_CREATE |
                       TURBODB_REVISION_OPEN_READ_ONLY |
@@ -215,6 +229,8 @@ turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *
   db->flags = cfg->flags;
   db->busy_timeout_ms = cfg->busy_timeout_ms;
   db->max_value_bytes = cfg->max_value_bytes;
+  db->max_batch_operations = cfg->max_batch_operations;
+  db->max_batch_bytes = cfg->max_batch_bytes;
   const int readonly = (cfg->flags & TURBODB_REVISION_OPEN_READ_ONLY) != 0;
   int flags = SQLITE_OPEN_FULLMUTEX | (readonly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE);
   if (cfg->flags & TURBODB_REVISION_OPEN_CREATE) flags |= SQLITE_OPEN_CREATE;
@@ -522,6 +538,16 @@ static turbodb_status_t mutate(turbodb_revision_write_t *write,
     write->poisoned = 1;
     return result(error, TURBODB_STATUS_LIMIT_EXCEEDED, "revision value too large");
   }
+  /* Include key and namespace bytes: many small records consume a bounded
+   * transaction budget just as much as a single large content blob. */
+  const uint64_t needed = (uint64_t)ns.len + (uint64_t)key.size +
+                          (uint64_t)data.size;
+  if (write->operations >= db->max_batch_operations ||
+      needed > db->max_batch_bytes - write->used_bytes) {
+    write->poisoned = 1;
+    return result(error, TURBODB_STATUS_LIMIT_EXCEEDED,
+                  "revision transaction budget exceeded; abort required");
+  }
   sqlite3_stmt *stmt = NULL;
   turbodb_status_t status = prepare(db->sql,
      "SELECT commit_seq FROM revision_heads WHERE namespace=?1 AND item_key=?2", &stmt, error);
@@ -564,6 +590,8 @@ static turbodb_status_t mutate(turbodb_revision_write_t *write,
   if (rc == SQLITE_OK) rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE) { status = fail_sql(db->sql, rc, error); goto fail; }
   (void)sqlite3_finalize(stmt);
+  write->used_bytes += needed;
+  write->operations++;
   return result(error, TURBODB_STATUS_OK, NULL);
 fail:
   if (stmt) (void)sqlite3_finalize(stmt);

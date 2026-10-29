@@ -27,6 +27,8 @@ typedef struct turbodb_revision_open_config_s {
   uint32_t busy_timeout_ms;
   uint64_t max_database_bytes; /* main database, not transient journal/WAL */
   uint64_t max_value_bytes;    /* maximum individual payload */
+  uint64_t max_batch_bytes;    /* total namespace + key + value bytes per write */
+  uint32_t max_batch_operations; /* finite number of mutations per commit */
 } turbodb_revision_open_config_t;
 
 void turbodb_revision_open_config_init(turbodb_revision_open_config_t *config);

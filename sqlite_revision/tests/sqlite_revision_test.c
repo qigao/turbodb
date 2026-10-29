@@ -218,10 +218,63 @@ static int verify_strict_schema_admission(const char *path) {
   return 0;
 }
 
+static int verify_bounded_batch(const char *path) {
+  turbodb_revision_open_config_t cfg;
+  turbodb_revision_db_t *db = NULL;
+  turbodb_revision_write_t *write = NULL;
+  turbodb_error_t err;
+  uint64_t sequence = 0;
+  turbodb_error_init(&err);
+  turbodb_revision_open_config_init(&cfg);
+  cfg.path = turbodb_view(path);
+  cfg.flags = TURBODB_REVISION_OPEN_CREATE;
+  cfg.max_batch_operations = 0;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err),
+       TURBODB_STATUS_INVALID_ARGUMENT);
+  CHECK(db == NULL);
+  cfg.max_batch_operations = 1;
+  cfg.max_batch_bytes = 8;
+  (void)remove(path);
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_begin_write(db, (turbodb_blob_t){"quota-1", 7},
+                                    &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_put(write, turbodb_view("ns"),
+       (turbodb_blob_t){"ab", 2}, (turbodb_blob_t){"four", 4},
+       TURBODB_REVISION_EXPECT_ABSENT, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_put(write, turbodb_view("ns"),
+       (turbodb_blob_t){"cd", 2}, (turbodb_blob_t){"bad", 3},
+       TURBODB_REVISION_EXPECT_ABSENT, &err),
+       TURBODB_STATUS_LIMIT_EXCEEDED);
+  CALL(turbodb_revision_write_publish(write, &sequence, &err),
+       TURBODB_STATUS_INVALID_STATE);
+  turbodb_revision_write_abort(write); write = NULL;
+  CALL(turbodb_revision_inspect_request(db, (turbodb_blob_t){"quota-1", 7},
+       &sequence, &err), TURBODB_STATUS_NOT_FOUND);
+  CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_OK); db = NULL;
+
+  cfg.flags = 0;
+  cfg.max_batch_operations = 2;
+  cfg.max_batch_bytes = 7;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_begin_write(db, (turbodb_blob_t){"quota-2", 7},
+                                    &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_write_put(write, turbodb_view("ns"),
+       (turbodb_blob_t){"ab", 2}, (turbodb_blob_t){"four", 4},
+       TURBODB_REVISION_EXPECT_ABSENT, &err),
+       TURBODB_STATUS_LIMIT_EXCEEDED);
+  turbodb_revision_write_abort(write); write = NULL;
+  CALL(turbodb_revision_inspect_request(db, (turbodb_blob_t){"quota-2", 7},
+       &sequence, &err), TURBODB_STATUS_NOT_FOUND);
+  CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_OK);
+  (void)remove(path);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   const char *path = argc > 1 ? argv[1] : "sqlite_revision_native_test.db";
   int rc = run(path);
   if (!rc) rc = verify_strict_schema_admission(path);
+  if (!rc) rc = verify_bounded_batch(path);
   if (!rc) puts("SQLite revision native C11 contract PASS");
   return rc;
 }

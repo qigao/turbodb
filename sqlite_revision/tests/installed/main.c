@@ -32,7 +32,8 @@ int main(int argc, char **argv) {
   (void)remove(path);
   turbodb_error_init(&err);
   turbodb_revision_open_config_init(&cfg);
-  if (cfg.struct_size != sizeof(cfg) || cfg.abi_version != TURBODB_REVISION_ABI_VERSION)
+  if (cfg.struct_size != sizeof(cfg) || cfg.abi_version != TURBODB_REVISION_ABI_VERSION ||
+      cfg.max_batch_operations == 0 || cfg.max_batch_bytes == 0)
     return 3;
   cfg.path = turbodb_view(path);
   cfg.flags = TURBODB_REVISION_OPEN_CREATE;
