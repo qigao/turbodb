@@ -151,9 +151,63 @@ static int run(const char *path) {
   return 0;
 }
 
+static int verify_strict_schema_admission(const char *path) {
+  sqlite3 *raw = NULL;
+  turbodb_revision_open_config_t cfg;
+  turbodb_revision_db_t *db = NULL;
+  turbodb_error_t err;
+  turbodb_error_init(&err);
+  turbodb_revision_open_config_init(&cfg);
+  cfg.path = turbodb_view(path);
+
+  /* Correct application_id/version and table NAMES must not admit a fake DDL. */
+  (void)remove(path);
+  CHECK(sqlite3_open(path, &raw) == SQLITE_OK);
+  CHECK(sqlite3_exec(raw,
+    "PRAGMA application_id=1413763670; PRAGMA user_version=1;"
+    "CREATE TABLE revision_commits(fake INTEGER);"
+    "CREATE TABLE revision_values(fake INTEGER);"
+    "CREATE TABLE revision_heads(fake INTEGER);",
+    NULL, NULL, NULL) == SQLITE_OK);
+  CHECK(sqlite3_close(raw) == SQLITE_OK); raw = NULL;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_UNSUPPORTED);
+  CHECK(db == NULL);
+
+  /* No injected trigger may execute inside a revision commit. */
+  (void)remove(path);
+  cfg.flags = TURBODB_REVISION_OPEN_CREATE;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_OK); db = NULL;
+  CHECK(sqlite3_open(path, &raw) == SQLITE_OK);
+  CHECK(sqlite3_exec(raw,
+    "CREATE TRIGGER injected_revision AFTER INSERT ON revision_commits "
+    "BEGIN SELECT 1; END;",
+    NULL, NULL, NULL) == SQLITE_OK);
+  CHECK(sqlite3_close(raw) == SQLITE_OK); raw = NULL;
+  cfg.flags = 0;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_UNSUPPORTED);
+  CHECK(db == NULL);
+
+  /* Named index membership is part of v1 schema admission. */
+  (void)remove(path);
+  cfg.flags = TURBODB_REVISION_OPEN_CREATE;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_OK); db = NULL;
+  CHECK(sqlite3_open(path, &raw) == SQLITE_OK);
+  CHECK(sqlite3_exec(raw, "DROP INDEX revision_changes_by_commit;",
+                     NULL, NULL, NULL) == SQLITE_OK);
+  CHECK(sqlite3_close(raw) == SQLITE_OK); raw = NULL;
+  cfg.flags = 0;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_UNSUPPORTED);
+  CHECK(db == NULL);
+  (void)remove(path);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   const char *path = argc > 1 ? argv[1] : "sqlite_revision_native_test.db";
   int rc = run(path);
+  if (!rc) rc = verify_strict_schema_admission(path);
   if (!rc) puts("SQLite revision native C11 contract PASS");
   return rc;
 }

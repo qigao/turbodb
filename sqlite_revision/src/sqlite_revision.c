@@ -16,6 +16,24 @@
 #define REVISION_MAX_KEY 4096u
 #define REVISION_MAX_REQUEST_ID 256u
 
+#define REVISION_COMMITS_DDL \
+  "CREATE TABLE revision_commits(" \
+  "commit_seq INTEGER PRIMARY KEY, request_id BLOB NOT NULL UNIQUE," \
+  "CHECK(length(request_id) BETWEEN 1 AND 256))"
+#define REVISION_VALUES_DDL \
+  "CREATE TABLE revision_values(" \
+  "namespace TEXT NOT NULL, item_key BLOB NOT NULL, commit_seq INTEGER NOT NULL," \
+  "is_deleted INTEGER NOT NULL CHECK(is_deleted IN (0,1)), payload BLOB," \
+  "PRIMARY KEY(namespace,item_key,commit_seq)," \
+  "FOREIGN KEY(commit_seq) REFERENCES revision_commits(commit_seq)) WITHOUT ROWID"
+#define REVISION_HEADS_DDL \
+  "CREATE TABLE revision_heads(" \
+  "namespace TEXT NOT NULL, item_key BLOB NOT NULL, commit_seq INTEGER NOT NULL," \
+  "PRIMARY KEY(namespace,item_key)," \
+  "FOREIGN KEY(commit_seq) REFERENCES revision_commits(commit_seq)) WITHOUT ROWID"
+#define REVISION_INDEX_DDL \
+  "CREATE INDEX revision_changes_by_commit ON revision_values(commit_seq,namespace,item_key)"
+
 struct turbodb_revision_db_s {
   sqlite3 *sql;
   char *path;
@@ -115,23 +133,51 @@ static turbodb_status_t pragma_integer(sqlite3 *sql, const char *query,
     status = fail_sql(sql, rc, error);
   return status;
 }
+/* Reject a spoofed application_id/user_version, missing/altered indexes,
+ * trigger injection, and tables with the right names but the wrong schema.
+ * v1 has no migration path: its exact DDL is part of admission, not metadata
+ * that an untrusted file can assert via PRAGMA user_version alone. */
 static turbodb_status_t verify_schema(sqlite3 *sql, turbodb_error_t *error) {
-  sqlite3_int64 tables = -1, unexpected = -1;
-  turbodb_status_t status = pragma_integer(sql,
-    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN "
-    "('revision_commits','revision_values','revision_heads')", &tables, error);
+  static const char *const names[] = {
+    "revision_changes_by_commit", "revision_commits", "revision_heads",
+    "revision_values"
+  };
+  static const char *const kinds[] = {"index", "table", "table", "table"};
+  static const char *const definitions[] = {
+    REVISION_INDEX_DDL, REVISION_COMMITS_DDL, REVISION_HEADS_DDL,
+    REVISION_VALUES_DDL
+  };
+  sqlite3_stmt *stmt = NULL;
+  turbodb_status_t status = prepare(sql,
+    "SELECT name,type,sql FROM sqlite_master "
+    "WHERE name NOT LIKE 'sqlite_%' ORDER BY name", &stmt, error);
   if (status != TURBODB_STATUS_OK) return status;
-  status = pragma_integer(sql,
-    "SELECT count(*) FROM sqlite_master WHERE type='table' "
-    "AND substr(name,1,7)!='sqlite_' AND name NOT IN "
-    "('revision_commits','revision_values','revision_heads')", &unexpected, error);
-  if (status != TURBODB_STATUS_OK) return status;
-  if (tables != 3 || unexpected != 0)
-    return result(error, TURBODB_STATUS_UNSUPPORTED,
-                  "unsupported revision SQLite schema; no automatic migration");
-  return TURBODB_STATUS_OK;
+  int rc;
+  size_t count = 0;
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const char *name = (const char *)sqlite3_column_text(stmt, 0);
+    const char *kind = (const char *)sqlite3_column_text(stmt, 1);
+    const char *definition = (const char *)sqlite3_column_text(stmt, 2);
+    if (count >= sizeof(names) / sizeof(names[0]) || !name || !kind ||
+        !definition || strcmp(name, names[count]) ||
+        strcmp(kind, kinds[count]) || strcmp(definition, definitions[count])) {
+      status = result(error, TURBODB_STATUS_UNSUPPORTED,
+                      "unsupported revision SQLite schema; no automatic migration");
+      break;
+    }
+    count++;
+  }
+  if (rc == SQLITE_DONE && count != sizeof(names) / sizeof(names[0])) {
+    status = result(error, TURBODB_STATUS_UNSUPPORTED,
+                    "missing revision SQLite objects; no automatic migration");
+  } else if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+    status = fail_sql(sql, rc, error);
+  }
+  rc = sqlite3_finalize(stmt);
+  if (status == TURBODB_STATUS_OK && rc != SQLITE_OK)
+    return fail_sql(sql, rc, error);
+  return status;
 }
-
 void turbodb_revision_open_config_init(turbodb_revision_open_config_t *config) {
   if (!config) return;
   memset(config, 0, sizeof(*config));
@@ -218,19 +264,10 @@ turbodb_status_t turbodb_revision_db_open(const turbodb_revision_open_config_t *
   if (is_new) {
     status = execute(db->sql,
       "BEGIN IMMEDIATE;"
-      "CREATE TABLE revision_commits("
-      "commit_seq INTEGER PRIMARY KEY, request_id BLOB NOT NULL UNIQUE,"
-      "CHECK(length(request_id) BETWEEN 1 AND 256));"
-      "CREATE TABLE revision_values("
-      "namespace TEXT NOT NULL, item_key BLOB NOT NULL, commit_seq INTEGER NOT NULL,"
-      "is_deleted INTEGER NOT NULL CHECK(is_deleted IN (0,1)), payload BLOB,"
-      "PRIMARY KEY(namespace,item_key,commit_seq),"
-      "FOREIGN KEY(commit_seq) REFERENCES revision_commits(commit_seq)) WITHOUT ROWID;"
-      "CREATE TABLE revision_heads("
-      "namespace TEXT NOT NULL, item_key BLOB NOT NULL, commit_seq INTEGER NOT NULL,"
-      "PRIMARY KEY(namespace,item_key),"
-      "FOREIGN KEY(commit_seq) REFERENCES revision_commits(commit_seq)) WITHOUT ROWID;"
-      "CREATE INDEX revision_changes_by_commit ON revision_values(commit_seq,namespace,item_key);"
+      REVISION_COMMITS_DDL ";"
+      REVISION_VALUES_DDL ";"
+      REVISION_HEADS_DDL ";"
+      REVISION_INDEX_DDL ";"
       "PRAGMA application_id=1413763670;" /* 0x54445256 */
       "PRAGMA user_version=1;"
       "COMMIT;", error);

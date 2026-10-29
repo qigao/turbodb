@@ -10,7 +10,7 @@
       "inherits": "base-test",
       "filter": {
         "include": {
-          "name": "^orm_"
+          "name": "^(orm_|turbodb-sqlite-revision-)"
         },
         "exclude": {
           "label": "^(benchmark|tidessql)$"
