@@ -82,6 +82,76 @@ static int install(void){
  return sqlite3_vfs_register(&wrapped_vfs,1)!=SQLITE_OK;
 }
 static turbodb_blob_t blob(const void *d,size_t n){turbodb_blob_t b={d,n};return b;}
+/* FTS5 and Graph/Generation were staged in the SAME revision transaction.
+ * On a failed xSync the commit outcome can be unknown, but a clean reopen
+ * must see both projections or neither. Do not automatically replay. */
+static int verify_projected_fault(const char *original) {
+ char path[1024];
+ CHECK(strlen(original) < sizeof(path)-32);
+ (void)snprintf(path, sizeof(path), "%s-fts.db", original);
+ (void)remove(path);
+ turbodb_revision_db_t *db=NULL;
+ turbodb_revision_write_t *w=NULL;
+ turbodb_revision_read_t *read=NULL;
+ turbodb_revision_scan_t *scan=NULL;
+ turbodb_revision_value_t *value=NULL;
+ turbodb_revision_scan_config_t scan_config;
+ turbodb_revision_open_config_t cfg;
+ turbodb_error_t err;
+ uint64_t seq=0;
+ turbodb_status_t status;
+ turbodb_blob_t key={NULL,0};
+ turbodb_error_init(&err);
+ turbodb_revision_open_config_init(&cfg);
+ cfg.path=turbodb_view(path);
+ cfg.flags=TURBODB_REVISION_OPEN_CREATE|TURBODB_REVISION_OPEN_FTS5;
+ OP(turbodb_revision_db_open(&cfg,&db,&err),TURBODB_STATUS_OK);
+ OP(turbodb_revision_begin_write(db,blob("fts-req",7),&w,&err),TURBODB_STATUS_OK);
+ OP(turbodb_revision_write_put(w,turbodb_view("source"),blob("fileA",5),
+        blob("revision",8),TURBODB_REVISION_EXPECT_ABSENT,&err),TURBODB_STATUS_OK);
+ OP(turbodb_revision_write_project_text(w,turbodb_view("source"),
+        blob("fileA",5),turbodb_view("bright sky"),&err),TURBODB_STATUS_OK);
+ OP(turbodb_revision_write_put(w,turbodb_view("graph"),blob("out/A:B",7),
+        blob("rev1",4),TURBODB_REVISION_EXPECT_ABSENT,&err),TURBODB_STATUS_OK);
+ OP(turbodb_revision_write_put(w,turbodb_view("generation"),blob("head",4),
+        blob("gen1",4),TURBODB_REVISION_EXPECT_ABSENT,&err),TURBODB_STATUS_OK);
+ fail_next_sync=1;
+ status=turbodb_revision_write_publish(w,&seq,&err);
+ CHECK(status==TURBODB_STATUS_COMMIT_UNKNOWN);
+ turbodb_revision_write_abort(w);w=NULL;
+ OP(turbodb_revision_db_close(db,&err),TURBODB_STATUS_OK);db=NULL;
+ cfg.flags=TURBODB_REVISION_OPEN_READ_ONLY|TURBODB_REVISION_OPEN_FTS5;
+ OP(turbodb_revision_db_open(&cfg,&db,&err),TURBODB_STATUS_OK);
+ status=turbodb_revision_inspect_request(db,blob("fts-req",7),&seq,&err);
+ CHECK(status==TURBODB_STATUS_OK || status==TURBODB_STATUS_NOT_FOUND);
+ const int committed=(status==TURBODB_STATUS_OK);
+ OP(turbodb_revision_begin_read(db,0,&read,&err),TURBODB_STATUS_OK);
+ status=turbodb_revision_read_get(read,turbodb_view("graph"),blob("out/A:B",7),
+          &value,&err);
+ CHECK(status==(committed?TURBODB_STATUS_OK:TURBODB_STATUS_NOT_FOUND));
+ turbodb_revision_value_destroy(value);value=NULL;
+ status=turbodb_revision_read_get(read,turbodb_view("generation"),blob("head",4),
+          &value,&err);
+ CHECK(status==(committed?TURBODB_STATUS_OK:TURBODB_STATUS_NOT_FOUND));
+ turbodb_revision_value_destroy(value);value=NULL;
+ turbodb_revision_scan_config_init(&scan_config);
+ OP(turbodb_revision_read_search_text(read,turbodb_view("source"),
+       turbodb_view("sky"),&scan_config,&scan,&err),TURBODB_STATUS_OK);
+ status=turbodb_revision_scan_next(scan,&key,&value,&err);
+ CHECK(status==(committed?TURBODB_STATUS_OK:TURBODB_STATUS_NOT_FOUND));
+ if(committed) {
+   CHECK(key.size==5 && memcmp(key.data,"fileA",5)==0);
+   turbodb_revision_value_destroy(value);value=NULL;
+   OP(turbodb_revision_scan_next(scan,&key,&value,&err),TURBODB_STATUS_NOT_FOUND);
+ }
+ turbodb_revision_scan_close(scan);scan=NULL;
+ turbodb_revision_read_close(read);read=NULL;
+ OP(turbodb_revision_db_close(db,&err),TURBODB_STATUS_OK);db=NULL;
+ (void)remove(path);
+ puts("FTS+Graph uncertain commit inspection PASS");
+ return 0;
+}
+
 int main(int argc, char **argv){
  const char *path=argc > 1 ? argv[1] : "sqlite_revision_fault_test.db";
  (void)remove(path);
@@ -136,6 +206,7 @@ int main(int argc, char **argv){
  OP(turbodb_revision_db_open(&cfg,&db,&err),TURBODB_STATUS_OK);
  OP(turbodb_revision_inspect_request(db,blob("req3",4),&seq,&err),TURBODB_STATUS_NOT_FOUND);
  OP(turbodb_revision_db_close(db,&err),TURBODB_STATUS_OK);db=NULL;
+ CHECK(verify_projected_fault(path)==0);
  CHECK(sqlite3_vfs_register(under_vfs,1)==SQLITE_OK);
  CHECK(sqlite3_vfs_unregister(&wrapped_vfs)==SQLITE_OK);
  puts("fault vfs C11 PASS");
