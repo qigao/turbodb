@@ -36,6 +36,10 @@ static int run(const char *path) {
   CALL(turbodb_revision_begin_read(db,0,&read,&err),TURBODB_STATUS_OK);CHECK(turbodb_revision_read_sequence(read)==1);
   turbodb_revision_scan_config_init(&opts);CHECK(opts.abi_version==TURBODB_REVISION_SCAN_ABI_VERSION);
   CALL(turbodb_revision_read_scan_prefix(read,turbodb_view("graph"),blob("out/A:",6),&opts,&scan,&err),TURBODB_STATUS_OK);
+  turbodb_revision_scan_t *second = NULL;
+  CALL(turbodb_revision_read_scan_prefix(read,turbodb_view("graph"),
+       blob("in/B:",5),&opts,&second,&err),TURBODB_STATUS_BUSY);
+  CHECK(second == NULL);
   CALL(turbodb_revision_read_get(read,turbodb_view("graph"),blob("out/A:0001",10),&value,&err),TURBODB_STATUS_BUSY);
   CHECK(value==NULL);
   CHECK(!check_next(scan,"out/A:0001","old-1",1,0,&err));
@@ -52,7 +56,16 @@ static int run(const char *path) {
   CHECK(!check_next(scan,"out/A:0001","old-1",1,0,&err));
   CHECK(!check_next(scan,"out/A:0002","old-2",1,0,&err));
   CALL(turbodb_revision_scan_next(scan,&key,&value,&err),TURBODB_STATUS_NOT_FOUND);
-  /* read_close closes an active scan, prevents leaked SQLite statements. */
+  turbodb_revision_scan_close(scan);scan=NULL;
+  /* Reverse adjacency is independently indexed under the same revision. */
+  CALL(turbodb_revision_read_scan_prefix(read,turbodb_view("graph"),
+       blob("in/B:",5),&opts,&scan,&err),TURBODB_STATUS_OK);
+  CHECK(!check_next(scan,"in/B:0001","in-first",1,0,&err));
+  CALL(turbodb_revision_scan_next(scan,&key,&value,&err),TURBODB_STATUS_NOT_FOUND);
+  turbodb_revision_scan_close(scan);scan=NULL;
+  /* read_close closes an active scan, preventing leaked SQLite statements. */
+  CALL(turbodb_revision_read_scan_prefix(read,turbodb_view("graph"),
+       blob("out/A:",6),&opts,&scan,&err),TURBODB_STATUS_OK);
   turbodb_revision_read_close(read);read=NULL;scan=NULL;
   CALL(turbodb_revision_begin_read(db,2,&read,&err),TURBODB_STATUS_OK);
   CALL(turbodb_revision_read_scan_prefix(read,turbodb_view("graph"),blob("out/A:",6),&opts,&scan,&err),TURBODB_STATUS_OK);

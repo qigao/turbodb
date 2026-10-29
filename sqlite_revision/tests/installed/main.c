@@ -55,6 +55,29 @@ int main(int argc, char **argv) {
     return 5;
   turbodb_revision_value_destroy(value);
   value = NULL;
+
+  /* Qualify the new M1a symbols through the installed C11 SDK, not just
+   * internal native test linkage. Borrow the binary key only until next(). */
+  turbodb_revision_scan_config_t scan_cfg;
+  turbodb_revision_scan_t *scan = NULL;
+  turbodb_blob_t matched_key = {NULL, 0};
+  turbodb_revision_scan_config_init(&scan_cfg);
+  if (scan_cfg.abi_version != TURBODB_REVISION_SCAN_ABI_VERSION)
+    return 7;
+  CHECK(turbodb_revision_read_scan_prefix(read, turbodb_view("sdk"),
+                                          blob_view("fi", 2), &scan_cfg, &scan, &err));
+  CHECK(turbodb_revision_scan_next(scan, &matched_key, &value, &err));
+  bytes = turbodb_revision_value_bytes(value);
+  if (matched_key.size != 4 || memcmp(matched_key.data, "file", 4) ||
+      bytes.size != 17 || memcmp(bytes.data, "installed-content", 17))
+    return 8;
+  turbodb_revision_value_destroy(value);
+  value = NULL;
+  if (turbodb_revision_scan_next(scan, &matched_key, &value, &err) !=
+      TURBODB_STATUS_NOT_FOUND)
+    return 9;
+  turbodb_revision_scan_close(scan);
+  scan = NULL;
   turbodb_revision_read_close(read);
   read = NULL;
   CHECK(turbodb_revision_inspect_request(db, blob_view("installed-request", 17),
