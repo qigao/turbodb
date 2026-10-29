@@ -407,7 +407,7 @@ done:
 uint64_t turbodb_revision_value_sequence(const turbodb_revision_value_t *v) { return v ? v->sequence : 0; }
 int turbodb_revision_value_is_deleted(const turbodb_revision_value_t *v) { return v ? v->deleted : 0; }
 turbodb_blob_t turbodb_revision_value_bytes(const turbodb_revision_value_t *v) {
-  return v && !v->deleted ? turbodb_blob(v->data, v->size) : turbodb_blob(NULL, 0);
+  return v && !v->deleted ? (turbodb_blob_t){v->data, v->size} : (turbodb_blob_t){NULL, 0};
 }
 void turbodb_revision_value_destroy(turbodb_revision_value_t *v) {
   if (v) { free(v->data); free(v); }
@@ -546,7 +546,7 @@ turbodb_status_t turbodb_revision_write_delete(turbodb_revision_write_t *write,
                                                turbodb_blob_t key,
                                                uint64_t expected_head_seq,
                                                turbodb_error_t *error) {
-  return mutate(write, ns, key, turbodb_blob(NULL,0), 1, expected_head_seq, error);
+  return mutate(write, ns, key, (turbodb_blob_t){NULL, 0}, 1, expected_head_seq, error);
 }
 turbodb_status_t turbodb_revision_write_publish(turbodb_revision_write_t *write,
                                                 uint64_t *out_commit_seq,

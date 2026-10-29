@@ -6,6 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* turbodb_blob() constructs a generic turbodb_value_t, not turbodb_blob_t. */
+static turbodb_blob_t revision_blob(const void *data, size_t size) {
+  turbodb_blob_t out = {data, size};
+  return out;
+}
+
 #define CHECK(condition) do { if (!(condition)) { \
   fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition); \
   return 1; } } while (0)
@@ -25,7 +31,7 @@ static int check_value(turbodb_revision_db_t *db, uint64_t at,
   turbodb_error_init(&err);
   CALL(turbodb_revision_begin_read(db, at, &read, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_read_get(read, turbodb_view("docs"),
-                                turbodb_blob("file-1", 6), &value, &err),
+                                revision_blob("file-1", 6), &value, &err),
        TURBODB_STATUS_OK);
   CHECK(value != NULL);
   CHECK(turbodb_revision_value_sequence(value) == expected_seq);
@@ -62,40 +68,40 @@ static int run(const char *path) {
   CALL(turbodb_revision_begin_read(db, 0, &read, &err), TURBODB_STATUS_OK);
   CHECK(turbodb_revision_read_sequence(read) == 0);
   CALL(turbodb_revision_read_get(read, turbodb_view("docs"),
-                                turbodb_blob("file-1", 6), &value, &err),
+                                revision_blob("file-1", 6), &value, &err),
        TURBODB_STATUS_NOT_FOUND);
   CHECK(value == NULL);
   turbodb_revision_read_close(read); read = NULL;
 
-  CALL(turbodb_revision_begin_write(db, turbodb_blob(request1, 5), &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_begin_write(db, revision_blob(request1, 5), &write, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_put(write, turbodb_view("docs"),
-       turbodb_blob("file-1",6), turbodb_blob("version one",11),
+       revision_blob("file-1",6), revision_blob("version one",11),
        TURBODB_REVISION_EXPECT_ABSENT, &err), TURBODB_STATUS_OK);
   /* Every additional entry in the batch belongs to the same commit. */
   CALL(turbodb_revision_write_put(write, turbodb_view("docs"),
-       turbodb_blob("file-2",6), turbodb_blob("shared txn",10),
+       revision_blob("file-2",6), revision_blob("shared txn",10),
        TURBODB_REVISION_EXPECT_ABSENT, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_BUSY);
   CALL(turbodb_revision_write_publish(write, &seq, &err), TURBODB_STATUS_OK);
   write = NULL;
   CHECK(seq == 1);
   CHECK(check_value(db, 1, "version one", 0, 1) == 0);
-  CALL(turbodb_revision_inspect_request(db, turbodb_blob(request1,5), &seq, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_inspect_request(db, revision_blob(request1,5), &seq, &err), TURBODB_STATUS_OK);
   CHECK(seq == 1);
-  CALL(turbodb_revision_begin_write(db, turbodb_blob(request1, 5), &write, &err), TURBODB_STATUS_CONSTRAINT);
+  CALL(turbodb_revision_begin_write(db, revision_blob(request1, 5), &write, &err), TURBODB_STATUS_CONSTRAINT);
   CHECK(write == NULL);
 
   CALL(turbodb_revision_begin_read(db, 0, &read, &err), TURBODB_STATUS_OK);
   CHECK(turbodb_revision_read_sequence(read) == 1);
-  CALL(turbodb_revision_begin_write(db, turbodb_blob(request2, 5), &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_begin_write(db, revision_blob(request2, 5), &write, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_put(write, turbodb_view("docs"),
-       turbodb_blob("file-1", 6), turbodb_blob("version two", 11), 1, &err), TURBODB_STATUS_OK);
+       revision_blob("file-1", 6), revision_blob("version two", 11), 1, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_publish(write, &seq, &err), TURBODB_STATUS_OK);
   write = NULL;
   CHECK(seq == 2);
   /* This active reader sees the exact older SQLite transaction snapshot. */
   CALL(turbodb_revision_read_get(read, turbodb_view("docs"),
-       turbodb_blob("file-1",6), &value, &err), TURBODB_STATUS_OK);
+       revision_blob("file-1",6), &value, &err), TURBODB_STATUS_OK);
   CHECK(turbodb_revision_value_sequence(value) == 1);
   CHECK(memcmp(turbodb_revision_value_bytes(value).data, "version one", 11)==0);
   turbodb_revision_value_destroy(value); value = NULL;
@@ -105,16 +111,16 @@ static int run(const char *path) {
   CHECK(check_value(db, 0, "version two", 0, 2) == 0);
 
   /* A transaction with failed CAS is explicitly abandoned; old data remains. */
-  CALL(turbodb_revision_begin_write(db, turbodb_blob("req-bad", 7), &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_begin_write(db, revision_blob("req-bad", 7), &write, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_put(write, turbodb_view("docs"),
-       turbodb_blob("file-1",6), turbodb_blob("bad",3), 1, &err), TURBODB_STATUS_CONSTRAINT);
+       revision_blob("file-1",6), revision_blob("bad",3), 1, &err), TURBODB_STATUS_CONSTRAINT);
   turbodb_revision_write_abort(write); write = NULL;
-  CALL(turbodb_revision_inspect_request(db, turbodb_blob("req-bad",7), &seq, &err), TURBODB_STATUS_NOT_FOUND);
+  CALL(turbodb_revision_inspect_request(db, revision_blob("req-bad",7), &seq, &err), TURBODB_STATUS_NOT_FOUND);
   CHECK(check_value(db, 0, "version two", 0, 2) == 0);
 
-  CALL(turbodb_revision_begin_write(db, turbodb_blob(request3,5), &write, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_begin_write(db, revision_blob(request3,5), &write, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_delete(write, turbodb_view("docs"),
-       turbodb_blob("file-1",6), 2, &err), TURBODB_STATUS_OK);
+       revision_blob("file-1",6), 2, &err), TURBODB_STATUS_OK);
   CALL(turbodb_revision_write_publish(write, &seq, &err), TURBODB_STATUS_OK);
   write = NULL;
   CHECK(seq == 3);
@@ -126,11 +132,11 @@ static int run(const char *path) {
 
   cfg.flags = TURBODB_REVISION_OPEN_READ_ONLY;
   CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_OK);
-  CALL(turbodb_revision_begin_write(db, turbodb_blob("req-4",5), &write, &err), TURBODB_STATUS_INVALID_STATE);
+  CALL(turbodb_revision_begin_write(db, revision_blob("req-4",5), &write, &err), TURBODB_STATUS_INVALID_STATE);
   CHECK(write == NULL);
   CHECK(check_value(db, 1, "version one", 0, 1) == 0);
   CHECK(check_value(db, 3, "", 1, 3) == 0);
-  CALL(turbodb_revision_inspect_request(db, turbodb_blob(request3,5), &seq, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_inspect_request(db, revision_blob(request3,5), &seq, &err), TURBODB_STATUS_OK);
   CHECK(seq == 3);
   CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_OK); db = NULL;
 
