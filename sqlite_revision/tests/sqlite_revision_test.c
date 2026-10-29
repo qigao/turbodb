@@ -188,6 +188,20 @@ static int verify_strict_schema_admission(const char *path) {
   CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_UNSUPPORTED);
   CHECK(db == NULL);
 
+  /* '_' in SQL LIKE is a wildcard: extra 'sqlitex...' objects are not
+   * SQLite's reserved internal 'sqlite_' namespace. Reject these too. */
+  (void)remove(path);
+  cfg.flags = TURBODB_REVISION_OPEN_CREATE;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_OK);
+  CALL(turbodb_revision_db_close(db, &err), TURBODB_STATUS_OK); db = NULL;
+  CHECK(sqlite3_open(path, &raw) == SQLITE_OK);
+  CHECK(sqlite3_exec(raw, "CREATE VIEW sqlitexhidden AS SELECT 1;",
+                     NULL, NULL, NULL) == SQLITE_OK);
+  CHECK(sqlite3_close(raw) == SQLITE_OK); raw = NULL;
+  cfg.flags = 0;
+  CALL(turbodb_revision_db_open(&cfg, &db, &err), TURBODB_STATUS_UNSUPPORTED);
+  CHECK(db == NULL);
+
   /* Named index membership is part of v1 schema admission. */
   (void)remove(path);
   cfg.flags = TURBODB_REVISION_OPEN_CREATE;

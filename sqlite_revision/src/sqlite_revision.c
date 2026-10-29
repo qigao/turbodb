@@ -150,7 +150,7 @@ static turbodb_status_t verify_schema(sqlite3 *sql, turbodb_error_t *error) {
   sqlite3_stmt *stmt = NULL;
   turbodb_status_t status = prepare(sql,
     "SELECT name,type,sql FROM sqlite_master "
-    "WHERE name NOT LIKE 'sqlite_%' ORDER BY name", &stmt, error);
+    "WHERE substr(name,1,7)!='sqlite_' ORDER BY name", &stmt, error);
   if (status != TURBODB_STATUS_OK) return status;
   int rc;
   size_t count = 0;
