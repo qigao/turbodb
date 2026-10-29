@@ -94,64 +94,16 @@ jobs:
             '-DTURBODB_BUILD_TIDESSQL_SERVER=OFF' '-DBUILD_EXAMPLES=OFF' `
             '-DBUILD_TESTS=ON' '-DBUILD_E2E_TESTS=OFF'
           if ($LASTEXITCODE -ne 0) {
-            # vcpkg's compiler detector writes its *first real* CMake/ninja
-            # error to this directory, while top-level CMake only reports
-            # "compiler information unavailable". Preserve that diagnostic.
             $detector=Join-Path $env:VCPKG_ROOT 'buildtrees/detect_compiler'
             if (Test-Path $detector) {
               Get-ChildItem $detector -File -Recurse |
-                Where-Object { $_.Name -match '(config|stdout|stderr).*\\.log
-          $cache=Get-Content build/studio-llvm/CMakeCache.txt
-          if ($cache -notcontains 'TURBODB_BUILD_APP:BOOL=ON' -or
-              !($cache -match '^VCPKG_TARGET_TRIPLET:(?:STRING|UNINITIALIZED)=x64-llvm-mingw-dynamic$')) {
-            throw 'Studio or target ABI was dropped during configure'
-          }
-      - name: Build entire configured Studio and ORM graph
-        shell: pwsh
-        run: |
-          $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$env:PATH"
-          cmake --build build/studio-llvm --parallel 4
-          if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw Studio full build failed' }
-      - name: Run real native Windows Studio CTest
-        shell: pwsh
-        run: |
-          $installed=Join-Path $env:GITHUB_WORKSPACE 'build/studio-vcpkg-installed/x64-llvm-mingw-dynamic/bin'
-          $env:PATH="build/studio-llvm/bin;$installed;$env:TURBODB_LLVM_MINGW_BIN;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
-          ctest --test-dir build/studio-llvm --output-on-failure -R '^turbodb-app-' --repeat until-fail:3
-          if ($LASTEXITCODE -ne 0) { throw 'Native Studio application tests failed' }
-      - name: Admit real PE and editor DLL closure
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
-            $path=Join-Path 'build/studio-llvm/bin' $name
-            if (!(Test-Path $path -PathType Leaf)) {
-              throw "Missing real Windows Studio payload $name"
-            }
-          }
-          $machine=Get-ChildItem $env:TURBODB_LLVM_MINGW_BIN -Filter llvm-readobj.exe |
-            Select-Object -First 1
-          if (!$machine) { throw 'Pinned PE tool llvm-readobj.exe is missing' }
-          foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
-            $pe=& $machine.FullName --file-headers (Join-Path 'build/studio-llvm/bin' $name) |
-              Out-String
-            if ($LASTEXITCODE -ne 0 -or $pe -notmatch 'IMAGE_FILE_MACHINE_AMD64') {
-              throw "Studio PE machine does not match x64 llvm-mingw: $name"
-            }
-          }
-          Write-Host "TURBODB_STUDIO_LLVM_MINGW_OK arch=x64 exe=1 scintilla=1 lexilla=1 native_ctest=1"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: turbodb-studio-llvm-mingw-x64-qualification
-          path: build/studio-llvm/bin/
-          if-no-files-found: error
- } |
+                Where-Object { $_.Name -like '*-out.log' } |
                 Select-Object -Last 12 | ForEach-Object {
-                  Write-Host "=== vcpkg compiler qualification: $($_.FullName) ==="
+                  Write-Host "=== vcpkg compiler detector: $($_.FullName) ==="
                   Get-Content -LiteralPath $_.FullName -Tail 100
                 }
             }
-            throw 'llvm-mingw Studio configure failed (see compiler detector above)'
+            throw 'llvm-mingw Studio configure failed (see compiler detector logs)'
           }
           $cache=Get-Content build/studio-llvm/CMakeCache.txt
           if ($cache -notcontains 'TURBODB_BUILD_APP:BOOL=ON' -or
