@@ -1,0 +1,140 @@
+name: TurboDB Studio llvm-mingw native Windows
+
+on:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'CMakeLists.txt'
+      - 'CMakeOptions.cmake'
+      - 'vcpkg.json'
+      - 'vcpkg-configuration.json'
+      - '.github/workflows/studio-llvm-mingw.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turbodb-studio-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-llvm-mingw:
+    name: Original OpenATL/WTL + Studio llvm-mingw x64 native
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/vcpkg-cache
+          ref: 8359cdbdf25c1f58cfc7230cc6318dc2fdb804fb
+          path: tools/vcpkg-cache
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Bootstrap canonical curl-only vcpkg-cache
+        shell: pwsh
+        run: |
+          python tools/vcpkg-cache/scripts/setup-vcpkg-curl-cache.py tools/vcpkg-cache
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned vcpkg bootstrap failed' }
+      - name: Obtain pinned llvm-mingw x64 UCRT
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-x86_64.zip'
+          & curl.exe -fLsS --retry 2 --output llvm-mingw.zip $url
+          if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw download failed' }
+          $sum=(Get-FileHash llvm-mingw.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sum -ne 'fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd') {
+            throw "llvm-mingw archive SHA256 mismatch: $sum"
+          }
+          Expand-Archive llvm-mingw.zip -DestinationPath tools/llvm -Force
+          $tool=Get-ChildItem tools/llvm -Recurse -Filter x86_64-w64-mingw32-clang++.exe |
+            Select-Object -First 1
+          if (!$tool) { throw 'Pinned llvm-mingw compiler not found' }
+          "TURBODB_LLVM_MINGW_BIN=$($tool.Directory.FullName)" >> $env:GITHUB_ENV
+          $tool.Directory.FullName >> $env:GITHUB_PATH
+          & $tool.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw compiler cannot execute' }
+      - name: Restore existing published Windows native SDK pair and re2c
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Native SDK restore failed' }
+      - name: Configure complete Studio/ORM Windows graph with llvm-mingw
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
+          $installed=Join-Path $env:GITHUB_WORKSPACE 'build/studio-vcpkg-installed'
+          $triplets=Join-Path $env:GITHUB_WORKSPACE 'app/vcpkg-triplets'
+          $wtl=Join-Path $env:GITHUB_WORKSPACE 'tools/vcpkg-cache/ports/wtl'
+          & cmake -S . -B build/studio-llvm -G Ninja `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            '-DCMAKE_BUILD_TYPE=Release' `
+            "-DVCPKG_INSTALLED_DIR=$installed" `
+            '-DVCPKG_TARGET_TRIPLET=x64-llvm-mingw-dynamic' `
+            '-DVCPKG_HOST_TRIPLET=x64-windows' `
+            "-DVCPKG_OVERLAY_TRIPLETS=$triplets" `
+            "-DTURBODB_WTL_PORT_DIR=$wtl" `
+            '-DTURBODB_BUILD_APP=ON' '-DTURBODB_BUILD_ORM=ON' `
+            '-DTURBODB_BUILD_DBTOOLS=OFF' '-DTURBODB_BUILD_REDIS=OFF' `
+            '-DTURBODB_BUILD_SQLPARSER=OFF' '-DTURBODB_BUILD_TIDESSQL=OFF' `
+            '-DTURBODB_BUILD_TIDESSQL_SERVER=OFF' '-DBUILD_EXAMPLES=OFF' `
+            '-DBUILD_TESTS=ON' '-DBUILD_E2E_TESTS=OFF'
+          if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw Studio configure failed' }
+          $cache=Get-Content build/studio-llvm/CMakeCache.txt
+          if ($cache -notcontains 'TURBODB_BUILD_APP:BOOL=ON' -or
+              !($cache -match '^VCPKG_TARGET_TRIPLET:(?:STRING|UNINITIALIZED)=x64-llvm-mingw-dynamic$')) {
+            throw 'Studio or target ABI was dropped during configure'
+          }
+      - name: Build entire configured Studio and ORM graph
+        shell: pwsh
+        run: |
+          $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$env:PATH"
+          cmake --build build/studio-llvm --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw Studio full build failed' }
+      - name: Run real native Windows Studio CTest
+        shell: pwsh
+        run: |
+          $installed=Join-Path $env:GITHUB_WORKSPACE 'build/studio-vcpkg-installed/x64-llvm-mingw-dynamic/bin'
+          $env:PATH="build/studio-llvm/bin;$installed;$env:TURBODB_LLVM_MINGW_BIN;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
+          ctest --test-dir build/studio-llvm --output-on-failure -R '^turbodb-app-' --repeat until-fail:3
+          if ($LASTEXITCODE -ne 0) { throw 'Native Studio application tests failed' }
+      - name: Admit real PE and editor DLL closure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
+            $path=Join-Path 'build/studio-llvm/bin' $name
+            if (!(Test-Path $path -PathType Leaf)) {
+              throw "Missing real Windows Studio payload $name"
+            }
+          }
+          $machine=Get-ChildItem $env:TURBODB_LLVM_MINGW_BIN -Filter llvm-readobj.exe |
+            Select-Object -First 1
+          if (!$machine) { throw 'Pinned PE tool llvm-readobj.exe is missing' }
+          foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
+            $pe=& $machine.FullName --file-headers (Join-Path 'build/studio-llvm/bin' $name) |
+              Out-String
+            if ($LASTEXITCODE -ne 0 -or $pe -notmatch 'IMAGE_FILE_MACHINE_AMD64') {
+              throw "Studio PE machine does not match x64 llvm-mingw: $name"
+            }
+          }
+          Write-Host "TURBODB_STUDIO_LLVM_MINGW_OK arch=x64 exe=1 scintilla=1 lexilla=1 native_ctest=1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-studio-llvm-mingw-x64-qualification
+          path: build/studio-llvm/bin/
+          if-no-files-found: error

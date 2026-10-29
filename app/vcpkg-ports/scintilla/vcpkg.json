@@ -3,12 +3,17 @@
   "version": "5.5.8",
   "description": "A free source code editing component for Win32, GTK+, and OS X",
   "homepage": "https://www.scintilla.org/",
-  "supports": "windows & !uwp & !mingw",
+  "supports": "windows & !uwp",
   "dependencies": [
     {
       "name": "vcpkg-msbuild",
       "host": true,
-      "platform": "windows"
+      "platform": "windows & !mingw"
+    },
+    {
+      "name": "vcpkg-cmake",
+      "host": true,
+      "platform": "mingw"
     }
   ]
 }

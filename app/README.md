@@ -20,70 +20,48 @@ not linked into `Orm::C`, database drivers, or dbtools.
 A future HTTP/OpenAPI/remote feature may add it behind a separate explicit
 option.
 
-## Build
+## Build: llvm-mingw + source OpenATL
 
-From a Visual Studio developer environment, use the Windows Release user
-preset. It enables Studio and its required ORM drivers through the repository
-vcpkg manifest. This setting belongs to the user preset; CI profiles remain
-separate.
+TurboDB Studio remains **Windows-targeted only**, but can compile with
+llvm-mingw on a Windows host. Linux, macOS and Android core builds do not
+include `app/` when `TURBODB_BUILD_APP=OFF`.
 
-WTL also requires ATL from the selected Visual Studio installation. Install
-**C++ ATL for latest v143 build tools (x86 & x64)**
-(`Microsoft.VisualStudio.Component.VC.ATL`) through Visual Studio Installer
-if that instance lacks `atlbase.h`; the vcpkg WTL package does not supply ATL.
-See the [Visual Studio component list](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022).
-With multiple VS installations, configure and build from the same instance's
-x64 developer environment. When switching instances, use
-`cmake --preset win-release-user --fresh` to replace the cached compiler.
+Use the pinned original components:
 
-~~~powershell
-cmake --preset win-release-user
-cmake --build --preset win-release-user --target turbodb-studio
-ctest --preset win-release-user -R "^turbodb-app-" --output-on-failure
-~~~
+- OpenATL source HEAD `d943697d5b2b39c4f26406e0959ef01a53d42f1e`
+  through CMake FetchContent; there is **no installed OpenATL SDK** and no
+  dependency on Microsoft ATL or Visual Studio.
+- Original `wtl@10.0.10320#7` from qigao/vcpkg-cache
+  `8359cdbdf25c1f58cfc7230cc6318dc2fdb804fb`; set
+  `TURBODB_WTL_PORT_DIR` to that checkout's `ports/wtl`.
+- llvm-mingw 20261020 UCRT; set `TURBODB_LLVM_MINGW_BIN` to its `bin`.
+- App-only Scintilla 5.5.8 and Lexilla 5.4.6, built by the same
+  llvm-mingw triplet rather than linking their MSVC libraries.
 
-### CMake Tools with multiple Visual Studio instances
-
-CMake Tools can automatically select a newer Visual Studio instance that has
-the compiler but lacks ATL. Installing ATL in another instance does not make
-it available to the selected compiler.
-
-To use an existing instance with ATL, set this in the editor's workspace
-settings, then save your work and fully exit the editor:
-
-~~~json
-{
-  "cmake.useVsDeveloperEnvironment": "never"
-}
-~~~
-
-Start the editor from that instance's x64 developer environment. For example,
-from the repository root in PowerShell, with VS 2022 Professional and VS Code:
+A Windows developer environment with Ninja, CMake, vcpkg and
+compiler-compatible Salts/SaltsUtils SDKs can use:
 
 ~~~powershell
-cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && code .'
+$env:TURBODB_LLVM_MINGW_BIN = 'C:/toolchains/llvm-mingw/bin'
+$env:SALTS_ROOT = 'C:/sdk/salts/windows-x64'
+$env:SALTS_UTILS_ROOT = 'C:/sdk/salts-utils/windows-x64'
+
+cmake -S . -B build/studio-llvm -G Ninja `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DVCPKG_TARGET_TRIPLET=x64-llvm-mingw-dynamic `
+  -DVCPKG_OVERLAY_TRIPLETS="$PWD/app/vcpkg-triplets" `
+  -DTURBODB_WTL_PORT_DIR="$PWD/tools/vcpkg-cache/ports/wtl" `
+  -DTURBODB_BUILD_APP=ON -DTURBODB_BUILD_ORM=ON `
+  -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_BUILD_REDIS=OFF `
+  -DTURBODB_BUILD_SQLPARSER=OFF -DBUILD_TESTS=ON
+cmake --build build/studio-llvm --parallel 4
+ctest --test-dir build/studio-llvm -R '^turbodb-app-' --output-on-failure
 ~~~
 
-If the current shell already uses another VS developer environment
-(`VSINSTALLDIR` is set), clean it in the same child process before switching:
-
-~~~powershell
-cmd /d /c 'call "%VSINSTALLDIR%Common7\Tools\VsDevCmd.bat" -clean_env >nul && call "C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && code .'
-~~~
-
-Calling another instance's `VsDevCmd.bat` without cleaning can retain the old
-`VSINSTALLDIR` and continue selecting that instance's compiler and headers.
-
-Use your installed Visual Studio instance's path. An already running VS Code
-process may retain its old environment, so opening
-another window or an integrated terminal is insufficient.
-
-In the newly launched editor's terminal, run
-`cmake --preset win-release-user --fresh`, then select `win-release-user` in
-CMake Tools. Keep launching the editor from this developer environment while
-the setting is `never`; it makes CMake Tools inherit the editor's environment.
-See the [CMake Tools environment selection implementation](https://github.com/microsoft/vscode-cmake-tools/blob/v1.23.52/src/presets/preset.ts)
-and [Microsoft's developer prompt instructions](https://code.visualstudio.com/docs/cpp/config-msvc#_check-your-microsoft-visual-c-installation).
+`tools/vcpkg-cache` must be checked out at the pinned commit.
+The [dedicated Studio llvm-mingw CI](../.github/workflows/studio-llvm-mingw.yml)
+will fail on actual ABI, compiler, DLL, or lifecycle incompatibilities;
+a successful source check does not substitute for native Windows CTest.
 
 The first slice provides the frame and pane ownership boundaries only:
 

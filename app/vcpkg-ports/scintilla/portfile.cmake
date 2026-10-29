@@ -4,11 +4,24 @@ vcpkg_from_git(
   REF 0583df2dc4a988bd91d892399de73373264c13a2
 )
 
-vcpkg_install_msbuild(
-  SOURCE_PATH "${SOURCE_PATH}"
-  PROJECT_SUBPATH win32/Scintilla.vcxproj
-)
+if(VCPKG_TARGET_IS_MINGW)
+  # The upstream win32/makefile already supports MinGW and Clang; compile
+  # the same unchanged C++ source set with vcpkg's selected llvm-mingw
+  # toolchain. Never link an MSVC-ABI Scintilla binary to Studio.
+  file(COPY "${CMAKE_CURRENT_LIST_DIR}/StudioScintilla.cmake"
+       DESTINATION "${SOURCE_PATH}")
+  file(RENAME "${SOURCE_PATH}/StudioScintilla.cmake"
+              "${SOURCE_PATH}/CMakeLists.txt")
+  vcpkg_cmake_configure(SOURCE_PATH "${SOURCE_PATH}")
+  vcpkg_cmake_install()
+  vcpkg_copy_pdbs()
+else()
+  vcpkg_install_msbuild(
+    SOURCE_PATH "${SOURCE_PATH}"
+    PROJECT_SUBPATH win32/Scintilla.vcxproj)
+endif()
 
+file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/include")
 vcpkg_install_copyright(FILE_LIST "${SOURCE_PATH}/License.txt")
 file(INSTALL "${SOURCE_PATH}/include/"
      DESTINATION "${CURRENT_PACKAGES_DIR}/include/${PORT}"

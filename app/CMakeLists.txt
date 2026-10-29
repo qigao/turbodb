@@ -1,5 +1,5 @@
 if(NOT WIN32)
-  message(FATAL_ERROR "TurboDB Studio is supported only on Windows")
+  message(FATAL_ERROR "TurboDB Studio targets Windows; use llvm-mingw when cross-compiling")
 endif()
 
 if(NOT TARGET Orm::Cpp)
@@ -8,24 +8,23 @@ endif()
 
 enable_language(RC)
 
-# WTL uses ATL from the active Visual Studio toolchain. Recheck because a
-# Ninja build tree may be configured from a different developer environment.
-include(CheckIncludeFileCXX)
-unset(TURBODB_APP_HAS_ATL CACHE)
-check_include_file_cxx(atlbase.h TURBODB_APP_HAS_ATL)
-if(NOT TURBODB_APP_HAS_ATL)
-  message(FATAL_ERROR
-    "TurboDB Studio requires ATL (atlbase.h) in the active compiler environment. "
-    "Install Microsoft.VisualStudio.Component.VC.ATL for the selected Visual Studio "
-    "instance, then configure from its x64 developer environment. "
-    "When switching Visual Studio instances, run cmake --preset win-release-user --fresh.")
+# One ATL implementation, pinned to the OpenATL master merge qualified with
+# the original WTL 10.0.10320#7 source. FetchContent supplies only source:
+# there is no installed OpenATL SDK, Microsoft ATL fallback or WTL adapter.
+include(FetchContent)
+FetchContent_Declare(
+  turbodb_openatl
+  GIT_REPOSITORY https://github.com/qigao/OpenATL.git
+  GIT_TAG d943697d5b2b39c4f26406e0959ef01a53d42f1e
+  GIT_SHALLOW FALSE)
+FetchContent_MakeAvailable(turbodb_openatl)
+if(NOT TARGET OpenATL::ATL)
+  message(FATAL_ERROR "Pinned OpenATL source did not define OpenATL::ATL")
 endif()
 
-# The WTL, Scintilla, and Lexilla vcpkg ports do not expose one uniform CMake
-# package contract. Keep the adaptation local to the app so no GUI dependency
-# leaks into TurboDB libraries or dbtools.
-find_path(TURBODB_APP_WTL_INCLUDE_DIR
-          NAMES atlapp.h)
+# Scintilla and Lexilla remain app-only vcpkg dependencies, now built with
+# the active llvm-mingw toolchain instead of Windows-only MSBuild.
+# Original WTL includes are already propagated by OpenATL::ATL.
 find_path(TURBODB_APP_SCINTILLA_INCLUDE_DIR
           NAMES Scintilla.h
           PATH_SUFFIXES scintilla)
@@ -38,7 +37,6 @@ find_library(TURBODB_APP_LEXILLA_LIBRARY
              NAMES Lexilla lexilla)
 
 foreach(required_var
-        TURBODB_APP_WTL_INCLUDE_DIR
         TURBODB_APP_SCINTILLA_INCLUDE_DIR
         TURBODB_APP_SCINTILLA_LIBRARY
         TURBODB_APP_LEXILLA_INCLUDE_DIR
@@ -53,14 +51,23 @@ add_library(turbodb_app_editor_deps INTERFACE)
 target_include_directories(
   turbodb_app_editor_deps
   INTERFACE
-    "${TURBODB_APP_WTL_INCLUDE_DIR}"
     "${TURBODB_APP_SCINTILLA_INCLUDE_DIR}"
     "${TURBODB_APP_LEXILLA_INCLUDE_DIR}")
 target_link_libraries(
   turbodb_app_editor_deps
   INTERFACE
+    OpenATL::ATL
     "${TURBODB_APP_SCINTILLA_LIBRARY}"
     "${TURBODB_APP_LEXILLA_LIBRARY}")
+
+# LoadLibraryW needs both DLLs from the same vcpkg target ABI beside
+# Studio.exe, not just import libraries in the build directory.
+set(_studio_port_bin "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+foreach(_studio_dll IN ITEMS Scintilla.dll Lexilla.dll)
+  if(NOT EXISTS "${_studio_port_bin}/${_studio_dll}")
+    message(FATAL_ERROR "Studio requires target-ABI ${_studio_dll} at ${_studio_port_bin}")
+  endif()
+endforeach()
 
 set(turbodb_app_window_sources
   src/studio.manifest
@@ -133,6 +140,13 @@ set_target_properties(
   PROPERTIES
     FOLDER "app"
     OUTPUT_NAME "TurboDBStudio")
+
+foreach(_studio_dll IN ITEMS Scintilla.dll Lexilla.dll)
+  add_custom_command(TARGET turbodb-studio POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "${_studio_port_bin}/${_studio_dll}" "$<TARGET_FILE_DIR:turbodb-studio>"
+    VERBATIM)
+endforeach()
 
 if(BUILD_TESTS)
   cmake_add_test(NAME turbodb-app-config-test TEST_NAME turbodb-app-config
