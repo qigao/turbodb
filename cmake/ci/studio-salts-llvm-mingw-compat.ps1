@@ -44,3 +44,30 @@ if ([Regex]::Matches($patched, [Regex]::Escape('#if defined(_WIN32)')).Count -lt
   throw 'Patched Windows allocator guard verification failed'
 }
 Write-Host 'STUDIO_SALTS_NATIVE_ALIGN_ADMITTED guards=4 allocator=_aligned_malloc deallocator=_aligned_free'
+
+
+# Old C TinyTest constructor metadata uses __declspec(allocate(".CRT$XCV"))
+# for *all* Windows Clang. Clang in the GNU/MinGW ABI maps that spelling to
+# an ignored attribute. If tests are linked, no spec is registered, which can
+# make an empty test executable falsely succeed. Keep the original MSVC and
+# clang-cl CRT slot, but select the framework's existing GCC/Clang constructor
+# attribute for clang-mingw (which the PE CRT executes before main).
+$testHeader = Join-Path $root 'tinytest/include/tinytest.h'
+if (-not (Test-Path -LiteralPath $testHeader -PathType Leaf)) {
+  throw "Missing pinned Salts TinyTest public header"
+}
+$testSource = [IO.File]::ReadAllText($testHeader, $utf8)
+$testOriginal = '#elif defined(_WIN32) && defined(__clang__)'
+$testNative = '#elif defined(_WIN32) && defined(__clang__) && !defined(__MINGW32__)'
+if ([Regex]::Matches($testSource, [Regex]::Escape($testOriginal)).Count -ne 1 -or
+    -not $testSource.Contains('#elif defined(__GNUC__) || defined(__clang__)') -or
+    -not $testSource.Contains('static void fn(void) __attribute__((constructor));') -or
+    -not $testSource.Contains('__declspec(allocate(".CRT$XCV"))')) {
+  throw "Pinned TinyTest CRT constructor semantics changed; cannot adapt MinGW"
+}
+$testPatched = $testSource.Replace($testOriginal, $testNative)
+[IO.File]::WriteAllText($testHeader, $testPatched, $utf8)
+if ([Regex]::Matches($testPatched, [Regex]::Escape($testNative)).Count -ne 1) {
+  throw "MinGW TinyTest constructor selection patch failed"
+}
+Write-Host 'STUDIO_TINYTEST_MINGW_REGISTRATION_ADMITTED original_gnu_constructor=1 msvc_crt_unchanged=1'

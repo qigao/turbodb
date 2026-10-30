@@ -243,8 +243,25 @@ jobs:
       - name: Run real native Windows Studio CTest
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
+          $bin=Join-Path $env:GITHUB_WORKSPACE 'build/studio-llvm/bin'
           $installed=Join-Path $env:GITHUB_WORKSPACE 'build/studio-vcpkg-installed/x64-llvm-mingw-dynamic/bin'
-          $env:PATH="build/studio-llvm/bin;$installed;$env:TURBODB_LLVM_MINGW_BIN;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
+          $env:PATH="$bin;$installed;$env:TURBODB_LLVM_MINGW_BIN;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
+          # A TinyTest executable may exit 0 despite having zero registered
+          # specs. Prove real Clang/MinGW C constructor registration by listing
+          # a known existing ORM test suite before executing its CTest.
+          $maintenance=Join-Path $bin 'orm_sqlite_plugin_maintenance_test.exe'
+          if (-not (Test-Path $maintenance -PathType Leaf)) {
+            throw 'Real ORM TinyTest maintenance executable missing'
+          }
+          $listed=(& $maintenance --list | Out-String)
+          if ($LASTEXITCODE -ne 0 -or
+              -not $listed.Contains('SQLite plugin maintenance checkpoint and restore')) {
+            throw "Clang/MinGW TinyTest registration did not execute: $listed"
+          }
+          Write-Host 'STUDIO_TINYTEST_RUNTIME_REGISTRATION_OK'
+          ctest --test-dir build/studio-llvm --output-on-failure -R '^orm_sqlite_plugin_maintenance$'
+          if ($LASTEXITCODE -ne 0) { throw 'Native ORM TinyTest maintenance test failed' }
           ctest --test-dir build/studio-llvm --output-on-failure -R '^turbodb-app-' --repeat until-fail:3
           if ($LASTEXITCODE -ne 0) { throw 'Native Studio application tests failed' }
       - name: Admit real PE and editor DLL closure
