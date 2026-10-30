@@ -131,11 +131,39 @@ jobs:
             }
             & cmake -S $item.source -B $item.build -G Ninja @common @settings "-DCMAKE_INSTALL_PREFIX=$($item.prefix)"
             if ($LASTEXITCODE -ne 0) { throw "$($item.name) llvm-mingw configure failed" }
+            # CMake may select the "cc.exe" wrapper inside llvm-mingw/bin
+            # rather than the x86_64-prefixed clang.exe spelling. Validate
+            # the executable's provenance and actual target, not its basename.
             $cache=Get-Content (Join-Path $item.build 'CMakeCache.txt')
-            if (-not ($cache -match '^CMAKE_C_COMPILER:(?:FILEPATH|STRING)=.*x86_64-w64-mingw32-clang[.]exe$') -or
-                -not ($cache -match '^VCPKG_TARGET_TRIPLET:(?:STRING|UNINITIALIZED)=x64-llvm-mingw-dynamic$')) {
-              throw "$($item.name) target ABI is not pinned llvm-mingw"
+            $compilerEntry=@($cache | Where-Object {
+              $_ -match '^CMAKE_C_COMPILER:(?:FILEPATH|STRING|UNINITIALIZED)='
+            })
+            $tripletEntry=@($cache | Where-Object {
+              $_ -match '^VCPKG_TARGET_TRIPLET:(?:STRING|UNINITIALIZED|INTERNAL)='
+            })
+            if ($compilerEntry.Count -ne 1 -or $tripletEntry.Count -ne 1) {
+              throw "$($item.name) CMake cache lacks unique compiler/target entries"
             }
+            $cc=($compilerEntry[0] -split '=',2)[1]
+            $selectedTriplet=($tripletEntry[0] -split '=',2)[1]
+            Write-Host "SDK_ABI_SELECTION component=$($item.name) compiler=$cc triplet=$selectedTriplet"
+            $ccPath=[IO.Path]::GetFullPath($cc)
+            $expectedBin=[IO.Path]::GetFullPath($env:TURBODB_LLVM_MINGW_BIN).TrimEnd([char[]]@('/','\\'))
+            $expectedPrefix=$expectedBin+[IO.Path]::DirectorySeparatorChar
+            if (-not $ccPath.StartsWith($expectedPrefix,[StringComparison]::OrdinalIgnoreCase) -or
+                $selectedTriplet -ne 'x64-llvm-mingw-dynamic') {
+              throw "$($item.name) selected a compiler outside pinned llvm-mingw or wrong vcpkg triplet"
+            }
+            $compilerVersion=(& $cc --version | Out-String)
+            if ($LASTEXITCODE -ne 0 -or $compilerVersion -notmatch '(?i)clang version 23[.]') {
+              throw "$($item.name) compiler is not pinned LLVM Clang 23"
+            }
+            $compilerTarget=(& $cc -dumpmachine | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or
+                $compilerTarget -notmatch '^x86_64-.*(?:mingw|windows-gnu)') {
+              throw "$($item.name) compiler has wrong native Windows x64 target: $compilerTarget"
+            }
+            Write-Host "STUDIO_NATIVE_COMPILER_ADMITTED component=$($item.name) target=$compilerTarget"
             & cmake --build $item.build --target install --parallel 4
             if ($LASTEXITCODE -ne 0) { throw "$($item.name) native source build/install failed" }
             $configPath=Join-Path $item.prefix ("lib/cmake/"+$item.config)
