@@ -149,7 +149,7 @@ jobs:
           # table entry would prove an accidental import-lib / ABI dependency.
           $imports=& $machine.FullName --coff-imports 'build/studio-llvm/bin/TurboDBStudio.exe' | Out-String
           if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect Studio PE imports' }
-          if ($imports -match '(?i)\\b(?:Scintilla|Lexilla)\\.dll\\b') {
+          if ($imports -match '(?i)(?:Scintilla|Lexilla)[.]dll') {
             throw 'Studio must load editor DLLs explicitly, never link import libs'
           }
           Write-Host "TURBODB_STUDIO_LLVM_MINGW_OK arch=x64 exe=1 scintilla=1 lexilla=1 native_ctest=1 dynamic_editor=1"
