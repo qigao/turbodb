@@ -8,23 +8,23 @@ endif()
 
 enable_language(RC)
 
-# One ATL implementation, pinned to the OpenATL master merge qualified with
-# the original WTL 10.0.10320#7 source. FetchContent supplies only source:
+# One OpenWTL::WTL frontend with an internal OpenATL/COM backend.
+# WTL10 full release and seven patches are owned by the pinned OpenATL source:
 # there is no installed OpenATL SDK, Microsoft ATL fallback or WTL adapter.
 include(FetchContent)
 FetchContent_Declare(
   turbodb_openatl
   GIT_REPOSITORY https://github.com/qigao/OpenATL.git
-  GIT_TAG d943697d5b2b39c4f26406e0959ef01a53d42f1e
+  GIT_TAG 561c15677d7101a7300df73b87e1e1590cefe287
   GIT_SHALLOW FALSE)
 FetchContent_MakeAvailable(turbodb_openatl)
-if(NOT TARGET OpenATL::ATL)
-  message(FATAL_ERROR "Pinned OpenATL source did not define OpenATL::ATL")
+if(NOT TARGET OpenWTL::WTL)
+  message(FATAL_ERROR "Pinned OpenATL source did not define OpenWTL::WTL")
 endif()
 
 # Scintilla and Lexilla remain app-only vcpkg dependencies, now built with
 # the active llvm-mingw toolchain instead of Windows-only MSBuild.
-# Original WTL includes are already propagated by OpenATL::ATL.
+# Repository-owned WTL10/ATL headers are propagated by OpenWTL::WTL.
 # The editor has no static calls into either DLL: ScintillaRuntime uses
 # LoadLibraryW/GetProcAddress for both, as tested by Studio --self-test.
 # MinGW dynamic-only DLL ports need not produce import libraries. Do not
@@ -59,7 +59,7 @@ target_include_directories(
 target_link_libraries(
   turbodb_app_editor_deps
   INTERFACE
-    OpenATL::ATL)
+    OpenWTL::WTL)
 
 # LoadLibraryW needs both DLLs from the same vcpkg target ABI beside
 # Studio.exe, not just import libraries in the build directory.

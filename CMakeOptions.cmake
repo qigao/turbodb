@@ -36,17 +36,8 @@ if(TURBODB_BUILD_ORM OR
   list(APPEND VCPKG_MANIFEST_FEATURES postgresql)
 endif()
 if(TURBODB_BUILD_APP)
-  # Must be resolved before project() because vcpkg reads overlays during
-  # toolchain initialization. The WTL provider is the canonical, pinned
-  # qigao/vcpkg-cache overlay, not a second local copy or official vcpkg port.
-  set(TURBODB_WTL_PORT_DIR "" CACHE PATH
-      "Pinned qigao/vcpkg-cache/ports/wtl checkout (master@8359cdbd)")
-  if(NOT EXISTS "${TURBODB_WTL_PORT_DIR}/portfile.cmake" OR
-     NOT EXISTS "${TURBODB_WTL_PORT_DIR}/vcpkg.json")
-    message(FATAL_ERROR
-      "Studio requires original wtl@10.0.10320#7 from qigao/vcpkg-cache; "
-      "do not select another WTL source")
-  endif()
+  # The WTL frontend is now owned by the pinned OpenATL source checkout;
+  # only the separately pinned original zstd port remains in vcpkg.
   # Keep the original zstd source/provider. This separate canonical port
   # includes the CMake-4.4 C-only/llvm-mingw guard from vcpkg-cache PR #241;
   # no source fork, flag-suppression workaround, or library replacement.
@@ -60,7 +51,6 @@ if(TURBODB_BUILD_APP)
   list(APPEND VCPKG_MANIFEST_FEATURES app)
   list(APPEND VCPKG_OVERLAY_PORTS
        "${CMAKE_CURRENT_LIST_DIR}/app/vcpkg-ports"
-       "${TURBODB_WTL_PORT_DIR}"
        "${TURBODB_ZSTD_PORT_DIR}")
 endif()
 
