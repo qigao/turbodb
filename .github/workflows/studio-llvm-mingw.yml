@@ -148,7 +148,7 @@ jobs:
             $selectedTriplet=($tripletEntry[0] -split '=',2)[1]
             Write-Host "SDK_ABI_SELECTION component=$($item.name) compiler=$cc triplet=$selectedTriplet"
             $ccPath=[IO.Path]::GetFullPath($cc)
-            $expectedBin=[IO.Path]::GetFullPath($env:TURBODB_LLVM_MINGW_BIN).TrimEnd([char[]]@('/','\\'))
+            $expectedBin=[IO.Path]::GetFullPath($env:TURBODB_LLVM_MINGW_BIN).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar))
             $expectedPrefix=$expectedBin+[IO.Path]::DirectorySeparatorChar
             if (-not $ccPath.StartsWith($expectedPrefix,[StringComparison]::OrdinalIgnoreCase) -or
                 $selectedTriplet -ne 'x64-llvm-mingw-dynamic') {
