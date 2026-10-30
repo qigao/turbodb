@@ -23,6 +23,9 @@ target_link_libraries(Scintilla PRIVATE
 if(MINGW)
   target_link_options(Scintilla PRIVATE -static)
 endif()
-set_target_properties(Scintilla PROPERTIES OUTPUT_NAME Scintilla)
+# MinGW prefixes shared DLLs with "lib" unless the runtime name is
+# explicitly fixed. The existing Studio loader calls LoadLibraryW with the
+# exact public name "Scintilla.dll"; no alias/fallback at runtime.
+set_target_properties(Scintilla PROPERTIES OUTPUT_NAME Scintilla PREFIX "")
 install(TARGETS Scintilla RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)

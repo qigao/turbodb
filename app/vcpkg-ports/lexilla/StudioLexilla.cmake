@@ -17,6 +17,9 @@ target_compile_definitions(Lexilla PRIVATE NDEBUG)
 if(MINGW)
   target_link_options(Lexilla PRIVATE -static)
 endif()
-set_target_properties(Lexilla PROPERTIES OUTPUT_NAME Lexilla)
+# MinGW prefixes shared DLLs with "lib" unless the runtime name is
+# explicitly fixed. The existing Studio loader calls LoadLibraryW with the
+# exact public name "Lexilla.dll"; no alias/fallback at runtime.
+set_target_properties(Lexilla PROPERTIES OUTPUT_NAME Lexilla PREFIX "")
 install(TARGETS Lexilla RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)
