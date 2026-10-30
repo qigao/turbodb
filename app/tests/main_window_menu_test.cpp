@@ -13,6 +13,7 @@
 #include <vector>
 #include <functional>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 #include <atlgdi.h>
@@ -1928,8 +1929,34 @@ spec("Studio native menu") {
         std::vector<std::uint32_t> pixels;
         check_true(RenderToolbar(toolbar, {client.right, client.bottom}, &pixels));
         const auto colors = CurrentStudioColors();
-        if (!colors.system)
-          check_greater(ColorCount(pixels, colors.chrome_pressed), 100);
+        if (!colors.system) {
+          const int pressed_pixels = ColorCount(pixels, colors.chrome_pressed);
+          if (pressed_pixels <= 100) {
+            // Preserve the visual gate. Capture native Win32 geometry, toolbar
+            // state and both print paths to distinguish a clipped/wrapped
+            // button from a native custom-draw notification regression.
+            std::vector<std::uint32_t> native_pixels;
+            const bool native_print = RenderToolbar(toolbar,
+                {client.right, client.bottom}, &native_pixels, true);
+            const auto native_pressed = native_print ?
+                ColorCount(native_pixels, colors.chrome_pressed) : -1;
+            const auto state = ::SendMessageW(toolbar.m_hWnd, TB_GETSTATE, kViewEditor, 0);
+            std::fprintf(stderr,
+                "STUDIO_TOOLBAR_WRAP_RED width=%d client=%ldx%ld button=%ld,%ld,%ld,%ld "
+                "checked=%ld state=0x%llx printed=%d native_print=%d native_pressed=%d "
+                "chrome=%d hover=%d first_pixel=0x%x\\n",
+                width, static_cast<long>(client.right), static_cast<long>(client.bottom),
+                static_cast<long>(button.left), static_cast<long>(button.top),
+                static_cast<long>(button.right), static_cast<long>(button.bottom),
+                static_cast<long>(toolbar.IsButtonChecked(kViewEditor)),
+                static_cast<unsigned long long>(state), pressed_pixels,
+                native_print ? 1 : 0, native_pressed,
+                ColorCount(pixels, colors.chrome),
+                ColorCount(pixels, colors.chrome_hover),
+                pixels.empty() ? 0u : pixels.front());
+          }
+          check_greater(pressed_pixels, 100);
+        }
         check_less_equal(button.bottom, client.bottom);
         check_true(::IsWindowVisible(::GetFocus()) != FALSE);
       }
