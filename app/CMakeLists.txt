@@ -25,22 +25,25 @@ endif()
 # Scintilla and Lexilla remain app-only vcpkg dependencies, now built with
 # the active llvm-mingw toolchain instead of Windows-only MSBuild.
 # Original WTL includes are already propagated by OpenATL::ATL.
+# The editor has no static calls into either DLL: ScintillaRuntime uses
+# LoadLibraryW/GetProcAddress for both, as tested by Studio --self-test.
+# MinGW dynamic-only DLL ports need not produce import libraries. Do not
+# accidentally discover an MSVC or host Scintilla import library instead.
+set(_studio_port_prefix "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
 find_path(TURBODB_APP_SCINTILLA_INCLUDE_DIR
           NAMES Scintilla.h
-          PATH_SUFFIXES scintilla)
-find_library(TURBODB_APP_SCINTILLA_LIBRARY
-             NAMES Scintilla scintilla)
+          PATHS "${_studio_port_prefix}/include"
+          PATH_SUFFIXES scintilla
+          NO_DEFAULT_PATH)
 find_path(TURBODB_APP_LEXILLA_INCLUDE_DIR
           NAMES Lexilla.h
-          PATH_SUFFIXES lexilla)
-find_library(TURBODB_APP_LEXILLA_LIBRARY
-             NAMES Lexilla lexilla)
+          PATHS "${_studio_port_prefix}/include"
+          PATH_SUFFIXES lexilla
+          NO_DEFAULT_PATH)
 
 foreach(required_var
         TURBODB_APP_SCINTILLA_INCLUDE_DIR
-        TURBODB_APP_SCINTILLA_LIBRARY
-        TURBODB_APP_LEXILLA_INCLUDE_DIR
-        TURBODB_APP_LEXILLA_LIBRARY)
+        TURBODB_APP_LEXILLA_INCLUDE_DIR)
   if(NOT ${required_var})
     message(FATAL_ERROR
       "TurboDB Studio dependency ${required_var} was not resolved; configure with the vcpkg app feature")
@@ -56,13 +59,11 @@ target_include_directories(
 target_link_libraries(
   turbodb_app_editor_deps
   INTERFACE
-    OpenATL::ATL
-    "${TURBODB_APP_SCINTILLA_LIBRARY}"
-    "${TURBODB_APP_LEXILLA_LIBRARY}")
+    OpenATL::ATL)
 
 # LoadLibraryW needs both DLLs from the same vcpkg target ABI beside
 # Studio.exe, not just import libraries in the build directory.
-set(_studio_port_bin "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+set(_studio_port_bin "${_studio_port_prefix}/bin")
 foreach(_studio_dll IN ITEMS Scintilla.dll Lexilla.dll)
   if(NOT EXISTS "${_studio_port_bin}/${_studio_dll}")
     message(FATAL_ERROR "Studio requires target-ABI ${_studio_dll} at ${_studio_port_bin}")

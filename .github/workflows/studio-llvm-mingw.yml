@@ -139,13 +139,20 @@ jobs:
             Select-Object -First 1
           if (!$machine) { throw 'Pinned PE tool llvm-readobj.exe is missing' }
           foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
-            $pe=& $machine.FullName --file-headers (Join-Path 'build/studio-llvm/bin' $name) |
-              Out-String
+            $path=Join-Path 'build/studio-llvm/bin' $name
+            $pe=& $machine.FullName --file-headers $path | Out-String
             if ($LASTEXITCODE -ne 0 -or $pe -notmatch 'IMAGE_FILE_MACHINE_AMD64') {
               throw "Studio PE machine does not match x64 llvm-mingw: $name"
             }
           }
-          Write-Host "TURBODB_STUDIO_LLVM_MINGW_OK arch=x64 exe=1 scintilla=1 lexilla=1 native_ctest=1"
+          # The editor DLLs are explicit LoadLibraryW seeds. A static import
+          # table entry would prove an accidental import-lib / ABI dependency.
+          $imports=& $machine.FullName --coff-imports 'build/studio-llvm/bin/TurboDBStudio.exe' | Out-String
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect Studio PE imports' }
+          if ($imports -match '(?i)\\b(?:Scintilla|Lexilla)\\.dll\\b') {
+            throw 'Studio must load editor DLLs explicitly, never link import libs'
+          }
+          Write-Host "TURBODB_STUDIO_LLVM_MINGW_OK arch=x64 exe=1 scintilla=1 lexilla=1 native_ctest=1 dynamic_editor=1"
       - uses: actions/upload-artifact@v4
         with:
           name: turbodb-studio-llvm-mingw-x64-qualification
