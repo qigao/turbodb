@@ -31,10 +31,21 @@ if(WIN32 AND TARGET orm_sqlite_driver)
   get_filename_component(_turbodb_sqlite_lib_dir "${SQLite3_LIBRARY}" DIRECTORY)
   get_filename_component(_turbodb_sqlite_prefix "${_turbodb_sqlite_lib_dir}"
                          DIRECTORY)
-  set(_turbodb_sqlite_runtime "${_turbodb_sqlite_prefix}/bin/sqlite3.dll")
+  # The pinned vcpkg SQLite3 CMake port builds add_library(sqlite3 ...).
+  # On Windows MSVC that produces sqlite3.dll, but llvm-mingw uses CMake's
+  # default "lib" SHARED_LIBRARY_PREFIX, producing libsqlite3.dll. Never
+  # copy/alias a second SQLite provider or guess between two runtimes.
+  if(MINGW)
+    set(_turbodb_sqlite_runtime_name "libsqlite3.dll")
+  else()
+    set(_turbodb_sqlite_runtime_name "sqlite3.dll")
+  endif()
+  set(_turbodb_sqlite_runtime
+      "${_turbodb_sqlite_prefix}/bin/${_turbodb_sqlite_runtime_name}")
   if(NOT EXISTS "${_turbodb_sqlite_runtime}")
     message(FATAL_ERROR
-            "SQLite driver runtime DLL is missing: ${_turbodb_sqlite_runtime}")
+            "SQLite driver runtime DLL is missing for the target ABI: "
+            "${_turbodb_sqlite_runtime} (MinGW=${MINGW})")
   endif()
   list(APPEND _turbodb_runtime_dlls "${_turbodb_sqlite_runtime}")
 endif()

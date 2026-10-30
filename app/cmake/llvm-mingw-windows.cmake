@@ -1,0 +1,20 @@
+# This chainload toolchain is shared by the Studio and all vcpkg GUI
+# ports. It never picks up a different host/compiler toolchain implicitly.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR AMD64)
+if(NOT DEFINED ENV{TURBODB_LLVM_MINGW_BIN} OR
+   "$ENV{TURBODB_LLVM_MINGW_BIN}" STREQUAL "")
+  message(FATAL_ERROR "TURBODB_LLVM_MINGW_BIN must point at pinned llvm-mingw/bin")
+endif()
+file(TO_CMAKE_PATH "$ENV{TURBODB_LLVM_MINGW_BIN}" _studio_llvm_bin)
+foreach(_name IN ITEMS clang clang++ windres)
+  if(NOT EXISTS "${_studio_llvm_bin}/x86_64-w64-mingw32-${_name}.exe")
+    message(FATAL_ERROR "Missing x86_64-w64-mingw32-${_name}.exe in pinned toolchain")
+  endif()
+endforeach()
+set(CMAKE_C_COMPILER "${_studio_llvm_bin}/x86_64-w64-mingw32-clang.exe" CACHE FILEPATH "")
+set(CMAKE_CXX_COMPILER "${_studio_llvm_bin}/x86_64-w64-mingw32-clang++.exe" CACHE FILEPATH "")
+set(CMAKE_RC_COMPILER "${_studio_llvm_bin}/x86_64-w64-mingw32-windres.exe" CACHE FILEPATH "")
+get_filename_component(_studio_llvm_root "${_studio_llvm_bin}/.." ABSOLUTE)
+list(APPEND CMAKE_FIND_ROOT_PATH "${_studio_llvm_root}/x86_64-w64-mingw32")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)

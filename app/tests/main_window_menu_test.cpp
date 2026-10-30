@@ -1928,8 +1928,17 @@ spec("Studio native menu") {
         std::vector<std::uint32_t> pixels;
         check_true(RenderToolbar(toolbar, {client.right, client.bottom}, &pixels));
         const auto colors = CurrentStudioColors();
-        if (!colors.system)
-          check_greater(ColorCount(pixels, colors.chrome_pressed), 100);
+        if (!colors.system) {
+          // The checked state must actually be visible on THIS Editor button,
+          // including its wrapped second-row position, not merely elsewhere
+          // on the toolbar.
+          std::vector<std::uint32_t> editor_pixels;
+          for (int y = button.top; y < button.bottom; ++y)
+            for (int x = button.left; x < button.right; ++x)
+              editor_pixels.push_back(
+                  pixels[static_cast<std::size_t>(y) * client.right + x]);
+          check_greater(ColorCount(editor_pixels, colors.chrome_pressed), 100);
+        }
         check_less_equal(button.bottom, client.bottom);
         check_true(::IsWindowVisible(::GetFocus()) != FALSE);
       }

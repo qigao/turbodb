@@ -4,7 +4,10 @@ param(
   [string]$Rid,
   [ValidateSet("linux-x64", "linux-arm64", "macos-arm64", "windows-x64")]
   [string]$HostRid,
-  [switch]$Local
+  [switch]$Local,
+  # Studio's llvm-mingw lane builds both SDKs from exact release source tags;
+  # restore only the host-executable re2c tool, never MSVC ABI libraries.
+  [switch]$HostToolsOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +39,13 @@ $config = Join-Path $repositoryRoot "cmake/vcpkg-cache.nuget.config"
 $project = Join-Path $restoreRoot "qigao-turbodb-native-sdk.csproj"
 New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
 
+$nativeSdkReferences = if ($HostToolsOnly) {
+  ""
+} else {
+  '    <PackageReference Include="Salts.Native" Version="*-*" />' + "`n" +
+    '    <PackageReference Include="SaltsUtils.Native" Version="*-*" />'
+}
+
 @"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -43,8 +53,7 @@ New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Salts.Native" Version="*-*" />
-    <PackageReference Include="SaltsUtils.Native" Version="*-*" />
+$nativeSdkReferences
     <PackageReference Include="Qigao.Re2c.Binary" Version="*" />
   </ItemGroup>
 </Project>
@@ -61,6 +70,29 @@ function Get-RestoredPackage([string]$name) {
   if ($keys.Count -ne 1) { throw "expected one resolved $name package" }
   return Join-Path $packages $assets.libraries[$keys[0]].path
 }
+if ($HostToolsOnly) {
+  $re2cRoot = Join-Path (Get-RestoredPackage "Qigao.Re2c.Binary") "tools/$HostRid"
+  $re2cExe = if ($HostRid -eq "windows-x64") { "re2c.exe" } else { "re2c" }
+  $re2cPath = Join-Path $re2cRoot "bin/$re2cExe"
+  if (-not (Test-Path -LiteralPath $re2cPath -PathType Leaf)) {
+    throw "missing pinned host re2c executable: $re2cPath"
+  }
+  if (-not $IsWindows) {
+    & chmod +x $re2cPath
+    if ($LASTEXITCODE -ne 0) { throw "re2c host tool is not executable" }
+  }
+  & $re2cPath --version
+  if ($LASTEXITCODE -ne 0) { throw "restored re2c cannot execute" }
+  [Environment]::SetEnvironmentVariable("RE2C_ROOT", $re2cRoot)
+  if (-not $Local) {
+    "RE2C_ROOT=$re2cRoot" >> $env:GITHUB_ENV
+    "QIGAO_NUGET_PACKAGES=$packages" >> $env:GITHUB_ENV
+    (Join-Path $re2cRoot "bin") >> $env:GITHUB_PATH
+  }
+  Write-Host "Host-only re2c restored; no Salts.Native or SaltsUtils.Native MSVC SDK was selected"
+  return
+}
+
 $saltsPackage = Get-RestoredPackage "Salts.Native"
 $utilsPackage = Get-RestoredPackage "SaltsUtils.Native"
 $saltsRoot = Join-Path $saltsPackage "sdk/$Rid"

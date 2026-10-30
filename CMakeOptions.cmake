@@ -12,10 +12,6 @@ option(TURBODB_BUILD_SQLPARSER "Build the standalone re2c/Lemon SQL parser" ON)
 option(TURBODB_BUILD_APP "Build the TurboDB Studio Windows desktop application" OFF)
 
 if(TURBODB_BUILD_APP)
-  if(NOT CMAKE_HOST_WIN32)
-    message(FATAL_ERROR
-      "TURBODB_BUILD_APP is Windows-only; configure on a Windows host or disable it")
-  endif()
   if(NOT TURBODB_BUILD_ORM)
     message(FATAL_ERROR
       "TURBODB_BUILD_APP requires TURBODB_BUILD_ORM=ON")
@@ -40,9 +36,32 @@ if(TURBODB_BUILD_ORM OR
   list(APPEND VCPKG_MANIFEST_FEATURES postgresql)
 endif()
 if(TURBODB_BUILD_APP)
+  # Must be resolved before project() because vcpkg reads overlays during
+  # toolchain initialization. The WTL provider is the canonical, pinned
+  # qigao/vcpkg-cache overlay, not a second local copy or official vcpkg port.
+  set(TURBODB_WTL_PORT_DIR "" CACHE PATH
+      "Pinned qigao/vcpkg-cache/ports/wtl checkout (master@8359cdbd)")
+  if(NOT EXISTS "${TURBODB_WTL_PORT_DIR}/portfile.cmake" OR
+     NOT EXISTS "${TURBODB_WTL_PORT_DIR}/vcpkg.json")
+    message(FATAL_ERROR
+      "Studio requires original wtl@10.0.10320#7 from qigao/vcpkg-cache; "
+      "do not select another WTL source")
+  endif()
+  # Keep the original zstd source/provider. This separate canonical port
+  # includes the CMake-4.4 C-only/llvm-mingw guard from vcpkg-cache PR #241;
+  # no source fork, flag-suppression workaround, or library replacement.
+  set(TURBODB_ZSTD_PORT_DIR "" CACHE PATH
+      "Canonical qigao/vcpkg-cache zstd port with C-only CXX guard")
+  if(NOT EXISTS "${TURBODB_ZSTD_PORT_DIR}/portfile.cmake" OR
+     NOT EXISTS "${TURBODB_ZSTD_PORT_DIR}/vcpkg.json")
+    message(FATAL_ERROR
+      "Studio requires TURBODB_ZSTD_PORT_DIR at the pinned vcpkg-cache port")
+  endif()
   list(APPEND VCPKG_MANIFEST_FEATURES app)
   list(APPEND VCPKG_OVERLAY_PORTS
-       "${CMAKE_CURRENT_LIST_DIR}/app/vcpkg-ports")
+       "${CMAKE_CURRENT_LIST_DIR}/app/vcpkg-ports"
+       "${TURBODB_WTL_PORT_DIR}"
+       "${TURBODB_ZSTD_PORT_DIR}")
 endif()
 
 option(ENABLE_SANITIZER_ADDRESS "Enable AddressSanitizer" OFF)
