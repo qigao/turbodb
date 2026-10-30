@@ -1944,7 +1944,7 @@ spec("Studio native menu") {
             std::fprintf(stderr,
                 "STUDIO_TOOLBAR_WRAP_RED width=%d client=%ldx%ld button=%ld,%ld,%ld,%ld "
                 "checked=%ld state=0x%llx printed=%d native_print=%d native_pressed=%d "
-                "chrome=%d hover=%d first_pixel=0x%x\\n",
+                "chrome=%d hover=%d first_pixel=0x%x\n",
                 width, static_cast<long>(client.right), static_cast<long>(client.bottom),
                 static_cast<long>(button.left), static_cast<long>(button.top),
                 static_cast<long>(button.right), static_cast<long>(button.bottom),

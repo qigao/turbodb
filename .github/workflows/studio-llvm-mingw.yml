@@ -235,12 +235,14 @@ jobs:
             throw 'Studio or target ABI was dropped during configure'
           }
       - name: Build entire configured Studio and ORM graph
+        id: full_build
         shell: pwsh
         run: |
           $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
           cmake --build build/studio-llvm --parallel 4
           if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw Studio full build failed' }
       - name: Run real native Windows Studio CTest
+        id: native_ctest
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -265,6 +267,10 @@ jobs:
           ctest --test-dir build/studio-llvm --output-on-failure -R '^turbodb-app-' --repeat until-fail:3
           if ($LASTEXITCODE -ne 0) { throw 'Native Studio application tests failed' }
       - name: Admit real PE and editor DLL closure
+        # Run cheap independent PE evidence even when a native app test is RED.
+        # The job and final acceptance remain RED until native CTest passes.
+        if: ${{ !cancelled() && steps.full_build.outcome == 'success' }}
+        id: pe_closure
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -291,7 +297,11 @@ jobs:
           if ($imports -match '(?i)(?:Scintilla|Lexilla)[.]dll') {
             throw 'Studio must load editor DLLs explicitly, never link import libs'
           }
-          Write-Host "TURBODB_STUDIO_LLVM_MINGW_OK arch=x64 exe=1 scintilla=1 lexilla=1 native_ctest=1 dynamic_editor=1"
+          Write-Host "STUDIO_PE_EDITOR_DLL_STRUCTURE_OK arch=x64 exe=1 scintilla=1 lexilla=1 dynamic_editor=1"
+      - name: Admit complete Studio qualification on exact HEAD
+        if: ${{ success() && steps.full_build.outcome == 'success' && steps.native_ctest.outcome == 'success' && steps.pe_closure.outcome == 'success' }}
+        shell: pwsh
+        run: Write-Host "TURBODB_STUDIO_LLVM_MINGW_OK arch=x64 exe=1 scintilla=1 lexilla=1 native_ctest=1 dynamic_editor=1"
       - uses: actions/upload-artifact@v4
         with:
           name: turbodb-studio-llvm-mingw-x64-qualification
