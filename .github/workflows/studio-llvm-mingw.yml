@@ -65,13 +65,101 @@ jobs:
           $tool.Directory.FullName >> $env:GITHUB_PATH
           & $tool.FullName --version
           if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw compiler cannot execute' }
-      - name: Restore existing published Windows native SDK pair and re2c
+      - name: Checkout exact Salts 2.3 source matching published ABI
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: 6d6fd387cb245be8d7b0d866f9babad026a26832
+          path: external/studio-salts-src
+          persist-credentials: false
+      - name: Checkout exact SaltsUtils 4.3 source matching published ABI
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: fbb5f3ee19589836ced0f3b98414e71e6dcc1388
+          path: external/studio-salts-utils-src
+          persist-credentials: false
+      - name: Restore host re2c only, without incompatible MSVC SDK archives
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64
-          if ($LASTEXITCODE -ne 0) { throw 'Native SDK restore failed' }
+          ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64 -HostToolsOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Host re2c restore failed' }
+      - name: Compile source-only Salts and SaltsUtils using Studio llvm-mingw
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $installed=Join-Path $env:GITHUB_WORKSPACE 'build/studio-vcpkg-installed'
+          $triplets=Join-Path $env:GITHUB_WORKSPACE 'app/vcpkg-triplets'
+          $zstd=Join-Path $env:GITHUB_WORKSPACE 'tools/vcpkg-cache/ports/zstd'
+          $saltsPrefix=Join-Path $env:GITHUB_WORKSPACE 'build/studio-sdk/salts'
+          $utilsPrefix=Join-Path $env:GITHUB_WORKSPACE 'build/studio-sdk/salts-utils'
+          $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$installed/x64-llvm-mingw-dynamic/bin;$env:PATH"
+          $common=@(
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+            '-DCMAKE_BUILD_TYPE=Release'
+            '-DCMAKE_POLICY_VERSION_MINIMUM=3.5'
+            "-DVCPKG_INSTALLED_DIR=$installed"
+            '-DVCPKG_TARGET_TRIPLET=x64-llvm-mingw-dynamic'
+            '-DVCPKG_HOST_TRIPLET=x64-windows'
+            "-DVCPKG_OVERLAY_TRIPLETS=$triplets"
+            "-DVCPKG_OVERLAY_PORTS=$zstd"
+            '-DBUILD_TESTS=OFF'
+            '-DBUILD_EXAMPLES=OFF'
+            '-DBUILD_BENCHMARKS=OFF'
+            '-DENABLE_TESTS=OFF'
+            '-DENABLE_ASAN=OFF'
+          )
+          $releases=@(
+            @{ source='external/studio-salts-src'; build='build/studio-salts-llvm'; prefix=$saltsPrefix; config='Salts/SaltsConfig.cmake'; name='Salts'; commit='6d6fd387cb245be8d7b0d866f9babad026a26832' }
+            @{ source='external/studio-salts-utils-src'; build='build/studio-salts-utils-llvm'; prefix=$utilsPrefix; config='SaltsUtils/SaltsUtilsConfig.cmake'; name='SaltsUtils'; commit='fbb5f3ee19589836ced0f3b98414e71e6dcc1388' }
+          )
+          foreach ($item in $releases) {
+            $realSource=(Resolve-Path $item.source).Path
+            $actualCommit=(& git -C $realSource rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $item.commit) {
+              throw "Unexpected pinned $($item.name) source HEAD: $actualCommit"
+            }
+            if ($item.name -eq 'SaltsUtils') {
+              # SaltsUtils must consume the same locally compiled Salts SDK.
+              $env:SALTS_ROOT=$saltsPrefix
+              $env:PATH="$saltsPrefix/bin;$env:PATH"
+              $settings=@('-DSALTS_UTILS_ENABLE_CAPTURE=OFF')
+            } else {
+              $settings=@()
+            }
+            & cmake -S $item.source -B $item.build -G Ninja @common @settings "-DCMAKE_INSTALL_PREFIX=$($item.prefix)"
+            if ($LASTEXITCODE -ne 0) { throw "$($item.name) llvm-mingw configure failed" }
+            $cache=Get-Content (Join-Path $item.build 'CMakeCache.txt')
+            if (-not ($cache -match '^CMAKE_C_COMPILER:(?:FILEPATH|STRING)=.*x86_64-w64-mingw32-clang[.]exe$') -or
+                -not ($cache -match '^VCPKG_TARGET_TRIPLET:(?:STRING|UNINITIALIZED)=x64-llvm-mingw-dynamic$')) {
+              throw "$($item.name) target ABI is not pinned llvm-mingw"
+            }
+            & cmake --build $item.build --target install --parallel 4
+            if ($LASTEXITCODE -ne 0) { throw "$($item.name) native source build/install failed" }
+            $configPath=Join-Path $item.prefix ("lib/cmake/"+$item.config)
+            if (-not (Test-Path $configPath -PathType Leaf)) { throw "Missing $($item.name) installed config: $configPath" }
+            $badMsvcLibs=@(Get-ChildItem (Join-Path $item.prefix 'lib') -Filter '*.lib' -File -Recurse -ErrorAction Stop)
+            $nativeLibs=@(Get-ChildItem (Join-Path $item.prefix 'lib') -Filter '*.a' -File -Recurse -ErrorAction Stop)
+            if ($badMsvcLibs.Count -ne 0 -or $nativeLibs.Count -eq 0) {
+              throw "$($item.name) SDK mixes MSVC archives or contains no llvm-mingw archives"
+            }
+            Write-Host "STUDIO_NATIVE_SDK_READY component=$($item.name) source=$actualCommit triplet=x64-llvm-mingw-dynamic archives=$($nativeLibs.Count)"
+          }
+          "SALTS_ROOT=$saltsPrefix" >> $env:GITHUB_ENV
+          "SALTS_UTILS_ROOT=$utilsPrefix" >> $env:GITHUB_ENV
+          $provenance=@(
+            'target=x86_64-w64-mingw32'
+            'toolchain=llvm-mingw-20261020-ucrt'
+            'triplet=x64-llvm-mingw-dynamic'
+            'salts_source=6d6fd387cb245be8d7b0d866f9babad026a26832'
+            'salts_utils_source=fbb5f3ee19589836ced0f3b98414e71e6dcc1388'
+            'native_archives=required'
+            'msvc_archives=forbidden'
+          )
+          $proof=Join-Path $env:GITHUB_WORKSPACE 'build/studio-sdk/source-abi.txt'
+          $provenance | Set-Content -LiteralPath $proof -Encoding utf8NoBOM
       - name: Configure complete Studio/ORM Windows graph with llvm-mingw
         shell: pwsh
         run: |
@@ -115,7 +203,7 @@ jobs:
       - name: Build entire configured Studio and ORM graph
         shell: pwsh
         run: |
-          $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$env:PATH"
+          $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
           cmake --build build/studio-llvm --parallel 4
           if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw Studio full build failed' }
       - name: Run real native Windows Studio CTest
@@ -156,5 +244,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: turbodb-studio-llvm-mingw-x64-qualification
-          path: build/studio-llvm/bin/
+          path: |
+            build/studio-llvm/bin/
+            build/studio-sdk/source-abi.txt
           if-no-files-found: error

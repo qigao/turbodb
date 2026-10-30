@@ -39,6 +39,17 @@ Use the pinned original components:
   Supply `TURBODB_WTL_PORT_DIR` and `TURBODB_ZSTD_PORT_DIR` from
   that same exact checkout. This is not a new zstd source/provider.
 - llvm-mingw 20261020 UCRT; set `TURBODB_LLVM_MINGW_BIN` to its `bin`.
+- **The released Windows-x64 Salts.Native and SaltsUtils.Native packages are
+  built with MSVC**, and cannot be linked to the llvm-mingw Studio graph.
+  The dedicated CI checks out and builds original source commits
+  `qigao/salts@6d6fd387cb245be8d7b0d866f9babad026a26832`
+  (tag `v2.3.0-rc.17`) and
+  `qigao/salts-utils@fbb5f3ee19589836ced0f3b98414e71e6dcc1388`
+  (tag `v4.3.0-rc.11`) with the same `x64-llvm-mingw-dynamic` triplet.
+  It installs the resulting private SDKs into `build/studio-sdk`, with
+  source SHA and native-archive admission. Only the **host executable**
+  re2c is restored from GitHub Packages; no MSVC Salts archives are restored.
+  Do not claim this source build works until the real CI qualifies it.
 - App-only Scintilla 5.5.8 and Lexilla 5.4.6, built by the same
   llvm-mingw triplet rather than linking their MSVC libraries.
 
@@ -47,8 +58,10 @@ compiler-compatible Salts/SaltsUtils SDKs can use:
 
 ~~~powershell
 $env:TURBODB_LLVM_MINGW_BIN = 'C:/toolchains/llvm-mingw/bin'
-$env:SALTS_ROOT = 'C:/sdk/salts/windows-x64'
-$env:SALTS_UTILS_ROOT = 'C:/sdk/salts-utils/windows-x64'
+# Build both SDKs with the SAME llvm-mingw compiler and target triplet
+# as Studio first. MSVC-produced windows-x64 .lib packages are rejected.
+$env:SALTS_ROOT = 'C:/sdk/llvm-mingw/salts'
+$env:SALTS_UTILS_ROOT = 'C:/sdk/llvm-mingw/salts-utils'
 
 cmake -S . -B build/studio-llvm -G Ninja `
   -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
