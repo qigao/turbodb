@@ -34,7 +34,7 @@ Use the pinned original components:
 - Original `wtl@10.0.10320#7`, unchanged from qigao/vcpkg-cache
   `8359cdbdf25c1f58cfc7230cc6318dc2fdb804fb`. For the
   current Studio dependency experiment checkout
-  `qigao/vcpkg-cache@42264f94066edb6d91347c27d1be0903724430d7` (Draft PR #241) which retains
+  `qigao/vcpkg-cache@ddb500fb7c1472107efbd79ea92d7552cb01f452` (Draft PR #241) which retains
   the same WTL port and repairs one C-only zstd CMake compiler check.
   Supply `TURBODB_WTL_PORT_DIR` and `TURBODB_ZSTD_PORT_DIR` from
   that same exact checkout. This is not a new zstd source/provider.
