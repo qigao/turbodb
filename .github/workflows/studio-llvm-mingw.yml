@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   windows-llvm-mingw:
-    name: Original OpenATL/WTL + Studio llvm-mingw x64 native
+    name: Repository OpenWTL::WTL + Studio llvm-mingw x64 native
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
@@ -201,7 +201,6 @@ jobs:
           $env:PATH="$env:TURBODB_LLVM_MINGW_BIN;$env:RE2C_ROOT/bin;$env:SALTS_ROOT/bin;$env:SALTS_UTILS_ROOT/bin;$env:PATH"
           $installed=Join-Path $env:GITHUB_WORKSPACE 'build/studio-vcpkg-installed'
           $triplets=Join-Path $env:GITHUB_WORKSPACE 'app/vcpkg-triplets'
-          $wtl=Join-Path $env:GITHUB_WORKSPACE 'tools/vcpkg-cache/ports/wtl'
           $zstd=Join-Path $env:GITHUB_WORKSPACE 'tools/vcpkg-cache/ports/zstd'
           & cmake -S . -B build/studio-llvm -G Ninja `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
@@ -210,7 +209,6 @@ jobs:
             '-DVCPKG_TARGET_TRIPLET=x64-llvm-mingw-dynamic' `
             '-DVCPKG_HOST_TRIPLET=x64-windows' `
             "-DVCPKG_OVERLAY_TRIPLETS=$triplets" `
-            "-DTURBODB_WTL_PORT_DIR=$wtl" `
             "-DTURBODB_ZSTD_PORT_DIR=$zstd" `
             '-DTURBODB_BUILD_APP=ON' '-DTURBODB_BUILD_ORM=ON' `
             '-DTURBODB_BUILD_DBTOOLS=OFF' '-DTURBODB_BUILD_REDIS=OFF' `

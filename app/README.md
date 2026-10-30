@@ -7,13 +7,15 @@ TurboDB public APIs and runtime drivers.
 
 ## Initial dependency boundary
 
-The `app` vcpkg manifest feature provides:
+The `app` vcpkg manifest feature provides only:
 
-- WTL for native Windows shell/layout
 - Scintilla for the SQL editor control
 - Lexilla for editor lexing
 
-These dependencies are resolved only when `TURBODB_BUILD_APP=ON`. They are
+WTL 10.0.10320 lives with its seven compatibility patches inside the pinned
+OpenATL source checkout as `OpenWTL::WTL`, which transitively links the
+private ATL/COM backend. The editor dependencies are still resolved only
+when `TURBODB_BUILD_APP=ON`; they are
 not linked into `Orm::C`, database drivers, or dbtools.
 
 `chttp` is intentionally not part of the base application dependency closure.
@@ -28,16 +30,14 @@ include `app/` when `TURBODB_BUILD_APP=OFF`.
 
 Use the pinned original components:
 
-- OpenATL source HEAD `d943697d5b2b39c4f26406e0959ef01a53d42f1e`
+- OpenATL source HEAD `19a4b428ac0bbbfe9021c92ee1e77a8d30e82c9e`
   through CMake FetchContent; there is **no installed OpenATL SDK** and no
   dependency on Microsoft ATL or Visual Studio.
-- Original `wtl@10.0.10320#7`, unchanged from qigao/vcpkg-cache
-  `8359cdbdf25c1f58cfc7230cc6318dc2fdb804fb`. For the
-  current Studio dependency experiment checkout
-  `qigao/vcpkg-cache@ddb500fb7c1472107efbd79ea92d7552cb01f452` (Draft PR #241) which retains
-  the same WTL port and repairs one C-only zstd CMake compiler check.
-  Supply `TURBODB_WTL_PORT_DIR` and `TURBODB_ZSTD_PORT_DIR` from
-  that same exact checkout. This is not a new zstd source/provider.
+- Original WTL10 release plus seven reviewed compiler/bugfix patches is
+  now checked into the OpenATL `wtl/` tree, not installed from vcpkg.
+  `qigao/vcpkg-cache@ddb500fb` is still required for the independent
+  canonical zstd/libpq app dependencies, not as a WTL provider.
+  Supply only `TURBODB_ZSTD_PORT_DIR` from that checkout.
 - llvm-mingw 20261020 UCRT; set `TURBODB_LLVM_MINGW_BIN` to its `bin`.
 - **The released Windows-x64 Salts.Native and SaltsUtils.Native packages are
   built with MSVC**, and cannot be linked to the llvm-mingw Studio graph.
@@ -67,7 +67,6 @@ cmake -S . -B build/studio-llvm -G Ninja `
   -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
   -DVCPKG_TARGET_TRIPLET=x64-llvm-mingw-dynamic `
   -DVCPKG_OVERLAY_TRIPLETS="$PWD/app/vcpkg-triplets" `
-  -DTURBODB_WTL_PORT_DIR="$PWD/tools/vcpkg-cache/ports/wtl" `
   -DTURBODB_ZSTD_PORT_DIR="$PWD/tools/vcpkg-cache/ports/zstd" `
   -DTURBODB_BUILD_APP=ON -DTURBODB_BUILD_ORM=ON `
   -DTURBODB_BUILD_DBTOOLS=OFF -DTURBODB_BUILD_REDIS=OFF `

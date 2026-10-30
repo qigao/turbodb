@@ -38,18 +38,10 @@
     "app": {
       "description": "Build the optional TurboDB Studio Windows desktop application",
       "dependencies": [
-        "wtl",
         "scintilla",
         "lexilla"
       ]
     }
   },
-  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01",
-  "overrides": [
-    {
-      "name": "wtl",
-      "version": "10.0.10320",
-      "port-version": 7
-    }
-  ]
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
 }
