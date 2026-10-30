@@ -30,7 +30,7 @@ include `app/` when `TURBODB_BUILD_APP=OFF`.
 
 Use the pinned original components:
 
-- OpenATL source HEAD `19a4b428ac0bbbfe9021c92ee1e77a8d30e82c9e`
+- OpenATL source HEAD `561c15677d7101a7300df73b87e1e1590cefe287`
   through CMake FetchContent; there is **no installed OpenATL SDK** and no
   dependency on Microsoft ATL or Visual Studio.
 - Original WTL10 release plus seven reviewed compiler/bugfix patches is

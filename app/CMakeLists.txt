@@ -15,7 +15,7 @@ include(FetchContent)
 FetchContent_Declare(
   turbodb_openatl
   GIT_REPOSITORY https://github.com/qigao/OpenATL.git
-  GIT_TAG 19a4b428ac0bbbfe9021c92ee1e77a8d30e82c9e
+  GIT_TAG 561c15677d7101a7300df73b87e1e1590cefe287
   GIT_SHALLOW FALSE)
 FetchContent_MakeAvailable(turbodb_openatl)
 if(NOT TARGET OpenWTL::WTL)
