@@ -121,6 +121,12 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $item.commit) {
               throw "Unexpected pinned $($item.name) source HEAD: $actualCommit"
             }
+            if ($item.name -eq 'Salts') {
+              # The old immutable 2.3 release used _MSC_VER for Windows'
+              # aligned-allocation ownership path. llvm-mingw must use the
+              # same Windows _aligned_malloc/_aligned_free pair, never POSIX.
+              & ./cmake/ci/studio-salts-llvm-mingw-compat.ps1 -SourceRoot $realSource -ExpectedHead $item.commit
+            }
             if ($item.name -eq 'SaltsUtils') {
               # SaltsUtils must consume the same locally compiled Salts SDK.
               $env:SALTS_ROOT=$saltsPrefix
