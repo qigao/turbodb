@@ -3,6 +3,8 @@
 #include "command_ids.h"
 #include "studio_colors.h"
 
+#include <cstdio>
+
 namespace turbodb::app {
 
 namespace {
@@ -203,6 +205,24 @@ LRESULT CommandToolbar::CustomDraw(NMTBCUSTOMDRAW& draw) {
   const auto colors = CurrentStudioColors();
   if (colors.system) return CDRF_DODEFAULT;
   auto& native = draw.nmcd;
+  // Temporary failure-only native GUI trace. The test sets this window
+  // property only while comparing true paint and offscreen print paths.
+  if (::GetPropW(m_hWnd, L"TURBODB_STUDIO_TEST_PAINT_TRACE") != nullptr) {
+    RECT clip{};
+    const int clip_kind = ::GetClipBox(native.hdc, &clip);
+    std::fprintf(stderr,
+        "STUDIO_TOOLBAR_CUSTOMDRAW stage=0x%lx item=%llu checked=%d "
+        "pressed=%d native_rc=%ld,%ld,%ld,%ld clip_kind=%d "
+        "clip=%ld,%ld,%ld,%ld\n",
+        static_cast<unsigned long>(native.dwDrawStage),
+        static_cast<unsigned long long>(native.dwItemSpec),
+        static_cast<int>(IsButtonChecked(static_cast<UINT>(native.dwItemSpec)) != FALSE),
+        static_cast<int>(IsButtonPressed(static_cast<UINT>(native.dwItemSpec)) != FALSE),
+        static_cast<long>(native.rc.left), static_cast<long>(native.rc.top),
+        static_cast<long>(native.rc.right), static_cast<long>(native.rc.bottom),
+        clip_kind, static_cast<long>(clip.left), static_cast<long>(clip.top),
+        static_cast<long>(clip.right), static_cast<long>(clip.bottom));
+  }
   if (native.dwDrawStage == CDDS_PREPAINT) {
     RECT client{};
     GetClientRect(&client);

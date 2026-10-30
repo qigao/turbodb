@@ -215,7 +215,7 @@ HWND FindExplorer(HWND editor) {
 }
 
 bool RenderToolbar(HWND toolbar, SIZE size, std::vector<std::uint32_t>* pixels,
-                   bool native_dialog = false) {
+                   bool native_dialog = false, bool capture_screen = false) {
   CClientDC reference(toolbar);
   CDC dc;
   CBitmap bitmap;
@@ -233,7 +233,13 @@ bool RenderToolbar(HWND toolbar, SIZE size, std::vector<std::uint32_t>* pixels,
   const HBITMAP old_bitmap = dc.SelectBitmap(bitmap);
   RECT bounds{0, 0, size.cx, size.cy};
   dc.FillRect(&bounds, ::GetSysColorBrush(COLOR_BTNFACE));
-  if (native_dialog) {
+  if (capture_screen) {
+    if (!::BitBlt(dc, 0, 0, size.cx, size.cy, reference.m_hDC,
+                  0, 0, SRCCOPY)) {
+      dc.SelectBitmap(old_bitmap);
+      return false;
+    }
+  } else if (native_dialog) {
     if (!::PrintWindow(toolbar, dc, PW_CLIENTONLY)) {
       dc.SelectBitmap(old_bitmap);
       return false;
@@ -1935,22 +1941,36 @@ spec("Studio native menu") {
             // Preserve the visual gate. Capture native Win32 geometry, toolbar
             // state and both print paths to distinguish a clipped/wrapped
             // button from a native custom-draw notification regression.
+            // The actual control can paint differently from WM_PRINT and
+            // PrintWindow. Diagnose without changing the original assertion.
+            const wchar_t* trace_key = L"TURBODB_STUDIO_TEST_PAINT_TRACE";
+            const bool trace_set = ::SetPropW(toolbar.m_hWnd, trace_key,
+                reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(1))) != FALSE;
+            const bool redrawn = ::RedrawWindow(toolbar.m_hWnd, nullptr, nullptr,
+                RDW_INVALIDATE | RDW_UPDATENOW) != FALSE;
+            std::vector<std::uint32_t> screen_pixels;
+            const bool screen_captured = RenderToolbar(toolbar,
+                {client.right, client.bottom}, &screen_pixels, false, true);
             std::vector<std::uint32_t> native_pixels;
             const bool native_print = RenderToolbar(toolbar,
                 {client.right, client.bottom}, &native_pixels, true);
             const auto native_pressed = native_print ?
                 ColorCount(native_pixels, colors.chrome_pressed) : -1;
             const auto state = ::SendMessageW(toolbar.m_hWnd, TB_GETSTATE, kViewEditor, 0);
+            if (trace_set) ::RemovePropW(toolbar.m_hWnd, trace_key);
             std::fprintf(stderr,
                 "STUDIO_TOOLBAR_WRAP_RED width=%d client=%ldx%ld button=%ld,%ld,%ld,%ld "
                 "checked=%ld state=0x%llx printed=%d native_print=%d native_pressed=%d "
-                "chrome=%d hover=%d first_pixel=0x%x\n",
+                "screen=%d redrawn=%d screen_pressed=%d chrome=%d hover=%d "
+                "first_pixel=0x%x\n",
                 width, static_cast<long>(client.right), static_cast<long>(client.bottom),
                 static_cast<long>(button.left), static_cast<long>(button.top),
                 static_cast<long>(button.right), static_cast<long>(button.bottom),
                 static_cast<long>(toolbar.IsButtonChecked(kViewEditor)),
                 static_cast<unsigned long long>(state), pressed_pixels,
                 native_print ? 1 : 0, native_pressed,
+                screen_captured ? 1 : 0, redrawn ? 1 : 0,
+                screen_captured ? ColorCount(screen_pixels, colors.chrome_pressed) : -1,
                 ColorCount(pixels, colors.chrome),
                 ColorCount(pixels, colors.chrome_hover),
                 pixels.empty() ? 0u : pixels.front());
