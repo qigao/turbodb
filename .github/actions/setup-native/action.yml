@@ -13,7 +13,7 @@ runs:
     - uses: actions/setup-dotnet@v4
       with:
         dotnet-version: "8.0.x"
-    - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@fafb1efe5ac2440bfd7a08e493988d0459d89e51
+    - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@v0.1.0
       id: vcpkg
       with:
         mode: read
