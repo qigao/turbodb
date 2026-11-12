@@ -6,7 +6,7 @@
 
 构建使用环境精确选定的 SaltsBase、CMeta、SaltsUtils 与 CNet 正式版；变量和恢复步骤见根 README 的[依赖版本说明](../../README.md#upstream-dependency-versions)。SDK 来自经 SHA-256 校验的 GitHub Release 资产。NuGet 包不嵌入或隐式恢复上游 SDK。调用方提供 `SALTS_BASE_ROOT`、`CMETA_ROOT`、`SALTS_UTILS_ROOT` 和 `SALTSCORE_ROOT`，运行时使用匹配 SDK 的 `bin` 或 `lib`。
 
-CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`。导出配置从显式根必需查找匹配版本的 `SaltsBase`、`CMeta`、`SaltsUtils` 和 `SaltsCore`。MySQL TLS 使用 `Salts::CNet`，SHA-256 使用 `Salts::Crypto`，`mysql_native_password` 的 SHA-1 使用已接入的 GmSSL。Windows 包保留 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`。
+CMake 入口为 `find_package(TurboDB CONFIG REQUIRED)`。导出配置从显式根必需查找匹配版本的 `SaltsBase`、`CMeta`、`SaltsUtils` 和 `SaltsCore`。MySQL TLS 使用 `Salts::CNet`，SHA-256 使用 `Salts::Crypto`，`mysql_native_password` 的 SHA-1 使用已接入的 GmSSL。Windows 包保留 SQLite/PostgreSQL 驱动所需的 `sqlite3.dll` 和 `libpq.dll`，同时部署在 `bin` 与 `lib/turbodb/drivers`，满足可执行文件和显式插件加载的依赖搜索契约。
 
 客户端按需链接 `Orm::C`、`Orm::Cpp`、`Orm::DriverABI`、`TurboDB::MySQL`、`TurboDB::Redis` 或 `TurboDB::SchemaABI`。驱动不通过链接自动加载：从 `TurboDB_DRIVER_DIR` 选择模块并调用 `orm_runtime_load_driver`。ORM 核心不直接依赖数据库客户端。
 

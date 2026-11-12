@@ -94,7 +94,7 @@ LRESULT ConnectionDialog::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
   GetDlgItem(IDC_CONNECTION_DATABASE).GetWindowRect(&database);
   ::MapWindowPoints(nullptr, m_hWnd, reinterpret_cast<POINT*>(&database), 2);
   RECT gap{0, 0, 0, 8};
-  MapDialogRect(&gap);
+  ::MapDialogRect(m_hWnd, &gap);
   network_height_ = footer_bounds_[0].top - database.bottom - gap.bottom;
   error_height_ = footer_bounds_[3].top - footer_bounds_[1].top;
   drafts_[0].database = L":memory:";
@@ -294,13 +294,13 @@ void ConnectionDialog::ShowError(const std::wstring& message, int focus) {
   error_visible_ = true;
   LayoutFields();
   if (focus != 0) {
-    SendMessage(WM_NEXTDLGCTL,
-                reinterpret_cast<WPARAM>(::GetDlgItem(m_hWnd, focus)), TRUE);
+    ::SendMessage(m_hWnd, WM_NEXTDLGCTL,
+                  reinterpret_cast<WPARAM>(::GetDlgItem(m_hWnd, focus)), TRUE);
     if (focus >= IDC_CONNECTION_NAME && focus <= IDC_CONNECTION_SERVER)
       SendDlgItemMessage(focus, EM_SETSEL, 0, -1);
   } else {
-    SendMessage(WM_NEXTDLGCTL,
-                reinterpret_cast<WPARAM>(::GetDlgItem(m_hWnd, IDC_CONNECTION_ERROR)), TRUE);
+    ::SendMessage(m_hWnd, WM_NEXTDLGCTL,
+                  reinterpret_cast<WPARAM>(::GetDlgItem(m_hWnd, IDC_CONNECTION_ERROR)), TRUE);
   }
   ::MessageBeep(MB_ICONWARNING);
 }

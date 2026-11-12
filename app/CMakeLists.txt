@@ -3,19 +3,12 @@ enable_language(RC)
 add_subdirectory("${PROJECT_SOURCE_DIR}/external/OpenWTL"
                  "${CMAKE_CURRENT_BINARY_DIR}/OpenWTL" EXCLUDE_FROM_ALL SYSTEM)
 
-# The editor ports expose headers and libraries rather than CMake packages.
-find_path(TURBODB_APP_SCINTILLA_INCLUDE_DIR
-          NAMES Scintilla.h
-          PATH_SUFFIXES scintilla REQUIRED)
-find_library(TURBODB_APP_SCINTILLA_LIBRARY
-             NAMES Scintilla scintilla REQUIRED)
-find_path(TURBODB_APP_LEXILLA_INCLUDE_DIR
-          NAMES Lexilla.h
-          PATH_SUFFIXES lexilla REQUIRED)
-find_library(TURBODB_APP_LEXILLA_LIBRARY
-             NAMES Lexilla lexilla REQUIRED)
-
-
+# Editor DLLs are loaded explicitly; only their target-ABI headers are linked.
+set(_studio_port_prefix "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+find_path(TURBODB_APP_SCINTILLA_INCLUDE_DIR NAMES Scintilla.h
+  REQUIRED PATHS "${_studio_port_prefix}/include" PATH_SUFFIXES scintilla NO_DEFAULT_PATH)
+find_path(TURBODB_APP_LEXILLA_INCLUDE_DIR NAMES Lexilla.h
+  REQUIRED PATHS "${_studio_port_prefix}/include" PATH_SUFFIXES lexilla NO_DEFAULT_PATH)
 
 add_library(turbodb_app_editor_deps INTERFACE)
 target_include_directories(
@@ -23,11 +16,9 @@ target_include_directories(
   INTERFACE
     "${TURBODB_APP_SCINTILLA_INCLUDE_DIR}"
     "${TURBODB_APP_LEXILLA_INCLUDE_DIR}")
-target_link_libraries(
-  turbodb_app_editor_deps
-  INTERFACE
-    "${TURBODB_APP_SCINTILLA_LIBRARY}"
-    "${TURBODB_APP_LEXILLA_LIBRARY}")
+# LoadLibraryW needs both DLLs from the same vcpkg target ABI beside
+# Studio.exe, not just import libraries in the build directory.
+set(_studio_port_bin "${_studio_port_prefix}/bin")
 
 set(turbodb_app_window_sources
   src/studio.manifest
@@ -98,6 +89,13 @@ set_target_properties(
   PROPERTIES
     FOLDER "app"
     OUTPUT_NAME "TurboDBStudio")
+
+foreach(_studio_dll IN ITEMS Scintilla.dll Lexilla.dll)
+  add_custom_command(TARGET turbodb-studio POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+      "${_studio_port_bin}/${_studio_dll}" "$<TARGET_FILE_DIR:turbodb-studio>"
+    VERBATIM)
+endforeach()
 
 if(BUILD_TESTS)
   cmake_add_test(NAME turbodb-app-config-test TEST_NAME turbodb-app-config

@@ -1,0 +1,114 @@
+name: TurboDB Studio llvm-mingw native Windows
+
+on:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'external/OpenWTL'
+      - '.gitmodules'
+      - 'CMakeLists.txt'
+      - 'CMakeOptions.cmake'
+      - 'CMakeUserPresets.json'
+      - 'presets/**'
+      - 'cmake/ci/restore-native-sdks.*'
+      - 'vcpkg.json'
+      - 'vcpkg-configuration.json'
+      - '.github/workflows/studio-llvm-mingw.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turbodb-studio-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_CACHE_VERSION: ${{ vars.VCPKG_CACHE_VERSION }}
+  SALTS_BASE_VERSION: ${{ vars.SALTS_BASE_VERSION }}
+  CMETA_VERSION: ${{ vars.CMETA_VERSION }}
+  SALTS_UTILS_VERSION: ${{ vars.SALTS_UTILS_VERSION }}
+  SALTS_CORE_VERSION: ${{ vars.SALTS_CORE_VERSION }}
+  GITHUB_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ github.token }}
+  LLVM_MINGW_TARGET: x86_64-w64-mingw32
+
+jobs:
+  windows-llvm-mingw:
+    name: OpenWTL Studio with released llvm-mingw SDKs
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ./.github/actions/setup-native
+        with:
+          platform: windows-x64
+          preset: native-release-user
+          triplet: qigao-x64-windows-llvm-mingw
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/vcpkg-cache
+          ref: v${{ env.VCPKG_CACHE_VERSION }}
+          path: build/ci-infrastructure/vcpkg-cache
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Obtain pinned llvm-mingw x64 UCRT
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-x86_64.zip'
+          & curl.exe -fLsS --retry 2 --output llvm-mingw.zip $url
+          if ($LASTEXITCODE -ne 0) { throw 'llvm-mingw download failed' }
+          $sum=(Get-FileHash llvm-mingw.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sum -ne 'fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd') {
+            throw "llvm-mingw archive SHA256 mismatch: $sum"
+          }
+          Expand-Archive llvm-mingw.zip -DestinationPath build/llvm
+          $root=[IO.Path]::GetFullPath('build/llvm/llvm-mingw-20261020-ucrt-x86_64').Replace('\', '/')
+          "LLVM_MINGW_ROOT=$root" >> $env:GITHUB_ENV
+          "$root/bin" >> $env:GITHUB_PATH
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          choco install ninja -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Ninja install failed' }
+      - name: Restore released target-ABI SDKs
+        shell: pwsh
+        env:
+          VCPKG_CACHE_REPOSITORY_ROOT: ${{ github.workspace }}/build/ci-infrastructure/vcpkg-cache
+        run: ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64 -Profile windows-llvm-mingw-x64
+      - name: Configure full native graph
+        run: cmake --preset native-release-user
+      - name: Build full native graph
+        run: cmake --build --preset native-release-user --parallel 4
+      - name: Run native CTest suite
+        run: ctest --preset native-release-user -LE e2e --output-junit ctest-studio.xml
+      - name: Inspect native PE editor dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin='build/native-release-user/bin'
+          foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
+            $pe=& "$env:LLVM_MINGW_ROOT/bin/llvm-readobj.exe" --file-headers "$bin/$name" | Out-String
+            if ($LASTEXITCODE -ne 0 -or $pe -notmatch 'IMAGE_FILE_MACHINE_AMD64') {
+              throw "Studio PE machine does not match x64 llvm-mingw: $name"
+            }
+          }
+          $imports=& "$env:LLVM_MINGW_ROOT/bin/llvm-readobj.exe" --coff-imports "$bin/TurboDBStudio.exe" | Out-String
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect Studio PE imports' }
+          if ($imports -match '(?i)(?:Scintilla|Lexilla)[.]dll') {
+            throw 'Studio must load editor DLLs explicitly, never link import libs'
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-studio-llvm-mingw-x64
+          path: |
+            build/native-release-user/bin/
+            build/native-release-user/ctest-studio.xml
+          if-no-files-found: error

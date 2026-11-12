@@ -232,6 +232,18 @@ LRESULT CommandToolbar::CustomDraw(NMTBCUSTOMDRAW& draw) {
            TBCDRF_USECDCOLORS | CDRF_NOTIFYPOSTPAINT;
   }
   if (native.dwDrawStage == CDDS_ITEMPOSTPAINT && checked) {
+    // The themed Win32 toolbar may overpaint ITEMPREPAINT's checked fill
+    // after TBSTYLE_WRAPABLE moves buttons onto a second row. Give checked
+    // buttons a persistent two-pixel inset outline AFTER native text/icon
+    // painting, preserving the native control and its input/accessibility.
+    RECT outline = native.rc;
+    ::InflateRect(&outline, -1, -1);
+    HBRUSH outline_brush = StudioControlColors(
+        native.hdc, colors.chrome_text, colors.chrome_pressed);
+    ::FrameRect(native.hdc, &outline, outline_brush);
+    ::InflateRect(&outline, -1, -1);
+    ::FrameRect(native.hdc, &outline, outline_brush);
+
     RECT marker = native.rc;
     ::InflateRect(&marker, -4, -2);
     marker.top = marker.bottom - 2;
