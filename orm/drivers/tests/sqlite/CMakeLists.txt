@@ -3,7 +3,7 @@ cmake_add_test(
   FOLDER "orm/drivers/tests/sqlite"
   TEST_NAME orm_sqlite_plugin
   SOURCES orm_sqlite_plugin_test.c
-  LIBS turbo_orm Salts::TinyTest Salts::CFlow Salts::Platform
+  LIBS turbo_orm Salts::TinyTest CMeta::CFlow Salts::Core
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 

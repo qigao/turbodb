@@ -6,7 +6,7 @@
 #endif
 
 #include <orm.h>
-#include <salts/thread.h>
+#include <threads/threads.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -64,7 +64,7 @@ typedef struct orm_native_cleanup {
 } orm_native_cleanup;
 
 typedef struct orm_owner {
-  cmeta_mutex_t mutex;
+  sync_mutex_t mutex;
   uint32_t references;
   uint32_t dependents;
   uint32_t max_references;

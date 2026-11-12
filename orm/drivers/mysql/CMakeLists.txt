@@ -15,7 +15,7 @@ target_include_directories(orm_mysql_driver PRIVATE
   ${ORM_SOURCE_DIR}/src/flow
   ${ORM_SOURCE_DIR}/src/driver)
 target_link_libraries(orm_mysql_driver PRIVATE
-  Orm::C Orm::DriverABI TurboDB::MySQL Salts::CSTL
+  Orm::C Orm::DriverABI TurboDB::MySQL CMeta::CSTL
   turbodb_schema_support Salts::JsonParser)
 set_target_properties(orm_mysql_driver PROPERTIES
   PREFIX ""

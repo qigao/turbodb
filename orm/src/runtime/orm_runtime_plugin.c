@@ -44,7 +44,7 @@ static orm_status_t runtime_begin_load(
     orm_runtime_t *runtime, const char *path, orm_error_t *error) {
   orm_status_t status = ORM_STATUS_OK;
   const char *message = NULL;
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
     status = ORM_STATUS_INVALID_STATE;
     message = "runtime is closed";
@@ -65,7 +65,7 @@ static orm_status_t runtime_begin_load(
     runtime->load_active = 1u;
     ++runtime->pending_operations;
   }
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return runtime_result(error, status, message);
 }
 
@@ -282,11 +282,11 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
     goto fail_plugin;
   }
 
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN ||
       runtime->load_active == 0u ||
       runtime->pending_operations == 0u) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     status = runtime_result(error, ORM_STATUS_INVALID_STATE,
                             "runtime load reservation was lost");
     goto fail_plugin;
@@ -295,7 +295,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
           runtime,
           (orm_driver_bytes_v1){canonical_snapshot.text,
                                 canonical_snapshot.size})) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     status = runtime_result(error, ORM_STATUS_DRIVER_ALREADY_REGISTERED,
                             "driver ID is already registered");
     goto fail_plugin;
@@ -315,7 +315,7 @@ orm_runtime_load_driver(orm_runtime_t *runtime,
   ++runtime->driver_count;
   --runtime->pending_operations;
   runtime->load_active = 0u;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 
 fail_admission:
@@ -387,21 +387,21 @@ orm_runtime_driver_acquire_extension(
       "invalid driver extension contract ID", error);
   if (status != ORM_STATUS_OK) return status;
 
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
   orm_runtime_driver *driver = runtime_find_driver(runtime, id);
   if (driver == NULL) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
   }
   if (runtime->extension_count >= runtime->config.max_pending_operations ||
       runtime->refs == UINT32_MAX) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "runtime extension budget is full");
   }
@@ -409,7 +409,7 @@ orm_runtime_driver_acquire_extension(
   ++runtime->dependents;
   ++runtime->refs;
   plugin = driver->plugin;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
 
   plugin_status = cmeta_plugin_registry_acquire(
       &runtime->plugins, plugin, &lease, &manifest);
@@ -494,15 +494,15 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
   if (runtime == NULL || out_info == NULL || !runtime_id_valid(id))
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid driver info request");
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
   orm_runtime_driver *driver = runtime_find_driver(runtime, id);
   if (driver == NULL) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
   }
@@ -516,7 +516,7 @@ orm_runtime_driver_info(orm_runtime_t *runtime, orm_string_view_t id,
   out_info->execution_models = driver->execution_models;
   memcpy(out_info->bundle_id, driver->bundle_id,
          sizeof(out_info->bundle_id));
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
@@ -530,22 +530,22 @@ orm_runtime_driver_storage_info(
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "invalid driver storage info request");
 
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
 
   orm_runtime_driver *driver = runtime_find_driver(runtime, id);
   if (driver == NULL) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_DRIVER_NOT_REGISTERED,
                           "driver is not registered");
   }
 
   *out_storage = driver->storage;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 

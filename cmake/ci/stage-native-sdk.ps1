@@ -9,14 +9,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-foreach ($name in @("GITHUB_WORKSPACE", "TURBODB_CI_PKG_ROOT", "GITHUB_ENV",
-                    "SALTS_PACKAGE_VERSION", "SALTS_UTILS_PACKAGE_VERSION")) {
+foreach ($name in @("GITHUB_WORKSPACE", "GITHUB_ENV", "SALTS_BASE_VERSION",
+                    "CMETA_VERSION", "SALTS_UTILS_VERSION", "SALTS_CORE_VERSION")) {
   if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
     throw "$name is required"
   }
 }
-$package = if ($Rid -eq "android-arm64-v8a") { "turbodb-android" } else { "turbodb" }
-$installed = Join-Path $env:TURBODB_CI_PKG_ROOT "$package/release"
+$installed = Join-Path (Split-Path -Parent $InstallManifest) "stage"
 $stage = Join-Path $env:GITHUB_WORKSPACE "build/stage/sdk/$Rid"
 if (Test-Path -LiteralPath $stage) { throw "SDK staging directory already exists: $stage" }
 if (-not (Test-Path -LiteralPath $installed -PathType Container)) { throw "install tree is missing: $installed" }
@@ -40,7 +39,7 @@ foreach ($file in Get-Content -LiteralPath $InstallManifest | Sort-Object -Uniqu
 # libraries into the SDK. TLS and authentication digests use Salts; libpq is
 # built without its own SSL provider.
 if ($Rid -eq "windows-x64") {
-  $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed/$env:QIGAO_VCPKG_WINDOWS_TRIPLET/bin"
+  $vcpkgBin = Join-Path $env:VCPKG_INSTALLED_DIR "$env:VCPKG_TARGET_TRIPLET/bin"
   foreach ($runtimeDll in @("libpq.dll", "sqlite3.dll")) {
     $source = Join-Path $vcpkgBin $runtimeDll
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -51,8 +50,8 @@ if ($Rid -eq "windows-x64") {
 }
 $runtimeManifest = @()
 if ($Rid -in @("linux-x64", "linux-arm64", "android-arm64-v8a")) {
-  if ([string]::IsNullOrWhiteSpace($env:SALTS_ROOT)) { throw "SALTS_ROOT is required" }
-  $saltsLibrary = Join-Path $env:SALTS_ROOT "lib/libsalts.so"
+  if ([string]::IsNullOrWhiteSpace($env:SALTS_BASE_ROOT)) { throw "SALTS_BASE_ROOT is required" }
+  $saltsLibrary = Join-Path $env:SALTS_BASE_ROOT "lib/libsalts.so"
   if (-not (Test-Path -LiteralPath $saltsLibrary -PathType Leaf)) {
     throw "restored Salts runtime is missing: $saltsLibrary"
   }
@@ -67,7 +66,8 @@ if ($Rid -in @("linux-x64", "linux-arm64", "android-arm64-v8a")) {
 }
 @(
   "package=TurboDB.Native", "version=$Version", "rid=$Rid", "profile=release",
-  "salts=$env:SALTS_PACKAGE_VERSION", "saltsutils=$env:SALTS_UTILS_PACKAGE_VERSION",
+  "salts=$env:SALTS_BASE_VERSION", "saltsutils=$env:SALTS_UTILS_VERSION",
+  "cmeta=$env:CMETA_VERSION", "cnet=$env:SALTS_CORE_VERSION",
   "drivers=sqlite,postgresql,mysql", "source=$env:GITHUB_SHA",
   "tidessql=OFF", "tidesdb=OFF"
   $runtimeManifest

@@ -1,5 +1,5 @@
 #include "dbtool_schema_driver.h"
-#include <salts/plugin.h>
+#include <cmeta/plugin.h>
 
 /* Deliberately incomplete operations exercise host admission before open. */
 static const dbtool_schema_driver_ops invalid_ops = {

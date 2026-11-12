@@ -2,7 +2,7 @@
 #define TINYTEST_NO_MAIN
 #include "orm_internal.h"
 #include <cmeta/struct.h>
-#include <cmeta_cmeta_data.h>
+#include <cmeta/core_data.h>
 #include <data_bind.h>
 #include <tinytest.h>
 #include <stdio.h>

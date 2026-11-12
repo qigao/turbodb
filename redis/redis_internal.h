@@ -8,8 +8,8 @@
 
 #include "redis_export.h"
 #include "redis_reply.h"
-#include "cmeta_buffer.h"
-#include "tstr.h"
+#include "memory/buffer.h"
+#include "core/tstr.h"
 
 #define REDIS_RESP_MAX_DEPTH 128u
 

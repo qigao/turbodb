@@ -1,30 +1,26 @@
 # 第三方材料说明
 
-## TidesDB 存储引擎
+## OpenWTL
 
-`tidesdb/` 保存 [TidesDB](https://github.com/tidesdb/tidesdb) 源码，当前
-`tidesdb/CMakeLists.txt` 声明版本 9.3.15；上游许可见 `tidesdb/LICENSE`。
-本地 SSI 修复将冲突边更新与回滚判定放入既有活动事务表的写锁内，避免并发
-判定使同一键的所有竞争事务互相判负。WAL 和 memtable 写入仍在锁外；不改变
-存储格式或公开 ABI。回归覆盖见 `tidessql_storage_race` 和
-`tidessql_storage`（`tidessql/tests/storage/`）。
+Studio 通过 `external/OpenWTL` Git 子模块使用
+[qigao/OpenWTL 0.1.2](https://github.com/qigao/OpenWTL/releases/tag/v0.1.2)，
+固定提交 `311b2dc361eea42cf6c821289133a99713298a74`，链接公开 target
+`OpenWTL::WTL`。子模块不含本地补丁。
+
+- 项目代码与构建集成：Apache-2.0，见 `external/OpenWTL/LICENSE`。
+- OpenATL 基础：MIT，见 `external/OpenWTL/third_party_licenses/OPENATL-MIT.txt`。
+- WTL 10.0.10320：MS-PL，见 `external/OpenWTL/wtl/MS-PL.txt`；来源记录见同目录 `SOURCE.md`。
+
+上游版权与许可证文件随子模块保留；不再依赖 Microsoft ATL 或独立 vcpkg WTL 包。
 
 ## GmSSL 密码库
 
 MySQL client 认证和私有 TidesSQL server 密码边界通过 vcpkg 的 `GmSSL::GmSSL`
 接入 GmSSL 3.2.0，不复制上游源码。来源：[guanzhi/GmSSL](https://github.com/guanzhi/GmSSL/tree/v3.2.0)，
-许可 Apache-2.0；安装包保留上游 `share/gmssl/copyright`。项目依赖固定在
-qigao/vcpkg-cache commit `1da9c439a2380a8752e88046ca0c5ae159991e03` 的 gmssl port，
+许可 Apache-2.0；安装包保留上游 `share/gmssl/copyright`。项目依赖由
+`vcpkg-configuration.json` 选定的 qigao/vcpkg-cache gmssl port 管理，
 该 port 包含 Salts CNet 所需 TLS 适配补丁与 SHA1/SHA2/AES/P256 构建选项；
 补丁和版本元数据由 registry 管理。其他 registry 包的原 baseline 不变。
-
-## Zstandard 压缩库
-
-TidesDB 通过既有 vcpkg manifest 和 registry 使用
-[facebook/zstd](https://github.com/facebook/zstd) 的静态库。SDK 的静态 TidesDB
-配置随包提供最终链接所需的私有 archive，按 BSD-3-Clause 许可使用，并保留
-生产端 vcpkg 包的完整许可证文件 `share/tidesdb/zstd/copyright`；版本及构建补丁
-继续由 `vcpkg-configuration.json` 所指的 registry 管理。
 
 ## MySQL 8.4.0 测试语料
 

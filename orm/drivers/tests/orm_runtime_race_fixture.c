@@ -1,6 +1,6 @@
 #include <orm_driver_plugin.h>
-#include <salts/clock.h>
-#include <salts/thread.h>
+#include <core/clock.h>
+#include <threads/threads.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,10 +78,10 @@ static void race_gate_pause(uint32_t phase) {
     return;
 
   race_marker_write(entered);
-  const uint64_t started = cmeta_monotonic_ms();
+  const uint64_t started = monotonic_ms();
   while (!race_marker_exists(release) &&
-         cmeta_monotonic_ms() - started < RACE_TIMEOUT_MS)
-    cmeta_sleep_ms(1u);
+         monotonic_ms() - started < RACE_TIMEOUT_MS)
+    sleep_ms(1u);
 
   (void)remove(arm);
   (void)remove(entered);

@@ -1,5 +1,5 @@
 #include <cflow/executor.h>
-#include <salts/thread.h>
+#include <threads/threads.h>
 #define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include <tinymock.h>
 #include <stdatomic.h>
@@ -29,14 +29,14 @@ static void sqlite_gate(sqlite3_context *context, int count,
   (void)values;
   atomic_store(&gate_owner_thread, on_test_owner);
   atomic_fetch_add(&gate_entered, 1);
-  while (!atomic_load(&gate_released)) cmeta_sleep_ms(1u);
+  while (!atomic_load(&gate_released)) sleep_ms(1u);
   sqlite3_result_int(context, 7);
 }
 
 static int await_gate(void) {
   for (unsigned attempt = 0; attempt < TEST_WAIT_ATTEMPTS; ++attempt) {
     if (atomic_load(&gate_entered)) return 1;
-    cmeta_sleep_ms(1u);
+    sleep_ms(1u);
   }
   return 0;
 }
@@ -47,7 +47,7 @@ static orm_row_cursor_step await_step(orm_row_cursor *cursor,
   for (unsigned attempt = 0; attempt < TEST_WAIT_ATTEMPTS; ++attempt) {
     step = cursor->ops->next(cursor->context, row);
     if (step.kind != ORM_ROW_CURSOR_WAIT) return step;
-    cmeta_sleep_ms(1u);
+    sleep_ms(1u);
   }
   return step;
 }

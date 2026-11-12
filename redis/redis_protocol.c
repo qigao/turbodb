@@ -1,7 +1,7 @@
 #include "redis_internal.h"
 
-#include <fmt.h>
-#include "cmeta_error.h"
+#include <core/fmt.h>
+#include "core/error.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -20,8 +20,10 @@ int redis_resp_command_build_bounded(int argc, const char **argv,
                                      size_t max_command_bytes,
                                      tstr *out_command) {
   tstr command = NULL;
-  tstr next;
+  tstr reserved;
   size_t total;
+  size_t used;
+  int written;
   int index;
   if (argc <= 0 || !argv || max_command_bytes == 0u || !out_command ||
       *out_command)
@@ -39,40 +41,39 @@ int redis_resp_command_build_bounded(int argc, const char **argv,
       return SALTS_ENOBUFS;
     total += framing + length;
   }
+  /* Reserve once, then render directly into the owner's capacity. Avoid both
+   * temporary tstr appends and zero-initializing large binary payloads. */
   command = tstr_new();
   if (!command) return SALTS_ENOMEM;
-  next = tstr_reserve(command, total);
-  if (!next) {
+  reserved = tstr_reserve(command, total);
+  if (!reserved) {
     tstr_free(command);
     return SALTS_ENOMEM;
   }
-  command = next;
-  next = tstr_append_format(command, "*{}\r\n", argc);
-  if (!next) {
+  command = reserved;
+  written = fmt(command, total + 1u, "*{}\r\n", argc);
+  if (written <= 0) {
     tstr_free(command);
     return SALTS_ENOMEM;
   }
-  command = next;
+  used = (size_t)written;
   for (index = 0; index < argc; ++index) {
-    size_t length = argvlen ? argvlen[index] : strlen(argv[index]);
-    next = tstr_append_format(command, "${}\r\n", length);
-    if (!next) {
+    const vstr argument = vstr_from_buf(
+        argv[index], argvlen ? argvlen[index] : strlen(argv[index]));
+    written = fmt(command + used, total - used + 1u, "${}\r\n", argument.len);
+    if (written <= 0) {
       tstr_free(command);
       return SALTS_ENOMEM;
     }
-    command = next;
-    next = tstr_cat_v(command, vstr_from_buf(argv[index], length));
-    if (!next) {
-      tstr_free(command);
-      return SALTS_ENOMEM;
-    }
-    command = next;
-    next = tstr_cat_len(command, "\r\n", 2u);
-    if (!next) {
-      tstr_free(command);
-      return SALTS_ENOMEM;
-    }
-    command = next;
+    used += (size_t)written;
+    memcpy(command + used, argument.data, argument.len);
+    used += argument.len;
+    memcpy(command + used, "\r\n", 2u);
+    used += 2u;
+  }
+  if (!tstr_set_len_checked(command, used)) {
+    tstr_free(command);
+    return SALTS_ENOBUFS;
   }
   *out_command = command;
   return SALTS_OK;

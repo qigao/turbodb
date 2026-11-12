@@ -30,7 +30,7 @@ target_include_directories(sqlparser
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE src ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(sqlparser PRIVATE Salts::CSTL Salts::Core)
+target_link_libraries(sqlparser PRIVATE CMeta::CSTL Salts::Core)
 target_compile_definitions(sqlparser PUBLIC
   SQLPARSER_SQLITE_ENABLE_UPDATE_DELETE_LIMIT=$<BOOL:${SQLPARSER_SQLITE_ENABLE_UPDATE_DELETE_LIMIT}>)
 cmake_install_headers(FILES include/sqlparser/sqlparser.h
@@ -38,6 +38,6 @@ cmake_install_headers(FILES include/sqlparser/sqlparser.h
 if(BUILD_TESTS)
   add_subdirectory(tests)
 endif()
-if(BUILD_EXAMPLES)
+if(BUILD_EXAMPLE)
   add_subdirectory(examples)
 endif()

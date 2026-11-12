@@ -21,8 +21,8 @@ target_link_libraries(
           Salts::Core
           Salts::CNet
           Salts::CSerde
-          Salts::CFlow
-          Salts::CSTL)
+          CMeta::CFlow
+          CMeta::CSTL)
 set_target_properties(
   orm_postgresql_driver
   PROPERTIES PREFIX ""

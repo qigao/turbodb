@@ -5,7 +5,7 @@ foreach(driver IN ITEMS mysql postgresql)
   target_include_directories(orm_coexistence_${driver}_fixture
     PRIVATE ${ORM_SOURCE_DIR}/include/orm)
   target_link_libraries(orm_coexistence_${driver}_fixture
-    PRIVATE Salts::PluginABI Salts::CSerde Salts::CFlow)
+    PRIVATE CMeta::PluginABI Salts::CSerde CMeta::CFlow)
   set_target_properties(orm_coexistence_${driver}_fixture PROPERTIES
     PREFIX ""  C_VISIBILITY_PRESET hidden
     WINDOWS_EXPORT_ALL_SYMBOLS OFF FOLDER "orm/drivers/tests/cross_driver")
@@ -21,7 +21,7 @@ cmake_add_test(
   FOLDER "orm/drivers/tests/cross_driver"
   TEST_NAME orm_runtime_coexistence
   SOURCES orm_runtime_coexistence_test.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyTest
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} CMeta::CFlow Salts::TinyTest
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/runtime)
 set_target_properties(orm_runtime_coexistence_test PROPERTIES
    LINKER_LANGUAGE CXX)

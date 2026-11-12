@@ -41,7 +41,7 @@ target_include_directories(
                $<INSTALL_INTERFACE:include> $<INSTALL_INTERFACE:include/redis>
         PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
-target_link_libraries(tedis PUBLIC Salts::Core Salts::CFlow)
+target_link_libraries(tedis PUBLIC Salts::Core CMeta::CFlow)
 
 # Platform-specific settings
 if(WIN32)
@@ -51,7 +51,7 @@ if(WIN32)
 endif()
 
 # Tests
-if(BUILD_TESTS)
+if(BUILD_TESTS OR BUILD_BENCHMARK)
   add_subdirectory(tests)
 endif()
 

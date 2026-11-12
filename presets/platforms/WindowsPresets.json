@@ -1,0 +1,73 @@
+{
+  "version": 6,
+  "include": [
+    "../BasePresets.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "windows-msvc",
+      "hidden": true,
+      "inherits": [
+        "ISWindows",
+        "base",
+        "toolkit-msvc",
+        "flags-msvc"
+      ]
+    },
+    {
+      "name": "windows-llvm-mingw",
+      "hidden": true,
+      "inherits": [
+        "ISWindows",
+        "base",
+        "toolkit-llvm-mingw"
+      ]
+    },
+    {
+      "name": "target-llvm-mingw-x64",
+      "hidden": true,
+      "inherits": "windows-llvm-mingw",
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "qigao-x64-windows-llvm-mingw",
+        "LLVM_MINGW_TARGET": "x86_64-w64-mingw32"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_PROCESSOR": "x86_64"
+      }
+    },
+    {
+      "name": "target-llvm-mingw-arm64",
+      "hidden": true,
+      "inherits": "windows-llvm-mingw",
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "qigao-arm64-windows-llvm-mingw",
+        "LLVM_MINGW_TARGET": "aarch64-w64-mingw32"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_PROCESSOR": "aarch64"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-windows",
+      "hidden": true,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-windows",
+      "hidden": true,
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    }
+  ]
+}

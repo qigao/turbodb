@@ -2,7 +2,7 @@
 
 #include <cmeta/struct.h>
 #include <tinytest.hpp>
-#include <salts/thread.h>
+#include <threads/threads.h>
 
 #include <cstddef>
 #include <utility>
@@ -175,7 +175,7 @@ spec("ORM thin C++ CFlow facade") {
       for (int attempt = 0; attempt < max_pumps && observer.count < expected && !observer.failed;
            ++attempt) {
         (void)cflow_scheduler_advance(&scheduler.native, 1u);
-        cmeta_sleep_ms(1u);
+        sleep_ms(1u);
       }
       check_equal(observer.count, expected);
       check_equal(observer.last_id, expected == 1 ? 7 : 11);

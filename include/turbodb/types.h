@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <tstr.h>
+#include <core/tstr.h>
 
 #define TURBODB_TYPES_ABI_VERSION UINT32_C(1)
 

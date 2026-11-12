@@ -18,6 +18,6 @@ if(BUILD_TESTS)
   add_test(NAME dbtool_postgresql_test COMMAND dbtool_postgresql_test)
 endif()
 
-if(BUILD_E2E_TESTS)
+if(BUILD_TESTS)
   add_subdirectory(e2e)
 endif()

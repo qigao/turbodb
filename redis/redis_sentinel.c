@@ -1,7 +1,7 @@
 #include "redis_sentinel.h"
 
-#include "cmeta_error.h"
-#include "tstr.h"
+#include "core/error.h"
+#include "core/tstr.h"
 
 #include <errno.h>
 #include <stdlib.h>

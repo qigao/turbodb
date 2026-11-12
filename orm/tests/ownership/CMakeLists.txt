@@ -69,13 +69,13 @@ cmake_add_test(
   FOLDER "orm/tests/ownership"
   TEST_NAME orm_owner_regression
   SOURCES orm_owner_regression_test.c
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_state_test
   FOLDER "orm/tests/ownership"
   TEST_NAME orm_owner_state
   SOURCES orm_owner_state_test.c
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_checked_test
   FOLDER "orm/tests/ownership"
@@ -84,37 +84,37 @@ cmake_add_test(
     orm_cursor_open_owner_test.c orm_cursor_execution_owner_test.c
     orm_row_storage_cutover_test.c orm_row_budget_owner_test.c
     orm_row_borrowed_contract_test.c
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_public_flow_test
   FOLDER "orm/tests/ownership"
   TEST_NAME orm_owner_public_flow
   SOURCES ../flow/sqlite/orm_public_flow_test.c
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_cpp_flow_test
   FOLDER "orm/tests/ownership"
   TEST_NAME orm_owner_cpp_flow
   SOURCES ../flow/sqlite/orm_cpp_flow_test.cpp
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_cleanup_test
   FOLDER "orm/tests/ownership"
   TEST_NAME orm_owner_cleanup
   SOURCES orm_cleanup_failure_test.c
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_race_test
   FOLDER "orm/tests/ownership"
   TEST_NAME orm_owner_race
   SOURCES orm_owner_race_test.c
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_failure_test
   FOLDER "orm/tests/ownership"
   TEST_NAME orm_owner_failure
   SOURCES orm_connection_failure_test.c
-  LIBS orm_owner_test_core Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS orm_owner_test_core Salts::DataBind CMeta::CFlow Salts::TinyTest)
 set(owner_test_targets
     orm_owner_regression_test
     orm_owner_state_test
@@ -181,7 +181,7 @@ cmake_add_test(
     ${ORM_SOURCE_DIR}/drivers/postgresql/postgres_direct_tls_bridge.c
     ${ORM_SOURCE_DIR}/drivers/postgresql/orm_postgres_cursor.c
   LIBS orm_owner_test_core PostgreSQL::PostgreSQL Salts::CSerde Salts::DataBind
-    Salts::CNet Salts::CFlow Salts::TinyTest
+    Salts::CNet CMeta::CFlow Salts::TinyTest
   INCLUDES ../../src/abi ../../src/flow ${ORM_SOURCE_DIR}/drivers/postgresql)
 
 set_target_properties(

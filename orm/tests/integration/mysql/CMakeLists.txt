@@ -4,7 +4,7 @@ cmake_add_test(
   FOLDER "orm/tests/integration/mysql"
   SOURCES tidessqld_driver_e2e_test.c
           ${PROJECT_SOURCE_DIR}/tidessql/tests/daemon/process_fixture.c
-  LIBS turbo_orm Salts::CFlow Salts::Platform Salts::Core Salts::TinyTest
+  LIBS turbo_orm CMeta::CFlow Salts::Core Salts::Core Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm
            ${PROJECT_SOURCE_DIR}/tidessql/tests/daemon)

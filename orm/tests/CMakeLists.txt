@@ -21,6 +21,6 @@ if(BUILD_TESTS)
   add_subdirectory(ownership)
 endif()
 
-if(BUILD_E2E_TESTS)
+if(BUILD_TESTS)
   add_subdirectory(e2e)
 endif()

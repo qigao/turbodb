@@ -18,7 +18,7 @@ static orm_status_t runtime_begin_connect(
   *out_driver = NULL;
   orm_status_t status = ORM_STATUS_OK;
   const char *message = NULL;
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
     status = ORM_STATUS_INVALID_STATE;
     message = "runtime is closed";
@@ -36,7 +36,7 @@ static orm_status_t runtime_begin_connect(
       *out_driver = driver;
     }
   }
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return runtime_result(error, status, message);
 }
 

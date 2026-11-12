@@ -85,23 +85,31 @@ jobs:
           set -euo pipefail
           producer_salts=""
           producer_utils=""
+          producer_cmeta=""
+          producer_cnet=""
           for rid in linux-x64 linux-arm64 macos-arm64 windows-x64 android-arm64-v8a; do
             manifest="package/sdk/$rid/turbodb-sdk-manifest.txt"
             test -f "$manifest"
             # Windows manifests use CRLF; the terminator is not part of the version.
             salts="$(sed -n 's/\r$//;s/^salts=//p' "$manifest")"
             utils="$(sed -n 's/\r$//;s/^saltsutils=//p' "$manifest")"
-            if [[ -z "$salts" || -z "$utils" ]]; then
+            cmeta="$(sed -n 's/\r$//;s/^cmeta=//p' "$manifest")"
+            cnet="$(sed -n 's/\r$//;s/^cnet=//p' "$manifest")"
+            if [[ -z "$salts" || -z "$utils" || -z "$cmeta" || -z "$cnet" ]]; then
               echo "Missing native producer versions: rid=$rid salts=$salts saltsutils=$utils" >&2
               exit 1
             fi
             if [[ -n "$producer_salts" && "$salts" != "$producer_salts" ]] ||
-               [[ -n "$producer_utils" && "$utils" != "$producer_utils" ]]; then
+               [[ -n "$producer_utils" && "$utils" != "$producer_utils" ]] ||
+               [[ -n "$producer_cmeta" && "$cmeta" != "$producer_cmeta" ]] ||
+               [[ -n "$producer_cnet" && "$cnet" != "$producer_cnet" ]]; then
               echo "Native producer versions disagree across RIDs: $rid" >&2
               exit 1
             fi
             producer_salts="$salts"
             producer_utils="$utils"
+            producer_cmeta="$cmeta"
+            producer_cnet="$cnet"
           done
 
           command -v readelf >/dev/null
@@ -117,7 +125,7 @@ jobs:
               case "$needed" in
                 libsalts.so.*)
                   if [[ "$needed" != "$wanted" ]]; then
-                    echo "TurboDB ELF NEEDED mismatch: $library requires $needed, Salts.Native=$producer_salts ($wanted)" >&2
+                    echo "TurboDB ELF NEEDED mismatch: $library requires $needed, SaltsBase=$producer_salts ($wanted)" >&2
                     exit 1
                   fi
                   matching=$((matching + 1))
@@ -132,8 +140,10 @@ jobs:
           {
             echo "### TurboDB.Native runtime graph"
             echo
-            echo "- Salts.Native: $producer_salts"
-            echo "- SaltsUtils.Native: $producer_utils"
+            echo "- SaltsBase: $producer_salts"
+            echo "- SaltsUtils: $producer_utils"
+            echo "- CMeta: $producer_cmeta"
+            echo "- CNet: $producer_cnet"
             echo "- Linux NEEDED: $wanted ($matching imports)"
           } >> "$GITHUB_STEP_SUMMARY"
 

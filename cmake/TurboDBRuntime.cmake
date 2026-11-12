@@ -4,6 +4,15 @@ set(_turbodb_runtime_directories "${PROJECT_SOURCE_DIR}")
 set(_turbodb_runtime_targets "")
 set(_turbodb_runtime_dlls "")
 set(_turbodb_project_dlls "")
+# CMake's FindSQLite3/FindPostgreSQL expose UNKNOWN imported libraries, so their
+# runtime DLLs are absent from TARGET_RUNTIME_DLLS. The manifest selects dynamic
+# Windows ports; stage these two dependencies through the same existing task.
+find_file(TURBODB_SQLITE_RUNTIME sqlite3.dll REQUIRED NO_DEFAULT_PATH
+  PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/$ENV{VCPKG_CONFIGURATION_SUBDIR}bin")
+find_file(TURBODB_POSTGRESQL_RUNTIME libpq.dll REQUIRED NO_DEFAULT_PATH
+  PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/$ENV{VCPKG_CONFIGURATION_SUBDIR}bin")
+list(APPEND _turbodb_runtime_dlls
+  "${TURBODB_SQLITE_RUNTIME}" "${TURBODB_POSTGRESQL_RUNTIME}")
 while(_turbodb_runtime_directories)
   list(POP_FRONT _turbodb_runtime_directories _directory)
   get_property(_subdirectories DIRECTORY "${_directory}" PROPERTY SUBDIRECTORIES)

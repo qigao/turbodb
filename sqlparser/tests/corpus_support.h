@@ -2,15 +2,15 @@
 #define SQLPARSER_CORPUS_SUPPORT_H
 
 #include <sqlparser/sqlparser.h>
-#include <cmeta_fs.h>
-#include <tstr.h>
+#include <file/fs.h>
+#include <core/tstr.h>
 #include <tinytest.h>
 #include <stdio.h>
 #include <string.h>
 
 enum { REPORT_MAX_BYTES = 16 * 1024 * 1024, CONTEXT_CAPACITY = 80,
        REPORT_ROW_CAPACITY = 2048 };
-static cmeta_fs_buf_t input;
+static fs_buf_t input;
 static sqlparser_document *document;
 static tstr path, report;
 
@@ -63,21 +63,21 @@ static void error_position(size_t offset, size_t *line, size_t *column,
 
 static void clear_corpus(void) {
   sqlparser_document_destroy(document); document = NULL;
-  cmeta_fs_buf_free(&input);
+  fs_buf_free(&input);
   tstr_free(path); path = NULL;
   tstr_free(report); report = NULL;
 }
 
-static void read_fixture(const char *root, const char *file, cmeta_fs_buf_t *buffer) {
+static void read_fixture(const char *root, const char *file, fs_buf_t *buffer) {
   path = tstr_new_len(root, strlen(root));
   check_not_null(path);
   tstr updated = tstr_cat_len(path, file, strlen(file));
   check_not_null(updated);
   path = updated;
-  cmeta_fs_stat_t stat;
-  check_equal(cmeta_fs_stat(path, &stat), 0);
+  fs_stat_t stat;
+  check_equal(fs_stat(path, &stat), 0);
   check_true(stat.size <= sqlparser_default_limits().max_input_bytes);
-  check_equal(cmeta_fs_read_file(path, buffer), 0);
+  check_equal(fs_read_file(path, buffer), 0);
   tstr_free(path); path = NULL;
 }
 #endif

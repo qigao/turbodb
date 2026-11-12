@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include <vstr.h>
+#include <core/vstr.h>
 
 #include "workspace/sql_workspace_session.h"
 

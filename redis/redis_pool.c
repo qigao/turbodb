@@ -1,7 +1,7 @@
 #include "redis_pool.h"
 
-#include "cmeta_error.h"
-#include "tstr.h"
+#include "core/error.h"
+#include "core/tstr.h"
 
 #include <limits.h>
 #include <stdio.h>

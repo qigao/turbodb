@@ -3,8 +3,8 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_sqlite_async
   SOURCES orm_sqlite_async_test.c
-  LIBS orm_c_test_static SQLite::SQLite3 Salts::CFlow Salts::Platform
-    Salts::TinyTest Salts::TinyMock
+  LIBS orm_c_test_static SQLite::SQLite3 CMeta::CFlow Salts::Core
+    Salts::TinyTest CMeta::TinyMock
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow)
@@ -19,7 +19,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_sqlite_flow
   SOURCES orm_sqlite_flow_test.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} SQLite::SQLite3 Salts::DataBind Salts::CFlow
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} SQLite::SQLite3 Salts::DataBind CMeta::CFlow
     Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
@@ -37,7 +37,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_public_flow
   SOURCES orm_public_flow_test.c
-  LIBS orm_c_test_static Salts::CFlow Salts::DataBind Salts::TinyTest
+  LIBS orm_c_test_static CMeta::CFlow Salts::DataBind Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 
@@ -51,7 +51,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_cpp_flow
   SOURCES orm_cpp_flow_test.cpp
-  LIBS orm_c_test_static Salts::CFlow Salts::TinyTest
+  LIBS orm_c_test_static CMeta::CFlow Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 target_compile_features(orm_cpp_flow_test PRIVATE cxx_std_17)
@@ -68,7 +68,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_public_ownership
   SOURCES orm_public_ownership_test.c
-  LIBS orm_c_test_static Salts::CFlow Salts::TinyTest
+  LIBS orm_c_test_static CMeta::CFlow Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 

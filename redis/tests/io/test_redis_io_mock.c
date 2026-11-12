@@ -1,7 +1,7 @@
 #include "../../redis_io.h"
 #include "../../redis_io_internal.h"
 
-#include <salts/clock.h>
+#include <core/clock.h>
 #include <tinytest.h>
 
 #include <string.h>
@@ -65,10 +65,10 @@ static void redis_io_fake_check_sockets(size_t count, uintptr_t expected) {
  * bounded fake is single-threaded and preserves the per-call return sequences
  * needed to exercise retry and clock-wrap behavior. */
 #define cflow_io_native_backend_forget_socket test_forget_socket
-#define cmeta_hrtime test_hrtime
+#define hrtime test_hrtime
 #include "../../redis_io.c"
 #undef cflow_io_native_backend_forget_socket
-#undef cmeta_hrtime
+#undef hrtime
 
 enum { TEST_SOCKET = 1234, NEXT_SOCKET = 5678, TEST_TIMEOUT_NS = 20,
        TEST_START_NS = 100, TEST_TICK_NS = 10 };

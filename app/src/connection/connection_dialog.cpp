@@ -6,7 +6,7 @@
 
 #include <atldlgs.h>
 #include <atlctrlx.h>
-#include <cmeta_fs.h>
+#include <file/fs.h>
 
 #include "main_window.h"
 
@@ -294,11 +294,13 @@ void ConnectionDialog::ShowError(const std::wstring& message, int focus) {
   error_visible_ = true;
   LayoutFields();
   if (focus != 0) {
-    GotoDlgCtrl(GetDlgItem(focus));
+    SendMessage(WM_NEXTDLGCTL,
+                reinterpret_cast<WPARAM>(::GetDlgItem(m_hWnd, focus)), TRUE);
     if (focus >= IDC_CONNECTION_NAME && focus <= IDC_CONNECTION_SERVER)
       SendDlgItemMessage(focus, EM_SETSEL, 0, -1);
   } else {
-    GotoDlgCtrl(GetDlgItem(IDC_CONNECTION_ERROR));
+    SendMessage(WM_NEXTDLGCTL,
+                reinterpret_cast<WPARAM>(::GetDlgItem(m_hWnd, IDC_CONNECTION_ERROR)), TRUE);
   }
   ::MessageBeep(MB_ICONWARNING);
 }
@@ -386,7 +388,7 @@ bool ConnectionDialog::ReadProfile(ConnectionProfile* profile) {
   if (!EncodeText(module_path_, IDC_CONNECTION_CONFIG_LOAD, &profile->module_path) ||
       !ReadField(IDC_CONNECTION_NAME, false, &profile->display_name))
     return false;
-  if (!cmeta_fs_path_is_absolute(profile->module_path.c_str())) {
+  if (!fs_path_is_absolute(profile->module_path.c_str())) {
     ShowError(L"The driver module must have an absolute path. Check module_path in the INI configuration.",
               IDC_CONNECTION_CONFIG_LOAD);
     return false;

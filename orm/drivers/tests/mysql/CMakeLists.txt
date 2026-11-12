@@ -154,7 +154,7 @@ cmake_add_test(
   FOLDER "orm/drivers/tests/mysql"
   TEST_NAME orm_mysql_cursor
   SOURCES orm_mysql_cursor_test.c ${ORM_SOURCE_DIR}/drivers/mysql/cursor.c
-  LIBS TurboDB::MySQL Salts::Core Salts::CFlow Salts::CSerde Salts::TinyTest
+  LIBS TurboDB::MySQL Salts::Core CMeta::CFlow Salts::CSerde Salts::TinyTest
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/drivers/mysql ${ORM_MYSQL_SOURCE_DIR}
     ${ORM_MYSQL_SOURCE_DIR}/wire)

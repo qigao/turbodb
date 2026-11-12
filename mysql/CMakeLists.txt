@@ -15,7 +15,7 @@ target_include_directories(turbodb_mysql PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mysql>)
 target_link_libraries(turbodb_mysql
   PUBLIC Salts::Core Salts::CSerde
-  PRIVATE Salts::CNet)
+  PRIVATE Salts::CNet Salts::Crypto Salts::SIMD GmSSL::GmSSL)
 set_target_properties(turbodb_mysql PROPERTIES
   EXPORT_NAME MySQL
   POSITION_INDEPENDENT_CODE ON
@@ -29,6 +29,6 @@ install(FILES turbodb_mysql.h session.h session_script.h session_async.h source.
   transaction_control.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/mysql COMPONENT MySQL)
 
-if(BUILD_TESTS)
+if(BUILD_TESTS OR BUILD_BENCHMARK)
   add_subdirectory(tests)
 endif()

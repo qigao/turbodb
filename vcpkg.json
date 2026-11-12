@@ -1,48 +1,32 @@
 {
-  "name": "vcpkg-turbonet",
+  "name": "turbodb",
   "version-semver": "2.3.4",
   "dependencies": [
     {
       "name": "pkgconf",
       "host": true
     },
-    "zstd",
-    "gmssl"
-  ],
-  "features": {
-    "salts-utils": {
-      "description": "Resolve the Lua and QuickJS dependencies exported by SaltsUtils",
-      "dependencies": [
-        "lua",
-        "quickjs-ng"
+    "gmssl",
+    "libjpeg-turbo",
+    "libyuv",
+    "lua",
+    "quickjs-ng",
+    "sqlite3",
+    {
+      "name": "libpq",
+      "default-features": false,
+      "features": [
+        "zstd"
       ]
     },
-    "sqlite": {
-      "description": "Build SQLite ORM/database-tool backends and SQL parser reference tests",
-      "dependencies": [
-        "sqlite3"
-      ]
+    {
+      "name": "scintilla",
+      "platform": "windows"
     },
-    "postgresql": {
-      "description": "Build the optional PostgreSQL ORM backend",
-      "dependencies": [
-        {
-          "name": "libpq",
-          "default-features": false,
-          "features": [
-            "zstd"
-          ]
-        }
-      ]
-    },
-    "app": {
-      "description": "Build the optional TurboDB Studio Windows desktop application",
-      "dependencies": [
-        "wtl",
-        "scintilla",
-        "lexilla"
-      ]
+    {
+      "name": "lexilla",
+      "platform": "windows"
     }
-  },
+  ],
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
 }

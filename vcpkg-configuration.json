@@ -3,17 +3,16 @@
     {
       "kind": "git",
       "repository": "https://github.com/qigao/vcpkg-cache",
-      "baseline": "d4a0318b7d1abdadf86d6cd5d2d0e7d70a694432",
+      "reference": "v0.1.3",
+      "baseline": "b1febdf10867f0e2cfcd3751bf83acaba3073280",
       "packages": [
-        "libpq",
-        "zstd"
+        "gmssl",
+        "aklomp-base64",
+        "c-ares",
+        "zstd",
+        "vcpkg-make",
+        "libpq"
       ]
-    },
-    {
-      "kind": "git",
-      "repository": "https://github.com/qigao/vcpkg-cache",
-      "baseline": "1da9c439a2380a8752e88046ca0c5ae159991e03",
-      "packages": ["gmssl"]
     }
   ]
 }

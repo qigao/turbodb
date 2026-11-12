@@ -1,8 +1,3 @@
-if(NOT DEFINED ENV{RE2C_ROOT} OR NOT IS_DIRECTORY "$ENV{RE2C_ROOT}")
-    message(FATAL_ERROR "RE2C_ROOT must name the restored host re2c package")
-endif()
-unset(RE2C_EXECUTABLE CACHE)
-unset(RE2C_EXECUTABLE)
 find_program(RE2C_EXECUTABLE re2c PATHS "$ENV{RE2C_ROOT}/bin"
     NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 
@@ -15,17 +10,7 @@ find_program(RE2C_EXECUTABLE re2c PATHS "$ENV{RE2C_ROOT}/bin"
 # Native builds can execute the normal CMake lemon target. Cross builds cannot:
 # that target is compiled for the target architecture. Build the same repository
 # source once with a host C compiler and make grammar generation depend on it.
-if(LEMON_EXECUTABLE)
-    if(NOT EXISTS "${LEMON_EXECUTABLE}")
-        message(FATAL_ERROR "Configured host lemon executable does not exist: ${LEMON_EXECUTABLE}")
-    endif()
-    set(LEMON_DEPENDS "")
-    message(STATUS "Using configured host lemon: ${LEMON_EXECUTABLE}")
-elseif(TARGET lemon AND NOT CMAKE_CROSSCOMPILING)
-    set(LEMON_EXECUTABLE $<TARGET_FILE:lemon>)
-    set(LEMON_DEPENDS lemon)
-    message(STATUS "Using project-provided lemon target")
-elseif(CMAKE_CROSSCOMPILING)
+if(CMAKE_CROSSCOMPILING)
     find_program(
         LEMON_HOST_C_COMPILER
         NAMES cc gcc clang
@@ -49,13 +34,12 @@ elseif(CMAKE_CROSSCOMPILING)
     message(STATUS
         "Cross-compiling: using repository host lemon: ${LEMON_EXECUTABLE}")
 else()
-    message(FATAL_ERROR
-        "Project-provided Lemon target is unavailable. "
-        "Set LEMON_EXECUTABLE to the repository-compatible host generator.")
+    set(LEMON_EXECUTABLE $<TARGET_FILE:lemon>)
+    set(LEMON_DEPENDS lemon)
 endif()
 
 # Set path to lemon parser template
-set(LEMPAR "${CMAKE_SOURCE_DIR}/tools/lemon/lempar.c" CACHE PATH "Path to lemon parser template")
+set(LEMPAR "${CMAKE_SOURCE_DIR}/tools/lemon/lempar.c")
 
 # Note: These variables are set in the root scope and will be inherited 
 # by all subdirectories added via add_subdirectory().

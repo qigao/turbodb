@@ -1,5 +1,7 @@
 #include "parameters.h"
 
+#include <core/tstr.h>
+#include <simd.h>
 #include <limits.h>
 #include <string.h>
 
@@ -12,6 +14,8 @@ typedef enum mysql_parameter_lex_state_t {
   MYSQL_PARAMETER_LEX_LINE_HASH,
   MYSQL_PARAMETER_LEX_BLOCK_COMMENT
 } mysql_parameter_lex_state_t;
+
+enum { MYSQL_PARAMETER_SCALAR_SPAN_BYTES = 8u };
 
 static bool mysql_parameter_is_space(uint8_t value) {
   return value == (uint8_t)' ' || value == (uint8_t)'\t' ||
@@ -128,8 +132,9 @@ static mysql_wire_status_t mysql_parameter_emit(
     return MYSQL_WIRE_STATUS_INVALID;
   if (*used > capacity || capacity - *used < size)
     return MYSQL_WIRE_STATUS_LIMIT;
+  /* Removed parameter indices can put output inside the following input span. */
   if (size != 0u)
-    memcpy(out + *used, data, size);
+    memmove(out + *used, data, size);
   *used += size;
   return MYSQL_WIRE_STATUS_OK;
 }
@@ -187,6 +192,69 @@ static mysql_wire_status_t mysql_parameter_parse_portable_index(
   return MYSQL_WIRE_STATUS_OK;
 }
 
+static bool mysql_parameter_code_delimiter(unsigned char ch) {
+  return ch == '\'' || ch == '"' || ch == '`' || ch == '#' ||
+         ch == '-' || ch == '/' || ch == '*' || ch == '?';
+}
+
+/* Count ordinary code bytes in O(n) time/O(1) space. Inputs are borrowed,
+ * unaligned and counted; only complete 16-byte blocks reach simd_v128_load.
+ * Folding bit 4 lets '/' and '?' share a nibble entry. Any extra candidates
+ * (such as 'p' for '`') are resolved by the lexical predicate, never skipped. */
+static bool mysql_parameter_code_span(vstr text, size_t *length) {
+  static const v128 low_nibble = {{
+      15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15}};
+  static const v128 fold = {{
+      16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}};
+  static const v128 candidates = {{
+      0x70, 0xff, 0x32, 0x33, 0xff, 0xff, 0xff, 0x37,
+      0xff, 0xff, 0x3a, 0xff, 0xff, 0x3d, 0xff, 0x3f}};
+  size_t offset = 0u;
+
+  while (text.len - offset >= sizeof(v128)) {
+    v128 bytes, indices, folded, expected, matches;
+    uint32_t mask;
+    simd_v128_load(&bytes, text.data + offset);
+    if (!simd_binary(&simd_u8x16, SALTS_SIMD_BINARY_AND,
+                     &indices, &bytes, &low_nibble) ||
+        !simd_binary(&simd_u8x16, SALTS_SIMD_BINARY_OR,
+                     &folded, &bytes, &fold) ||
+        !simd_swizzle_bytes(&expected, &candidates, &indices) ||
+        !simd_compare(&simd_u8x16, SALTS_SIMD_COMPARE_EQ,
+                      &matches, &folded, &expected) ||
+        !simd_reduce(&simd_u8x16, SALTS_SIMD_REDUCE_BITMASK, &matches, &mask))
+      return false;
+    if (mask != 0u) {
+      for (size_t lane = 0u; lane < sizeof(v128); ++lane) {
+        if ((mask & (UINT32_C(1) << lane)) != 0u &&
+            mysql_parameter_code_delimiter((unsigned char)text.data[offset + lane])) {
+          *length = offset + lane;
+          return true;
+        }
+      }
+    }
+    offset += sizeof(v128);
+  }
+  while (offset < text.len &&
+         !mysql_parameter_code_delimiter((unsigned char)text.data[offset]))
+    ++offset;
+  *length = offset;
+  return true;
+}
+
+static size_t mysql_parameter_literal_span(vstr text, char a, char b) {
+  size_t prefix = 0u;
+  while (prefix < text.len && prefix < MYSQL_PARAMETER_SCALAR_SPAN_BYTES) {
+    if (text.data[prefix] == a || text.data[prefix] == b) return prefix;
+    ++prefix;
+  }
+  if (prefix == text.len) return prefix;
+  const char delimiters[] = {a, b};
+  const vstr remaining = vstr_from_buf(text.data + prefix, text.len - prefix);
+  const size_t end = vstr_find_any(remaining, vstr_from_buf(delimiters, 2u));
+  return end == VSTR_NPOS ? text.len : prefix + end;
+}
+
 mysql_wire_status_t mysql_parameter_lower(
     const uint8_t *sql, size_t sql_size,
     const mysql_parameter_lower_options_t *options,
@@ -208,20 +276,52 @@ mysql_wire_status_t mysql_parameter_lower(
 
   while (input < sql_size) {
     const uint8_t ch = sql[input];
+    const vstr pending = vstr_from_buf((const char *)sql + input, sql_size - input);
+
+    if (state == MYSQL_PARAMETER_LEX_CODE && !mysql_parameter_code_delimiter(ch)) {
+      size_t length = 1u;
+      /* Dense markers and short identifiers finish before vector setup. */
+      while (length < pending.len && length < MYSQL_PARAMETER_SCALAR_SPAN_BYTES &&
+             !mysql_parameter_code_delimiter((unsigned char)pending.data[length]))
+        ++length;
+      if (length == MYSQL_PARAMETER_SCALAR_SPAN_BYTES &&
+          pending.len - length >= sizeof(v128)) {
+        size_t rest;
+        if (!mysql_parameter_code_span(
+                vstr_from_buf(pending.data + length, pending.len - length), &rest))
+          return MYSQL_WIRE_STATUS_INVALID;
+        length += rest;
+      }
+      const mysql_wire_status_t status = mysql_parameter_emit(
+          out_sql, out_capacity, &output, sql + input, length);
+      if (status != MYSQL_WIRE_STATUS_OK) return status;
+      input += length;
+      continue;
+    }
 
     if (state == MYSQL_PARAMETER_LEX_LINE_DASH ||
         state == MYSQL_PARAMETER_LEX_LINE_HASH) {
+      const size_t end = mysql_parameter_literal_span(pending, '\r', '\n');
+      const size_t length = end == pending.len ? end : end + 1u;
       mysql_wire_status_t status =
-          mysql_parameter_emit(out_sql, out_capacity, &output, &ch, 1u);
+          mysql_parameter_emit(out_sql, out_capacity, &output, sql + input, length);
       if (status != MYSQL_WIRE_STATUS_OK)
         return status;
-      ++input;
-      if (ch == (uint8_t)'\n' || ch == (uint8_t)'\r')
+      input += length;
+      if (end != pending.len)
         state = MYSQL_PARAMETER_LEX_CODE;
       continue;
     }
 
     if (state == MYSQL_PARAMETER_LEX_BLOCK_COMMENT) {
+      const size_t length = mysql_parameter_literal_span(pending, '*', '*');
+      if (length != 0u) {
+        const mysql_wire_status_t status = mysql_parameter_emit(
+            out_sql, out_capacity, &output, sql + input, length);
+        if (status != MYSQL_WIRE_STATUS_OK) return status;
+        input += length;
+        continue;
+      }
       if (input + 1u < sql_size &&
           sql[input] == (uint8_t)'*' &&
           sql[input + 1u] == (uint8_t)'/') {
@@ -253,6 +353,16 @@ mysql_wire_status_t mysql_parameter_lower(
               : state == MYSQL_PARAMETER_LEX_DOUBLE_QUOTE
                     ? (uint8_t)'"'
                     : (uint8_t)'`';
+      const char escape = state != MYSQL_PARAMETER_LEX_BACKTICK &&
+                                  !options->no_backslash_escapes ? '\\' : (char)terminator;
+      const size_t length = mysql_parameter_literal_span(pending, (char)terminator, escape);
+      if (length != 0u) {
+        const mysql_wire_status_t status = mysql_parameter_emit(
+            out_sql, out_capacity, &output, sql + input, length);
+        if (status != MYSQL_WIRE_STATUS_OK) return status;
+        input += length;
+        continue;
+      }
 
       if (ch == terminator) {
         if (input + 1u < sql_size && sql[input + 1u] == terminator) {

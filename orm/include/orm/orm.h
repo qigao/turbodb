@@ -13,7 +13,7 @@
 #include <cmeta/data.h>
 #include <cmeta/object.h>
 #include <cflow/cflow.h>
-#include <tstr.h>
+#include <core/tstr.h>
 #include <turbodb/types.h>
 
 #if defined(ORM_C_STATIC)

@@ -5,7 +5,7 @@ target_compile_features(turbodb_dbtool_core PUBLIC c_std_11)
 target_include_directories(turbodb_dbtool_core
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(turbodb_dbtool_core PUBLIC
-  turbodb_schema_support Salts::Core Salts::Plugin
+  turbodb_schema_support Salts::Core CMeta::Plugin
   PRIVATE Salts::CmdParser)
 set_target_properties(
   turbodb_dbtool_core
@@ -34,18 +34,16 @@ endif()
 install(TARGETS dbtools RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools)
 
-if(TURBODB_BUILD_ORM)
-  add_dependencies(dbtools orm_sqlite_driver orm_postgresql_driver orm_mysql_driver)
-  # A dbtools component install must include the modules it consumes. Their
-  # native/Salts dependencies remain provided by the deployment environment.
-  install(TARGETS orm_sqlite_driver orm_postgresql_driver orm_mysql_driver
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers COMPONENT dbtools
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers COMPONENT dbtools)
-  install(TARGETS turbo_orm
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dbtools)
-endif()
+add_dependencies(dbtools orm_sqlite_driver orm_postgresql_driver orm_mysql_driver)
+# A dbtools component install must include the modules it consumes. Their
+# native/Salts dependencies remain provided by the deployment environment.
+install(TARGETS orm_sqlite_driver orm_postgresql_driver orm_mysql_driver
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers COMPONENT dbtools
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers COMPONENT dbtools)
+install(TARGETS turbo_orm
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dbtools)
 
-if(BUILD_TESTS OR BUILD_E2E_TESTS)
+if(BUILD_TESTS)
   add_subdirectory(tests)
 endif()

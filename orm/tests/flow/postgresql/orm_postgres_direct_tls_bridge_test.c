@@ -1,6 +1,6 @@
 #include "postgres_direct_tls_bridge.h"
 
-#include <cmeta_error.h>
+#include <core/error.h>
 #include <tinytest.h>
 
 #include <string.h>

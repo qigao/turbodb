@@ -2,7 +2,7 @@
  * CSerde reader and canonical Salts providers; no substitute binder or lease. */
 #define TINYTEST_NO_MAIN
 #include "orm_row_publisher.h"
-#include <cmeta_cmeta_data.h>
+#include <cmeta/core_data.h>
 #include <tinytest.h>
 #include <stdlib.h>
 #include <string.h>

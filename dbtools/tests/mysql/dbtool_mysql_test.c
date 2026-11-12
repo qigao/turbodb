@@ -1,5 +1,5 @@
 #include <session_script.h>
-#include <cmeta_error.h>
+#include <core/error.h>
 #define TINYMOCK_GENERATE_FUNCTION_OVERRIDES 1
 #include <tinymock.h>
 

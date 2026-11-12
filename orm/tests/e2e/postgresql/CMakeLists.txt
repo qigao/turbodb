@@ -3,7 +3,7 @@ cmake_add_test(
   FOLDER "orm/tests/e2e/postgresql"
   TEST_NAME orm_postgres_live
   SOURCES postgres_live_test.c
-  LIBS turbo_orm Salts::TinyTest Salts::Platform
+  LIBS turbo_orm Salts::TinyTest Salts::Core
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 
@@ -31,13 +31,13 @@ cmake_add_test(
   FOLDER "orm/tests/e2e/postgresql"
   TEST_NAME orm_owner_postgres
   SOURCES orm_owner_postgres_test.c
-  LIBS turbo_orm PostgreSQL::PostgreSQL Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS turbo_orm PostgreSQL::PostgreSQL Salts::DataBind CMeta::CFlow Salts::TinyTest)
 cmake_add_test(
   NAME orm_owner_postgres_loss_test
   FOLDER "orm/tests/e2e/postgresql"
   TEST_NAME orm_owner_postgres_loss
   SOURCES orm_owner_postgres_loss_test.c
-  LIBS turbo_orm PostgreSQL::PostgreSQL Salts::DataBind Salts::CFlow Salts::TinyTest)
+  LIBS turbo_orm PostgreSQL::PostgreSQL Salts::DataBind CMeta::CFlow Salts::TinyTest)
 add_dependencies(orm_owner_postgres_test orm_postgresql_driver)
 add_dependencies(orm_owner_postgres_loss_test orm_postgresql_driver)
 set_property(TARGET orm_owner_postgres_test orm_owner_postgres_loss_test
@@ -94,7 +94,7 @@ cmake_add_test(
   FOLDER "orm/tests/e2e/postgresql"
   TEST_NAME orm_postgres_direct_tls_live
   SOURCES postgres_direct_tls_live_test.c
-  LIBS turbo_orm Salts::TinyTest Salts::Platform
+  LIBS turbo_orm Salts::TinyTest Salts::Core
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 add_dependencies(orm_postgres_direct_tls_live_test orm_postgresql_driver)
@@ -112,7 +112,7 @@ cmake_add_test(
   TEST_NAME orm_postgres_direct_tls_binding_mismatch
   SOURCES postgres_direct_tls_binding_mismatch_test.c
     ${ORM_SOURCE_DIR}/drivers/postgresql/postgres_direct_tls_bridge.c
-  LIBS PostgreSQL::PostgreSQL Salts::CNet Salts::Platform Salts::TinyTest
+  LIBS PostgreSQL::PostgreSQL Salts::CNet Salts::Core CMeta::CFlow Salts::TinyTest
   INCLUDES ${ORM_SOURCE_DIR}/include/orm
     ${ORM_SOURCE_DIR}/drivers/postgresql)
 set_tests_properties(

@@ -90,6 +90,7 @@ bool WithConnectionDialog(MainWindow& window, std::function<void(HWND)> action,
 }
 
 bool WithDiscardDialog(MainWindow& window, UINT command, bool accept) {
+  window.ShowWindow(SW_SHOWNOACTIVATE);
   DialogScript script{window, [accept](HWND dialog) {
     ::SendMessageW(dialog, WM_COMMAND, accept ? IDOK : IDCANCEL, 0);
   }, ::GetTickCount()};

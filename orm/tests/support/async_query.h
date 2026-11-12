@@ -2,7 +2,7 @@
 #define ORM_TEST_ASYNC_QUERY_H
 #include <orm.h>
 #include <cmeta/struct.h>
-#include <salts/thread.h>
+#include <threads/threads.h>
 #include <stdio.h>
 
 Struct(async_test_row, (int, id));
@@ -75,7 +75,7 @@ static orm_status_t orm_test_async_query(orm_connection_t *connection, orm_error
       if (!cflow_subscription_request(&subscription, 2u)) goto cleanup;
       second_requested = 1;
     }
-    cmeta_sleep_ms(POLL_TICKS);
+    sleep_ms(POLL_TICKS);
   }
   if (observer.done && !observer.failed && observer.count == 2 && observer.sum == 18)
     status = ORM_STATUS_OK;

@@ -2,7 +2,7 @@
 
 **Typed and bounded database/storage infrastructure for the Salts ecosystem.**
 
-TurboDB provides C database components, C++ header-only wrappers, native-driver database tooling, Redis/TidesDB integrations, and optional ORM capabilities. It uses the installed [Salts](https://github.com/qigao/salts) SDK as its systems foundation while keeping storage semantics, drivers, durability behavior, and database-specific contracts owned by TurboDB.
+TurboDB provides C database components, C++ header-only wrappers, native-driver database tooling, Redis integrations, and optional ORM capabilities. It uses the released SaltsBase, CMeta, SaltsUtils, and CNet SDKs as its systems foundation while keeping storage semantics, drivers, durability behavior, and database-specific contracts owned by TurboDB.
 
 **Tags:** C11 · C++17 · database · storage · ORM · Redis · SQLite · PostgreSQL · durability · async-io
 
@@ -33,9 +33,7 @@ TurboDB is the **storage/data infrastructure layer**. It owns database-specific 
 | --- | --- |
 | ORM | Optional database-facing object/record mapping |
 | Redis | Redis-native primitives and durable/ordered adapter support |
-| TidesDB | TidesDB integration |
 | sqlparser | MySQL/SQLite syntax parsing and AST |
-| TidesSQL | C SDK v1 for SQL execution over local TidesDB plus the optional `tidessqld` MySQL/TLS service; [SDK, daemon and module boundary](tidessql/readme.md) |
 | SQLite | Native driver support and standalone schema application |
 | PostgreSQL | Native driver support and standalone schema application |
 | dbtools | Explicit standalone database tools |
@@ -104,111 +102,116 @@ The tool supports:
 
 ### Build
 
-Windows development and Release use `win-dev-user` and `win-release-user`.
-The standard profiles build the database tools and SQLite/PostgreSQL/MySQL clients.
-`win-release-user` also enables TurboDB Studio and the ORM with its
-SQLite/PostgreSQL/MySQL drivers. Other desktop user profiles can enable ORM
-with `TURBODB_BUILD_ORM=ON`. CI profiles do not inherit this Studio setting.
-TidesSQL, TidesDB, and `tidessqld` remain opt-in for desktop user profiles.
-Set `TURBODB_BUILD_TIDESSQL=ON` to build TidesSQL and its TidesDB storage engine.
-Enable `TURBODB_BUILD_TIDESSQL_SERVER=ON` to build
-`tidessqld` as well.
+Modules are assembled unconditionally; Windows also builds TurboDB Studio.
+TidesDB has been removed. The remaining `tidessql/` sources are archived and
+are outside the build, installation, and exported package. Module switches
+(`TURBODB_BUILD_*`) have been removed. Tests use `BUILD_TESTS`, benchmarks use
+`BUILD_BENCHMARK`, and examples use `BUILD_EXAMPLE`.
 
-Presets are organized by how they are used:
+`CMakeUserPresets.json` owns configure/build/test/install entry points and
+parent-environment SDK roots. Hidden definitions in `CMakePresets.json` and
+`presets/` supply compiler and platform profiles. Use CMake 3.27+, Ninja,
+Python 3.12+, PowerShell 7, Git, and an authenticated GitHub CLI.
+Windows MSVC also needs Visual Studio C++ tools. Studio uses the pinned
+OpenWTL submodule for ATL and WTL. Initialize it with
+`git submodule update --init external/OpenWTL` before configuring.
 
-- Manual development: the version-controlled `CMakeUserPresets.json` owns local
-  environment and SDK paths plus the development configure/build/test/install
-  entries (`win-*-user`, `linux-*-user`, and `android-*-win`).
-- CI workflows: `CMakePresets.json` owns the `ci-*` and `install-ci-*` entries
-  and their environment bindings. Workflow setup supplies SDK, toolchain, and
-  cache locations through the parent environment; CI presets do not inherit
-  from user presets.
+#### Protocol benchmarks
 
-Both groups reuse hidden presets in `CMakePresets.json` and `presets/*.json`
-for the vcpkg toolchain, platform settings, build options, install targets, and
-test filters. Keep machine-specific paths in `CMakeUserPresets.json`.
+Redis reserves its command's `tstr` capacity once and formats framing directly
+into it, publishing the length only after the complete frame is written. RESP
+scanning borrows counted `vstr` ranges; reply strings still own their copies.
+MySQL parameter lowering uses `simd.h` for complete 16-byte code blocks and
+`vstr` scans for quoted/comment spans. Short spans finish before vector setup;
+all loads are bounded, and overlapping in-place output remains supported.
 
-The macOS ARM64 CI and release profile uses AppleClang. The restored SDK must
-support this toolchain, including TinyTest's thread-local storage ABI; build or
-test failures stop publication.
+After restoring the SDK environment and entering the MSVC developer environment:
 
-CI 的共享 `setup-native` action 管理三类缓存：vcpkg 二进制包、ccache 编译结果、
-NuGet 包内容。vcpkg 继续使用 qigao/vcpkg-cache 的规范工具链与只读 NuGet feed，
-本地 L1 按宿主 OS/架构、目标 RID、共享契约版本/修订和项目依赖清单恢复，
-每次 run/job 单独保存；恢复到其他清单的包仍由 vcpkg ABI hash 决定是否可用。
+```powershell
+cmake --preset msvc-benchmark-user
+cmake --build --preset msvc-benchmark-user
+ctest --preset msvc-benchmark-user -L benchmark -V
+```
 
-`ci-*` preset 使用 `CMAKE_C_COMPILER_LAUNCHER` / `CMAKE_CXX_COMPILER_LAUNCHER`
-接入 ccache，保留 MSVC/GCC/AppleClang 和 Android NDK 的选择。ccache 的安装、
-恢复/保存、2 GiB 容量及命中统计由固定 SHA 的
-[ccache-action](https://github.com/hendrikmuhs/ccache-action) 提供；缓存按目标 RID、
-preset、共享缓存修订和构建配置隔离，分别保存各 job 的结果。
-这复用现成的跨平台 action，避免另写缓存安装和生命周期脚本。
-编译器按内容校验，源码、头文件和编译选项继续由
-[ccache](https://ccache.dev/manual/latest.html) 校验；不放宽其一致性检查。
-NuGet 仅缓存 payload，每轮仍重新解析 Salts/SaltsUtils/re2c 版本。
-不缓存 CMake build tree 或 SDK 安装目录，也不缩减完整构建和 CTest 范围。
-新缓存前缀会首次冷启动；收益以 workflow 输出的命中统计为准。
-回滚时成套移除 CI launcher 配置和 `setup-native` 的 ccache 接入。
+`BUILD_BENCHMARK` owns these targets independently of `BUILD_TESTS`. Their sources
+are [Redis protocol benchmarks](redis/tests/protocol_benchmark.c) and
+[MySQL parameter benchmarks](mysql/tests/parameters/parameter_benchmark.c).
 
-Release 构建先恢复最新发布的 Salts、SaltsUtils（包括预发布版、不限定版本系列），以及最新稳定版宿主 re2c 包。安装 .NET SDK 8、
-PowerShell 7，并在父环境设置具有 `read:packages` 权限的 `GITHUB_TOKEN`。
-Windows 在 Visual Studio Developer PowerShell 中运行以下命令。
-共享 [vcpkg-cache](https://github.com/qigao/vcpkg-cache) checkout 位于
-`%LOCALAPPDATA%/qigao/vcpkg-cache`；Linux 位于 `$HOME/.cache/qigao/vcpkg-cache`。
-本地与 CI 使用其 toolchain 和 overlay ports，共享 NuGet 缓存只读，本地缓存可写。
+Local MSVC Release measurements on AMD Ryzen 9 7940HX, using default CPU
+scheduling: median of three alternating before/after runs, each with 200 samples
+of 1,024 operations. These measure protocol CPU work, including reply ownership
+and command allocation where applicable; they do not measure database/network
+throughput.
+
+| Workload | Before (µs/op) | After (µs/op) | Speedup |
+| --- | ---: | ---: | ---: |
+| Redis 4 KiB simple reply, parse/own/free | 4.489 | 2.524 | 1.78× |
+| Redis command, 16 × 8-byte arguments, build/free | 1.797 | 1.347 | 1.33× |
+| Redis command, 16 × 4 KiB arguments, build/free | 2.574 | 2.198 | 1.17× |
+| MySQL typical SELECT parameter lowering | 0.262 | 0.146 | 1.80× |
+| MySQL dense parameter INSERT lowering | 0.205 | 0.175 | 1.17× |
+| MySQL 4 KiB ordinary code span lowering | 14.149 | 7.054 | 2.01× |
+| MySQL 4 KiB quoted span lowering | 7.102 | 0.276 | 25.69× |
+
+The 8/64-byte RESP reply workloads were within 4% of baseline; the short mixed
+quote/comment SQL workload was within 2%. SIMD results have not been measured
+on ARM64. Correctness tests cover delimiter positions, binary bytes, split CRLF,
+guard-page input bounds, output capacity and in-place lowering.
+
+#### Upstream dependency versions
+
+Select exact published versions through the parent environment or `.env`.
+The current set is [vcpkg-cache 0.1.3](https://github.com/qigao/vcpkg-cache/releases/tag/v0.1.3),
+[SaltsBase 0.1.5](https://github.com/qigao/salts-base/releases/tag/v0.1.5),
+[CMeta 0.1.5](https://github.com/qigao/cmeta/releases/tag/v0.1.5),
+[SaltsUtils 0.1.2](https://github.com/qigao/salts-utils/releases/tag/v0.1.2), and
+[CNet 0.1.11](https://github.com/qigao/salts-cnet/releases/tag/v0.1.11).
+`.env.example` lists the version variables and infrastructure paths; CI uses
+repository variables with the same names. The infrastructure checkout must
+match the selected release. Upgrades use separate versioned SDK directories.
+
+The restore entry point checks release asset SHA-256 digests and exports
+`SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTSCORE_ROOT`,
+`VCPKG_INSTALLED_DIR`, and `RE2C_ROOT` to the calling PowerShell process.
+The shared vcpkg-cache `resolve-release` and `locked` operations restore the
+selected preinstalled archive. The canonical manifest toolchain then resolves
+TurboDB's `vcpkg.json`, including Studio dependencies on Windows.
+
+Copy `.env.example` to `.env`, set the paths for your machine, and run these
+Windows MSVC commands in one PowerShell session:
 
 ```powershell
 ./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64 -Local
-cmake --preset win-release-user
-cmake --build --preset win-release-user
-ctest --preset win-release-user --output-on-failure
-cmake --build --preset install-win-release-user
+./cmake/WithVs.cmd cmake --fresh --preset msvc-release-user
+./cmake/WithVs.cmd cmake --build --preset msvc-release-user
+./cmake/WithVs.cmd ctest --preset msvc-release-user -LE e2e
+./cmake/WithVs.cmd cmake --build --preset install-msvc-release-user
 ```
 
-Linux 使用 PowerShell 7 执行 `pwsh -File cmake/ci/restore-native-sdks.ps1 -Rid linux-x64 -Local`，
-随后使用 `linux-release-user` 配置、构建与测试。恢复始终使用浮动版本和
-`--no-cache --force-evaluate`；Release preset 从 `stage/dependencies/<package>/<RID>`
-读取本轮恢复的包，实际 payload 位于 `stage/nuget`。已有普通目录不会被覆盖。
-Debug 需要匹配的 Debug SDK；交叉编译恢复必须提供 `-HostRid`，并通过环境传入宿主 `RE2C_ROOT`。
-Android 使用独立的 `vcpkg_installed_android`，避免切换目标时移除本机构建所需的依赖。
+`-Local` explicitly loads build settings from `.env`; CMake never loads it implicitly.
+GitHub authentication comes from the active `gh` login or parent token environment. Use `--fresh`
+when changing SDKs or toolchains. Runtime startup uses the preset `PATH`/`LD_LIBRARY_PATH`. Windows retains the
+existing `TurboDBRuntime` task to stage target runtime dependencies into the
+build executable directory, which is a trusted search location for Plugin.
 
-升级 Salts 2.x 后，应重新编译 TurboDB、消费者和全部驱动插件。Core/Plugin 的公开名称
-迁移为 `cmeta_*` / `CMETA_PLUGIN_*`，协程执行器使用 `coro_*`；插件入口改为
-`cmeta_plugin_query`，旧二进制插件不能混用。此次接入不迁移数据库文件或更改存储格式。
+Linux Clang uses `-Rid linux-x64` and `llvm-native-release-user`. Linux GCC uses
+`-Profile linux-gcc-x64` and `gcc-release-user`. Windows llvm-mingw uses
+`-Profile windows-llvm-mingw-x64` and `llvm-mingw-x64-release-user` with its
+matching compiler environment. Android uses `-Rid android-arm64-v8a -HostRid
+linux-x64` and `android-arm64-release-user`; its tests need a device runner.
+CNet 0.1.11 includes the native Linux ARM64 SDK. Its producer CI runs the
+complete native CTest suite on `ubuntu-24.04-arm` before publication.
 
-Salts 与 SaltsUtils SDK 均使用 `Version="*-*"`，由 NuGet 选择 feed 中最新的预发布版或正式版，不限定基础版本或版本系列；实际版本以本轮 restore 输出为准。
-上游发布后，重新运行上述恢复、配置和构建命令即可使用新包，无需修改恢复脚本或 NuGet 项目的版本范围。
-启用 ORM、dbtools 或 tidessqld 时，vcpkg 自动启用 `salts-utils` feature，
-提供新版包配置所需的 Lua 与 QuickJS。
+CI builds the complete configured graph. External database tests remain
+registered with the `e2e` label; run them with `ctest --preset <profile> -L e2e`
+after providing their database environment. `-LE e2e` selects local tests.
 
-Use targets and CTest filters to select individual tools and tests:
-
-Windows builds use the project-level `turbodb_runtime_dependencies` task to
-copy external DLLs declared by enabled targets into the shared build `bin`
-directory (under the configuration directory for multi-config generators).
-The task deduplicates dependency paths and runs once before executable and
-shared/module library targets, including individual target builds. Modules do
-not copy DLLs in post-build commands. In-tree DLLs remain build outputs;
-dependencies without imported DLL metadata still use the preset runtime `PATH`.
-Install components and SDK/Studio staging retain their own package layouts.
-
-```powershell
-cmake --build --preset win-release-user --target dbtools
-ctest --preset win-release-user -R "^dbtool_" --output-on-failure
-```
-
-Consumers must select the intended package explicitly. Profiles do not fall back to each other. Runtime ORM Drivers are deployment artifacts under `turbodb/drivers`; changing Driver deployment does not require relinking `Orm::C`.
-
-自动测试只保留 [`ORM CI`](.github/workflows/driver-sdk-package.yml)，覆盖 ORM 核心和
-SQLite、PostgreSQL、MySQL 三种数据库；PostgreSQL/MySQL 真实数据库测试在同一 workflow
-内执行。TidesDB、TidesSQL 和 Studio 没有独立 CI，TidesSQL 测试不参与默认 CI 或发布门禁。
-SDK 发布复用 ORM 测试与完整构建，包内仍保留现有库和宿主平台的 `tidessqld`。
-Android 仅交叉编译，不执行宿主测试。本地可显式选择测试：
-
-```powershell
-ctest --preset orm-win-release-user --output-on-failure
-ctest --preset win-release-user -L "^tidessql$" --output-on-failure
-```
+Rebuild TurboDB, consumers, and driver plugins together for the split SDK ABI.
+`Salts::Core` comes from SaltsBase; `CMeta::CMeta`, `CMeta::CFlow`, `CMeta::CSTL`,
+and `CMeta::Plugin` come from CMeta; DataBind comes from SaltsUtils; CNet and
+Crypto come from the CNet SDK. Native headers use `core/`, `memory/`, `file/`,
+and `threads/` paths. The migration adds no compatibility aliases and does not
+change database file formats.
 
 ### SQLite
 
@@ -273,13 +276,14 @@ See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detai
 
 ## Build and package model
 
-TurboDB publication, CI, and package consumers resolve **Salts.Native** and **SaltsUtils.Native** with `Version="*-*"`, selecting the latest available release including prereleases without restricting the version series. Callers provide the resolved install roots through `SALTS_ROOT` and `SALTS_UTILS_ROOT`; the SDK manifest records the producer versions and ELF SONAME used by the package.
+TurboDB consumes exact released SDK versions selected through the environment.
+Its exported package discovers `SaltsBase`, `CMeta`, `SaltsUtils`, and `SaltsCore`
+from explicit roots while retaining the public `TurboDB::*` and `Orm::*` targets.
+The packaged manifest records producer versions and the Base runtime SONAME.
 
-The top-level CMake configuration resolves both packages with `NO_DEFAULT_PATH` semantics and fails if either configured root is absent or invalid. Host presets do not replace those roots with an ambient SDK; package selection happens before CMake and compatibility is enforced by exported targets and ABI/capability checks.
-
-Salts owns canonical CMeta reflection plus Plugin publication, loading, lifecycle, and leases. The plugin ABI epoch follows the installed Salts SDK and must match between host and modules. SaltsUtils owns IDL/Schema/DataBind. TurboDB builds database-domain capabilities on those public contracts rather than copying reflection metadata, binding engines, or maintaining a second generic plugin runtime.
-
-The `TURBODB_BUILD_ORM`, `TURBODB_BUILD_REDIS` and `TURBODB_BUILD_DBTOOLS` switches select modules. `TURBODB_BUILD_ORM` is off by default and builds SQLite, PostgreSQL and MySQL drivers together when enabled; consumers choose which plugins to load at runtime. Redis remains an independently selectable native client because it does not provide the SQL contract required by the ORM. MongoDB is not included. The generic `Orm::C` target does not link database clients.
+CMeta owns reflection, Plugin, CFlow, and CSTL. SaltsBase owns native systems
+primitives; SaltsUtils owns Schema, IDL, and DataBind; CNet owns networking and
+crypto. TurboDB owns database-domain semantics on those contracts.
 
 ## Design principles
 

@@ -7,12 +7,12 @@
 #include "orm_async_wait.h"
 
 #include <libpq-fe.h>
-#include <salts/clock.h>
+#include <core/clock.h>
 
 #ifndef LIBPQ_HAS_EXTERNAL_CHANNEL_BINDING
 #error "TurboDB PostgreSQL driver requires libpq external channel-binding ABI"
 #endif
-#include <salts/thread.h>
+#include <threads/threads.h>
 
 #include <inttypes.h>
 #include <limits.h>
@@ -708,7 +708,7 @@ static orm_status_t orm_postgres_wait_bridge_channel_binding(
     orm_postgres_direct_tls_bridge *bridge, uint32_t timeout_ms,
     uint8_t *output, size_t capacity, size_t *out_size,
     orm_error_t *error) {
-  const uint64_t started_ms = cmeta_monotonic_ms();
+  const uint64_t started_ms = monotonic_ms();
 
   if (out_size == NULL)
     return ORM_STATUS_INVALID_ARGUMENT;
@@ -737,7 +737,7 @@ static orm_status_t orm_postgres_wait_bridge_channel_binding(
     }
 
     if (timeout_ms != 0u &&
-        cmeta_monotonic_ms() - started_ms >= timeout_ms) {
+        monotonic_ms() - started_ms >= timeout_ms) {
       orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
                     "PostgreSQL TLS channel-binding wait timed out");
       return ORM_STATUS_CONNECTION_ERROR;
@@ -748,7 +748,7 @@ static orm_status_t orm_postgres_wait_bridge_channel_binding(
 static orm_status_t orm_postgres_connect_poll(
     PGconn *connection, orm_postgres_direct_tls_bridge *bridge,
     int bridge_active, uint32_t timeout_ms, orm_error_t *error) {
-  const uint64_t started_ms = cmeta_monotonic_ms();
+  const uint64_t started_ms = monotonic_ms();
   PostgresPollingStatusType poll_status;
 
   if (connection == NULL)
@@ -773,11 +773,11 @@ static orm_status_t orm_postgres_connect_poll(
         return ORM_STATUS_CONNECTION_ERROR;
       }
     } else {
-      cmeta_sleep_ms(1u);
+      sleep_ms(1u);
     }
 
     if (timeout_ms != 0u &&
-        cmeta_monotonic_ms() - started_ms >= timeout_ms) {
+        monotonic_ms() - started_ms >= timeout_ms) {
       orm_error_set(error, ORM_STATUS_CONNECTION_ERROR,
                     "PostgreSQL connection timed out");
       return ORM_STATUS_CONNECTION_ERROR;

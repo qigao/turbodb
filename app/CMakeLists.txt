@@ -1,59 +1,26 @@
-if(NOT WIN32)
-  message(FATAL_ERROR "TurboDB Studio is supported only on Windows")
-endif()
-
-if(NOT TARGET Orm::Cpp)
-  message(FATAL_ERROR "TurboDB Studio requires the in-tree Orm::Cpp target")
-endif()
-
 enable_language(RC)
 
-# WTL uses ATL from the active Visual Studio toolchain. Recheck because a
-# Ninja build tree may be configured from a different developer environment.
-include(CheckIncludeFileCXX)
-unset(TURBODB_APP_HAS_ATL CACHE)
-check_include_file_cxx(atlbase.h TURBODB_APP_HAS_ATL)
-if(NOT TURBODB_APP_HAS_ATL)
-  message(FATAL_ERROR
-    "TurboDB Studio requires ATL (atlbase.h) in the active compiler environment. "
-    "Install Microsoft.VisualStudio.Component.VC.ATL for the selected Visual Studio "
-    "instance, then configure from its x64 developer environment. "
-    "When switching Visual Studio instances, run cmake --preset win-release-user --fresh.")
-endif()
+add_subdirectory("${PROJECT_SOURCE_DIR}/external/OpenWTL"
+                 "${CMAKE_CURRENT_BINARY_DIR}/OpenWTL" EXCLUDE_FROM_ALL SYSTEM)
 
-# The WTL, Scintilla, and Lexilla vcpkg ports do not expose one uniform CMake
-# package contract. Keep the adaptation local to the app so no GUI dependency
-# leaks into TurboDB libraries or dbtools.
-find_path(TURBODB_APP_WTL_INCLUDE_DIR
-          NAMES atlapp.h)
+# The editor ports expose headers and libraries rather than CMake packages.
 find_path(TURBODB_APP_SCINTILLA_INCLUDE_DIR
           NAMES Scintilla.h
-          PATH_SUFFIXES scintilla)
+          PATH_SUFFIXES scintilla REQUIRED)
 find_library(TURBODB_APP_SCINTILLA_LIBRARY
-             NAMES Scintilla scintilla)
+             NAMES Scintilla scintilla REQUIRED)
 find_path(TURBODB_APP_LEXILLA_INCLUDE_DIR
           NAMES Lexilla.h
-          PATH_SUFFIXES lexilla)
+          PATH_SUFFIXES lexilla REQUIRED)
 find_library(TURBODB_APP_LEXILLA_LIBRARY
-             NAMES Lexilla lexilla)
+             NAMES Lexilla lexilla REQUIRED)
 
-foreach(required_var
-        TURBODB_APP_WTL_INCLUDE_DIR
-        TURBODB_APP_SCINTILLA_INCLUDE_DIR
-        TURBODB_APP_SCINTILLA_LIBRARY
-        TURBODB_APP_LEXILLA_INCLUDE_DIR
-        TURBODB_APP_LEXILLA_LIBRARY)
-  if(NOT ${required_var})
-    message(FATAL_ERROR
-      "TurboDB Studio dependency ${required_var} was not resolved; configure with the vcpkg app feature")
-  endif()
-endforeach()
+
 
 add_library(turbodb_app_editor_deps INTERFACE)
 target_include_directories(
   turbodb_app_editor_deps
   INTERFACE
-    "${TURBODB_APP_WTL_INCLUDE_DIR}"
     "${TURBODB_APP_SCINTILLA_INCLUDE_DIR}"
     "${TURBODB_APP_LEXILLA_INCLUDE_DIR}")
 target_link_libraries(
@@ -122,11 +89,9 @@ target_link_libraries(
   turbodb-studio
   PRIVATE
     Orm::Cpp
+    OpenWTL::WTL
     Salts::IniParser
-    turbodb_app_editor_deps
-    comctl32
-    comdlg32
-    ole32)
+    turbodb_app_editor_deps)
 
 set_target_properties(
   turbodb-studio
@@ -147,7 +112,7 @@ if(BUILD_TESTS)
     INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/src"
     DEFS UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
       "TURBODB_APP_SQLITE_PLUGIN_PATH=\"$<TARGET_FILE:orm_sqlite_driver>\""
-    LIBS Orm::Cpp turbodb_app_editor_deps Salts::TinyTest Salts::IniParser comctl32 comdlg32 ole32
+    LIBS Orm::Cpp OpenWTL::WTL turbodb_app_editor_deps Salts::TinyTest Salts::IniParser
     FOLDER "app/tests")
   add_dependencies(turbodb-app-menu-test orm_sqlite_driver)
   set_tests_properties(turbodb-app-menu PROPERTIES TIMEOUT 60)

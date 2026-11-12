@@ -1,4 +1,4 @@
-#include <salts/plugin.h>
+#include <cmeta/plugin.h>
 
 static const cmeta_plugin_manifest bad_manifest = {
     .struct_size = CMETA_PLUGIN_MANIFEST_SIZE,

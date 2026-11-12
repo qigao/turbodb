@@ -1,5 +1,5 @@
 #include "dbtool_plugin.h"
-#include <cmeta_fs.h>
+#include <file/fs.h>
 
 #include <string.h>
 
@@ -34,7 +34,7 @@ dbtool_status dbtool_plugin_load(dbtool_plugin *plugin, const char *path,
   dbtool_error_init(error);
   if (plugin == NULL || plugin->registry.impl != NULL || path == NULL ||
       path[0] == '\0' || strlen(path) > CMETA_PLUGIN_PATH_MAX ||
-      !cmeta_fs_path_is_absolute(path) || driver_id == NULL || driver_id[0] == '\0') {
+      !fs_path_is_absolute(path) || driver_id == NULL || driver_id[0] == '\0') {
     dbtool_error_set(error, DBTOOL_STATUS_INVALID_ARGUMENT, dbtool_plugin_load_stage, 0,
                      "an absolute plugin path and driver ID are required");
     return DBTOOL_STATUS_INVALID_ARGUMENT;

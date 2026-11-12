@@ -3,7 +3,7 @@
 
 #include <sqlparser/sqlparser.h>
 #include <cstl/vec.h>
-#include <tstr.h>
+#include <core/tstr.h>
 
 struct sqlparser_document {
   sqlparser_options options;

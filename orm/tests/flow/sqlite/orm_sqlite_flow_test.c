@@ -3,8 +3,8 @@
 
 #include <cmeta/struct.h>
 #include <sqlite3.h>
-#include <cmeta_cmeta_data.h>
-#include <tstr.h>
+#include <cmeta/core_data.h>
+#include <core/tstr.h>
 #include "tinytest.h"
 
 #include <stddef.h>

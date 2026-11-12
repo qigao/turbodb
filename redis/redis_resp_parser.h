@@ -6,7 +6,7 @@
 #ifndef REDIS_RESP_PARSER_H
 #define REDIS_RESP_PARSER_H
 
-#include "vstr.h"
+#include "core/vstr.h"
 
 #include <stddef.h>
 #include <stdint.h>

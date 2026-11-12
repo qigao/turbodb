@@ -56,10 +56,10 @@ static void run_corpus(sqlparser_dialect dialect, const char *report_path) {
     append_report(row);
     bytes += input.len;
     sqlparser_document_destroy(document); document = NULL;
-    cmeta_fs_buf_free(&input);
+    fs_buf_free(&input);
   }
-  cmeta_fs_buf_t output = {report, tstr_len(report)};
-  check_equal(cmeta_fs_write_file(report_path, &output), 0);
+  fs_buf_t output = {report, tstr_len(report)};
+  check_equal(fs_write_file(report_path, &output), 0);
   printf("CORPUS dialect=%s files=%zu bytes=%zu accepted=%zu syntax_errors=%zu limits=%zu accepted_statements=%zu\n",
     dialect == SQLPARSER_SQLITE ? "sqlite" : "mysql", files, bytes, accepted, rejected, limited, statements);
   printf("CORPUS report=%s\n", report_path);

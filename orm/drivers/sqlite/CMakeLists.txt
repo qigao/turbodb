@@ -19,8 +19,8 @@ target_link_libraries(
           Orm::DriverABI
           Salts::Core
           Salts::CSerde
-          Salts::CFlow
-          Salts::CSTL)
+          CMeta::CFlow
+          CMeta::CSTL)
 # Runtime MODULE owns the native SQLite dependency. Generic Orm::C must remain
 # independent from SQLite headers, objects and link items.
 get_target_property(ORM_SQLITE_DRIVER_LINK_CONTRACT orm_sqlite_driver

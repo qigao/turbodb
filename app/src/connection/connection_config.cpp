@@ -6,9 +6,9 @@
 #include <cstring>
 #include <memory>
 
-#include <cmeta_fs.h>
+#include <file/fs.h>
 #include <ini_parser.h>
-#include <tstr.h>
+#include <core/tstr.h>
 
 namespace turbodb::app {
 namespace {
@@ -56,7 +56,7 @@ bool AbsolutePath(const std::wstring& path) {
   const bool unc = path.size() >= 2 &&
       ((path[0] == L'\\' && path[1] == L'\\') || (path[0] == L'/' && path[1] == L'/'));
   auto encoded = EncodePath(path);
-  return (drive || unc) && encoded && cmeta_fs_path_is_absolute(encoded.get());
+  return (drive || unc) && encoded && fs_path_is_absolute(encoded.get());
 }
 
 bool ResolvePath(std::wstring* path, const std::wstring& config_path) {

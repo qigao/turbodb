@@ -1,7 +1,7 @@
 #include "redis_cluster.h"
 
-#include "cmeta_error.h"
-#include "tstr.h"
+#include "core/error.h"
+#include "core/tstr.h"
 
 #include <stdlib.h>
 #include <string.h>

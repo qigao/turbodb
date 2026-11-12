@@ -1,8 +1,17 @@
 #include "auth.h"
 
-#include <cmeta_crypto.h>
+#include <crypto/sha256.h>
+#include <gmssl/sha1.h>
 
 #include <string.h>
+
+/* mysql_native_password fixes SHA-1 as part of its wire algorithm. */
+static void mysql_auth_sha1(const void *data, size_t size, uint8_t digest[20]) {
+  SHA1_CTX context;
+  sha1_init(&context);
+  sha1_update(&context, (const uint8_t *)data, size);
+  sha1_finish(&context, digest);
+}
 
 static mysql_wire_status_t mysql_auth_caching_sha2(
     const char *password, const uint8_t *nonce,
@@ -14,14 +23,14 @@ static mysql_wire_status_t mysql_auth_caching_sha2(
   size_t password_size = strlen(password);
   size_t i;
 
-  if (cmeta_sha256(password, password_size, first) != 0)
+  if (salts_crypto_sha256(password, password_size, first) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
-  if (cmeta_sha256(first, sizeof(first), second) != 0)
+  if (salts_crypto_sha256(first, sizeof(first), second) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
 
   memcpy(challenge_input, second, sizeof(second));
   memcpy(challenge_input + sizeof(second), nonce, MYSQL_AUTH_NONCE_BYTES);
-  if (cmeta_sha256(challenge_input, sizeof(challenge_input), challenge) != 0)
+  if (salts_crypto_sha256(challenge_input, sizeof(challenge_input), challenge) != 0)
     return MYSQL_WIRE_STATUS_INVALID;
 
   for (i = 0u; i < sizeof(first); ++i)
@@ -39,15 +48,12 @@ static mysql_wire_status_t mysql_auth_native(
   size_t password_size = strlen(password);
   size_t i;
 
-  if (cmeta_sha1(password, password_size, first) != 0)
-    return MYSQL_WIRE_STATUS_INVALID;
-  if (cmeta_sha1(first, sizeof(first), second) != 0)
-    return MYSQL_WIRE_STATUS_INVALID;
+  mysql_auth_sha1(password, password_size, first);
+  mysql_auth_sha1(first, sizeof(first), second);
 
   memcpy(challenge_input, nonce, MYSQL_AUTH_NONCE_BYTES);
   memcpy(challenge_input + MYSQL_AUTH_NONCE_BYTES, second, sizeof(second));
-  if (cmeta_sha1(challenge_input, sizeof(challenge_input), challenge) != 0)
-    return MYSQL_WIRE_STATUS_INVALID;
+  mysql_auth_sha1(challenge_input, sizeof(challenge_input), challenge);
 
   for (i = 0u; i < sizeof(first); ++i)
     out[i] = (uint8_t)(first[i] ^ challenge[i]);

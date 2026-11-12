@@ -7,7 +7,7 @@ cmake_add_test(
     ${ORM_SOURCE_DIR}/drivers/postgresql/postgres_direct_tls_bridge.c
     ${ORM_SOURCE_DIR}/drivers/postgresql/orm_postgres_cursor.c
     ${ORM_SOURCE_DIR}/drivers/postgresql/orm_postgres_libpq.c
-  LIBS orm_c_test_static PostgreSQL::PostgreSQL Salts::CNet Salts::CFlow Salts::TinyTest Salts::TinyMock
+  LIBS orm_c_test_static PostgreSQL::PostgreSQL Salts::CNet CMeta::CFlow Salts::TinyTest CMeta::TinyMock
   INCLUDES ${ORM_SOURCE_DIR}/src/abi ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/src/sql ${ORM_SOURCE_DIR}/drivers/postgresql)
 set_target_properties(orm_postgres_async_test PROPERTIES LINKER_LANGUAGE CXX)
@@ -22,7 +22,7 @@ cmake_add_test(
   SOURCES orm_postgres_libpq_test.c ../../abi/c_api_fake_libpq.cpp
     ${ORM_SOURCE_DIR}/drivers/postgresql/orm_postgres_libpq.c
     ${ORM_SOURCE_DIR}/drivers/postgresql/postgres_direct_tls_bridge.c
-  LIBS orm_test_support Salts::Core Salts::CNet Salts::CFlow Salts::TinyTest
+  LIBS orm_test_support Salts::Core Salts::CNet CMeta::CFlow Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/drivers/postgresql ${ORM_ABI_TEST_DIR}
@@ -45,7 +45,7 @@ cmake_add_test(
   TEST_NAME orm_postgres_flow
   SOURCES orm_postgres_flow_test.c
     ${ORM_SOURCE_DIR}/drivers/postgresql/orm_postgres_cursor.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::CFlow Salts::TinyMock
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} CMeta::CFlow CMeta::TinyMock
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/drivers/postgresql)

@@ -16,13 +16,11 @@ target_include_directories(
           ${ORM_SOURCE_DIR}/src/driver ${ORM_SOURCE_DIR}/src/runtime)
 target_link_libraries(
   orm_c_test_static
-  PUBLIC TurboDB::Types Salts::Core
+  PUBLIC TurboDB::Types Salts::Core CMeta::CFlow
   PRIVATE Salts::CSerde
           Salts::DataBind
-          Salts::Plugin
-          Salts::CFlow
-          Salts::CSTL
-          Salts::Platform
+          CMeta::Plugin
+          CMeta::CSTL
           ${CMAKE_DL_LIBS})
 target_compile_definitions(orm_c_test_static
                            PRIVATE ORM_LEGACY_SQLITE_FACTORY)

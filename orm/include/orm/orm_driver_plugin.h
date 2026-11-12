@@ -3,7 +3,7 @@
 
 #include "orm_driver_interface.h"
 
-#include <salts/plugin.h>
+#include <cmeta/plugin.h>
 
 /*
  * Driver plugins follow the exact Salts Plugin ABI epoch used to build this
@@ -16,7 +16,7 @@
 /*
  * Construct the canonical Plugin publication row.  The descriptor and typed
  * interface value are borrowed from the plugin module and therefore remain
- * usable only while the host retains a live Salts::Plugin lease.
+ * usable only while the host retains a live CMeta::Plugin lease.
  */
 CMETA_INLINE cmeta_plugin_export orm_driver_plugin_export(
     TurboDb_Driver *driver, uint64_t capabilities) {

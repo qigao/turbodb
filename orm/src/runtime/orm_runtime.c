@@ -103,53 +103,53 @@ orm_runtime_driver *runtime_find_driver(orm_runtime_t *runtime,
 
 orm_status_t runtime_acquire_dependent(
     orm_runtime_t *runtime, orm_error_t *error) {
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed != ORM_RUNTIME_OPEN) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_INVALID_STATE,
                           "runtime is closed");
   }
   if (runtime->dependents == runtime->config.max_connections) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "runtime connection budget is full");
   }
   if (runtime->refs == UINT32_MAX) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_LIMIT_EXCEEDED,
                           "runtime reference budget is full");
   }
   ++runtime->dependents;
   ++runtime->refs;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return ORM_STATUS_OK;
 }
 
 static int runtime_release_dependent_ref(orm_runtime_t *runtime) {
   int last = 0;
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->dependents == 0u || runtime->refs == 0u) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->dependents;
   --runtime->refs;
   last = runtime->refs == 0u;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return last;
 }
 
 void runtime_finish_pending(
     orm_runtime_t *runtime, int load_operation) {
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->pending_operations == 0u ||
       (load_operation && runtime->load_active == 0u)) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->pending_operations;
   if (load_operation) runtime->load_active = 0u;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
 }
 
 static void runtime_release_last(orm_runtime_t *runtime);
@@ -161,17 +161,17 @@ void runtime_drop_dependent(orm_runtime_t *runtime) {
 
 static int runtime_release_extension_ref(orm_runtime_t *runtime) {
   int last = 0;
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->extension_count == 0u ||
       runtime->dependents == 0u || runtime->refs == 0u) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->extension_count;
   --runtime->dependents;
   --runtime->refs;
   last = runtime->refs == 0u;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return last;
 }
 
@@ -237,7 +237,7 @@ orm_runtime_create(const orm_runtime_config_t *config,
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime");
 
-  cmeta_mutex_init(&runtime->mutex);
+  sync_mutex_init(&runtime->mutex);
   if (runtime->mutex == NULL) {
     free(runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
@@ -249,7 +249,7 @@ orm_runtime_create(const orm_runtime_config_t *config,
   const cmeta_plugin_status plugin_status =
       cmeta_plugin_registry_init(&runtime->plugins, &plugin_config);
   if (plugin_status != CMETA_PLUGIN_OK) {
-    cmeta_mutex_destroy(&runtime->mutex);
+    sync_mutex_destroy(&runtime->mutex);
     free(runtime);
     return runtime_plugin_status(plugin_status, error,
                                  "initialize Plugin registry");
@@ -259,7 +259,7 @@ orm_runtime_create(const orm_runtime_config_t *config,
       config->max_drivers, sizeof(*runtime->drivers));
   if (runtime->drivers == NULL) {
     (void)cmeta_plugin_registry_destroy(&runtime->plugins);
-    cmeta_mutex_destroy(&runtime->mutex);
+    sync_mutex_destroy(&runtime->mutex);
     free(runtime);
     return runtime_result(error, ORM_STATUS_OUT_OF_MEMORY,
                           "allocate runtime driver index");
@@ -277,19 +277,19 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     return runtime_result(error, ORM_STATUS_INVALID_ARGUMENT,
                           "runtime is required");
 
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->closed == ORM_RUNTIME_CLOSED) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_OK, NULL);
   }
   if (runtime->closed == ORM_RUNTIME_FAILED) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_result(error, ORM_STATUS_CLEANUP_FAILED,
                           "runtime cleanup is quarantined");
   }
   if (runtime->closed == ORM_RUNTIME_OPEN) {
     if (runtime->dependents != 0u || runtime->pending_operations != 0u) {
-      cmeta_mutex_unlock(&runtime->mutex);
+      sync_mutex_unlock(&runtime->mutex);
       return runtime_result(error, ORM_STATUS_BUSY,
                             "runtime has active or pending operations");
     }
@@ -297,7 +297,7 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     runtime->close_remaining = runtime->driver_count;
   }
   const uint32_t remaining_snapshot = runtime->close_remaining;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
 
   for (uint32_t remaining = remaining_snapshot; remaining != 0u; --remaining) {
     orm_runtime_driver *driver = &runtime->drivers[remaining - 1u];
@@ -305,9 +305,9 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
         cmeta_plugin_registry_request_stop(&runtime->plugins, driver->plugin);
     if (plugin_status != CMETA_PLUGIN_OK &&
         plugin_status != CMETA_PLUGIN_ALREADY) {
-      cmeta_mutex_lock(&runtime->mutex);
+      sync_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
-      cmeta_mutex_unlock(&runtime->mutex);
+      sync_mutex_unlock(&runtime->mutex);
       return runtime_plugin_status(
           plugin_status, error, "request Driver Plugin stop");
     }
@@ -316,9 +316,9 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     plugin_status = cmeta_plugin_registry_poll_quiescent(
         &runtime->plugins, driver->plugin, &quiescent);
     if (plugin_status != CMETA_PLUGIN_OK) {
-      cmeta_mutex_lock(&runtime->mutex);
+      sync_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
-      cmeta_mutex_unlock(&runtime->mutex);
+      sync_mutex_unlock(&runtime->mutex);
       return runtime_plugin_status(
           plugin_status, error, "poll Driver Plugin quiescence");
     }
@@ -332,9 +332,9 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
       if (plugin_status == CMETA_PLUGIN_BUSY)
         return runtime_plugin_status(
             plugin_status, error, "unload Driver Plugin");
-      cmeta_mutex_lock(&runtime->mutex);
+      sync_mutex_lock(&runtime->mutex);
       runtime->closed = ORM_RUNTIME_FAILED;
-      cmeta_mutex_unlock(&runtime->mutex);
+      sync_mutex_unlock(&runtime->mutex);
       return runtime_plugin_status(
           plugin_status, error, "unload Driver Plugin");
     }
@@ -344,28 +344,28 @@ orm_runtime_close(orm_runtime_t *runtime, orm_error_t *error) {
     driver->binding = NULL;
     driver->plugin = (cmeta_plugin_ref){0};
 
-    cmeta_mutex_lock(&runtime->mutex);
+    sync_mutex_lock(&runtime->mutex);
     if (runtime->close_remaining != remaining) {
-      cmeta_mutex_unlock(&runtime->mutex);
+      sync_mutex_unlock(&runtime->mutex);
       abort();
     }
     --runtime->close_remaining;
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
   }
 
   const cmeta_plugin_status destroy_status =
       cmeta_plugin_registry_destroy(&runtime->plugins);
   if (destroy_status != CMETA_PLUGIN_OK) {
-    cmeta_mutex_lock(&runtime->mutex);
+    sync_mutex_lock(&runtime->mutex);
     runtime->closed = ORM_RUNTIME_FAILED;
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     return runtime_plugin_status(
         destroy_status, error, "destroy Driver Plugin registry");
   }
 
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   runtime->closed = ORM_RUNTIME_CLOSED;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   return runtime_result(error, ORM_STATUS_OK, NULL);
 }
 
@@ -382,31 +382,31 @@ static void runtime_release_last(orm_runtime_t *runtime) {
     abort();
   }
   free(runtime->drivers);
-  cmeta_mutex_destroy(&runtime->mutex);
+  sync_mutex_destroy(&runtime->mutex);
   free(runtime);
 }
 
 void ORM_C_CALL orm_runtime_retain(orm_runtime_t *runtime) {
   if (runtime == NULL) return;
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->refs == 0u || runtime->refs == UINT32_MAX) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     abort();
   }
   ++runtime->refs;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
 }
 
 void ORM_C_CALL orm_runtime_release(orm_runtime_t *runtime) {
   if (runtime == NULL) return;
   int last = 0;
-  cmeta_mutex_lock(&runtime->mutex);
+  sync_mutex_lock(&runtime->mutex);
   if (runtime->refs == 0u) {
-    cmeta_mutex_unlock(&runtime->mutex);
+    sync_mutex_unlock(&runtime->mutex);
     abort();
   }
   --runtime->refs;
   last = runtime->refs == 0u;
-  cmeta_mutex_unlock(&runtime->mutex);
+  sync_mutex_unlock(&runtime->mutex);
   if (last) runtime_release_last(runtime);
 }

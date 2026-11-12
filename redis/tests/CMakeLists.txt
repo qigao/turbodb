@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.15)
 
+if(BUILD_TESTS)
 add_subdirectory(io)
 
 cmake_add_test(
   NAME test_redis_io
   SOURCES test_redis_io.c ../redis_io.c
-  LIBS Salts::CFlow Salts::Core Salts::TinyTest
+  LIBS CMeta::CFlow Salts::Core Salts::TinyTest
   INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/..
   FOLDER "redis/tests")
 target_compile_definitions(test_redis_io PRIVATE REDIS_BUILD)
@@ -29,7 +30,7 @@ cmake_add_test(
 cmake_add_test(
   NAME test_redis_cflow
   SOURCES test_redis_cflow.c
-  LIBS tedis Salts::TinyTest Salts::CFlow
+  LIBS tedis Salts::TinyTest CMeta::CFlow
   INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/..
   FOLDER "redis/tests")
 target_compile_definitions(test_redis_cflow PRIVATE REDIS_BUILD)
@@ -85,4 +86,13 @@ cmake_add_test(
   FOLDER "redis/tests")
 if(WIN32)
   target_link_libraries(test_redis_stream_group PRIVATE ws2_32)
+endif()
+endif()
+
+if(BUILD_BENCHMARK)
+  cmake_add_benchmark(NAME redis_protocol_benchmark
+    SOURCES protocol_benchmark.c LIBS tedis Salts::TinyTest
+    FOLDER "redis/tests")
+  add_test(NAME redis_protocol_benchmark COMMAND redis_protocol_benchmark)
+  set_tests_properties(redis_protocol_benchmark PROPERTIES LABELS benchmark)
 endif()

@@ -3,7 +3,7 @@ add_library(TurboDB::SchemaABI ALIAS turbodb_schema_abi)
 target_include_directories(turbodb_schema_abi INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include/turbodb/schema>)
-target_link_libraries(turbodb_schema_abi INTERFACE Salts::PluginABI)
+target_link_libraries(turbodb_schema_abi INTERFACE CMeta::PluginABI)
 set_target_properties(turbodb_schema_abi PROPERTIES
   EXPORT_NAME SchemaABI FOLDER "drivers/schema")
 

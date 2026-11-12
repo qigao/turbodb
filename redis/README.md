@@ -30,7 +30,7 @@ attached Publishers.
 
 ```c
 #include <redis_cflow.h>
-#include <cmeta_error.h>
+#include <core/error.h>
 
 #include <stdint.h>
 
@@ -133,7 +133,7 @@ all command streams, close the facade, then destroy it. `close()` returns
 ## Build dependency
 
 Link `TurboDB::Redis`. Its public first-party dependencies are
-`Salts::Core` and `Salts::CFlow`; `find_package(TurboNet)` is not
+`Salts::Core` and `CMeta::CFlow`; `find_package(TurboNet)` is not
 required.
 
 

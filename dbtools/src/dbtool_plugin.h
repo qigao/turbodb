@@ -2,7 +2,7 @@
 #define TURBODB_DBTOOL_PLUGIN_H
 
 #include "dbtool_schema_driver.h"
-#include <salts/plugin.h>
+#include <cmeta/plugin.h>
 
 typedef struct dbtool_plugin {
   cmeta_plugin_registry registry;

@@ -1,0 +1,21 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "toolkit-llvm-mingw",
+      "hidden": true,
+      "description": "Explicit LLVM-MinGW compiler drivers from the selected SDK root and target",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-clang.exe",
+        "CMAKE_CXX_COMPILER": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-clang++.exe",
+        "CMAKE_SYSTEM_NAME": "Windows",
+        "CMAKE_AR": "$env{LLVM_MINGW_ROOT}/bin/llvm-ar.exe",
+        "CMAKE_RANLIB": "$env{LLVM_MINGW_ROOT}/bin/llvm-ranlib.exe",
+        "CMAKE_RC_COMPILER": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-windres.exe"
+      },
+      "environment": {
+        "LLVM_MINGW_TARGET": "$penv{LLVM_MINGW_TARGET}"
+      }
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 cmake_add_test(NAME sqlparser_test SOURCES parser_test.c
   LIBS sqlparser Salts::TinyTest FOLDER "sqlparser/tests")
 cmake_add_test(NAME sqlparser_failure_test SOURCES failure_test.c
-  LIBS sqlparser Salts::CSTL Salts::Core Salts::TinyTest
+  LIBS sqlparser CMeta::CSTL Salts::Core Salts::TinyTest
   INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/../src ${CMAKE_CURRENT_BINARY_DIR}/..
   FOLDER "sqlparser/tests")
 cmake_add_test(NAME sqlparser_benchmark SOURCES benchmark.c

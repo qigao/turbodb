@@ -1,6 +1,6 @@
 #include "redis_internal.h"
 #include "redis_resp_parser.h"
-#include "tstr.h"
+#include "core/tstr.h"
 
 #include <limits.h>
 #include <stddef.h>
@@ -11,6 +11,8 @@
 #define REDIS_TSTR_ALLOCATION_OVERHEAD (sizeof(size_t) * 2u + 1u)
 #define REDIS_RESP_PARSE_OOM (-3)
 #define REDIS_RESP_PARSE_LIMIT (-2)
+
+enum { REDIS_RESP_SCAN_BATCH_BYTES = 128u };
 
 typedef struct redis_reply_string_s {
   tstr value;
@@ -195,6 +197,13 @@ static int redis_resp_reply_reader_line(
     redis_resp_token_t *token) {
   size_t index = impl->line_scan > impl->offset
                      ? impl->line_scan : impl->offset;
+  /* Short RESP headers complete inline; longer spans amortize the shared
+   * scanner call. Neither path reads beyond used or loses a split CRLF. */
+  if (buffer->used - index > REDIS_RESP_SCAN_BATCH_BYTES) {
+    const vstr pending = vstr_from_buf(buffer->data + index, buffer->used - index);
+    const size_t delimiter = vstr_find(pending, VSTR_LIT("\r\n"));
+    index = delimiter == VSTR_NPOS ? buffer->used : index + delimiter;
+  }
   for (; index + 1u < buffer->used; ++index) {
     int parsed;
     if (buffer->data[index] != '\r' || buffer->data[index + 1u] != '\n')
@@ -456,6 +465,12 @@ static int redis_resp_array_header_ready(const redis_resp_buffer *buffer,
   if (buffer->used == 0u) return 0;
   scan = reader->header_scan > 1u ? reader->header_scan : 1u;
   if (scan > buffer->used) scan = buffer->used;
+  if (buffer->used - scan > REDIS_RESP_SCAN_BATCH_BYTES) {
+    const vstr pending = vstr_from_buf(buffer->data + scan - 1u,
+                                      buffer->used - scan + 1u);
+    const size_t delimiter = vstr_find(pending, VSTR_LIT("\r\n"));
+    scan = delimiter == VSTR_NPOS ? buffer->used : scan + delimiter;
+  }
   while (scan < buffer->used) {
     if (buffer->data[scan - 1u] == '\r' && buffer->data[scan] == '\n') {
       reader->header_scan = scan + 1u;

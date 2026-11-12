@@ -1,5 +1,5 @@
 #include "../../../orm/drivers/sqlite/schema.h"
-#include <salts/plugin.h>
+#include <cmeta/plugin.h>
 
 static const cmeta_plugin_export exports[] = {{
     .struct_size = CMETA_PLUGIN_EXPORT_SIZE,

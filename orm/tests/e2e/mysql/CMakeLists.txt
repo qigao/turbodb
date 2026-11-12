@@ -3,7 +3,7 @@ cmake_add_test(
   FOLDER "orm/tests/e2e/mysql"
   TEST_NAME orm_mysql_driver_live
   SOURCES mysql_driver_live_test.c
-  LIBS turbo_orm Salts::CFlow Salts::Platform
+  LIBS turbo_orm CMeta::CFlow Salts::Core
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 
@@ -41,7 +41,7 @@ cmake_add_test(
     ${ORM_MYSQL_SOURCE_DIR}/wire/result.c ${ORM_MYSQL_SOURCE_DIR}/wire/handshake.c
     ${ORM_MYSQL_SOURCE_DIR}/wire/statement.c ${ORM_MYSQL_SOURCE_DIR}/wire/row.c
     ${ORM_MYSQL_SOURCE_DIR}/auth/auth.c
-  LIBS Salts::CNet Salts::CSerde Salts::CFlow Salts::Core
+  LIBS Salts::CNet Salts::Crypto GmSSL::GmSSL Salts::CSerde CMeta::CFlow Salts::Core
   DEFS MYSQL_ENABLE_FAULT_INJECTION=1
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/drivers/mysql ${ORM_MYSQL_SOURCE_DIR}

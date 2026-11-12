@@ -1,11 +1,11 @@
 #include "redis_io_flow.h"
 
 #include "redis_io_internal.h"
-#include "cmeta_error.h"
-#include "cmeta_thread.h"
+#include "core/error.h"
+#include "threads/threads.h"
 
 #include <cmeta/cmeta.h>
-#include <salts/clock.h>
+#include <core/clock.h>
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -39,7 +39,7 @@ struct redis_io_flow_impl {
   bool runtime_pending;
   bool completion_encoded;
   int driver_error;
-  cmeta_mutex_t gate;
+  sync_mutex_t gate;
 };
 
 enum { REDIS_IO_FLOW_DRIVE_STEPS = 32u };
@@ -57,22 +57,22 @@ static void redis_io_flow_operation_release(void *user) {
   redis_io_flow_operation *operation = (redis_io_flow_operation *)user;
   redis_io_flow_impl *impl = operation != NULL ? operation->owner : NULL;
   if (impl == NULL) return;
-  cmeta_mutex_lock(&impl->gate);
+  sync_mutex_lock(&impl->gate);
   impl->operation_owned = false;
-  cmeta_mutex_unlock(&impl->gate);
+  sync_mutex_unlock(&impl->gate);
   redis_io_flow_finish_runtime_pending(impl, true);
 }
 
 static void redis_io_flow_finish_runtime_pending(redis_io_flow_impl *impl, bool force) {
   bool finish = false;
   if (impl == NULL) return;
-  cmeta_mutex_lock(&impl->gate);
+  sync_mutex_lock(&impl->gate);
   if (impl->runtime_pending && (force || impl->completion_encoded)) {
     impl->runtime_pending = false;
     impl->completion_encoded = false;
     finish = true;
   }
-  cmeta_mutex_unlock(&impl->gate);
+  sync_mutex_unlock(&impl->gate);
   if (finish) redis_io_runtime_publisher_finished(impl->runtime);
 }
 
@@ -83,16 +83,16 @@ redis_io_flow_prepare(void *user, cflow_io_operation *operation, const char **er
     if (error != NULL) *error = "Redis I/O Publisher has no pending operation";
     return CFLOW_IO_PUBLISHER_PREPARE_ERROR;
   }
-  cmeta_mutex_lock(&impl->gate);
+  sync_mutex_lock(&impl->gate);
   if (!impl->pending_valid || impl->operation_owned) {
-    cmeta_mutex_unlock(&impl->gate);
+    sync_mutex_unlock(&impl->gate);
     if (error != NULL) *error = "Redis I/O Publisher has no available operation";
     return CFLOW_IO_PUBLISHER_PREPARE_ERROR;
   }
   impl->pending_valid = false;
   impl->operation_owned = true;
   *operation = (cflow_io_operation){&impl->operation, redis_io_flow_operation_release};
-  cmeta_mutex_unlock(&impl->gate);
+  sync_mutex_unlock(&impl->gate);
   return CFLOW_IO_PUBLISHER_PREPARE_OPERATION;
 }
 
@@ -109,9 +109,9 @@ static cflow_read_status redis_io_flow_encode(void *user, cflow_io_request_id re
     return CFLOW_READ_ERROR;
   }
   *(cflow_io_completion *)out_value = *completion;
-  cmeta_mutex_lock(&impl->gate);
+  sync_mutex_lock(&impl->gate);
   impl->completion_encoded = true;
-  cmeta_mutex_unlock(&impl->gate);
+  sync_mutex_unlock(&impl->gate);
   return CFLOW_READ_VALUE;
 }
 
@@ -125,9 +125,9 @@ static void redis_io_flow_run_scheduled(void *user) {
     status = cflow_io_publisher_owner_run_ready(&impl->owner, REDIS_IO_FLOW_DRIVE_STEPS, &progressed);
   } while (status == SALTS_OK && progressed == REDIS_IO_FLOW_DRIVE_STEPS);
   if (status != SALTS_OK && status != SALTS_EBUSY) {
-    cmeta_mutex_lock(&impl->gate);
+    sync_mutex_lock(&impl->gate);
     if (impl->driver_error == SALTS_OK) impl->driver_error = status;
-    cmeta_mutex_unlock(&impl->gate);
+    sync_mutex_unlock(&impl->gate);
   }
   redis_io_flow_finish_runtime_pending(impl, false);
 }
@@ -138,9 +138,9 @@ static void redis_io_flow_wake(void *user) {
   if (impl == NULL) return;
   status = redis_io_runtime_schedule_publisher(&impl->runtime_publisher);
   if (status != SALTS_OK) {
-    cmeta_mutex_lock(&impl->gate);
+    sync_mutex_lock(&impl->gate);
     if (impl->driver_error == SALTS_OK) impl->driver_error = status;
-    cmeta_mutex_unlock(&impl->gate);
+    sync_mutex_unlock(&impl->gate);
   }
 }
 
@@ -148,12 +148,12 @@ static int redis_io_flow_close_owner(redis_io_flow_impl *impl) {
   uint64_t started;
   if (impl == NULL || !impl->owner_live) return SALTS_OK;
   if (redis_io_runtime_in_callback()) return SALTS_EBUSY;
-  started = cmeta_hrtime();
+  started = hrtime();
   for (;;) {
     uint64_t now;
     int status = redis_io_runtime_schedule_publisher(&impl->runtime_publisher);
     if (status != SALTS_OK) return status;
-    now = cmeta_hrtime();
+    now = hrtime();
     if (now - started >= impl->close_timeout_ns) return SALTS_ETIMEDOUT;
     status = redis_io_runtime_wait_publisher_idle(&impl->runtime_publisher,
                                                impl->close_timeout_ns - (now - started));
@@ -176,7 +176,7 @@ int redis_io_flow_init(redis_io_flow *flow, redis_io_runtime *runtime, uint64_t 
     return SALTS_EINVAL;
   impl = (redis_io_flow_impl *)calloc(1u, sizeof(*impl));
   if (impl == NULL) return SALTS_ENOMEM;
-  cmeta_mutex_init(&impl->gate);
+  sync_mutex_init(&impl->gate);
   impl->runtime = runtime;
   impl->operation.owner = impl;
   impl->close_timeout_ns = close_timeout_ns;
@@ -201,7 +201,7 @@ int redis_io_flow_init(redis_io_flow *flow, redis_io_runtime *runtime, uint64_t 
 
 failed:
   if (impl->attached) (void)redis_io_runtime_detach_publisher(&impl->runtime_publisher);
-  cmeta_mutex_destroy(&impl->gate);
+  sync_mutex_destroy(&impl->gate);
   free(impl);
   return status;
 }
@@ -215,25 +215,25 @@ int redis_io_flow_submit(redis_io_flow *flow, const cflow_io_native_operation *o
   if (impl == NULL || operation == NULL || !impl->publisher_live || impl->active ||
       impl->pending_valid)
     return SALTS_EINVAL;
-  cmeta_mutex_lock(&impl->gate);
+  sync_mutex_lock(&impl->gate);
   if (impl->operation_owned) {
-    cmeta_mutex_unlock(&impl->gate);
+    sync_mutex_unlock(&impl->gate);
     return SALTS_EBUSY;
   }
   impl->operation.native = *operation;
   impl->pending_valid = true;
-  cmeta_mutex_unlock(&impl->gate);
+  sync_mutex_unlock(&impl->gate);
   status = redis_io_runtime_publisher_started(impl->runtime);
   if (status != SALTS_OK) {
-    cmeta_mutex_lock(&impl->gate);
+    sync_mutex_lock(&impl->gate);
     impl->pending_valid = false;
-    cmeta_mutex_unlock(&impl->gate);
+    sync_mutex_unlock(&impl->gate);
     return status;
   }
-  cmeta_mutex_lock(&impl->gate);
+  sync_mutex_lock(&impl->gate);
   impl->runtime_pending = true;
   impl->driver_error = SALTS_OK;
-  cmeta_mutex_unlock(&impl->gate);
+  sync_mutex_unlock(&impl->gate);
   context.downstream_demand = 1u;
   step = cflow_publisher_resume(&impl->publisher, &context, &ignored);
   if (step.kind != CFLOW_STEP_WAIT) {
@@ -254,9 +254,9 @@ redis_io_flow_step redis_io_flow_next(redis_io_flow *flow) {
   cflow_step step;
   int status;
   if (impl == NULL || !impl->active || !impl->publisher_live) return out;
-  cmeta_mutex_lock(&impl->gate);
+  sync_mutex_lock(&impl->gate);
   status = impl->driver_error;
-  cmeta_mutex_unlock(&impl->gate);
+  sync_mutex_unlock(&impl->gate);
   if (status != SALTS_OK) {
     out.status = status;
     return out;
@@ -314,7 +314,7 @@ int redis_io_flow_destroy(redis_io_flow *flow) {
     if (status != SALTS_OK) return status;
     impl->attached = false;
   }
-  cmeta_mutex_destroy(&impl->gate);
+  sync_mutex_destroy(&impl->gate);
   free(impl);
   flow->impl = NULL;
   return SALTS_OK;

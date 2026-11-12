@@ -4,7 +4,7 @@
 
 #include "orm_text_token.h"
 
-#include <salts/thread.h>
+#include <threads/threads.h>
 
 #include <errno.h>
 #include <locale.h>
@@ -18,7 +18,7 @@
 
 enum { ORM_TEXT_TOKEN_FLOAT_CAPACITY = 768u };
 
-static cmeta_once_t orm_text_token_locale_once = SALTS_ONCE_INIT;
+static sync_once_t orm_text_token_locale_once = SALTS_ONCE_INIT;
 #if defined(_WIN32)
 static _locale_t orm_text_token_c_locale;
 #else
@@ -35,7 +35,7 @@ static void orm_text_token_locale_init(void) {
 }
 
 static double orm_text_token_strtod(const char *text, char **end) {
-  cmeta_once(&orm_text_token_locale_once, orm_text_token_locale_init);
+  sync_once(&orm_text_token_locale_once, orm_text_token_locale_init);
   if (orm_text_token_c_locale == NULL) {
     *end = (char *)text;
     return 0.0;

@@ -1,6 +1,6 @@
 #include "redis_lua_apply.h"
 
-#include "cmeta_error.h"
+#include "core/error.h"
 
 #include <inttypes.h>
 #include <stdio.h>

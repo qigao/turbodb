@@ -13,13 +13,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   include(CmakeUtils)
 endif()
 
-if(NOT TARGET Salts::Plugin OR NOT TARGET Salts::PluginABI)
-  message(
-    FATAL_ERROR
-      "ORM requires an installed Salts SDK exporting Salts::Plugin and Salts::PluginABI"
-  )
-endif()
-
 set(ORM_VERSION 2.2.0)
 set(ORM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -43,13 +36,13 @@ target_include_directories(
           ${ORM_SOURCE_DIR}/src/runtime)
 target_link_libraries(
   turbo_orm
-  PUBLIC TurboDB::Types Salts::Core Salts::CFlow
-  PRIVATE Salts::CSerde Salts::DataBind Salts::Plugin Salts::CSTL
-          Salts::Platform ${CMAKE_DL_LIBS})
+  PUBLIC TurboDB::Types Salts::Core CMeta::CFlow
+  PRIVATE Salts::CSerde Salts::DataBind CMeta::Plugin CMeta::CSTL
+          ${CMAKE_DL_LIBS})
 
 get_target_property(ORM_CORE_LINK_CONTRACT turbo_orm LINK_LIBRARIES)
 set(ORM_CORE_FORBIDDEN_LINKS SQLite::SQLite3 PostgreSQL::PostgreSQL Salts::CNet
-                             TidesDB::tidesdb TurboDB::Redis)
+                             TurboDB::Redis)
 list(REMOVE_ITEM ORM_CORE_FORBIDDEN_LINKS "")
 set(ORM_CORE_ALLOWED_LINKS ${ORM_CORE_LINK_CONTRACT})
 list(REMOVE_ITEM ORM_CORE_ALLOWED_LINKS ${ORM_CORE_FORBIDDEN_LINKS})
@@ -109,7 +102,7 @@ cmake_install_headers(
   DESTINATION
   ${CMAKE_INSTALL_INCLUDEDIR}/shared/orm)
 
-if(BUILD_TESTS OR BUILD_E2E_TESTS)
+if(BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 

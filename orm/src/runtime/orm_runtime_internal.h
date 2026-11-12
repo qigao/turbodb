@@ -3,7 +3,7 @@
 
 #include <orm_runtime.h>
 #include <orm_driver_plugin.h>
-#include <salts/thread.h>
+#include <threads/threads.h>
 
 /* Runtime state is private to this directory. The mutex protects reservations,
  * counters and lifecycle transitions; plugin callbacks run outside that lock.
@@ -33,7 +33,7 @@ enum {
 };
 
 struct orm_runtime {
-  cmeta_mutex_t mutex;
+  sync_mutex_t mutex;
   uint32_t refs;
   uint32_t closed;
   orm_runtime_config_t config;

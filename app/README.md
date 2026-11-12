@@ -1,89 +1,44 @@
 # TurboDB Studio
 
-TurboDB Studio is the optional Windows desktop client for TurboDB.
+TurboDB Studio is the Windows desktop client for TurboDB.
 
 This subtree owns native UI concerns only. Database semantics remain behind
 TurboDB public APIs and runtime drivers.
 
-## Initial dependency boundary
+## Dependency boundary
 
-The `app` vcpkg manifest feature provides:
+Studio uses [qigao/OpenWTL](https://github.com/qigao/OpenWTL) 0.1.2 through
+`OpenWTL::WTL`. Its source submodule is pinned to
+`311b2dc361eea42cf6c821289133a99713298a74`. The target supplies both the
+repository-owned ATL implementation and WTL 10.0.10320, plus their Windows
+UI/COM dependencies. The application keeps ownership of COM initialization.
+Microsoft ATL and the separate vcpkg `wtl` port are not required.
 
-- WTL for native Windows shell/layout
-- Scintilla for the SQL editor control
-- Lexilla for editor lexing
-
-These dependencies are resolved only when `TURBODB_BUILD_APP=ON`. They are
-not linked into `Orm::C`, database drivers, or dbtools.
-
-`chttp` is intentionally not part of the base application dependency closure.
-A future HTTP/OpenAPI/remote feature may add it behind a separate explicit
-option.
+The Windows vcpkg dependencies supply Scintilla for the editor and Lexilla for
+lexing. These UI dependencies remain private to Studio and its window tests.
 
 ## Build
 
-From a Visual Studio developer environment, use the Windows Release user
-preset. It enables Studio and its required ORM drivers through the repository
-vcpkg manifest. This setting belongs to the user preset; CI profiles remain
-separate.
-
-WTL also requires ATL from the selected Visual Studio installation. Install
-**C++ ATL for latest v143 build tools (x86 & x64)**
-(`Microsoft.VisualStudio.Component.VC.ATL`) through Visual Studio Installer
-if that instance lacks `atlbase.h`; the vcpkg WTL package does not supply ATL.
-See the [Visual Studio component list](https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022).
-With multiple VS installations, configure and build from the same instance's
-x64 developer environment. When switching instances, use
-`cmake --preset win-release-user --fresh` to replace the cached compiler.
+Initialize the pinned source dependency, restore the SDKs as described in the
+[root build instructions](../README.md#build), and use the MSVC user preset:
 
 ~~~powershell
-cmake --preset win-release-user
-cmake --build --preset win-release-user --target turbodb-studio
-ctest --preset win-release-user -R "^turbodb-app-" --output-on-failure
+git submodule update --init external/OpenWTL
+./cmake/WithVs.cmd cmake --preset msvc-release-user
+./cmake/WithVs.cmd cmake --build --preset msvc-release-user
+./cmake/WithVs.cmd ctest --preset msvc-release-user -R ^turbodb-app-
 ~~~
 
-### CMake Tools with multiple Visual Studio instances
+CI checks out the pinned submodule before configuring the complete graph.
+OpenWTL implements a documented ATL compatibility subset; Studio's existing
+window, dialog, query, and startup tests validate the APIs used here. Upstream
+sources and notices remain unchanged. See the root third-party notices for
+Apache-2.0, MIT, and MS-PL attribution.
 
-CMake Tools can automatically select a newer Visual Studio instance that has
-the compiler but lacks ATL. Installing ATL in another instance does not make
-it available to the selected compiler.
-
-To use an existing instance with ATL, set this in the editor's workspace
-settings, then save your work and fully exit the editor:
-
-~~~json
-{
-  "cmake.useVsDeveloperEnvironment": "never"
-}
-~~~
-
-Start the editor from that instance's x64 developer environment. For example,
-from the repository root in PowerShell, with VS 2022 Professional and VS Code:
-
-~~~powershell
-cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && code .'
-~~~
-
-If the current shell already uses another VS developer environment
-(`VSINSTALLDIR` is set), clean it in the same child process before switching:
-
-~~~powershell
-cmd /d /c 'call "%VSINSTALLDIR%Common7\Tools\VsDevCmd.bat" -clean_env >nul && call "C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && code .'
-~~~
-
-Calling another instance's `VsDevCmd.bat` without cleaning can retain the old
-`VSINSTALLDIR` and continue selecting that instance's compiler and headers.
-
-Use your installed Visual Studio instance's path. An already running VS Code
-process may retain its old environment, so opening
-another window or an integrated terminal is insufficient.
-
-In the newly launched editor's terminal, run
-`cmake --preset win-release-user --fresh`, then select `win-release-user` in
-CMake Tools. Keep launching the editor from this developer environment while
-the setting is `never`; it makes CMake Tools inherit the editor's environment.
-See the [CMake Tools environment selection implementation](https://github.com/microsoft/vscode-cmake-tools/blob/v1.23.52/src/presets/preset.ts)
-and [Microsoft's developer prompt instructions](https://code.visualstudio.com/docs/cpp/config-msvc#_check-your-microsoft-visual-c-installation).
+Use the same selected Visual Studio developer environment for CMake and the
+editor. `VSDEVCMD_BAT` selects that environment; `msvc-release-user` supplies
+the remaining build settings. OpenWTL headers come from the initialized
+submodule and are independent of which Visual Studio instance has ATL.
 
 The first slice provides the frame and pane ownership boundaries only:
 

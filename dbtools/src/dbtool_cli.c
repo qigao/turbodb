@@ -4,7 +4,7 @@
 #include "dbtool_plugin.h"
 
 #include <cmd_arger.h>
-#include <tstr.h>
+#include <core/tstr.h>
 
 #include <limits.h>
 #include <stdint.h>

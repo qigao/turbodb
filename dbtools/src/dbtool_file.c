@@ -5,26 +5,26 @@
 #include <stdlib.h>
 
 static int dbtool_native_stat(void *context, const char *path,
-                              cmeta_fs_stat_t *out) {
+                              fs_stat_t *out) {
   (void)context;
-  return cmeta_fs_stat(path, out);
+  return fs_stat(path, out);
 }
 
-static cmeta_file_t dbtool_native_open(void *context, const char *path,
+static file_t dbtool_native_open(void *context, const char *path,
                                        int flags, int mode) {
   (void)context;
-  return cmeta_fs_open(path, flags, mode);
+  return fs_open(path, flags, mode);
 }
 
-static int dbtool_native_read(void *context, cmeta_file_t file, char *data,
+static int dbtool_native_read(void *context, file_t file, char *data,
                               size_t size) {
   (void)context;
-  return cmeta_fs_read(file, data, size);
+  return fs_read(file, data, size);
 }
 
-static int dbtool_native_close(void *context, cmeta_file_t file) {
+static int dbtool_native_close(void *context, file_t file) {
   (void)context;
-  return cmeta_fs_close(file);
+  return fs_close(file);
 }
 
 static const dbtool_file_ops dbtool_native_file_ops = {
@@ -42,8 +42,8 @@ dbtool_status dbtool_file_read_with_ops(const char *path, size_t max_bytes,
                                         const dbtool_file_ops *ops,
                                         void *ops_context,
                                         dbtool_error *error) {
-  cmeta_fs_stat_t info = {0};
-  cmeta_file_t file = SALTS_INVALID_FILE;
+  fs_stat_t info = {0};
+  file_t file = SALTS_INVALID_FILE;
   char *data = NULL;
   size_t expected;
   size_t offset = 0u;

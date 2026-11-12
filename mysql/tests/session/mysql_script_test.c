@@ -1,5 +1,5 @@
 #include <cnet/cnet.h>
-#include <cmeta_buffer.h>
+#include <memory/buffer.h>
 #include <tinytest.h>
 
 typedef struct mysql_script_fake_state {

@@ -1,27 +1,14 @@
 @PACKAGE_INIT@
-
 include(CMakeFindDependencyMacro)
-set(_TurboDB_PREFIX "${PACKAGE_PREFIX_DIR}")
-if(NOT DEFINED ENV{SALTS_ROOT} OR NOT IS_DIRECTORY "$ENV{SALTS_ROOT}")
-  message(FATAL_ERROR "SALTS_ROOT must name the restored Salts SDK")
-endif()
-unset(Salts_DIR CACHE)
-unset(Salts_DIR)
-cmake_path(CONVERT "$ENV{SALTS_ROOT}" TO_CMAKE_PATH_LIST _TurboDB_SALTS_ROOT NORMALIZE)
-find_dependency(Salts CONFIG REQUIRED PATHS "${_TurboDB_SALTS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-if(@TURBODB_BUILD_TIDESSQL@)
-  set(TidesDB_DIR "${_TurboDB_PREFIX}/@CMAKE_INSTALL_LIBDIR@/cmake/tidesdb")
-  find_dependency(TidesDB CONFIG REQUIRED NO_DEFAULT_PATH
-    PATHS "${TidesDB_DIR}" NO_CMAKE_FIND_ROOT_PATH)
-endif()
+find_dependency(SaltsBase @SaltsBase_VERSION@ EXACT CONFIG REQUIRED
+  PATHS "$ENV{SALTS_BASE_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(CMeta @CMeta_VERSION@ EXACT CONFIG REQUIRED
+  PATHS "$ENV{CMETA_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(SaltsUtils @SaltsUtils_VERSION@ EXACT CONFIG REQUIRED
+  PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_dependency(SaltsCore @SaltsCore_VERSION@ EXACT CONFIG REQUIRED
+  PATHS "$ENV{SALTSCORE_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 include("${CMAKE_CURRENT_LIST_DIR}/TurboDBTargets.cmake")
-if(@TURBODB_BUILD_ORM@)
-  include("${CMAKE_CURRENT_LIST_DIR}/OrmTargets.cmake")
-  set(TurboDB_DRIVER_DIR "${_TurboDB_PREFIX}/@CMAKE_INSTALL_LIBDIR@/turbodb/drivers")
-endif()
-if(@TURBODB_BUILD_TIDESSQL@)
-  include("${_TurboDB_PREFIX}/@CMAKE_INSTALL_LIBDIR@/cmake/TidesSQL/TidesSQLTargets.cmake")
-endif()
-unset(_TurboDB_SALTS_ROOT)
-unset(_TurboDB_PREFIX)
+include("${CMAKE_CURRENT_LIST_DIR}/OrmTargets.cmake")
+set(TurboDB_DRIVER_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/turbodb/drivers")
 check_required_components(TurboDB)

@@ -44,7 +44,7 @@ cmake_add_test(
   TEST_NAME orm_driver_interface
   SOURCES orm_driver_interface_test.c orm_driver_interface_peer_a.c
     orm_driver_interface_peer_b.c
-  LIBS Salts::Plugin Salts::CFlow
+  LIBS CMeta::Plugin CMeta::CFlow
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 
@@ -53,7 +53,7 @@ cmake_add_test(
   FOLDER "orm/drivers/tests"
   TEST_NAME orm_driver_interface_cpp
   SOURCES orm_driver_interface_cpp_test.cpp
-  LIBS Salts::Plugin Salts::CFlow
+  LIBS CMeta::Plugin CMeta::CFlow
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm)
 
@@ -73,7 +73,7 @@ cmake_add_test(
   FOLDER "orm/drivers/tests"
   TEST_NAME orm_driver_backend_bridge
   SOURCES orm_driver_backend_bridge_test.c ../../src/driver/orm_driver_backend_bridge.c
-  LIBS Salts::Core Salts::CFlow Salts::CSTL Salts::TinyTest
+  LIBS Salts::Core CMeta::CFlow CMeta::CSTL Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
     ${ORM_SOURCE_DIR}/src/flow ${ORM_SOURCE_DIR}/src/driver)
@@ -89,7 +89,7 @@ cmake_add_test(
   FOLDER "orm/drivers/tests"
   TEST_NAME orm_driver_backend_adapter
   SOURCES orm_driver_backend_adapter_test.c ../../src/driver/orm_driver_backend_bridge.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::Core Salts::CSTL Salts::CSerde
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} Salts::Core CMeta::CSTL Salts::CSerde
     Salts::TinyTest
   DEFS ORM_C_STATIC ORM_NATIVE_OWNER_CANDIDATE
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
@@ -134,7 +134,7 @@ set_target_properties(
              WINDOWS_EXPORT_ALL_SYMBOLS OFF
              FOLDER "orm/drivers/tests")
 add_library(orm_plugin_bad_abi_fixture MODULE orm_module_bad_abi_fixture.c)
-target_link_libraries(orm_plugin_bad_abi_fixture PRIVATE Salts::PluginABI)
+target_link_libraries(orm_plugin_bad_abi_fixture PRIVATE CMeta::PluginABI)
 set_target_properties(
   orm_plugin_bad_abi_fixture
   PROPERTIES PREFIX ""
@@ -146,8 +146,8 @@ add_library(orm_plugin_bad_contract_fixture MODULE
 target_include_directories(orm_plugin_bad_contract_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
-  orm_plugin_bad_contract_fixture PRIVATE Salts::PluginABI Salts::Core
-                                          Salts::CSerde Salts::CFlow)
+  orm_plugin_bad_contract_fixture PRIVATE CMeta::PluginABI Salts::Core
+                                          Salts::CSerde CMeta::CFlow)
 set_target_properties(
   orm_plugin_bad_contract_fixture
   PROPERTIES PREFIX ""
@@ -163,8 +163,8 @@ add_library(orm_plugin_bad_storage_fixture MODULE
 target_include_directories(orm_plugin_bad_storage_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
-  orm_plugin_bad_storage_fixture PRIVATE Salts::PluginABI Salts::Core
-                                         Salts::CSerde Salts::CFlow)
+  orm_plugin_bad_storage_fixture PRIVATE CMeta::PluginABI Salts::Core
+                                         Salts::CSerde CMeta::CFlow)
 set_target_properties(
   orm_plugin_bad_storage_fixture
   PROPERTIES PREFIX ""
@@ -180,8 +180,8 @@ add_library(orm_plugin_bad_shape_fixture MODULE
 target_include_directories(orm_plugin_bad_shape_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
-  orm_plugin_bad_shape_fixture PRIVATE Salts::PluginABI Salts::Core
-                                       Salts::CSerde Salts::CFlow)
+  orm_plugin_bad_shape_fixture PRIVATE CMeta::PluginABI Salts::Core
+                                       Salts::CSerde CMeta::CFlow)
 set_target_properties(
   orm_plugin_bad_shape_fixture
   PROPERTIES PREFIX ""
@@ -196,8 +196,8 @@ add_library(orm_runtime_plugin_fixture MODULE orm_runtime_plugin_fixture.c)
 target_include_directories(orm_runtime_plugin_fixture
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(
-  orm_runtime_plugin_fixture PRIVATE Salts::PluginABI Salts::Core Salts::CSerde
-                                     Salts::CFlow)
+  orm_runtime_plugin_fixture PRIVATE CMeta::PluginABI Salts::Core Salts::CSerde
+                                     CMeta::CFlow)
 set_target_properties(
   orm_runtime_plugin_fixture
   PROPERTIES PREFIX ""
@@ -242,7 +242,7 @@ set_tests_properties(
 add_library(orm_runtime_race_fixture MODULE orm_runtime_race_fixture.c)
 target_include_directories(orm_runtime_race_fixture PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(orm_runtime_race_fixture
-                      PRIVATE Salts::PluginABI Salts::Platform Salts::CFlow)
+                      PRIVATE CMeta::PluginABI Salts::Core CMeta::CFlow)
 set_target_properties(
   orm_runtime_race_fixture
   PROPERTIES PREFIX ""
@@ -259,7 +259,7 @@ target_compile_definitions(orm_runtime_race_fixture_two
 target_include_directories(orm_runtime_race_fixture_two
                            PRIVATE ${ORM_SOURCE_DIR}/include/orm)
 target_link_libraries(orm_runtime_race_fixture_two
-                      PRIVATE Salts::PluginABI Salts::Platform Salts::CFlow)
+                      PRIVATE CMeta::PluginABI Salts::Core CMeta::CFlow)
 set_target_properties(
   orm_runtime_race_fixture_two
   PROPERTIES PREFIX ""

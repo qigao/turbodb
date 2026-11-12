@@ -1,6 +1,6 @@
 #include "redis_socket.h"
 
-#include "cmeta_error.h"
+#include "core/error.h"
 
 #include <stdbool.h>
 #include <stdio.h>
