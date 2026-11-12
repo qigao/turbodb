@@ -10,6 +10,8 @@
   变量可能仍按 NDK 默认 32 位 ABI 探测，继而拒绝已恢复的 64 位 SDK。
 - PostgreSQL E2E fixture 只依赖公开 ORM 入口，错误输出通过公开结构和
   `fmt_text` 写入；不能依赖没有公开声明的 `orm_error_set`。
+- 使用 `IPPROTO_TCP` 的 POSIX socket 适配器显式包含 `netinet/in.h`；
+  glibc 的间接 include 会掩盖缺失，Android Bionic 不提供该间接声明。
 
 ## Redis / MySQL 协议扫描
 
