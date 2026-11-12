@@ -1,6 +1,6 @@
 {
   "name": "turbodb",
-  "version-semver": "2.3.6",
+  "version-semver": "0.1.0",
   "dependencies": [
     {
       "name": "pkgconf",

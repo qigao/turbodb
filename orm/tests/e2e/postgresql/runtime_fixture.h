@@ -2,6 +2,7 @@
 #define ORM_POSTGRES_RUNTIME_FIXTURE_H
 
 #include <orm_runtime.h>
+#include <core/fmt.h>
 #include <stdlib.h>
 
 /* Each case owns its runtime until all connection dependents have gone. */
@@ -10,8 +11,11 @@ static orm_status_t pg_runtime_create(
   *out_runtime = NULL;
   const char *path = getenv("ORM_POSTGRESQL_PLUGIN");
   if (path == NULL || path[0] == '\0') {
-    orm_error_set(error, ORM_STATUS_INVALID_ARGUMENT,
-                  "PostgreSQL E2E requires ORM_POSTGRESQL_PLUGIN");
+    if (error != NULL) {
+      error->status = ORM_STATUS_INVALID_ARGUMENT;
+      (void)fmt_text(error->message, sizeof(error->message),
+                     "PostgreSQL E2E requires ORM_POSTGRESQL_PLUGIN");
+    }
     return ORM_STATUS_INVALID_ARGUMENT;
   }
 

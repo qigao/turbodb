@@ -14,5 +14,8 @@
         "libpq"
       ]
     }
+  ],
+  "overlay-ports": [
+    "app/vcpkg-ports"
   ]
 }

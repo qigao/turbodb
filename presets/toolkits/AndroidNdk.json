@@ -8,8 +8,8 @@
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "Android",
         "CMAKE_ANDROID_NDK": "$env{ANDROID_NDK_HOME}",
-        "CMAKE_ANDROID_STL_TYPE": "c++_shared",
-        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake"
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        "ANDROID_STL": "c++_shared"
       }
     },
     {

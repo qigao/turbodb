@@ -232,7 +232,7 @@ jobs:
             --name github --username qigao --password "$GITHUB_TOKEN" \
             --store-password-in-clear-text
           dotnet nuget push "dist/TurboDB.Native.${{ needs.metadata.outputs.version }}.nupkg" \
-            --api-key "$GITHUB_TOKEN" --source github --skip-duplicate
+            --api-key "$GITHUB_TOKEN" --source github
 
       - name: Create GitHub Release
         shell: bash
@@ -248,4 +248,4 @@ jobs:
           fi
           gh release create "$TAG" dist/*.nupkg \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "TurboDB $VERSION" --generate-notes
+            --title "TurboDB $VERSION" --latest --generate-notes

@@ -1,5 +1,16 @@
 # 构建与性能排障记录
 
+## 发布 CI 的配置边界
+
+- `setup-vcpkg-curl-cache` 在 CMake configure 之前解析 manifest；应用 overlay
+  必须声明在 `vcpkg-configuration.json`，只写在 CMake preset 中会导致 CI
+  报 `baseline does not contain an entry for port lexilla`。
+- 链式加载 NDK `android.toolchain.cmake` 时使用其 `ANDROID_ABI`、
+  `ANDROID_PLATFORM` 和 `ANDROID_STL` 输入。只设置 CMake 原生 Android
+  变量可能仍按 NDK 默认 32 位 ABI 探测，继而拒绝已恢复的 64 位 SDK。
+- PostgreSQL E2E fixture 只依赖公开 ORM 入口，错误输出通过公开结构和
+  `fmt_text` 写入；不能依赖没有公开声明的 `orm_error_set`。
+
 ## Redis / MySQL 协议扫描
 
 - 短 RESP 回复和密集参数 SQL 不能为每个片段都进入外部向量函数。
