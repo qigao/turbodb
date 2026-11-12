@@ -31,18 +31,20 @@ endif()
 if(NOT WIN32)
   set_property(TARGET dbtools PROPERTY INSTALL_RPATH "$ORIGIN/../lib")
 endif()
-install(TARGETS dbtools RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools)
-
 add_dependencies(dbtools orm_sqlite_driver orm_postgresql_driver orm_mysql_driver)
-# A dbtools component install must include the modules it consumes. Their
-# native/Salts dependencies remain provided by the deployment environment.
-install(TARGETS orm_sqlite_driver orm_postgresql_driver orm_mysql_driver
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers COMPONENT dbtools
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers COMPONENT dbtools)
-install(TARGETS turbo_orm
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dbtools)
+if(NOT ANDROID)
+  # Android SDKs ship libraries for application embedding, without a host CLI.
+  install(TARGETS dbtools RUNTIME_DEPENDENCY_SET DbToolsRuntimeDependencies
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools)
+  # A dbtools component install must include the modules it consumes. Their
+  # native/Salts dependencies remain provided by the deployment environment.
+  install(TARGETS orm_sqlite_driver orm_postgresql_driver orm_mysql_driver
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/turbodb/drivers COMPONENT dbtools
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/turbodb/drivers COMPONENT dbtools)
+  install(TARGETS turbo_orm
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dbtools
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dbtools)
+endif()
 
 if(BUILD_TESTS)
   add_subdirectory(tests)
