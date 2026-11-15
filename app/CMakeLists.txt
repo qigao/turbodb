@@ -1,7 +1,14 @@
 enable_language(RC)
 
-add_subdirectory("${PROJECT_SOURCE_DIR}/external/OpenWTL"
-                 "${CMAKE_CURRENT_BINARY_DIR}/OpenWTL" EXCLUDE_FROM_ALL SYSTEM)
+include(FetchContent)
+# OpenWTL publishes source archives only. Keep its source identity and bytes
+# pinned together; CMake verifies the archive before exposing OpenWTL::WTL.
+FetchContent_Declare(OpenWTL
+  URL https://github.com/qigao/OpenWTL/archive/refs/tags/v0.1.2.zip
+  URL_HASH SHA256=9fbe6cc68d23ee37bbd4ae4e2a54f64b4d428f2837f0d557687d9551fde485bd
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  SYSTEM)
+FetchContent_MakeAvailable(OpenWTL)
 
 # Editor DLLs are loaded explicitly; only their target-ABI headers are linked.
 set(_studio_port_prefix "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")

@@ -44,7 +44,7 @@ final class ConnectorJProbe {
       properties.setProperty("trustCertificateKeyStorePassword", new String(TRUST_PASSWORD));
       properties.setProperty("connectTimeout", "5000");
       properties.setProperty("socketTimeout", "5000");
-      String url = "jdbc:mysql://localhost:" + port + "/tenant";
+      String url = "jdbc:drivers/mysql://localhost:" + port + "/tenant";
       try (Connection connection = DriverManager.getConnection(url, properties)) {
         connection.setAutoCommit(false);
         try (Statement statement = connection.createStatement()) {

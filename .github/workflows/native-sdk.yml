@@ -17,7 +17,7 @@ env:
   SALTS_BASE_VERSION: ${{ vars.SALTS_BASE_VERSION }}
   CMETA_VERSION: ${{ vars.CMETA_VERSION }}
   SALTS_UTILS_VERSION: ${{ vars.SALTS_UTILS_VERSION }}
-  SALTS_CORE_VERSION: ${{ vars.SALTS_CORE_VERSION }}
+  SALTS_CNET_VERSION: ${{ vars.SALTS_CNET_VERSION }}
 
 jobs:
   sdk:
@@ -28,20 +28,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-24.04, rid: linux-x64, host: linux-x64, preset: ci-linux-release, triplet: x64-linux}
-          - {os: ubuntu-24.04-arm, rid: linux-arm64, host: linux-arm64, preset: ci-linux-arm64-release, triplet: arm64-linux}
+          - {os: ubuntu-24.04, rid: linux-x64, host: linux-x64, preset: ci-llvm-native-release-user, triplet: x64-linux}
+          - {os: ubuntu-24.04-arm, rid: linux-arm64, host: linux-arm64, preset: ci-llvm-native-release-user, triplet: arm64-linux}
           - os: macos-15
             rid: macos-arm64
             host: macos-arm64
-            preset: ci-macos-arm64-release
+            preset: ci-llvm-native-release-user
             triplet: arm64-osx
-          - {os: windows-2025, rid: windows-x64, host: windows-x64, preset: ci-windows-release, triplet: x64-windows}
-          - {os: ubuntu-24.04, rid: android-arm64-v8a, host: linux-x64, preset: ci-android-release, triplet: arm64-android}
+          - {os: windows-2025, rid: windows-x64, host: windows-x64, preset: ci-msvc-release-user, triplet: x64-windows}
+          - {os: ubuntu-24.04, rid: android-arm64-v8a, host: linux-x64, preset: ci-android-arm64-release-user, triplet: arm64-android}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          submodules: true
       - uses: ./.github/actions/setup-native
         with:
           platform: ${{ matrix.rid }}
@@ -96,7 +95,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          cmake --preset ci-windows-release
+          cmake --preset ci-msvc-release-user
           if errorlevel 1 exit /b 1
 
       - name: Build on Unix
@@ -106,7 +105,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          cmake --build --preset ci-windows-release --parallel 4
+          cmake --build --preset ci-msvc-release-user --parallel 4
           if errorlevel 1 exit /b 1
 
       - name: Test on Unix
@@ -136,7 +135,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          ctest --preset ci-windows-release -LE e2e
+          ctest --preset ci-msvc-release-user -LE e2e
           if errorlevel 1 exit /b 1
 
       - name: Install on Unix
@@ -146,7 +145,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          cmake --build --preset install-ci-windows-release --parallel 4
+          cmake --build --preset install-ci-msvc-release-user --parallel 4
           if errorlevel 1 exit /b 1
       - name: Stage native SDK
         shell: pwsh

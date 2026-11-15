@@ -78,6 +78,11 @@ int runtime_id_valid(orm_string_view_t id) {
     return 0;
   for (size_t i = 1u; i < id.len; ++i) {
     const unsigned char c = text[i];
+    if (c == '/') {
+      if (i + 1u == id.len || text[i + 1u] < 'a' || text[i + 1u] > 'z')
+        return 0;
+      continue;
+    }
     if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
           c == '_' || c == '-'))
       return 0;

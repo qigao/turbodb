@@ -83,7 +83,7 @@ spec("schema Plugin admission and ownership") {
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     check_equal(dbtool_cli_execute(2, argv, NULL, NULL, &result, &error),
                 DBTOOL_STATUS_HELP);
-    const char *selectors[] = {"sqlite", "pg", "mysql"};
+    const char *selectors[] = {"sqlite", "pg", "drivers/mysql"};
     for (size_t i = 0u; i < sizeof(selectors) / sizeof(selectors[0]); ++i) {
       const char *help[] = {"dbtools", "--driver", selectors[i], "--help"};
       dbtool_driver_kind selected = DBTOOL_DRIVER_MYSQL;

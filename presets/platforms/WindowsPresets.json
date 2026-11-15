@@ -12,7 +12,10 @@
         "base",
         "toolkit-msvc",
         "flags-msvc"
-      ]
+      ],
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
     },
     {
       "name": "windows-llvm-mingw",
@@ -26,25 +29,23 @@
     {
       "name": "target-llvm-mingw-x64",
       "hidden": true,
-      "inherits": "windows-llvm-mingw",
+      "inherits": [
+        "toolkit-llvm-mingw-x64",
+        "windows-llvm-mingw"
+      ],
       "environment": {
-        "VCPKG_TARGET_TRIPLET": "qigao-x64-windows-llvm-mingw",
-        "LLVM_MINGW_TARGET": "x86_64-w64-mingw32"
-      },
-      "cacheVariables": {
-        "CMAKE_SYSTEM_PROCESSOR": "x86_64"
+        "VCPKG_TARGET_TRIPLET": "qigao-x64-windows-llvm-mingw"
       }
     },
     {
       "name": "target-llvm-mingw-arm64",
       "hidden": true,
-      "inherits": "windows-llvm-mingw",
+      "inherits": [
+        "toolkit-llvm-mingw-arm64",
+        "windows-llvm-mingw"
+      ],
       "environment": {
-        "VCPKG_TARGET_TRIPLET": "qigao-arm64-windows-llvm-mingw",
-        "LLVM_MINGW_TARGET": "aarch64-w64-mingw32"
-      },
-      "cacheVariables": {
-        "CMAKE_SYSTEM_PROCESSOR": "aarch64"
+        "VCPKG_TARGET_TRIPLET": "qigao-arm64-windows-llvm-mingw"
       }
     }
   ],

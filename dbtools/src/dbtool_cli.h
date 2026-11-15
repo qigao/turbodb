@@ -9,7 +9,7 @@ extern "C" {
 
 /* NULL ops selects the explicitly configured Plugin. Non-NULL operations are
  * borrowed for this call and let embedded callers supply an existing backend.
- * --driver selects sqlite, pg or mysql. selected_driver is optional and is
+ * --driver selects sqlite, pg or drivers/mysql. selected_driver is optional and is
  * written after a successful command parse; parse failure or help leaves it unchanged. */
 dbtool_status dbtool_cli_execute(int argc, const char *const *argv,
                                  dbtool_driver_kind *selected_driver,

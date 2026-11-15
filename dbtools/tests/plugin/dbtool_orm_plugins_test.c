@@ -38,7 +38,7 @@ spec("dbtools consumes ORM driver schema exports") {
     dbtool_error error = DBTOOL_ERROR_INIT;
     const dbtool_connection_config config = {NULL, "{}", 0u};
     void *context = NULL;
-    check_equal(dbtool_plugin_load(&plugin, DBTOOL_MYSQL_PLUGIN, "mysql", &error),
+    check_equal(dbtool_plugin_load(&plugin, DBTOOL_MYSQL_PLUGIN, "drivers/mysql", &error),
                 DBTOOL_STATUS_OK);
     check_not_null(plugin.ops);
     check_equal(plugin.ops->open(&context, &config, &error), DBTOOL_STATUS_INVALID_ARGUMENT);

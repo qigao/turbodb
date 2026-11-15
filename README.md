@@ -6,6 +6,23 @@ TurboDB provides C database components, C++ header-only wrappers, native-driver 
 
 **Tags:** C11 · C++17 · database · storage · ORM · Redis · SQLite · PostgreSQL · durability · async-io
 
+## 0.1.1 migration
+
+MySQL's canonical runtime ID and CLI selector are now `drivers/mysql`.
+Update connection profiles, `expected_driver_id`, and `dbtools --driver` arguments
+together. SQLite and PostgreSQL IDs are unchanged. Driver IDs accept bounded
+slash-separated tokens, each starting with a lowercase letter and continuing
+with lowercase letters, digits, `_` or `-`; empty or traversal components fail.
+Plugin ABI, reflected contract checks and exact ID matching still apply.
+
+Client sources now live under `drivers/mysql` and `drivers/redis`; concrete ORM
+adapters live under `orm/backends`. Native consumers use installed headers under
+`drivers/mysql/` and `drivers/redis/`. The shared DTO include remains
+`turbodb/types.h`. Rebuild hosts and driver plugins with the matching SDK set
+listed below. No database file conversion is required. To roll back, select the
+complete 0.1.0 package and matching SDKs, restore its original IDs/header paths,
+and configure with `--fresh`.
+
 ## Built on Salts
 
 TurboDB does not treat Salts as a generic utility dependency. Selected runtime-facing components reuse Salts so database work participates in the same type, ownership, execution, and error model as the rest of the ecosystem.
@@ -87,7 +104,7 @@ Stream delivery remains at-least-once. Consumers must project idempotently and a
 
 ## Standalone DDL SQL tools
 
-`dbtools --driver sqlite|pg|mysql` executes database bootstrap/schema SQL through
+`dbtools --driver sqlite|pg|drivers/mysql` executes database bootstrap/schema SQL through
 dynamically loaded database drivers. Salts Plugin validates the module ABI and
 the CMeta-reflected `TurboDb.SchemaApply` contract before opening a connection.
 
@@ -112,9 +129,11 @@ are outside the build, installation, and exported package. Module switches
 parent-environment SDK roots. Hidden definitions in `CMakePresets.json` and
 `presets/` supply compiler and platform profiles. Use CMake 3.27+, Ninja,
 Python 3.12+, PowerShell 7, Git, and an authenticated GitHub CLI.
-Windows MSVC also needs Visual Studio C++ tools. Studio uses the pinned
-OpenWTL submodule for ATL and WTL. Initialize it with
-`git submodule update --init external/OpenWTL` before configuring.
+Windows MSVC also needs Visual Studio C++ tools. Windows architecture tests
+require Visual Studio's `dumpbin`, including llvm-mingw builds; run CTest through
+`cmake/WithVs.cmd` with `VSDEVCMD_BAT` set. Studio uses the OpenWTL 0.1.2
+release source archive for ATL and WTL. CMake downloads it into the build tree
+and verifies the SHA-256 pinned in `app/CMakeLists.txt` before configuration.
 
 #### Protocol benchmarks
 
@@ -134,8 +153,8 @@ ctest --preset msvc-benchmark-user -L benchmark -V
 ```
 
 `BUILD_BENCHMARK` owns these targets independently of `BUILD_TESTS`. Their sources
-are [Redis protocol benchmarks](redis/tests/protocol_benchmark.c) and
-[MySQL parameter benchmarks](mysql/tests/parameters/parameter_benchmark.c).
+are [Redis protocol benchmarks](drivers/redis/tests/protocol_benchmark.c) and
+[MySQL parameter benchmarks](drivers/mysql/tests/parameters/parameter_benchmark.c).
 
 Local MSVC Release measurements on AMD Ryzen 9 7940HX, using default CPU
 scheduling: median of three alternating before/after runs, each with 200 samples
@@ -162,20 +181,33 @@ guard-page input bounds, output capacity and in-place lowering.
 
 Select exact published versions through the parent environment or `.env`.
 The current set is [vcpkg-cache 0.1.3](https://github.com/qigao/vcpkg-cache/releases/tag/v0.1.3),
-[SaltsBase 0.1.5](https://github.com/qigao/salts-base/releases/tag/v0.1.5),
-[CMeta 0.1.5](https://github.com/qigao/cmeta/releases/tag/v0.1.5),
-[SaltsUtils 0.1.2](https://github.com/qigao/salts-utils/releases/tag/v0.1.2), and
-[CNet 0.1.11](https://github.com/qigao/salts-cnet/releases/tag/v0.1.11).
+[SaltsBase 0.1.8](https://github.com/qigao/salts-base/releases/tag/v0.1.8),
+[CMeta 0.1.7](https://github.com/qigao/cmeta/releases/tag/v0.1.7),
+[SaltsUtils 0.1.4](https://github.com/qigao/salts-utils/releases/tag/v0.1.4), and
+[CNet 0.1.12](https://github.com/qigao/salts-cnet/releases/tag/v0.1.12).
 `.env.example` lists the version variables and infrastructure paths; CI uses
 repository variables with the same names. The infrastructure checkout must
 match the selected release. Upgrades use separate versioned SDK directories.
 
 The restore entry point checks release asset SHA-256 digests and exports
-`SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTSCORE_ROOT`,
-`VCPKG_INSTALLED_DIR`, and `RE2C_ROOT` to the calling PowerShell process.
+`SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTS_CNET_ROOT`,
+`VCPKG_INSTALLED_DIR`, `RE2C_ROOT`, and `LEMON_ROOT` to the calling PowerShell process.
 The shared vcpkg-cache `resolve-release` and `locked` operations restore the
-selected preinstalled archive. The canonical manifest toolchain then resolves
-TurboDB's `vcpkg.json`, including Studio dependencies on Windows.
+selected preinstalled archive. On Windows, this explicit restore step also runs
+vcpkg against TurboDB's manifest to prepare GmSSL and Studio's Scintilla/Lexilla
+ports in that installation. CMake consumes the prepared triplet through
+`CMAKE_PREFIX_PATH`, as in TurboScript and http-services. Configuration does not
+run vcpkg or generate compiler toolchains; missing dependencies fail discovery.
+The generator packages are Re2c 4.6.7 and Lemon 1.0.0 from that same cache release.
+Lemon's executable and `share/lemon/lempar.c` must come from the same host package.
+
+SaltsCNet 0.1.12 renamed its CMake package from `SaltsCore` to `SaltsCNet`;
+its public targets remain `Salts::CNet` and `Salts::Crypto`. Select it through
+`SALTS_CNET_VERSION` and `SALTS_CNET_ROOT`. SaltsUtils 0.1.4 was built against
+Base 0.1.8 with CMeta 0.1.6 source; CMeta 0.1.7 provides the matching Base 0.1.8
+binary composition without changing its public ABI. Rebuild TurboDB and its
+plugins with this set. Rollback requires selecting the previous complete SDK
+set and its matching package configuration, then configuring with `--fresh`.
 
 Copy `.env.example` to `.env`, set the paths for your machine, and run these
 Windows MSVC commands in one PowerShell session:
@@ -197,9 +229,16 @@ build executable directory, which is a trusted search location for Plugin.
 Linux Clang uses `-Rid linux-x64` and `llvm-native-release-user`. Linux GCC uses
 `-Profile linux-gcc-x64` and `gcc-release-user`. Windows llvm-mingw uses
 `-Profile windows-llvm-mingw-x64` and `llvm-mingw-x64-release-user` with its
-matching compiler environment. Android uses `-Rid android-arm64-v8a -HostRid
+matching compiler environment. As in TurboScript, its local `.env` only supplies
+`LLVM_MINGW_ROOT`; presets select the compiler executables and target.
+After loading the SDK roots and compiler root into the parent environment,
+`cmake --preset llvm-mingw-x64-release-user --fresh` works directly, without
+rerunning restoration. CMake does not load `QigaoVcpkgToolchain.cmake` or require
+`LLVM_MINGW_*TOOLCHAIN_FILE` variables. Compiler files needed while preparing
+vcpkg ports remain internal to the dependency restore process.
+Android uses `-Rid android-arm64-v8a -HostRid
 linux-x64` and `android-arm64-release-user`; its tests need a device runner.
-CNet 0.1.11 includes the native Linux ARM64 SDK. Its producer CI runs the
+CNet 0.1.12 includes the native Linux ARM64 SDK. Its producer CI runs the
 complete native CTest suite on `ubuntu-24.04-arm` before publication.
 
 CI builds the complete configured graph. External database tests remain
@@ -237,7 +276,7 @@ dbtools --driver pg schema apply `
 
 Without `--conninfo-env`, libpq's standard environment, service, and `.pgpass` behavior applies.
 
-Use `--driver mysql` for MySQL. Plugin paths must be absolute; omit `--plugin`
+Use `--driver drivers/mysql` for MySQL. Plugin paths must be absolute; omit `--plugin`
 only when `TURBODB_SQLITE_PLUGIN`, `TURBODB_POSTGRESQL_PLUGIN`, or
 `TURBODB_MYSQL_PLUGIN` supplies the selected module path. See
 [dbtools usage and deployment](dbtools/readme.md) for MySQL connection settings.
@@ -277,7 +316,7 @@ See [driver-data-tools.md](docs/architecture/driver-data-tools.md) for the detai
 ## Build and package model
 
 TurboDB consumes exact released SDK versions selected through the environment.
-Its exported package discovers `SaltsBase`, `CMeta`, `SaltsUtils`, and `SaltsCore`
+Its exported package discovers `SaltsBase`, `CMeta`, `SaltsUtils`, and `SaltsCNet`
 from explicit roots while retaining the public `TurboDB::*` and `Orm::*` targets.
 The packaged manifest records producer versions and the Base runtime SONAME.
 

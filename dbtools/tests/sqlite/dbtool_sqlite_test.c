@@ -1,4 +1,4 @@
-#include "../../../orm/drivers/sqlite/schema.h"
+#include "../../../orm/backends/sqlite/schema.h"
 
 #include <limits.h>
 #include <stdlib.h>

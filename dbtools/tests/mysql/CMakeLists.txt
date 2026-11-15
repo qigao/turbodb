@@ -3,8 +3,8 @@ if(BUILD_TESTS)
     NAME dbtool_mysql_test
     SOURCES dbtool_mysql_test.c
     LIBS turbodb_schema_support Salts::JsonParser Salts::TinyTest CMeta::TinyMock
-    INCLUDES ${PROJECT_SOURCE_DIR}/mysql
-    FOLDER "dbtools/tests/mysql")
+    INCLUDES ${PROJECT_SOURCE_DIR}/drivers/mysql
+    FOLDER "dbtools/tests/drivers/mysql")
 endif()
 if(BUILD_TESTS)
   add_subdirectory(e2e)

@@ -9,11 +9,11 @@ int main(int argc, char **argv) {
   if (argc > argument && strcmp(argv[argument], "--sqlite") == 0) {
     dialect = SQLPARSER_SQLITE;
     ++argument;
-  } else if (argc > argument && strcmp(argv[argument], "--mysql") == 0) {
+  } else if (argc > argument && strcmp(argv[argument], "--drivers/mysql") == 0) {
     ++argument;
   }
   if (argc > argument + 1) {
-    fprintf(stderr, "usage: sqlparser_example [--mysql|--sqlite] [SQL]\n");
+    fprintf(stderr, "usage: sqlparser_example [--drivers/mysql|--sqlite] [SQL]\n");
     return EXIT_FAILURE;
   }
   const char *sql = argc > argument ? argv[argument] :
@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "SQL error at byte %zu: %s\n", error.offset, error.message);
     return EXIT_FAILURE;
   }
-  printf("dialect=%s statements=%zu\n", dialect == SQLPARSER_SQLITE ? "sqlite" : "mysql",
+  printf("dialect=%s statements=%zu\n", dialect == SQLPARSER_SQLITE ? "sqlite" : "drivers/mysql",
          sqlparser_statements(document).count);
   for (sqlparser_id id = sqlparser_statements(document).first; id != SQLPARSER_NONE;) {
     const sqlparser_node *node = sqlparser_get_node(document, id);

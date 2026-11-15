@@ -95,7 +95,7 @@ int main(void) {
   status = mysql_session_connect_and_ping(&config, &error);
   if (status != MYSQL_SESSION_OK) {
     fprintf(stderr,
-            "mysql ping failed status=%d stage=%s cnet=%d native=%d "
+            "drivers/mysql ping failed status=%d stage=%s cnet=%d native=%d "
             "server=%u sqlstate=%s message=%s\n",
             (int)status, error.stage, error.cnet_status,
             error.cnet_native_status, (unsigned int)error.server_error,
@@ -112,7 +112,7 @@ int main(void) {
         &config, sql, sizeof(sql) - 1u, &probe, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql COM_QUERY text probe failed status=%d stage=%s cnet=%d "
+              "drivers/mysql COM_QUERY text probe failed status=%d stage=%s cnet=%d "
               "native=%d server=%u sqlstate=%s message=%s\n",
               (int)status, error.stage, error.cnet_status,
               error.cnet_native_status, (unsigned int)error.server_error,
@@ -148,7 +148,7 @@ int main(void) {
     status = mysql_session_prepared_probe(&config, &probe, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql prepared probe failed status=%d stage=%s cnet=%d native=%d "
+              "drivers/mysql prepared probe failed status=%d stage=%s cnet=%d native=%d "
               "server=%u sqlstate=%s message=%s\n",
               (int)status, error.stage, error.cnet_status,
               error.cnet_native_status, (unsigned int)error.server_error,
@@ -207,7 +207,7 @@ int main(void) {
         &source, &columns, &column_count, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql cursor source failed status=%d stage=%s cnet=%d native=%d "
+              "drivers/mysql cursor source failed status=%d stage=%s cnet=%d native=%d "
               "server=%u sqlstate=%s message=%s\n",
               (int)status, error.stage, error.cnet_status,
               error.cnet_native_status, (unsigned int)error.server_error,
@@ -224,7 +224,7 @@ int main(void) {
     if (mysql_cursor_start(
             &cursor, &source, columns, column_count,
             &cursor_config, &cursor_error) != ORM_STATUS_OK) {
-      fprintf(stderr, "mysql cursor start failed status=%d message=%s\n",
+      fprintf(stderr, "drivers/mysql cursor start failed status=%d message=%s\n",
               (int)cursor_error.status, cursor_error.message);
       if (source.ops != NULL && source.context != NULL)
         source.ops->destroy(source.context);
@@ -297,7 +297,7 @@ int main(void) {
         &command_result, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql prepared command failed status=%d stage=%s cnet=%d native=%d "
+              "drivers/mysql prepared command failed status=%d stage=%s cnet=%d native=%d "
               "server=%u sqlstate=%s message=%s\n",
               (int)status, error.stage, error.cnet_status,
               error.cnet_native_status, (unsigned int)error.server_error,
@@ -360,7 +360,7 @@ int main(void) {
         &transaction, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql transaction begin failed status=%d stage=%s cnet=%d native=%d "
+              "drivers/mysql transaction begin failed status=%d stage=%s cnet=%d native=%d "
               "server=%u sqlstate=%s message=%s\n",
               (int)status, error.stage, error.cnet_status,
               error.cnet_native_status, (unsigned int)error.server_error,
@@ -374,7 +374,7 @@ int main(void) {
     if (status != MYSQL_SESSION_OK ||
         command_result.affected_rows != UINT64_C(1)) {
       fprintf(stderr,
-              "mysql transaction update failed status=%d affected=%llu "
+              "drivers/mysql transaction update failed status=%d affected=%llu "
               "stage=%s message=%s\n",
               (int)status,
               (unsigned long long)command_result.affected_rows,
@@ -387,7 +387,7 @@ int main(void) {
         transaction, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql transaction rollback failed status=%d stage=%s message=%s\n",
+              "drivers/mysql transaction rollback failed status=%d stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       mysql_transaction_session_destroy(transaction);
       return 1;
@@ -400,7 +400,7 @@ int main(void) {
         &source, &columns, &column_count, &error);
     if (status != MYSQL_SESSION_OK || column_count != 1u) {
       fprintf(stderr,
-              "mysql rollback verification source failed status=%d columns=%zu "
+              "drivers/mysql rollback verification source failed status=%d columns=%zu "
               "stage=%s message=%s\n",
               (int)status, column_count, error.stage, error.message);
       if (source.ops != NULL && source.context != NULL)
@@ -412,7 +412,7 @@ int main(void) {
             &cursor, &source, columns, column_count,
             &cursor_config, &cursor_error) != ORM_STATUS_OK) {
       fprintf(stderr,
-              "mysql rollback verification cursor failed status=%d message=%s\n",
+              "drivers/mysql rollback verification cursor failed status=%d message=%s\n",
               (int)cursor_error.status, cursor_error.message);
       if (source.ops != NULL && source.context != NULL)
         source.ops->destroy(source.context);
@@ -435,7 +435,7 @@ int main(void) {
     step = cursor.ops->next(cursor.context, &reader);
     if (step.kind != ORM_ROW_CURSOR_DONE) {
       fprintf(stderr,
-              "mysql rollback verification expected DONE got=%d status=%d\n",
+              "drivers/mysql rollback verification expected DONE got=%d status=%d\n",
               (int)step.kind, (int)step.status);
       cursor.ops->destroy(cursor.context);
       return 1;
@@ -488,7 +488,7 @@ int main(void) {
         &transaction, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql savepoint transaction begin failed status=%d stage=%s message=%s\n",
+              "drivers/mysql savepoint transaction begin failed status=%d stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       return 1;
     }
@@ -497,7 +497,7 @@ int main(void) {
         transaction, savepoint_name, sizeof(savepoint_name) - 1u, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql SAVEPOINT failed status=%d stage=%s message=%s\n",
+              "drivers/mysql SAVEPOINT failed status=%d stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       mysql_transaction_session_destroy(transaction);
       return 1;
@@ -509,7 +509,7 @@ int main(void) {
     if (status != MYSQL_SESSION_OK ||
         command_result.affected_rows != UINT64_C(1)) {
       fprintf(stderr,
-              "mysql savepoint update failed status=%d affected=%llu "
+              "drivers/mysql savepoint update failed status=%d affected=%llu "
               "stage=%s message=%s\n",
               (int)status,
               (unsigned long long)command_result.affected_rows,
@@ -522,7 +522,7 @@ int main(void) {
         transaction, savepoint_name, sizeof(savepoint_name) - 1u, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql ROLLBACK TO SAVEPOINT failed status=%d stage=%s message=%s\n",
+              "drivers/mysql ROLLBACK TO SAVEPOINT failed status=%d stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       mysql_transaction_session_destroy(transaction);
       return 1;
@@ -532,7 +532,7 @@ int main(void) {
         transaction, savepoint_name, sizeof(savepoint_name) - 1u, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql RELEASE SAVEPOINT failed status=%d stage=%s message=%s\n",
+              "drivers/mysql RELEASE SAVEPOINT failed status=%d stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       mysql_transaction_session_destroy(transaction);
       return 1;
@@ -541,7 +541,7 @@ int main(void) {
     status = mysql_transaction_session_commit(transaction, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql savepoint transaction commit failed status=%d stage=%s message=%s\n",
+              "drivers/mysql savepoint transaction commit failed status=%d stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       mysql_transaction_session_destroy(transaction);
       return 1;
@@ -554,7 +554,7 @@ int main(void) {
         &source, &columns, &column_count, &error);
     if (status != MYSQL_SESSION_OK || column_count != 1u) {
       fprintf(stderr,
-              "mysql savepoint verification source failed status=%d columns=%zu "
+              "drivers/mysql savepoint verification source failed status=%d columns=%zu "
               "stage=%s message=%s\n",
               (int)status, column_count, error.stage, error.message);
       if (source.ops != NULL && source.context != NULL)
@@ -566,7 +566,7 @@ int main(void) {
             &cursor, &source, columns, column_count,
             &cursor_config, &cursor_error) != ORM_STATUS_OK) {
       fprintf(stderr,
-              "mysql savepoint verification cursor failed status=%d message=%s\n",
+              "drivers/mysql savepoint verification cursor failed status=%d message=%s\n",
               (int)cursor_error.status, cursor_error.message);
       if (source.ops != NULL && source.context != NULL)
         source.ops->destroy(source.context);
@@ -590,7 +590,7 @@ int main(void) {
     step = cursor.ops->next(cursor.context, &reader);
     if (step.kind != ORM_ROW_CURSOR_DONE) {
       fprintf(stderr,
-              "mysql savepoint verification expected DONE got=%d status=%d\n",
+              "drivers/mysql savepoint verification expected DONE got=%d status=%d\n",
               (int)step.kind, (int)step.status);
       cursor.ops->destroy(cursor.context);
       return 1;
@@ -615,7 +615,7 @@ int main(void) {
         &transaction, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql disconnect transaction begin failed status=%d "
+              "drivers/mysql disconnect transaction begin failed status=%d "
               "stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       return 1;
@@ -626,7 +626,7 @@ int main(void) {
         NULL, 0u, &command_result, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql wait_timeout setup failed status=%d stage=%s message=%s\n",
+              "drivers/mysql wait_timeout setup failed status=%d stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       mysql_transaction_session_destroy(transaction);
       return 1;
@@ -640,7 +640,7 @@ int main(void) {
     if (status != MYSQL_SESSION_IO &&
         status != MYSQL_SESSION_TIMEOUT) {
       fprintf(stderr,
-              "mysql real disconnect expected IO/TIMEOUT got=%d "
+              "drivers/mysql real disconnect expected IO/TIMEOUT got=%d "
               "affected=%llu stage=%s message=%s\n",
               (int)status,
               (unsigned long long)command_result.affected_rows,
@@ -661,7 +661,7 @@ int main(void) {
         probe.columns[0].size != 1u ||
         probe.columns[0].data[0] != (uint8_t)'0') {
       fprintf(stderr,
-              "mysql disconnect no-replay verification failed status=%d "
+              "drivers/mysql disconnect no-replay verification failed status=%d "
               "rows=%u columns=%u value=%.*s stage=%s message=%s\n",
               (int)status,
               (unsigned int)probe.row_count,
@@ -687,7 +687,7 @@ int main(void) {
         &transaction, &error);
     if (status != MYSQL_SESSION_OK) {
       fprintf(stderr,
-              "mysql commit-unknown transaction begin failed status=%d "
+              "drivers/mysql commit-unknown transaction begin failed status=%d "
               "stage=%s message=%s\n",
               (int)status, error.stage, error.message);
       return 1;
@@ -699,7 +699,7 @@ int main(void) {
     if (status != MYSQL_SESSION_OK ||
         command_result.affected_rows != UINT64_C(1)) {
       fprintf(stderr,
-              "mysql commit-unknown update failed status=%d affected=%llu "
+              "drivers/mysql commit-unknown update failed status=%d affected=%llu "
               "stage=%s message=%s\n",
               (int)status,
               (unsigned long long)command_result.affected_rows,
@@ -715,7 +715,7 @@ int main(void) {
         error.status != MYSQL_SESSION_COMMIT_UNKNOWN ||
         mysql_transaction_session_test_commit_send_count(transaction) != 1u) {
       fprintf(stderr,
-              "mysql lost COMMIT ack classification failed status=%d "
+              "drivers/mysql lost COMMIT ack classification failed status=%d "
               "error_status=%d sends=%u stage=%s message=%s\n",
               (int)status, (int)error.status,
               mysql_transaction_session_test_commit_send_count(transaction),

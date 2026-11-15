@@ -151,13 +151,13 @@ static dbtool_status dbtool_cli_parse(int argc, const char *const *argv,
     return DBTOOL_STATUS_HELP;
   if (argc < 3 || argv == NULL || argv[0] == NULL || argv[1] == NULL ||
       strcmp(argv[1], "--driver") != 0)
-    return dbtool_cli_fail(error, "required option: --driver sqlite|pg|mysql");
+    return dbtool_cli_fail(error, "required option: --driver sqlite|pg|drivers/mysql");
   if (argv[2] == NULL || argv[2][0] == '\0')
     return dbtool_cli_fail(error, "--driver requires one non-empty value");
   if (strcmp(argv[2], "sqlite") == 0) driver = DBTOOL_DRIVER_SQLITE;
   else if (strcmp(argv[2], "pg") == 0) driver = DBTOOL_DRIVER_POSTGRESQL;
-  else if (strcmp(argv[2], "mysql") == 0) driver = DBTOOL_DRIVER_MYSQL;
-  else return dbtool_cli_fail(error, "unknown --driver: expected sqlite, pg or mysql");
+  else if (strcmp(argv[2], "drivers/mysql") == 0) driver = DBTOOL_DRIVER_MYSQL;
+  else return dbtool_cli_fail(error, "unknown --driver: expected sqlite, pg or drivers/mysql");
   if (argc == 4 && argv[3] != NULL && strcmp(argv[3], "--help") == 0)
     return DBTOOL_STATUS_HELP;
   if (argc < 5 || argv[3] == NULL || argv[4] == NULL ||
@@ -285,7 +285,7 @@ const char *dbtool_cli_driver_name(dbtool_driver_kind driver) {
   switch (driver) {
     case DBTOOL_DRIVER_SQLITE: return "sqlite";
     case DBTOOL_DRIVER_POSTGRESQL: return "postgresql";
-    case DBTOOL_DRIVER_MYSQL: return "mysql";
+    case DBTOOL_DRIVER_MYSQL: return "drivers/mysql";
     default: return NULL;
   }
 }
@@ -293,11 +293,11 @@ const char *dbtool_cli_driver_name(dbtool_driver_kind driver) {
 void dbtool_cli_print_help(const char *program) {
   const char *name = program != NULL ? program : "dbtools";
   (void)fprintf(stdout,
-    "Usage: %s --driver <sqlite|pg|mysql> schema apply --file <sql>\n"
+    "Usage: %s --driver <sqlite|pg|drivers/mysql> schema apply --file <sql>\n"
     "  Common: [--plugin <absolute-path>] [--max-script-bytes <n>]\n"
     "  sqlite: --database <path> [--busy-timeout-ms <n>]\n"
     "  pg:     [--conninfo-env <name>]\n"
-    "  mysql:  --conninfo-env <name>\n"
+    "  drivers/mysql:  --conninfo-env <name>\n"
     "Plugin: --plugin or TURBODB_SQLITE_PLUGIN / TURBODB_POSTGRESQL_PLUGIN /\n"
     "        TURBODB_MYSQL_PLUGIN is required for the selected driver.\n"
     "MySQL connection: JSON with host, username, password, database, ca_file,\n"

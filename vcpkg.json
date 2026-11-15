@@ -1,16 +1,7 @@
 {
   "name": "turbodb",
-  "version-semver": "0.1.0",
+  "version-semver": "0.1.1",
   "dependencies": [
-    {
-      "name": "pkgconf",
-      "host": true
-    },
-    "gmssl",
-    "libjpeg-turbo",
-    "libyuv",
-    "lua",
-    "quickjs-ng",
     "sqlite3",
     {
       "name": "libpq",
@@ -19,6 +10,7 @@
         "zstd"
       ]
     },
+    "gmssl",
     {
       "name": "scintilla",
       "platform": "windows"

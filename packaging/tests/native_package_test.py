@@ -64,9 +64,9 @@ class NativePackageTest(unittest.TestCase):
             "lib/cmake/TurboDB/TurboDBTargets.cmake",
             "include/shared/orm/orm_runtime.h",
             "include/shared/orm/orm_flow.hpp",
-            "include/mysql/session_async.h",
-            "include/mysql/session_script.h",
-            "include/redis/redis_io.h",
+            "include/drivers/mysql/session_async.h",
+            "include/drivers/mysql/session_script.h",
+            "include/drivers/redis/redis_io.h",
         )
         for rid in ("linux-x64", "linux-arm64", "macos-arm64", "windows-x64", "android-arm64-v8a"):
             windows = rid == "windows-x64"

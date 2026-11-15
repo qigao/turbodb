@@ -20,7 +20,7 @@ spec("MySQL schema plugin against a TLS test server") {
     const char *conninfo = getenv("TURBODB_DBTOOLS_MYSQL_TEST_CONNINFO");
     check_not_null(conninfo);
     check_not_null(path);
-    check_equal(dbtool_plugin_load(&plugin, path, "mysql", &error), DBTOOL_STATUS_OK);
+    check_equal(dbtool_plugin_load(&plugin, path, "drivers/mysql", &error), DBTOOL_STATUS_OK);
     const dbtool_connection_config config = {NULL, conninfo, 0u};
     check_equal(plugin.ops->open(&context, &config, &error), DBTOOL_STATUS_OK);
   }

@@ -8,8 +8,10 @@ TurboDB public APIs and runtime drivers.
 ## Dependency boundary
 
 Studio uses [qigao/OpenWTL](https://github.com/qigao/OpenWTL) 0.1.2 through
-`OpenWTL::WTL`. Its source submodule is pinned to
-`311b2dc361eea42cf6c821289133a99713298a74`. The target supplies both the
+`OpenWTL::WTL`. CMake fetches the official v0.1.2 source ZIP, corresponding to
+`311b2dc361eea42cf6c821289133a99713298a74`, with SHA-256
+`9fbe6cc68d23ee37bbd4ae4e2a54f64b4d428f2837f0d557687d9551fde485bd`.
+The target supplies both the
 repository-owned ATL implementation and WTL 10.0.10320, plus their Windows
 UI/COM dependencies. The application keeps ownership of COM initialization.
 Microsoft ATL and the separate vcpkg `wtl` port are not required.
@@ -19,17 +21,17 @@ lexing. These UI dependencies remain private to Studio and its window tests.
 
 ## Build
 
-Initialize the pinned source dependency, restore the SDKs as described in the
+Restore the SDKs as described in the
 [root build instructions](../README.md#build), and use the MSVC user preset:
 
 ~~~powershell
-git submodule update --init external/OpenWTL
-./cmake/WithVs.cmd cmake --preset msvc-release-user
+./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64 -Local
+./cmake/WithVs.cmd cmake --fresh --preset msvc-release-user
 ./cmake/WithVs.cmd cmake --build --preset msvc-release-user
 ./cmake/WithVs.cmd ctest --preset msvc-release-user -R ^turbodb-app-
 ~~~
 
-CI checks out the pinned submodule before configuring the complete graph.
+CI verifies the pinned source archive while configuring the complete graph.
 OpenWTL implements a documented ATL compatibility subset; Studio's existing
 window, dialog, query, and startup tests validate the APIs used here. Upstream
 sources and notices remain unchanged. See the root third-party notices for
@@ -37,8 +39,9 @@ Apache-2.0, MIT, and MS-PL attribution.
 
 Use the same selected Visual Studio developer environment for CMake and the
 editor. `VSDEVCMD_BAT` selects that environment; `msvc-release-user` supplies
-the remaining build settings. OpenWTL headers come from the initialized
-submodule and are independent of which Visual Studio instance has ATL.
+the remaining build settings. OpenWTL headers come from the verified archive
+under `build/<preset>/_deps/openwtl-src` and are independent of which Visual
+Studio instance has ATL. A missing archive or a digest mismatch fails configuration.
 
 The first slice provides the frame and pane ownership boundaries only:
 
@@ -154,7 +157,7 @@ Salts Plugin retain all module admission and connection lifecycle decisions.
 
 | Key | Meaning |
 | --- | --- |
-| `driver` | Required: `sqlite`, `postgresql`, or `mysql`. |
+| `driver` | Required: `sqlite`, `postgresql`, or `drivers/mysql`. |
 | `module_path` | Required: the matching driver DLL. |
 | `database` | Required: SQLite file path or `:memory:`; network database name. |
 | `display_name` | Optional; defaults to the profile's `NAME`. |
@@ -365,4 +368,4 @@ and Lexilla styles. Built-in forms follow the database documentation:
 [SQLite scalar functions](https://www.sqlite.org/lang_corefunc.html),
 [SQLite aggregates](https://www.sqlite.org/lang_aggfunc.html),
 [PostgreSQL string functions](https://www.postgresql.org/docs/current/functions-string.html),
-and [MySQL string functions](https://dev.mysql.com/doc/refman/8.4/en/string-functions.html).
+and [MySQL string functions](https://dev.drivers/mysql.com/doc/refman/8.4/en/string-functions.html).

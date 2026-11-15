@@ -882,7 +882,7 @@ orm_status_t ORM_C_CALL orm_query_explain(
   if (status == ORM_STATUS_OK) {
     if (strcmp(connection->driver_id, "sqlite") == 0)
       status = explain_load_sqlite(connection, sql, plan, error);
-    else if (strcmp(connection->driver_id, "mysql") == 0)
+    else if (strcmp(connection->driver_id, "drivers/mysql") == 0)
       status = explain_load_mysql(connection, sql, plan, error);
     else if (strcmp(connection->driver_id, "postgresql") == 0)
       status = explain_load_postgresql(connection, sql, plan, error);

@@ -111,7 +111,7 @@ spec("MySQL command response chains with the real TidesSQL SDK") {
   before_each() {
     database=NULL; first=second=NULL; dispatch=(tdsql_mysql_dispatch){0}; turbodb_error_init(&error);
     bounds=tdsql_mysql_registry_config_default();
-    directory=tt_make_temp_dir("tidessql-mysql-dispatch"); check_not_null(directory);
+    directory=tt_make_temp_dir("tidessql-drivers/mysql-dispatch"); check_not_null(directory);
     const turbodb_option_t options[]={
       {turbodb_view("path"),turbodb_view(directory)},
       {turbodb_view("column_family"),turbodb_view("dispatch")},

@@ -91,16 +91,16 @@ table, including a nullable `open_async_cursor` callback.
 | `src/sql` | Database-independent SQL rendering |
 | `drivers/<database>` | One native backend and its plugin CMake target |
 | `drivers/tests` | Driver contracts, plugin fixtures and per-database tests |
-| `../mysql` | Standalone `TurboDB::MySQL` client library |
+| `../drivers/mysql` | Standalone `TurboDB::MySQL` client library |
 | `driver-sdk` | The source-tree `Orm::DriverABI` target |
 
 Each implementation directory declares its own sources in `CMakeLists.txt`.
 `orm/CMakeLists.txt` builds the generic core, C++ facade and driver ABI, then
-registers the ORM tests and concrete adapters under `orm/drivers/`.
-The `orm/drivers/` dispatcher builds SQLite, PostgreSQL and MySQL
-from their own directories, followed by driver tests in `orm/drivers/tests/`.
-Native MySQL code belongs to the root `mysql/` library; its ORM adapter is in
-`orm/drivers/mysql/`. The shared schema ABI remains under `drivers/schema/`
+registers the ORM tests and concrete adapters under `orm/backends/`.
+The `orm/backends/` dispatcher builds SQLite, PostgreSQL and MySQL
+from their own directories, followed by driver tests in `orm/backends/tests/`.
+Native MySQL code belongs to the root `drivers/mysql/` library; its ORM adapter is in
+`orm/backends/drivers/mysql/`. The shared schema ABI remains under `drivers/schema/`
 because independent database tools also consume it.
 The shared core owns no native database dependency; each plugin owns its
 native SDK links and install rule.
@@ -159,7 +159,7 @@ component：`OrmSqliteDriver`、`OrmPostgresqlDriver`、`OrmMysqlDriver`。
 这些 component 只选择插件产物，
 不会自动打包 ORM、Salts 或数据库原生运行库。
 
-本次目录调整将具体 ORM 驱动和驱动测试归入 `orm/drivers/`，公共契约与通用
+本次目录调整将具体 ORM 驱动和驱动测试归入 `orm/backends/`，公共契约与通用
 适配代码仍由 ORM 核心维护。根目录 `drivers/` 只保留 dbtools 也使用的共享
 schema 能力；拆成独立仓库或新公共库会引入当前不需要的版本与发布边界。
 所有源码、fixture 和 CMake 引用一起迁移；回滚时也应一起恢复旧路径。
@@ -372,12 +372,12 @@ unchanged. Storage, WAL fault and concurrency tests live in
 restore the plugin, header and test registrations together from the preceding
 revision and enable TidesSQL.
 
-The root `mysql/` directory provides the standalone `TurboDB::MySQL` static
-client and installed headers, without ORM dependencies. `orm/drivers/mysql/`
+The root `drivers/mysql/` directory provides the standalone `TurboDB::MySQL` static
+client and installed headers, without ORM dependencies. `orm/backends/drivers/mysql/`
 owns the `orm_mysql_driver` MODULE and links that client; its output remains
 `turbodb_driver_mysql`. Both are built when `TURBODB_BUILD_ORM` is enabled.
-Native API tests live in `mysql/tests/`; ORM contract and integration tests
-remain under `orm/tests/`. See [MySQL client boundaries](../mysql/readme.md).
+Native API tests live in `drivers/mysql/tests/`; ORM contract and integration tests
+remain under `orm/tests/`. See [MySQL client boundaries](../drivers/mysql/readme.md).
 
 ```sh
 cmake --preset win-dev-user
@@ -388,12 +388,12 @@ ctest --preset win-dev-user --output-on-failure
 `BUILD_TESTS` controls unit tests and local contract/integration checks.
 `orm/tests/CMakeLists.txt` dispatches to `abi/`, `flow/`,
 `integration/`, and `ownership/`, each with its own `CMakeLists.txt`.
-`orm/drivers/tests/CMakeLists.txt` owns driver tests grouped into `mysql/`, `postgresql/`, `sqlite/`,
+`orm/backends/tests/CMakeLists.txt` owns driver tests grouped into `drivers/mysql/`, `postgresql/`, `sqlite/`,
 and `cross_driver/`, each with its own `CMakeLists.txt`.
-Generic driver and runtime tests live directly under `orm/drivers/tests/`.
+Generic driver and runtime tests live directly under `orm/backends/tests/`.
 Database-specific flow and ABI tests also have their own subdirectories.
 Integration tests live in `integration/sqlite/` and, when `tidessqld` is built,
-`integration/mysql/`. Each directory declares its target sources and test
+`integration/drivers/mysql/`. Each directory declares its target sources and test
 properties directly; parent files only select and add the relevant directories.
 Shared test headers are provided by the `support/` interface target.
 `BUILD_E2E_TESTS` independently controls tests against external databases and

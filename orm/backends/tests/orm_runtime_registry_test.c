@@ -1,0 +1,556 @@
+#include <orm_runtime.h>
+
+#include <tinytest.h>
+
+#include <stdlib.h>
+#include <string.h>
+
+static const char *fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static const char *no_entry_fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_NO_QUERY_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static const char *bad_abi_fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_BAD_ABI_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static const char *bad_contract_fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_BAD_CONTRACT_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static const char *bad_shape_fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_BAD_SHAPE_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static const char *bad_storage_fixture_path(void) {
+  const char *path = getenv("ORM_PLUGIN_BAD_STORAGE_FIXTURE");
+  return path == NULL ? "" : path;
+}
+
+static orm_driver_load_config_t load_config_path(const char *id,
+                                                 const char *path) {
+  orm_driver_load_config_t config;
+  memset(&config, 0, sizeof(config));
+  config.struct_size = (uint32_t)sizeof(config);
+  config.abi_version = ORM_RUNTIME_ABI_VERSION;
+  config.module_path = orm_view(path);
+  config.expected_driver_id = orm_view(id);
+  return config;
+}
+
+static orm_driver_load_config_t load_config(const char *id) {
+  return load_config_path(id, fixture_path());
+}
+
+spec("runtime driver registry") {
+  it("accepts namespaced driver IDs and rejects malformed namespace components") {
+    static const char *const valid_ids[] = {"fixture", "drivers/mysql", "a/b-2_c"};
+    static const char *const invalid_ids[] = {
+        "", "/mysql", "drivers/", "drivers//mysql", "drivers/../mysql",
+        "drivers/1mysql", "drivers\\mysql", "Drivers/mysql"};
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_driver_info_t info;
+    orm_error_t error;
+    orm_runtime_config_init(&config);
+    orm_error_init(&error);
+    check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
+    for (size_t i = 0; i < sizeof(valid_ids) / sizeof(valid_ids[0]); ++i) {
+      check_equal(orm_runtime_driver_info(runtime, orm_view(valid_ids[i]), &info, &error),
+                  ORM_STATUS_DRIVER_NOT_REGISTERED);
+    }
+    for (size_t i = 0; i < sizeof(invalid_ids) / sizeof(invalid_ids[0]); ++i) {
+      check_equal(orm_runtime_driver_info(runtime, orm_view(invalid_ids[i]), &info, &error),
+                  ORM_STATUS_INVALID_ARGUMENT);
+    }
+    const char embedded_nul[] = "drivers/mysql\0hidden";
+    check_equal(orm_runtime_driver_info(runtime,
+                    (orm_string_view_t){embedded_nul, sizeof(embedded_nul) - 1u},
+                    &info, &error), ORM_STATUS_INVALID_ARGUMENT);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("loads validates initializes and publishes one explicit module atomically") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_info_t info;
+    orm_driver_storage_capabilities_v1 storage;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&config);
+    orm_error_init(&error);
+    check_equal(config.execution.execution_model,
+                ORM_DRIVER_EXEC_CALLER_BLOCKING);
+    check_equal(orm_runtime_create(&config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_not_null(runtime);
+
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    memset(&info, 0xa5, sizeof(info));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("fixture"),
+                                        &info, &error),
+                ORM_STATUS_OK);
+    check_equal(info.canonical_id_size, 7u);
+    check_equal(memcmp(info.canonical_id, "fixture", 7u), 0);
+    check_equal(info.execution_models, ORM_DRIVER_EXEC_CALLER_BLOCKING);
+
+    memset(&storage, 0xa5, sizeof(storage));
+    check_equal(orm_runtime_driver_storage_info(
+                    runtime, orm_view("fixture"), &storage, &error),
+                ORM_STATUS_OK);
+    check_true(orm_driver_storage_capabilities_valid(&storage));
+    check_equal(storage.capabilities, UINT64_C(0));
+
+    memset(&info, 0, sizeof(info));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("fixture-alias"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+    memset(&storage, 0, sizeof(storage));
+    check_equal(orm_runtime_driver_storage_info(
+                    runtime, orm_view("fixture-alias"), &storage, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("rejects an ID mismatch without publishing a partial registration") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_info_t info;
+    orm_driver_load_config_t wrong = load_config("other");
+    orm_driver_load_config_t right = load_config("fixture");
+
+    orm_runtime_config_init(&config);
+    check_equal(orm_runtime_create(&config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &wrong, &error),
+                ORM_STATUS_DRIVER_ID_MISMATCH);
+    check_equal(orm_runtime_driver_info(runtime, orm_view("fixture"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+    check_equal(orm_runtime_load_driver(runtime, &right, &error),
+                ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("distinguishes entry Plugin ABI contract version and CMeta shape failures") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_info_t info;
+    orm_driver_load_config_t good = load_config("fixture");
+    orm_driver_load_config_t no_entry =
+        load_config_path("noentry", no_entry_fixture_path());
+    orm_driver_load_config_t bad_abi =
+        load_config_path("badabi", bad_abi_fixture_path());
+    orm_driver_load_config_t bad_contract =
+        load_config_path("badcontract", bad_contract_fixture_path());
+    orm_driver_load_config_t bad_shape =
+        load_config_path("badshape", bad_shape_fixture_path());
+    orm_driver_load_config_t bad_storage =
+        load_config_path("badstorage", bad_storage_fixture_path());
+
+    orm_runtime_config_init(&config);
+    check_true(no_entry.module_path.len != 0u);
+    check_true(bad_abi.module_path.len != 0u);
+    check_true(bad_contract.module_path.len != 0u);
+    check_true(bad_shape.module_path.len != 0u);
+    check_true(bad_storage.module_path.len != 0u);
+    check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &good, &error), ORM_STATUS_OK);
+
+    check_equal(orm_runtime_load_driver(runtime, &no_entry, &error),
+                ORM_STATUS_DRIVER_ENTRY_MISSING);
+    check_equal(orm_runtime_driver_info(runtime, orm_view("noentry"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_load_driver(runtime, &bad_abi, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    check_not_null(strstr(error.message, "Plugin ABI mismatch"));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("badabi"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_load_driver(runtime, &bad_contract, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    check_not_null(strstr(error.message, "contract version mismatch"));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("badcontract"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_load_driver(runtime, &bad_shape, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    check_not_null(strstr(error.message, "CMeta Interface shape mismatch"));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("badshape"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_load_driver(runtime, &bad_storage, &error),
+                ORM_STATUS_ABI_MISMATCH);
+    check_not_null(strstr(error.message,
+                          "storage capability descriptor is invalid"));
+    check_equal(orm_runtime_driver_info(runtime, orm_view("badstorage"),
+                                        &info, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+
+    check_equal(orm_runtime_driver_info(runtime, orm_view("fixture"),
+                                        &info, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("rejects duplicate canonical registration without replacing the first") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_info_t info;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&config);
+    check_equal(orm_runtime_create(&config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_DRIVER_ALREADY_REGISTERED);
+    check_equal(orm_runtime_driver_info(runtime, orm_view("fixture"),
+                                        &info, &error),
+                ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("rejects a repeated explicit module path before reopening it") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_load_config_t first = load_config("fixture");
+    orm_driver_load_config_t second = load_config("other");
+
+    orm_runtime_config_init(&config);
+    check_equal(orm_runtime_create(&config, &runtime, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &second, &error),
+                ORM_STATUS_DRIVER_ALREADY_REGISTERED);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("enforces the configured bounded driver registry") {
+    orm_runtime_config_t config;
+    orm_runtime_t *runtime = NULL;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&config);
+    config.max_drivers = 1u;
+    check_equal(orm_runtime_create(&config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_LIMIT_EXCEEDED);
+    orm_runtime_release(runtime);
+  }
+
+  it("holds the runtime open while a driver connection exists") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_not_null(connection);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+    orm_disconnect(connection);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps the module leased through a standalone query handle") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_create(connection, orm_view("rows"),
+                                 &query, &error),
+                ORM_STATUS_OK);
+
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    orm_query_destroy(query);
+    query = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps the module leased through a standalone transaction handle") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_transaction_t *transaction = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_transaction_begin(connection, ORM_ISOLATION_SERIALIZABLE,
+                                      &transaction, &error),
+                ORM_STATUS_OK);
+
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    check_equal(orm_transaction_rollback(transaction, &error), ORM_STATUS_OK);
+    orm_transaction_destroy(transaction);
+    transaction = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("does not publish a module lease when connect fails") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = (orm_connection_t *)(uintptr_t)1u;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("missing");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_DRIVER_NOT_REGISTERED);
+    check_null(connection);
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps the module leased through row Publisher cursor cleanup") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_config_t connection_config;
+    orm_flow_config_t flow_config;
+    cflow_publisher rows = {0};
+    orm_error_t error;
+    int value = 0;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    orm_flow_config(&flow_config, &cmeta_data_int);
+
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_create(connection, orm_view("rows"),
+                                 &query, &error),
+                ORM_STATUS_OK);
+    cflow_scheduler scheduler = {0};
+    check_true(cflow_scheduler_test_init(&scheduler));
+    const orm_async_config_t async = {sizeof(async), &scheduler, 1u, 10u};
+    check_equal(orm_query_open_async_flow(query, &flow_config, &async, &rows, &error),
+                ORM_STATUS_UNSUPPORTED);
+    check_false(cflow_publisher_valid(&rows));
+    cflow_scheduler_destroy(&scheduler);
+    check_equal(orm_query_open_flow(query, &flow_config, &rows, &error),
+                ORM_STATUS_OK);
+
+    orm_query_destroy(query);
+    query = NULL;
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    const cflow_step step = cflow_publisher_resume(&rows, NULL, &value);
+    check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(value, 7);
+    cflow_publisher_destroy(&rows);
+
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps the module leased through a lazy driver command Publisher") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_query_t *query = NULL;
+    orm_config_t connection_config;
+    cflow_publisher command = {0};
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_insert(connection, orm_view("rows"), &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow(query, &command, &error),
+                ORM_STATUS_OK);
+
+    orm_query_destroy(query);
+    query = NULL;
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    const cflow_step step =
+        cflow_publisher_resume(&command, NULL, &result);
+    check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(result.affected_rows, UINT64_C(3));
+    cflow_publisher_destroy(&command);
+
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps the module leased through a Driver transaction Publisher") {
+    orm_runtime_config_t runtime_config;
+    orm_runtime_t *runtime = NULL;
+    orm_connection_t *connection = NULL;
+    orm_transaction_t *transaction = NULL;
+    orm_query_t *query = NULL;
+    orm_config_t connection_config;
+    cflow_publisher command = {0};
+    orm_command_result_t result = ORM_COMMAND_RESULT_INIT;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&runtime_config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&runtime_config, &runtime, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(runtime, &load, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(runtime, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_transaction_begin(connection, ORM_ISOLATION_SERIALIZABLE,
+                                      &transaction, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_insert(connection, orm_view("rows"), &query, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_query_open_command_flow_in_transaction(
+                    query, transaction, &command, &error),
+                ORM_STATUS_OK);
+
+    orm_query_destroy(query);
+    query = NULL;
+    orm_disconnect(connection);
+    connection = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_BUSY);
+
+    const cflow_step step =
+        cflow_publisher_resume(&command, NULL, &result);
+    check_equal(step.kind, CFLOW_STEP_VALUE_AND_DONE);
+    check_equal(result.affected_rows, UINT64_C(3));
+    cflow_publisher_destroy(&command);
+
+    check_equal(orm_transaction_commit(transaction, &error), ORM_STATUS_OK);
+    orm_transaction_destroy(transaction);
+    transaction = NULL;
+    check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
+    orm_runtime_release(runtime);
+  }
+
+  it("keeps two runtimes using the same module independent") {
+    orm_runtime_config_t config;
+    orm_runtime_t *first = NULL;
+    orm_runtime_t *second = NULL;
+    orm_connection_t *connection = NULL;
+    orm_config_t connection_config;
+    orm_error_t error;
+    orm_driver_load_config_t load = load_config("fixture");
+
+    orm_runtime_config_init(&config);
+    orm_config(&connection_config);
+    connection_config.driver = orm_view("fixture");
+    check_equal(orm_runtime_create(&config, &first, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_create(&config, &second, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(first, &load, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_load_driver(second, &load, &error), ORM_STATUS_OK);
+    check_equal(orm_runtime_connect(first, &connection_config,
+                                    &connection, &error),
+                ORM_STATUS_OK);
+    check_equal(orm_runtime_close(first, &error), ORM_STATUS_BUSY);
+    check_equal(orm_runtime_close(second, &error), ORM_STATUS_OK);
+    orm_runtime_release(second);
+    orm_disconnect(connection);
+    check_equal(orm_runtime_close(first, &error), ORM_STATUS_OK);
+    orm_runtime_release(first);
+  }
+}

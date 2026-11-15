@@ -4,13 +4,12 @@ on:
   pull_request:
     paths:
       - 'app/**'
-      - 'external/OpenWTL'
-      - '.gitmodules'
       - 'CMakeLists.txt'
       - 'CMakeOptions.cmake'
       - 'CMakeUserPresets.json'
       - 'presets/**'
       - 'cmake/ci/restore-native-sdks.*'
+      - 'cmake/dependencies/**'
       - 'vcpkg.json'
       - 'vcpkg-configuration.json'
       - '.github/workflows/studio-llvm-mingw.yml'
@@ -29,7 +28,7 @@ env:
   SALTS_BASE_VERSION: ${{ vars.SALTS_BASE_VERSION }}
   CMETA_VERSION: ${{ vars.CMETA_VERSION }}
   SALTS_UTILS_VERSION: ${{ vars.SALTS_UTILS_VERSION }}
-  SALTS_CORE_VERSION: ${{ vars.SALTS_CORE_VERSION }}
+  SALTS_CNET_VERSION: ${{ vars.SALTS_CNET_VERSION }}
   GITHUB_TOKEN: ${{ github.token }}
   GH_TOKEN: ${{ github.token }}
   LLVM_MINGW_TARGET: x86_64-w64-mingw32
@@ -43,7 +42,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          submodules: true
       - uses: ./.github/actions/setup-native
         with:
           platform: windows-x64

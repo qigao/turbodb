@@ -6,50 +6,57 @@
       "hidden": true,
       "cacheVariables": {
         "BUILD_TESTS": "OFF",
-        "ENABLE_SANITIZER_ADDRESS": "OFF",
-        "ENABLE_SANITIZER_UNDEFINED": "OFF",
-        "ENABLE_SANITIZER_THREAD": "OFF",
-        "BUILD_EXAMPLE": "OFF"
+        "ENABLE_ASAN": "OFF",
+        "ENABLE_UBSAN": "OFF",
+        "ENABLE_TSAN": "OFF"
       }
     },
     {
       "name": "developer-mode",
       "hidden": true,
-      "inherits": "default-options",
-      "environment": {
-        "VCPKG_CONFIGURATION_SUBDIR": "debug/"
-      },
+      "inherits": [
+        "default-options"
+      ],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "BUILD_TESTS": "ON"
+      },
+      "environment": {
+        "VCPKG_CONFIGURATION_SUBDIR": "debug/"
       }
     },
     {
       "name": "release-mode",
       "hidden": true,
-      "inherits": "default-options",
-      "environment": {
-        "VCPKG_CONFIGURATION_SUBDIR": ""
-      },
+      "inherits": [
+        "default-options"
+      ],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      },
+      "environment": {
+        "VCPKG_CONFIGURATION_SUBDIR": ""
       }
     },
     {
       "name": "asan-ubsan-mode",
       "hidden": true,
-      "inherits": "developer-mode",
+      "inherits": [
+        "developer-mode"
+      ],
       "cacheVariables": {
-        "ENABLE_SANITIZER_ADDRESS": "ON",
-        "ENABLE_SANITIZER_UNDEFINED": "ON"
+        "ENABLE_ASAN": "ON",
+        "ENABLE_UBSAN": "ON"
       }
     },
     {
       "name": "tsan-mode",
       "hidden": true,
-      "inherits": "developer-mode",
+      "inherits": [
+        "developer-mode"
+      ],
       "cacheVariables": {
-        "ENABLE_SANITIZER_THREAD": "ON"
+        "ENABLE_TSAN": "ON"
       }
     }
   ]

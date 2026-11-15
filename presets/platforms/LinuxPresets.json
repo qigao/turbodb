@@ -12,7 +12,10 @@
         "base",
         "toolkit-gcc",
         "flags-gnu"
-      ]
+      ],
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
     },
     {
       "name": "linux-gcc-arm64",
@@ -20,7 +23,10 @@
       "inherits": [
         "flags-gnu-arm64",
         "linux-gcc"
-      ]
+      ],
+      "environment": {
+        "VCPKG_TARGET_TRIPLET": "arm64-linux"
+      }
     },
     {
       "name": "linux-llvm-native",

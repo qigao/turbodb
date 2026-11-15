@@ -32,13 +32,13 @@ spec("Studio connection configuration") {
         "[studio]\ndefault_connection=second\n"
         "[connection.first]\ndriver=sqlite\nmodule_path=first.dll\ndatabase=:memory:\n"
         "[connection.second]\ndriver=sqlite\nmodule_path=absent.dll\ndatabase=:memory:\n"
-        "[connection.network]\ndriver=mysql\nmodule_path=mysql.dll\ndatabase=db\nuser=reader\n"
+        "[connection.network]\ndriver=drivers/mysql\nmodule_path=drivers/mysql.dll\ndatabase=db\nuser=reader\n"
         "ca_certificate=ca.pem\ntls_server_name=db.example\n";
     ConnectionConfig config;
     std::wstring error;
     check_true(ParseConnectionConfig(vstr_from_cstr(text), kConfigPath, &config, &error));
     check_true(DriverModulePath(config, SqlProvider::sqlite) == L"C:\\settings\\absent.dll");
-    check_true(DriverModulePath(config, SqlProvider::mysql) == L"C:\\settings\\mysql.dll");
+    check_true(DriverModulePath(config, SqlProvider::mysql) == L"C:\\settings\\drivers\\mysql.dll");
     config.default_profile = 2;
     check_true(DriverModulePath(config, SqlProvider::sqlite) == L"C:\\settings\\first.dll");
   }
@@ -83,8 +83,8 @@ spec("Studio connection configuration") {
         "[connection.local]\ndriver=sqlite\nmodule_path=x.dll\ndatabase=x\npassword=secret-value\n",
         "[connection.local]\ndriver=sqlite\nmodule_path=C:x.dll\ndatabase=x\n",
         "[connection.local]\ndriver=sqlite\nmodule_path=/x.dll\ndatabase=x\n",
-        "[connection.local]\ndriver=mysql\nmodule_path=x.dll\ndatabase=x\nuser=u\n",
-        "[connection.local]\ndriver=mysql\nmodule_path=x.dll\ndatabase=x\nuser=u\n"
+        "[connection.local]\ndriver=drivers/mysql\nmodule_path=x.dll\ndatabase=x\nuser=u\n",
+        "[connection.local]\ndriver=drivers/mysql\nmodule_path=x.dll\ndatabase=x\nuser=u\n"
         "ca_certificate=ca.pem\ntls_server_name=db\nport=65536\n",
         "[studio]\ndefault_connection=missing\n[connection.local]\ndriver=sqlite\nmodule_path=x.dll\ndatabase=x\n",
         "[connection.local]\ndriver=sqlite\nmodule_path=x.dll\ndatabase=x\nunknown=value\n",

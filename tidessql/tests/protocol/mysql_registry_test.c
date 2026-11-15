@@ -24,7 +24,7 @@ static turbodb_status_t probe_close(tdsql_statement *s,turbodb_error_t *e) {
 #define vec_reserve probe_reserve
 #define vec_resize probe_resize
 #define tdsql_statement_close probe_close
-#include "../../server/mysql/registry.c"
+#include "../../server/drivers/mysql/registry.c"
 #undef tdsql_statement_close
 #undef vec_resize
 #undef vec_reserve
@@ -87,7 +87,7 @@ spec("MySQL connection statement registry with real TidesSQL") {
     configuration=tdsql_mysql_registry_config_default(); configuration.max_statements=TEST_STATEMENTS;
     response=tdsql_response_default(); prepared=(mysql_stmt_prepare_ok_t){.statement_id=TEST_SENTINEL}; turbodb_error_init(&error);
     vector_steps=fail_vector_step=close_calls=0; fail_close=false;
-    directory=tt_make_temp_dir("tidessql-mysql-registry"); check_not_null(directory);
+    directory=tt_make_temp_dir("tidessql-drivers/mysql-registry"); check_not_null(directory);
     const turbodb_option_t options[]={
       {turbodb_view("path"),turbodb_view(directory)},
       {turbodb_view("column_family"),turbodb_view("registry")},

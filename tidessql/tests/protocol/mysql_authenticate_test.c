@@ -34,7 +34,7 @@ static turbodb_status_t probe_close(tdsql_connection *connection,turbodb_error_t
 #define tdsql_database_connect probe_connect
 #define tdsql_connection_state probe_state
 #define tdsql_connection_close probe_close
-#include "../../server/mysql/authenticate.c"
+#include "../../server/drivers/mysql/authenticate.c"
 #undef tdsql_mysql_password_verify
 #undef tdsql_database_connect
 #undef tdsql_connection_state

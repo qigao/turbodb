@@ -2,16 +2,17 @@
 
 ## OpenWTL
 
-Studio 通过 `external/OpenWTL` Git 子模块使用
+Studio 通过固定 SHA-256 的正式发布源码归档使用
 [qigao/OpenWTL 0.1.2](https://github.com/qigao/OpenWTL/releases/tag/v0.1.2)，
 固定提交 `311b2dc361eea42cf6c821289133a99713298a74`，链接公开 target
-`OpenWTL::WTL`。子模块不含本地补丁。
+`OpenWTL::WTL`。归档不含本地补丁，由 `app/CMakeLists.txt` 的 CMake FetchContent
+恢复到 `build/<preset>/_deps/openwtl-src`；URL 和 SHA-256 是唯一事实源。
 
-- 项目代码与构建集成：Apache-2.0，见 `external/OpenWTL/LICENSE`。
-- OpenATL 基础：MIT，见 `external/OpenWTL/third_party_licenses/OPENATL-MIT.txt`。
-- WTL 10.0.10320：MS-PL，见 `external/OpenWTL/wtl/MS-PL.txt`；来源记录见同目录 `SOURCE.md`。
+- 项目代码与构建集成：Apache-2.0，见归档根目录 `LICENSE`。
+- OpenATL 基础：MIT，见归档内 `third_party_licenses/OPENATL-MIT.txt`。
+- WTL 10.0.10320：MS-PL，见归档内 `wtl/MS-PL.txt`；来源记录见同目录 `SOURCE.md`。
 
-上游版权与许可证文件随子模块保留；不再依赖 Microsoft ATL 或独立 vcpkg WTL 包。
+上游版权与许可证文件随源码归档完整保留；不再依赖 Microsoft ATL 或独立 vcpkg WTL 包。
 
 ## GmSSL 密码库
 

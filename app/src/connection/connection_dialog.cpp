@@ -18,7 +18,7 @@ constexpr DWORD kConnectionTimeoutMs = 10000;
 constexpr DWORD kFileDialogPathCharacters = 32768;
 constexpr UINT_PTR kConnectionTimer = 1;
 constexpr UINT kConnectionPollMs = 50;
-constexpr const char* kDriverIds[] = {"sqlite", "postgresql", "mysql"};
+constexpr const char* kDriverIds[] = {"sqlite", "postgresql", "drivers/mysql"};
 
 std::wstring ErrorText(const std::string& text) {
   const int size = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,

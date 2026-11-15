@@ -115,7 +115,7 @@ jobs:
           command -v readelf >/dev/null
           # Compare against the restored producer's ELF ABI, not its package version.
           wanted="$(sed -n 's/\r$//;s/^salts_soname=//p' package/sdk/linux-x64/turbodb-sdk-manifest.txt)"
-          if [[ ! "$wanted" =~ ^libsalts\.so\.[0-9]+(\.[0-9]+)*$ ]]; then
+          if [[ ! "$wanted" =~ ^libsalts\.so(\.[0-9]+)*$ ]]; then
             echo "Missing or invalid Salts runtime SONAME in Linux SDK manifest: $wanted" >&2
             exit 1
           fi
@@ -123,7 +123,7 @@ jobs:
           while IFS= read -r -d '' library; do
             while IFS= read -r needed; do
               case "$needed" in
-                libsalts.so.*)
+                libsalts.so|libsalts.so.*)
                   if [[ "$needed" != "$wanted" ]]; then
                     echo "TurboDB ELF NEEDED mismatch: $library requires $needed, SaltsBase=$producer_salts ($wanted)" >&2
                     exit 1

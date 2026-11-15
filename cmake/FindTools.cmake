@@ -1,47 +1,42 @@
-find_program(RE2C_EXECUTABLE re2c PATHS "$ENV{RE2C_ROOT}/bin"
-    NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
-
-# Find Lemon.
-#
-# The SQL parser grammar relies on extensions implemented by the repository's
-# tools/lemon/lemon.c. A distro/system Lemon is therefore not an ABI-compatible
-# generator and must never be selected as a fallback.
-#
-# Native builds can execute the normal CMake lemon target. Cross builds cannot:
-# that target is compiled for the target architecture. Build the same repository
-# source once with a host C compiler and make grammar generation depend on it.
-if(CMAKE_CROSSCOMPILING)
-    find_program(
-        LEMON_HOST_C_COMPILER
-        NAMES cc gcc clang
-        NO_CMAKE_FIND_ROOT_PATH
-        REQUIRED)
-    set(LEMON_HOST_DIR "${CMAKE_BINARY_DIR}/host-tools")
-    set(LEMON_HOST_EXECUTABLE "${LEMON_HOST_DIR}/lemon")
-    add_custom_command(
-        OUTPUT "${LEMON_HOST_EXECUTABLE}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${LEMON_HOST_DIR}"
-        COMMAND "${LEMON_HOST_C_COMPILER}"
-                "${CMAKE_SOURCE_DIR}/tools/lemon/lemon.c"
-                -O2
-                -o "${LEMON_HOST_EXECUTABLE}"
-        DEPENDS "${CMAKE_SOURCE_DIR}/tools/lemon/lemon.c"
-        VERBATIM
-        COMMENT "Building repository Lemon for the host")
-    add_custom_target(lemon_host DEPENDS "${LEMON_HOST_EXECUTABLE}")
-    set(LEMON_EXECUTABLE "${LEMON_HOST_EXECUTABLE}")
-    set(LEMON_DEPENDS lemon_host)
-    message(STATUS
-        "Cross-compiling: using repository host lemon: ${LEMON_EXECUTABLE}")
-else()
-    set(LEMON_EXECUTABLE $<TARGET_FILE:lemon>)
-    set(LEMON_DEPENDS lemon)
+# Lexer generation must use the explicitly selected host SDK.
+if(NOT DEFINED ENV{RE2C_ROOT} OR NOT IS_DIRECTORY "$ENV{RE2C_ROOT}")
+    message(FATAL_ERROR "RE2C_ROOT must name the restored host re2c package")
+endif()
+unset(RE2C_EXECUTABLE CACHE)
+unset(RE2C_EXECUTABLE)
+file(TO_CMAKE_PATH "$ENV{RE2C_ROOT}" _re2c_root)
+find_program(RE2C_EXECUTABLE re2c PATHS "${_re2c_root}/bin"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+file(REAL_PATH "$ENV{RE2C_ROOT}" _re2c_root)
+file(REAL_PATH "${RE2C_EXECUTABLE}" _re2c_executable)
+cmake_path(IS_PREFIX _re2c_root "${_re2c_executable}" NORMALIZE _re2c_in_root)
+if(NOT _re2c_in_root)
+    message(FATAL_ERROR "re2c executable is outside RE2C_ROOT: ${RE2C_EXECUTABLE}")
 endif()
 
-# Set path to lemon parser template
-set(LEMPAR "${CMAKE_SOURCE_DIR}/tools/lemon/lempar.c")
+# Both native and cross builds execute the selected host SDK tools.
+if(NOT DEFINED ENV{LEMON_ROOT} OR NOT IS_DIRECTORY "$ENV{LEMON_ROOT}")
+    message(FATAL_ERROR "LEMON_ROOT must name the restored host lemon package")
+endif()
+unset(LEMON_EXECUTABLE CACHE)
+unset(LEMON_EXECUTABLE)
+file(TO_CMAKE_PATH "$ENV{LEMON_ROOT}" _lemon_root)
+find_program(LEMON_EXECUTABLE lemon PATHS "${_lemon_root}/bin"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+file(REAL_PATH "$ENV{LEMON_ROOT}" _lemon_root)
+file(REAL_PATH "${LEMON_EXECUTABLE}" _lemon_executable)
+cmake_path(IS_PREFIX _lemon_root "${_lemon_executable}" NORMALIZE _lemon_in_root)
+if(NOT _lemon_in_root)
+    message(FATAL_ERROR "lemon executable is outside LEMON_ROOT: ${LEMON_EXECUTABLE}")
+endif()
+set(LEMON_DEPENDS "${LEMON_EXECUTABLE}")
 
-# Note: These variables are set in the root scope and will be inherited 
+unset(LEMPAR CACHE)
+unset(LEMPAR)
+find_file(LEMPAR lempar.c PATHS "${_lemon_root}/share/lemon"
+          NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+
+# Note: These variables are set in the root scope and will be inherited
 # by all subdirectories added via add_subdirectory().
 
 message(STATUS "Tools detection:")

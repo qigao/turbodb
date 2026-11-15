@@ -21,10 +21,11 @@ parser.add_argument('--host-rid')
 parser.add_argument('--profile')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
-versions = {repo: os.environ[key] for repo, key in {
+version_variables = {
     'vcpkg-cache': 'VCPKG_CACHE_VERSION', 'salts-base': 'SALTS_BASE_VERSION',
     'cmeta': 'CMETA_VERSION', 'salts-utils': 'SALTS_UTILS_VERSION',
-    'salts-cnet': 'SALTS_CORE_VERSION'}.items()}
+    'salts-cnet': 'SALTS_CNET_VERSION'}
+versions = {repo: os.environ[key] for repo, key in version_variables.items()}
 profiles = {
     'windows-x64': ('windows-msvc-x64', 'x64-windows'),
     'linux-x64': ('linux-clang-x64', 'x64-linux'),
@@ -114,7 +115,6 @@ def sdk(repo, prefix, config, asset_profile):
     if not (target / config).is_file():
         raise ValueError('Released SDK is incomplete: ' + str(target / config))
     environment[prefix + '_ROOT'] = target.as_posix()
-    environment[prefix.replace('SALTSCORE', 'SALTS_CORE') + '_VERSION'] = versions[repo]
 
 
 sdk('salts-base', 'SALTS_BASE', 'lib/cmake/SaltsBase/SaltsBaseConfig.cmake', profile)
@@ -124,7 +124,7 @@ cnet_profile = {'linux-clang-x64': 'linux-x64', 'linux-clang-arm64': 'linux-arm6
                 'macos-clang-arm64': 'macos-arm64',
                 'linux-clang-x64-tsan': 'linux-x64-tsan',
                 'windows-llvm-mingw-x64': 'windows-x64'}.get(profile, profile)
-sdk('salts-cnet', 'SALTSCORE', 'lib/cmake/SaltsCore/SaltsCoreConfig.cmake', cnet_profile)
+sdk('salts-cnet', 'SALTS_CNET', 'lib/cmake/SaltsCNet/SaltsCNetConfig.cmake', cnet_profile)
 
 # The shared helper owns preinstalled vcpkg and generator archive extraction.
 cache = release('vcpkg-cache')
@@ -132,15 +132,20 @@ for name, payload, required, prefix in [
     (f'installed-{triplet}.tar.xz', 'vcpkg_installed', f'{triplet}/include/zstd.h', 'VCPKG_INSTALLED_DIR'),
     ('Qigao.Re2c.Binary.4.6.7.nupkg', 'tools/' + host,
      'bin/re2c.exe' if host.startswith('windows') else 'bin/re2c', 'RE2C_ROOT'),
+    ('Qigao.Lemon.Binary.1.0.0.nupkg', 'tools/' + host,
+     'bin/lemon.exe' if host.startswith('windows') else 'bin/lemon', 'LEMON_ROOT'),
 ]:
     archive, digest = download(cache, name)
-    target = destination / (Path(name).stem + '-' + host)
-    lock = destination / (name + '.lock.json')
+    target = destination / ('vcpkg-cache-' + versions['vcpkg-cache'] + '-' + triplet
+                            if name.endswith('.tar.xz') else Path(name).stem + '-' + host)
+    lock = destination / (target.name + '.lock.json')
     # Host tool bytes are also published as public release assets.
     source = {'kind': 'url', 'url': next(a['browser_download_url'] for a in cache['assets'] if a['name'] == name)}
     if name.endswith('.nupkg'):
+        package_id, package_version = (('Qigao.Re2c.Binary', '4.6.7')
+                                       if prefix == 'RE2C_ROOT' else ('Qigao.Lemon.Binary', '1.0.0'))
         source = {'kind': 'package', 'feed': 'https://nuget.pkg.github.com/qigao/index.json',
-                  'id': 'Qigao.Re2c.Binary', 'version': '4.6.7'}
+                  'id': package_id, 'version': package_version}
     if name.endswith('.tar.xz'):
         os.environ['VCPKG_TARGET_TRIPLET'] = triplet
         run('python', infra / 'scripts/restore-native-dependency.py', 'resolve-release',
@@ -151,9 +156,29 @@ for name, payload, required, prefix in [
                '--destination', str(target), '--payload', payload, '--require', required, '--reuse']
     if name.endswith('.nupkg'):
         command += ['--archive', str(archive), '--executable', required]
+    if prefix == 'LEMON_ROOT':
+        command += ['--require', 'share/lemon/lempar.c']
     result = json.loads(run(*command))
     environment[prefix] = result['root']
-environment['VCPKG_CACHE_VERSION'] = versions['vcpkg-cache']
+
+if args.rid.startswith('windows-'):
+    # The published cache lacks Studio's editor ports. Resolve the project's
+    # manifest here, before CMake consumes the prepared installation.
+    if profile == 'windows-llvm-mingw-x64':
+        compiler_root = Path(os.environ['LLVM_MINGW_ROOT'])
+        toolchains = destination / 'toolchains' / profile
+        toolchains.mkdir(parents=True, exist_ok=True)
+        paths = transport.tool_paths(compiler_root, 'llvm-mingw', 'x64', host)
+        dependency = transport.cmake_toolchain(toolchains, 'x64', paths)
+        os.environ['LLVM_MINGW_DEPENDENCY_TOOLCHAIN_FILE'] = dependency.as_posix()
+        os.environ['LLVM_MINGW_HOST_DEPENDENCY_TOOLCHAIN_FILE'] = dependency.as_posix()
+    vcpkg = Path(os.environ['VCPKG_ROOT']) / ('vcpkg.exe' if os.name == 'nt' else 'vcpkg')
+    subprocess.run([str(vcpkg), 'install', '--triplet=' + triplet,
+                    '--x-manifest-root=' + str(root),
+                    '--x-install-root=' + environment['VCPKG_INSTALLED_DIR'],
+                    '--overlay-triplets=' + str(infra / 'triplets')], check=True)
+
+environment.update({key: versions[repo] for repo, key in version_variables.items()})
 output = root / 'build/native-sdk-environment.json'
 output.write_text(json.dumps(environment, indent=2) + '\n')
 print(output)

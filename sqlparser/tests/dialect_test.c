@@ -837,7 +837,7 @@ spec("explicit MySQL and SQLite dialects") {
     check_equal(s->as.select.columns.count, 8u);
   }
 
-  // MySQL 8.4 function-resolution.html and mysql-test/t/parser.test, sql_mode=''.
+  // MySQL 8.4 function-resolution.html and drivers/mysql-test/t/parser.test, sql_mode=''.
   it("distinguishes special function tokens from table identifiers") {
     const char *names[] = {
       "BIT_AND", "BIT_OR", "BIT_XOR", "CAST", "COUNT", "CURDATE", "CURTIME",
@@ -2163,7 +2163,7 @@ spec("explicit MySQL and SQLite dialects") {
     check_equal(sqlparser_statements(document).count, 2u);
   }
 
-  // https://dev.mysql.com/doc/refman/8.4/en/with.html
+  // https://dev.drivers/mysql.com/doc/refman/8.4/en/with.html
   // https://www.sqlite.org/lang_with.html
   it("preserves recursive and nested CTE structure in both dialects") {
     for (int d = SQLPARSER_MYSQL; d <= SQLPARSER_SQLITE; ++d) {
@@ -2210,7 +2210,7 @@ spec("explicit MySQL and SQLite dialects") {
     rejected("WITH source(n) AS (SELECT 7) SET @value=1", SQLPARSER_MYSQL);
   }
 
-  // https://dev.mysql.com/doc/refman/8.4/en/savepoint.html
+  // https://dev.drivers/mysql.com/doc/refman/8.4/en/savepoint.html
   it("supports MySQL savepoints with mandatory RELEASE SAVEPOINT spelling") {
     const sqlparser_node *s = parse("SAVEPOINT checkpoint; ROLLBACK WORK TO SAVEPOINT checkpoint; ROLLBACK TO checkpoint; RELEASE SAVEPOINT checkpoint", SQLPARSER_MYSQL);
     check_equal(sqlparser_statements(document).count, 4u);

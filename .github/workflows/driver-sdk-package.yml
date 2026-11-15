@@ -4,14 +4,12 @@ on:
   pull_request:
     branches: [master]
     paths:
-      - "mysql/**"
-      - "redis/**"
+      - "drivers/mysql/**"
+      - "drivers/redis/**"
       - "orm/**"
       - "drivers/**"
       - "dbtools/**"
       - "app/**"
-      - "external/OpenWTL"
-      - ".gitmodules"
       - "tidessql/**"
       - "sqlparser/**"
       - "include/**"
@@ -29,14 +27,12 @@ on:
   push:
     branches: [master]
     paths:
-      - "mysql/**"
-      - "redis/**"
+      - "drivers/mysql/**"
+      - "drivers/redis/**"
       - "orm/**"
       - "drivers/**"
       - "dbtools/**"
       - "app/**"
-      - "external/OpenWTL"
-      - ".gitmodules"
       - "tidessql/**"
       - "sqlparser/**"
       - "include/**"

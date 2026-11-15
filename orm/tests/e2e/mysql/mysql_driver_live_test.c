@@ -184,7 +184,7 @@ static orm_connection_t *connect_database(
   options[5] = (orm_option_t){orm_view("ca_file"), orm_view(ca_file)};
   options[6] = (orm_option_t){orm_view("server_name"), orm_view(server_name)};
   options[7] = (orm_option_t){orm_view("timeout_ms"), orm_view("5000")};
-  config.driver = orm_view("mysql");
+  config.driver = orm_view("drivers/mysql");
   config.options = options;
   config.option_count = 8u;
 
@@ -607,7 +607,7 @@ static int qualify_row_limit(
   options[5] = (orm_option_t){orm_view("ca_file"), orm_view(ca_file)};
   options[6] = (orm_option_t){orm_view("server_name"), orm_view(server_name)};
   options[7] = (orm_option_t){orm_view("timeout_ms"), orm_view("5000")};
-  config.driver = orm_view("mysql");
+  config.driver = orm_view("drivers/mysql");
   config.options = options;
   config.option_count = 8u;
   config.max_result_rows = 1u;
@@ -1138,7 +1138,7 @@ int main(void) {
   load.struct_size = (uint32_t)sizeof(load);
   load.abi_version = ORM_RUNTIME_ABI_VERSION;
   load.module_path = orm_view(module);
-  load.expected_driver_id = orm_view("mysql");
+  load.expected_driver_id = orm_view("drivers/mysql");
   if (fail_status(
           "load MySQL Driver",
           orm_runtime_load_driver(runtime, &load, &error),

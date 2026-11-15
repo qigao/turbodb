@@ -1,7 +1,7 @@
 #ifndef TIDESSQLD_CONFIG_H
 #define TIDESSQLD_CONFIG_H
 
-#include "../mysql/server.h"
+#include "../drivers/mysql/server.h"
 #include <cnet/cnet.h>
 
 enum {

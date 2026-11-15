@@ -116,8 +116,8 @@ spec("standalone database tool CLI") {
   }
 
   it("selects all supported drivers and forwards their connection settings") {
-    const char *selectors[] = {"sqlite", "pg", "mysql"};
-    const char *identities[] = {"sqlite", "postgresql", "mysql"};
+    const char *selectors[] = {"sqlite", "pg", "drivers/mysql"};
+    const char *identities[] = {"sqlite", "postgresql", "drivers/mysql"};
     const dbtool_driver_kind kinds[] = {
         DBTOOL_DRIVER_SQLITE, DBTOOL_DRIVER_POSTGRESQL, DBTOOL_DRIVER_MYSQL};
     driver_script = tt_make_temp_file("dbtool-select", ".sql");
@@ -296,7 +296,7 @@ spec("standalone database tool CLI") {
   }
 
   it("requires explicit MySQL connection environment before reading the script") {
-    const char *argv[] = {"dbtools", "--driver", "mysql", "schema", "apply", "--file", "missing.sql"};
+    const char *argv[] = {"dbtools", "--driver", "drivers/mysql", "schema", "apply", "--file", "missing.sql"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
     check_equal(dbtool_cli_execute(7, argv, NULL, &fake_ops,
@@ -306,8 +306,8 @@ spec("standalone database tool CLI") {
   }
 
   it("forwards MySQL connection environment and script through the shared CLI") {
-    char *path = tt_make_temp_file("dbtool-mysql-cli", ".sql");
-    const char *argv[] = {"dbtools", "--driver", "mysql", "schema", "apply", "--file", path,
+    char *path = tt_make_temp_file("dbtool-drivers/mysql-cli", ".sql");
+    const char *argv[] = {"dbtools", "--driver", "drivers/mysql", "schema", "apply", "--file", path,
                          "--conninfo-env", "PATH"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;
@@ -324,7 +324,7 @@ spec("standalone database tool CLI") {
   }
 
   it("rejects SQLite-only options for MySQL") {
-    const char *argv[] = {"dbtools", "--driver", "mysql", "schema", "apply", "--file", "missing.sql",
+    const char *argv[] = {"dbtools", "--driver", "drivers/mysql", "schema", "apply", "--file", "missing.sql",
                          "--conninfo-env", "PATH", "--busy-timeout-ms", "5"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;
     dbtool_error error = DBTOOL_ERROR_INIT;

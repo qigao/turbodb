@@ -74,7 +74,7 @@ static void start_client_until_accepted(void) {
 }
 spec("TidesSQL MySQL server existing client end to end") {
   before_each() {
-    database=NULL; directory=tt_make_temp_dir("tidessql-mysql-server"); check_not_null(directory);
+    database=NULL; directory=tt_make_temp_dir("tidessql-drivers/mysql-server"); check_not_null(directory);
     server=(tdsql_mysql_server){0}; source=(mysql_async_source){0}; second_source=(mysql_async_source){0};
     turbodb_error_init(&error); memset(&client_error,0,sizeof(client_error));
     const turbodb_option_t options[]={

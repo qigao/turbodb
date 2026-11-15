@@ -79,7 +79,7 @@ void AddWords(std::set<std::string>& output, std::string_view words,
 }  // namespace
 
 std::string SqlLanguageService::LexerName(SqlProvider provider) const {
-  if (provider == SqlProvider::mysql) return "mysql";
+  if (provider == SqlProvider::mysql) return "drivers/mysql";
   return "sql";
 }
 

@@ -132,7 +132,7 @@ int main() {
     return Fail("unknown provider must use the generic SQL lexer");
   }
 
-  session.SetConnection({42u, SqlProvider::mysql, 0x55u, "local-mysql"});
+  session.SetConnection({42u, SqlProvider::mysql, 0x55u, "local-drivers/mysql"});
   session.SetCatalog("app");
   session.SetSchema("public");
   session.ReplaceRelations({
@@ -140,7 +140,7 @@ int main() {
       {RelationKind::view, "app", "user_summary", {"id", "name"}},
   });
 
-  if (language.LexerName(session.provider()) != "mysql") {
+  if (language.LexerName(session.provider()) != "drivers/mysql") {
     return Fail("MySQL provider must select the MySQL lexer");
   }
 

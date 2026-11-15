@@ -15,8 +15,8 @@
       "name": "native-runtime",
       "hidden": true,
       "environment": {
-        "PATH": "${sourceDir}/build/${presetName}/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR}bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/bin${pathListSep}$env{SALTS_BASE_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{SALTSCORE_ROOT}/bin${pathListSep}$env{RE2C_ROOT}/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/tools/pkgconf${pathListSep}$penv{PATH}",
-        "LD_LIBRARY_PATH": "$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR}lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/lib${pathListSep}$env{SALTS_BASE_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$env{SALTSCORE_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
+        "PATH": "${sourceDir}/build/${presetName}/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR}bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/bin${pathListSep}$env{SALTS_CNET_ROOT}/bin${pathListSep}$env{SALTS_UTILS_ROOT}/bin${pathListSep}$env{CMETA_ROOT}/bin${pathListSep}$env{SALTS_BASE_ROOT}/bin${pathListSep}$penv{PATH}",
+        "LD_LIBRARY_PATH": "${sourceDir}/build/${presetName}/bin${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/$env{VCPKG_CONFIGURATION_SUBDIR}lib${pathListSep}$env{VCPKG_INSTALLED_DIR}/$env{VCPKG_TARGET_TRIPLET}/lib${pathListSep}$env{SALTS_CNET_ROOT}/lib${pathListSep}$env{SALTS_UTILS_ROOT}/lib${pathListSep}$env{CMETA_ROOT}/lib${pathListSep}$env{SALTS_BASE_ROOT}/lib${pathListSep}$penv{LD_LIBRARY_PATH}"
       }
     },
     {
@@ -57,7 +57,7 @@
         "release-mode"
       ],
       "cacheVariables": {
-        "CMAKE_ANDROID_ARCH_ABI": "$env{SALTSCORE_ANDROID_ABI}"
+        "CMAKE_ANDROID_ARCH_ABI": "$env{ANDROID_ABI}"
       }
     }
   ]

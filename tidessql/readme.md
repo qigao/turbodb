@@ -22,7 +22,7 @@ COM_STMT_PREPARE/EXECUTE；SQL grammar 在 `tidessqld` 调用的 TidesSQL 引擎
 
 公开静态 C SDK 版本为 1.3.0，ABI v1，头文件为
 [tidessql/tidessql.h](include/tidessql/tidessql.h)。引擎使用
-[共享 DTO](../include/turbodb/types.h) 中的 `turbodb_value_t`、状态、错误和
+[共享 DTO](../orm/types.h) 中的 `turbodb_value_t`、状态、错误和
 option，不包含 ORM 头文件或链接 ORM runtime。ORM 保留旧名称、struct tag、
 数值与布局作为兼容别名；内部 `orm_sql_*` 算法名称不属于 SDK，不安装。
 
@@ -195,7 +195,7 @@ EXECUTE 接收 `tdsql_bindings_default(values,count)` 初始化的 typed binding
 每轮执行在当前快照中先检查全部已记录来源的 table ID/规范 schema，再重新绑定并执行。
 普通 DML 的 TableVersion 变化不使描述符失效；任一来源删除/重建或修改列/默认值后返回 INVALID_STATE
 并锁定失效，须 close 后重新 prepare，RESET 不恢复。当前没有
-[MySQL 的自动重准备](https://dev.mysql.com/doc/refman/8.4/en/statement-caching.html)。
+[MySQL 的自动重准备](https://dev.drivers/mysql.com/doc/refman/8.4/en/statement-caching.html)。
 初始列类型是推导结果，每轮 `tdsql_result_column()` 才是实际执行元数据；未来
 frontend 须发送完整 metadata，不协商 optional result metadata。
 
@@ -230,7 +230,7 @@ Manifest。DDL descriptor 保存 SQL，每次 EXECUTE 重新绑定当前元数�
 修改目录不会使自身锁死；普通重复操作依照 CREATE/ALTER/DROP 的实际错误和
 IF EXISTS/IF NOT EXISTS 意图返回。CREATE 名称冲突与索引唯一性/物理容量仍在
 执行检查。事务回滚与 READ ONLY 行为保持，不采用 MySQL DDL 隐式提交。
-范围依据：[MySQL prepared statements](https://dev.mysql.com/doc/refman/8.4/en/sql-prepared-statements.html)，
+范围依据：[MySQL prepared statements](https://dev.drivers/mysql.com/doc/refman/8.4/en/sql-prepared-statements.html)，
 边界设计见 [DDL PREPARE](design.md#206-ddl-prepare-边界)。
 
 每会话 `sql_max_prepared_statements` 默认 64，`sql_max_prepared_bytes` 默认
@@ -320,21 +320,21 @@ ctest --preset win-release-user -R '^tidessql_(prepared|prepared_owner|sdk_cpp)$
 完整引擎日志在 `build/Msvc-Release/Testing/prepared-ddl-engine-regression.log`；
 测试细节为 CTest 的 `Testing/Temporary/LastTest.log`。
 
-#207 已新增私有 [MySQL server codec](server/mysql/wire.h)：有界消息分帧/组帧、
+#207 已新增私有 [MySQL server codec](server/drivers/mysql/wire.h)：有界消息分帧/组帧、
 序号与粘包处理，QUERY/PREPARE/EXECUTE/CLOSE/RESET/PING/QUIT 命令解码，原生
 参数类型缓存，以及 OK/ERR/EOF、prepare OK、列元数据和文本/二进制行编码。
-复用现有 `mysql/wire` 基础源码；不分配内存、不执行 SQL。完整请求校验后才
+复用现有 `drivers/mysql/wire` 基础源码；不分配内存、不执行 SQL。完整请求校验后才
 发布参数/类型，编码失败不改发送区；TEXT/BLOB 借用至本次请求结束。
 signed TINY 0/1 沿用现有 driver 的 BOOL 映射，其他整数宽度与 FLOAT 原生解码；
 不支持的命令/游标/query attributes 明确拒绝。边界见
-[codec 设计](design.md#207-mysql-服务端-codec-边界)。
+[codec 设计](design.md#207-drivers/mysql-服务端-codec-边界)。
 
 事实｜2026-10-05 新协议 [suite](tests/protocol/mysql_wire_test.c) 的 24 用例、
 734 条断言全部通过，包含独立 golden、现有 client encoder/decoder 互操作、
 真实 0xffffff 分片/空终止包、序号回绕、截断/容量/算术溢出和输出原子性。
 Windows Release 的全部 31 项 TidesSQL 与 7 项 MySQL client CTest 均通过
 （76.70 秒），本轮构建无编译警告或错误。日志为
-`build/Msvc-Release/Testing/mysql-codec-engine-regression.log`。最小复验：
+`build/Msvc-Release/Testing/drivers/mysql-codec-engine-regression.log`。最小复验：
 
 ```powershell
 cmake --build --preset win-release-user --target tidessql_mysql_wire_test mysql_packet_boundary_test -j 4
@@ -347,7 +347,7 @@ MED｜codec 不安装、不开放监听器；后续 registry/响应层进展见�
 Plugin ABI 阻塞仍存在，本轮没有 ORM 全量回归或安装更新。未运行 Linux、
 sanitizer 或 benchmark；代码未提交/推送，#204/#207 保持开放。
 
-#207 后续已新增私有 [registry](server/mysql/registry.h) 与
+#207 后续已新增私有 [registry](server/drivers/mysql/registry.h) 与
 `tidessql_mysql_frontend` target。每个 SQL connection 使用固定 CSTL Vec slots，
 MySQL ID 仅对应本连接的真实 SDK handle；成功 PREPARE 后才发布递增 ID/counts，
 关闭后不复用 ID，uint32 耗尽明确拒绝。SQL/schema/names 仍由 SDK 持有。原生
@@ -365,14 +365,14 @@ ID 按官方协议无响应处理，BUSY 保留映射，其他 cleanup error 消
 丢失返回 COMMIT_UNKNOWN，独立会话验证已提交，重复 EXECUTE 未重放 commit。
 多语句准备被既有单语句 parser 限额拒绝，业务数据与 ID 未推进。
 全部 33 项 TidesSQL + 7 项 MySQL client CTest 通过（104.88 秒），本轮构建无
-编译警告/错误；日志 `build/Msvc-Release/Testing/mysql-registry-engine-regression.log`。
+编译警告/错误；日志 `build/Msvc-Release/Testing/drivers/mysql-registry-engine-regression.log`。
 
 ```powershell
 cmake --build --preset win-release-user --target tidessql_mysql_registry_test tidessql_mysql_registry_owner_test -j 4
 ctest --preset win-release-user -R '^tidessql_mysql_registry(_owner)?$' --output-on-failure
 ```
 
-#207 已接入私有 [command dispatcher](server/mysql/dispatch.h)，QUERY/PING/QUIT
+#207 已接入私有 [command dispatcher](server/drivers/mysql/dispatch.h)，QUERY/PING/QUIT
 与 prepared 命令直接调用 SDK，返回完整 prepare/text/binary 响应链。实际 SDK
 metadata/affected rows/事务 flags/warnings 是事实源，两种 EOF 模式显式选择。
 固定 scratch 每次持有一个包，ACK 后推进；frame 容量不足保留原包，重取不会重读
@@ -386,16 +386,16 @@ ERR 后断连。断连先释放结果/registry，再 close SQL session 执行回
 多语句 admission、ACK/容量重取、lazy warnings/事务 flags、SDK/scratch/row
 限额、SHOW/参数化 EXPLAIN 的 prepared metadata/二进制行及断连回滚。native 故障验证末尾清理失败 ERR、提交未知不重放与 PREPARE
 snapshot cleanup 不发布 metadata。最小 2 项 CTest 通过（4.21 秒），构建无
-编译警告/错误；日志 `build/Msvc-Release/Testing/mysql-dispatch-final-test.log`。
+编译警告/错误；日志 `build/Msvc-Release/Testing/drivers/mysql-dispatch-final-test.log`。
 Windows Release 的全部 34 项 TidesSQL 与 7 项 MySQL client CTest 通过（82.57 秒），
-日志 `build/Msvc-Release/Testing/mysql-dispatch-engine-regression.log`。
+日志 `build/Msvc-Release/Testing/drivers/mysql-dispatch-engine-regression.log`。
 
 ```powershell
 cmake --build --preset win-release-user --target tidessql_mysql_dispatch_test tidessql_mysql_registry_owner_test -j 4
 ctest --preset win-release-user -R '^tidessql_mysql_(dispatch|registry_owner)$' --output-on-failure
 ```
 
-#207 已有私有 [handshake codec 与 negotiation gate](server/mysql/handshake.h)：
+#207 已有私有 [handshake codec 与 negotiation gate](server/drivers/mysql/handshake.h)：
 greeting 只声明已实现的协议形状，SSLRequest 后等待实际 transport TLS ready，
 再校验 login 与原 header 一致。纯协议成功仍等待账户验证，不创建 SQL session。
 用户名/数据库/token views 不跨输入 release；额外能力、截断、非零 filler、
@@ -405,14 +405,14 @@ header 变更和错误顺序明确拒绝。此 gate 不承担账户认证或创�
 
 事实｜2026-10-05 handshake suite 14 用例/659 断言通过；完整 35 项 TidesSQL
 与 7 项 MySQL client CTest 全通过（75.73 秒），本轮构建无编译警告/错误。
-日志 `build/Msvc-Release/Testing/mysql-handshake-engine-regression.log`。
+日志 `build/Msvc-Release/Testing/drivers/mysql-handshake-engine-regression.log`。
 
 ```powershell
 cmake --build --preset win-release-user --target tidessql_mysql_handshake_test -j 4
 ctest --preset win-release-user -R '^tidessql_mysql_handshake$' --output-on-failure
 ```
 
-#208 已接入私有 [密码验证边界](server/mysql/password.h)：TLS full-auth 请求、
+#208 已接入私有 [密码验证边界](server/drivers/mysql/password.h)：TLS full-auth 请求、
 GmSSL 随机 salt/PBKDF2-HMAC-SHA256 verifier 与恒定时间比较，拒绝空密码、
 嵌入 NUL、超限和 TLS 前输入；库失败保持 caller output 并清零临时秘密。
 MySQL client 的 token 哈希已改用 GmSSL，协议格式不变，vcpkg/CMake 及安装规则
@@ -427,9 +427,9 @@ TLS 测试实际导入 Salts CNet，完成同一连接上的 server/client TLS 1
 测试使用两端 CNet 与私有 codec/verifier 的显式编排，尚未通过 MySQL packet
 framing 连接完整服务或使用现有 MySQL session/ORM driver；不能视为 #209 E2E。
 Windows Release 37 项 TidesSQL + 7 项 client CTest 全通过（72.63 秒），
-构建无编译警告/错误。日志 `build/Msvc-Release/Testing/mysql-gmssl-engine-regression.log`。
+构建无编译警告/错误。日志 `build/Msvc-Release/Testing/drivers/mysql-gmssl-engine-regression.log`。
 
-私有 [账户授权 owner](server/mysql/authenticate.h) 将精确用户名映射到显式逻辑
+私有 [账户授权 owner](server/drivers/mysql/authenticate.h) 将精确用户名映射到显式逻辑
 数据库 grant；服务控制面持有的数据库 binding 直接引用已打开的共享数据库，
 客户端名称不会进入文件路径 API。未知账户仍执行同一工作因子的完整 KDF 后统一
 拒绝；密码成功后才创建 SDK session，最终认证 OK 完整交接后才可 move 给 command
@@ -440,8 +440,8 @@ ERR；错误消息不含密码、verifier 或服务端路径。
 事实｜账户 suite 27 用例/1223 断言通过，使用两个真实本地 TidesDB 和实际 SDK
 session/dispatcher，覆盖精确 grant、默认数据库、路径样式名称拒绝、资源限额、
 故障与清理。合并本增量后 Windows Release 38 项 TidesSQL + 7 项 MySQL client
-CTest 全通过（83.63 秒），日志 `build/Msvc-Release/Testing/mysql-auth-engine-regression.log`。
-私有 [CNet server adapter](server/mysql/server.h) 现已把 framed frontend 接到真实
+CTest 全通过（83.63 秒），日志 `build/Msvc-Release/Testing/drivers/mysql-auth-engine-regression.log`。
+私有 [CNet server adapter](server/drivers/mysql/server.h) 现已把 framed frontend 接到真实
 listener：固定 slot/connection workspace、单次在途 retained send、同 handle TLS upgrade、
 终态 session 回滚与 cleanup quarantine 均由单 owner poll 推进。它仍不安装，也没有
 daemon CLI/TOML 或部署账户文件。
@@ -602,7 +602,7 @@ HIGH｜当前 GmSSL 3.2.0#3 会拒绝 JDK 默认 ClientHello 中空的 OCSP
 
 ```powershell
 cmake --preset win-release-user `
-  -DTURBODB_MYSQL_CONNECTOR_J_JAR=C:/path/to/mysql-connector-j-9.1.0.jar
+  -DTURBODB_MYSQL_CONNECTOR_J_JAR=C:/path/to/drivers/mysql-connector-j-9.1.0.jar
 cmake --build --preset win-release-user --target tidessqld_connector_j_e2e_test
 ctest --preset win-release-user -R '^tidessqld_connector_j_e2e$' --output-on-failure
 ```
@@ -657,7 +657,7 @@ Windows/Linux native workflow 在安装后及 staging 后各运行一次同一 c
 PowerShell 启动时架构测试找不到 MSVC `dumpbin`；在
 `VsDevCmd.bat -arch=x64 -host_arch=x64` 环境完整重跑后 143/143 通过（350.51 秒）。随后
 `install-ci-windows-release` 成功；fresh staged SDK manifest 固定 `salts=1.8.27`、`saltsutils=4.1.10` 及
-`drivers=sqlite,postgresql,mysql,tidesdb`。安装树与 staged SDK 的独立 consumer 均完成
+`drivers=sqlite,postgresql,drivers/mysql,tidesdb`。安装树与 staged SDK 的独立 consumer 均完成
 configure/build/runtime smoke，staged `tidessqld` 的 process、CLI、Connector/J 和 MySQL
 ORM 四项 E2E 为 4/4 通过（5.12 秒）。这些结果补齐 Windows 安装与真实客户端验证；Linux、
 Android 及 NuGet 三 RID 仍必须由提交后的实际 CI runner 验证，不能由本机结果代替。
@@ -754,7 +754,7 @@ INSERT、UPDATE、DELETE、主键移动会把全部 Index/Unique 变化与 Data�
 核对实际索引项，然后原子删除该索引的 Index/Unique/目录并更新 TableVersion。
 表数据和其他索引保留；删除唯一索引后解除其约束，可使用同名创建新索引。
 索引不存在返回 SQL_ERROR；PRIMARY、限定名称、SQLite 的 IF EXISTS 形式及
-ALGORITHM/LOCK 不在执行范围。语法依据 [MySQL DROP INDEX](https://dev.mysql.com/doc/refman/8.4/en/drop-index.html)。
+ALGORITHM/LOCK 不在执行范围。语法依据 [MySQL DROP INDEX](https://dev.drivers/mysql.com/doc/refman/8.4/en/drop-index.html)。
 索引缺项、孤儿键或损坏数据返回 DATASTORE_ERROR，事务必须回滚。
 
 DOUBLE 键使用有限 binary64 数值顺序，正负零映射为同一唯一键；NULL 与数值零分离。
@@ -910,7 +910,7 @@ ORM handle 内的 autocommit 命令明确拒绝，以保留该 handle 的提交/
 类型化参数、已支持的纯表达式和会话变量读取。只读值使用上述布尔转换，隔离接受
 ASCII 大小写不敏感的 `SERIALIZABLE` 或枚举序号 3；其他已知隔离级别返回 UNSUPPORTED，
 非法类型或值返回 SQL_ERROR。DEFAULT 恢复执行器 的固定默认（READ WRITE/SERIALIZABLE）。
-按 [官方事务变量作用域](https://dev.mysql.com/doc/refman/8.4/en/set-transaction.html)，
+按 [官方事务变量作用域](https://dev.drivers/mysql.com/doc/refman/8.4/en/set-transaction.html)，
 `SET transaction_read_only=…`、SESSION/LOCAL 和 `@@SESSION`/`@@LOCAL` 修改会话默认；
 `SET @@transaction_read_only=…` 只影响下一事务，在活动事务内拒绝。隔离变量同理。
 设置不打开 Catalog 事务、不消耗下一访问模式、也不改变活动事务的冻结模式；
@@ -944,7 +944,7 @@ Salts Plugin 已切换为 ABI 4，旧 epoch 在加载时拒绝；升级 SDK 时�
 包括真实插件 282 个用例、私有执行器 223 个用例、旧 epoch 拒绝、跨驱动和 C/C++ flow。
 后续 SHOW 过滤增量的插件 287 个用例、私有执行器 229 个用例通过。
 协议与范围见 [会话快照](design.md#会话变量只读快照接入协议)。
-采用 [MySQL 保存点规则](https://dev.mysql.com/doc/refman/8.4/en/savepoint.html)：
+采用 [MySQL 保存点规则](https://dev.drivers/mysql.com/doc/refman/8.4/en/savepoint.html)：
 同名替换为最新点，回滚保留目标并删除后续点，release 不提交事务。
 名称限 `[A-Za-z_][A-Za-z_0-9]*`、最多 63 字节，ASCII 大小写不敏感。
 注册表首次使用时按配置上限固定分配，占用 retained WORK，事务结束释放；
@@ -1099,7 +1099,7 @@ raw IN 子查询已接入下文所述依赖路径；行值与未列出的隐式�
 TEXT 字面量支持单/双引号、成对引号、普通反斜杠转义和 document 固定的
 NO_BACKSLASH_ESCAPES 模式。常量字节归程序持有，编译时验证所有分支中的 UTF-8；
 空串、内嵌 NUL、尾空格均按显式长度处理。字符集前缀、相邻串拼接、COLLATE、BLOB
-字面量和其他未列出的表达式仍未开放，转义依据见[官方说明](https://dev.mysql.com/doc/refman/8.4/en/string-literals.html)。
+字面量和其他未列出的表达式仍未开放，转义依据见[官方说明](https://dev.drivers/mysql.com/doc/refman/8.4/en/string-literals.html)。
 表达式 run 已改为 open 预分配、逐行复用寄存器，close 归还；活动 run 阻止程序提前
 销毁，每次求值清空借用值。单次 eval 入口仍保留相同语义的临时 run 便利调用。
 标量编译入口接受既有白名单的所有结果类型，谓词入口仍限制 BOOL/NULL；TEXT/BLOB
@@ -1212,7 +1212,7 @@ TEXT/BLOB 结果引用窗口 owner 中深拷贝的目标载荷，下游仍按原
 绑定后可释放 AST，声明图 scratch 全部归还，执行沿用现有窗口阶段和配额。
 [命名窗口协议](design.md#命名窗口的-ast-与绑定边界)。
 已有八函数接受 ROWS/RANGE 帧的单边或 BETWEEN 边界，按
-[MySQL 帧规则](https://dev.mysql.com/doc/refman/8.4/en/window-functions-frames.html)仍使用整个分区，
+[MySQL 帧规则](https://dev.drivers/mysql.com/doc/refman/8.4/en/window-functions-frames.html)仍使用整个分区，
 帧范围不改变排名、分布或 LAG/LEAD 结果。绑定时验证边界方向和类型，打开/EXPLAIN 时
 验证 marker 为非 NULL、非负值；未使用的声明、LIMIT 0 和 EXISTS 剪枝也保留验证。
 ROWS 仅接受 I64/U64，RANGE 接受有限 I64/U64/DOUBLE；带数值偏移的 RANGE 要求恰好
@@ -1311,7 +1311,7 @@ LEFT 无 TRUE 匹配时补一行右侧 NULL，WHERE 留在下游。候选组合�
 计入 JOIN_PAIRS，右侧物化、TEXT/BLOB 深拷贝和峰值扩容共享工作/物化/步骤预算。
 [共享行快照](src/rows.h) 同时用于 Scan 排序和连接，不重复维护 payload 所有权。
 支持 INNER/LEFT/RIGHT 的 `USING(cols)` 和 `NATURAL [INNER|LEFT|RIGHT [OUTER]] JOIN`。
-依据 [MySQL JOIN 规则](https://dev.mysql.com/doc/refman/8.4/en/join.html)，公共列按普通相等
+依据 [MySQL JOIN 规则](https://dev.drivers/mysql.com/doc/refman/8.4/en/join.html)，公共列按普通相等
 匹配，NULL 不匹配 NULL；裸名称及 `*` 只输出一次公共列，外连接使用保留侧的值。
 星号顺序为公共列、第一侧独有列、第二侧独有列；RIGHT 的第一侧为右侧。
 `table.col` 和 `table.*` 保留原始表值与物理列顺序，未匹配侧仍为 NULL。
@@ -1450,8 +1450,8 @@ IGNORE 会把 NULL 到 NOT NULL、无效数值和越界数值调整为目标列�
 AST 通过 `columns_specified` 区分省略清单和显式空清单；列引用报 SQL_ERROR。
 若一个候选行同时冲突多个唯一约束，当前按索引目录顺序选择首个 owner；调用方不应依赖其与
 MySQL 物理索引顺序一致。
-本批语法与多行规则参考 [MySQL INSERT 官方说明](https://dev.mysql.com/doc/refman/8.4/en/insert.html)，
-重复键语义参考 [MySQL ON DUPLICATE KEY UPDATE 官方说明](https://dev.mysql.com/doc/refman/8.4/en/insert-on-duplicate.html)，
+本批语法与多行规则参考 [MySQL INSERT 官方说明](https://dev.drivers/mysql.com/doc/refman/8.4/en/insert.html)，
+重复键语义参考 [MySQL ON DUPLICATE KEY UPDATE 官方说明](https://dev.drivers/mysql.com/doc/refman/8.4/en/insert-on-duplicate.html)，
 完整调用见上述集成测试中的 `SQL INSERT VALUES/SET`、`INSERT SELECT`、`MySQL duplicate-key` 与 `INSERT IGNORE` 分组。
 [协议与格式](design.md#私有关系行插入与扫描协议)。
 
@@ -1495,22 +1495,22 @@ SELECT 与 UPDATE/DELETE 共用 [表达式绑定器](src/binding.h) 的名字解
 候选溢出与 WHERE/CASE 短路、LIMIT 0 绑定、排序失败重试和写入回滚；分配故障遍历包含计算键路径。
 主键更新增加 13 项用例，覆盖顺序冲突、重复赋值/无变化、LIMIT、非首列主键、整数端点、
 逐次 delete/put 故障、保存点清理失败、旧键索引排序失败、写预算边界、损坏记录、并发竞争和提交重开。
-规则来源：[MySQL UPDATE](https://dev.mysql.com/doc/refman/8.4/en/update.html)、
-[MySQL DELETE](https://dev.mysql.com/doc/refman/8.4/en/delete.html)、
-[MySQL NULL 排序](https://dev.mysql.com/doc/refman/8.4/en/working-with-null.html)。
+规则来源：[MySQL UPDATE](https://dev.drivers/mysql.com/doc/refman/8.4/en/update.html)、
+[MySQL DELETE](https://dev.drivers/mysql.com/doc/refman/8.4/en/delete.html)、
+[MySQL NULL 排序](https://dev.drivers/mysql.com/doc/refman/8.4/en/working-with-null.html)。
 
 
 [私有 SHOW 结果源](src/show.h) 支持 `SHOW [FULL] TABLES`、
 `SHOW COLUMNS/FIELDS FROM table`、`SHOW INDEX/INDEXES/KEYS FROM table`（FROM 可用 IN）、
 `SHOW WARNINGS [LIMIT ...]` 和 `SHOW COUNT(*) WARNINGS`，
 从同一 Catalog 事务快照读取表名、数值列定义和索引目录。
-结果列按照 [MySQL SHOW TABLES](https://dev.mysql.com/doc/refman/8.4/en/show-tables.html) 与
-[SHOW COLUMNS](https://dev.mysql.com/doc/refman/8.4/en/show-columns.html) 的布局提供；
+结果列按照 [MySQL SHOW TABLES](https://dev.drivers/mysql.com/doc/refman/8.4/en/show-tables.html) 与
+[SHOW COLUMNS](https://dev.drivers/mysql.com/doc/refman/8.4/en/show-columns.html) 的布局提供；
 FULL TABLES 增加 `Table_type`，COLUMNS 返回 Field/Type/Null/Key/Default/Extra。
 Default 对显式整数默认值返回规范化文本，对显式 NULL 或无默认值返回 SQL NULL。
 Key 优先级 PRI > UNI > MUL：主键为 PRI，单列唯一索引首列为 UNI，普通或复合
 唯一索引首列为 MUL，后续键列不单独标记；删索引后自动反映当前目录。
-INDEX 使用 [MySQL SHOW INDEX](https://dev.mysql.com/doc/refman/8.4/en/show-index.html)
+INDEX 使用 [MySQL SHOW INDEX](https://dev.drivers/mysql.com/doc/refman/8.4/en/show-index.html)
 的 15 列布局，含 PRIMARY，每个索引列一行，序号从 1 开始，方向为 A/D。
 **MED｜兼容性边界：** Index_type 为本地 LSM，Cardinality 尚无统计而返回 NULL；
 Sub_part/Packed/Expression 为 NULL，Visible 为 YES，注释为空。不承诺索引枚举顺序。
@@ -1530,7 +1530,7 @@ LIKE 的表名匹配大小写敏感，列名和变量名匹配采用 ASCII 折�
 iterator/get/分配故障、资源限额和显示名称所有权。
 
 `SHOW CREATE TABLE table` 返回 Table/Create Table 两列单行结果。按照
-[MySQL SHOW CREATE TABLE](https://dev.mysql.com/doc/refman/8.4/en/show-create-table.html)
+[MySQL SHOW CREATE TABLE](https://dev.drivers/mysql.com/doc/refman/8.4/en/show-create-table.html)
 生成规范化定义，保留列序、三种数值类型、NULL/NOT NULL、显式列默认值、主键及完整二级索引的
 名称、唯一性、复合列序与 ASC/DESC；引用全部名称，不补造 ENGINE 等属性。
 生成文本在 open 内按 WORK/STEP 预算构建，读取与释放沿用上述快照和租约协议。
@@ -1693,10 +1693,10 @@ Linux 使用 `ci-linux-release` 的同名 targets 和测试过滤。常规 CI �
   JOIN 在全部输入就绪后生成带来源限定符的组合 schema，因此直接 scalar/IN/EXISTS 可逐行引用任意
   JOIN 输入列。每个 occurrence 仍拥有独立 reader，定义仍只物化一次。
 
-标量行为参考 [MySQL 标量子查询](https://dev.mysql.com/doc/refman/8.4/en/scalar-subqueries.html)
-和[子查询错误](https://dev.mysql.com/doc/refman/8.4/en/subquery-errors.html)。
-IN 参考 [MySQL 三值比较](https://dev.mysql.com/doc/refman/8.4/en/any-in-some-subqueries.html)
-及[子查询限制](https://dev.mysql.com/doc/refman/8.4/en/subquery-restrictions.html)。
+标量行为参考 [MySQL 标量子查询](https://dev.drivers/mysql.com/doc/refman/8.4/en/scalar-subqueries.html)
+和[子查询错误](https://dev.drivers/mysql.com/doc/refman/8.4/en/subquery-errors.html)。
+IN 参考 [MySQL 三值比较](https://dev.drivers/mysql.com/doc/refman/8.4/en/any-in-some-subqueries.html)
+及[子查询限制](https://dev.drivers/mysql.com/doc/refman/8.4/en/subquery-restrictions.html)。
 [依赖所有者设计](design.md#runtime-非相关标量依赖所有者) 说明边界、复杂度与迁移方式。
 
 UPDATE/DELETE 现已共享查询依赖图：`WITH ... UPDATE/DELETE` 可在 WHERE、SET 和计算排序表达式中使用
@@ -1740,7 +1740,7 @@ WHERE 常量所带来的函数依赖，也不从复合分组表达式反推源�
 JOIN 准备顺序绑定，RIGHT JOIN 先准备右侧；完整前缀保持 SQL 列序和已完成的 NULL 扩展，
 前缀间保持同一词法层级。来源只能引用已准备好的前缀和所属查询可见的祖先行；自身、
 后续未准备来源及不合法的外连接方向在打开时拒绝。普通非 LATERAL 派生表仍不能引用
-同一 SELECT 的兄弟来源，依据 [MySQL LATERAL 规则](https://dev.mysql.com/doc/refman/8.4/en/lateral-derived-tables.html)。
+同一 SELECT 的兄弟来源，依据 [MySQL LATERAL 规则](https://dev.drivers/mysql.com/doc/refman/8.4/en/lateral-derived-tables.html)。
 
 每个节点只编译一次并拥有原 SQL 参数快照，FROM 按当前左行重开整个相关右子树，普通
 叶子 rewind，LATERAL 叶子调用成对 open/close；相关 CTE 每行重建缓存，非相关 CTE
@@ -1766,8 +1766,8 @@ AST、输入参数及 marker 字节载荷可在成功打开后释放；捕获借
 输出仍须满足既有名称规则，可用显式别名或 CTE 列名列表命名；重复输出名仍拒绝。
 纯常量查询不读取 Catalog 或业务行，但仍占用事务来源租约至 close；EXPLAIN 的 table/type
 为 NULL，Extra 含 `No tables used`，不求值投影。仍不提供虚拟 `FROM DUAL`、无分组无聚合的
-HAVING 或 MySQL 的完整自动列名规则。语法依据 [MySQL SELECT](https://dev.mysql.com/doc/refman/8.4/en/select.html)
-及 [EXPLAIN](https://dev.mysql.com/doc/refman/8.4/en/explain-output.html)，实现边界见
+HAVING 或 MySQL 的完整自动列名规则。语法依据 [MySQL SELECT](https://dev.drivers/mysql.com/doc/refman/8.4/en/select.html)
+及 [EXPLAIN](https://dev.drivers/mysql.com/doc/refman/8.4/en/explain-output.html)，实现边界见
 [无 FROM 查询设计](design.md#无-from-查询的单位行输入)。
 
 事实｜无 FROM 增量新增 11 个正式用例，Windows Release 的 11 个相关 CTest 目标全部通过
@@ -1925,7 +1925,7 @@ SELECT/UNION/分组/派生表以及 scalar/IN/EXISTS 内的 WITH。CTE 采用一
 未写列名列表时沿用既有计算列别名要求。未被求值的 CTE 不读业务行，但仍验证名称和类型。
 EXPLAIN 为每个定义输出一次 DERIVED，不物化缓存。RECURSIVE 关键字可用于无自引用的 WITH；
 实际递归引用须配置 `sql_max_recursive_iterations`。详见[绑定与依赖图](design.md#非递归-with-的绑定与依赖图)，语法依据
-[MySQL WITH 文档](https://dev.mysql.com/doc/refman/8.4/en/with.html)。
+[MySQL WITH 文档](https://dev.drivers/mysql.com/doc/refman/8.4/en/with.html)。
 
 事实｜WITH SQL 接入新增 12 个用例，Windows Release 的 11 个相关 CTest 目标全部通过
 （38.65 秒）。runtime 98 项/135491 条断言、真实 relational 插件 66 项/3033 条断言；
@@ -1987,7 +1987,7 @@ Windows Release 的 10 个相关 CTest 目标全部通过（38.12 秒）；runti
 也可作为 INNER/LEFT/RIGHT/CROSS JOIN 的来源。派生来源与外层共享事务快照，打开时绑定类型，
 按需取行，未强制物化全表；JOIN 等算子的物化继续受现有配额约束。EXPLAIN 输出 DERIVED，
 不执行其投影或读取业务行。AST/参数载荷可在 open 后释放；关闭外层消费者后才释放子查询。
-遵循 [MySQL 派生表规则](https://dev.mysql.com/doc/refman/8.4/en/derived-tables.html) 的别名和唯一列名要求；
+遵循 [MySQL 派生表规则](https://dev.drivers/mysql.com/doc/refman/8.4/en/derived-tables.html) 的别名和唯一列名要求；
 支持别名后的等宽列清单 `AS d(x,y)`，按输出顺序覆盖名称，可重命名星号展开、UNION、
 匿名计算列和重复的内部输出名称；普通及 LATERAL 派生表共用该规则。未提供清单时，
 带 FROM 的计算列仍须显式别名。重复清单名称、列数不匹配或引用被覆盖的旧名返回
@@ -2006,7 +2006,7 @@ SQL_ERROR，绑定不修改子查询的类型、行值、GROUP/ORDER 名称和�
 EXPLAIN、事务回滚、取消、错误恢复、逐分配故障及每个构造步骤预算边界。
 构建无警告或错误，空白检查通过。未运行 MySQL 服务端差分、sanitizer 或 benchmark。
 
-EXISTS / NOT EXISTS 已接入 raw SQL，遵循 [MySQL 存在性规则](https://dev.mysql.com/doc/refman/8.4/en/exists-and-not-exists-subqueries.html)。
+EXISTS / NOT EXISTS 已接入 raw SQL，遵循 [MySQL 存在性规则](https://dev.drivers/mysql.com/doc/refman/8.4/en/exists-and-not-exists-subqueries.html)。
 [查询需求与复合执行设计](design.md#exists-查询需求与复合执行) 说明何时省略投影、何时保留去重以维护分页行数。
 名称、类型、UNION 宽度及参数仍在打开时校验；不存在相关列绑定或隐式类型转换。
 

@@ -27,7 +27,7 @@ static void password_test_clear(void *buffer,size_t size) {
 #define rand_bytes password_test_random
 #define pbkdf2_hmac_genkey password_test_hash
 #define gmssl_secure_clear password_test_clear
-#include "../../server/mysql/password.c"
+#include "../../server/drivers/mysql/password.c"
 #undef rand_bytes
 #undef pbkdf2_hmac_genkey
 #undef gmssl_secure_clear

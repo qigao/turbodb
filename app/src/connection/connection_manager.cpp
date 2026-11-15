@@ -51,7 +51,7 @@ bool ConnectionManager::Initialize(std::string* error) {
 
 SqlProvider ConnectionManager::ProviderFromId(const std::string& id) noexcept {
   if (id == "sqlite") return SqlProvider::sqlite;
-  if (id == "mysql") return SqlProvider::mysql;
+  if (id == "drivers/mysql") return SqlProvider::mysql;
   if (id == "postgresql") return SqlProvider::postgresql;
   return SqlProvider::unknown;
 }

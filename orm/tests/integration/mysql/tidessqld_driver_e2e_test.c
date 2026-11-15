@@ -194,7 +194,7 @@ static orm_runtime_t *open_runtime(orm_error_t *error) {
   load.struct_size = (uint32_t)sizeof(load);
   load.abi_version = ORM_RUNTIME_ABI_VERSION;
   load.module_path = orm_view(TEST_ORM_MYSQL_PLUGIN);
-  load.expected_driver_id = orm_view("mysql");
+  load.expected_driver_id = orm_view("drivers/mysql");
   if (report_status(
           "load MySQL ORM plugin",
           orm_runtime_load_driver(runtime, &load, error), error) != 0) {
@@ -223,7 +223,7 @@ static orm_connection_t *open_connection(
       (orm_option_t){orm_view("server_name"), orm_view("localhost")};
   options[7] = (orm_option_t){orm_view("timeout_ms"), orm_view("5000")};
   orm_config(&config);
-  config.driver = orm_view("mysql");
+  config.driver = orm_view("drivers/mysql");
   config.options = options;
   config.option_count = 8u;
   if (report_status(
@@ -286,7 +286,7 @@ static int exercise_orm_process_chain(
 }
 
 static int run_process_e2e(void) {
-  char *directory = tt_make_temp_dir("orm-mysql-tidessqld");
+  char *directory = tt_make_temp_dir("orm-drivers/mysql-tidessqld");
   char *config = NULL;
   char *database = NULL;
   tidessqld_test_daemon daemon = {0};

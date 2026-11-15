@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 foreach ($name in @("GITHUB_WORKSPACE", "GITHUB_ENV", "SALTS_BASE_VERSION",
-                    "CMETA_VERSION", "SALTS_UTILS_VERSION", "SALTS_CORE_VERSION")) {
+                    "CMETA_VERSION", "SALTS_UTILS_VERSION", "SALTS_CNET_VERSION")) {
   if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
     throw "$name is required"
   }
@@ -72,8 +72,8 @@ if ($Rid -in @("linux-x64", "linux-arm64", "android-arm64-v8a")) {
 @(
   "package=TurboDB.Native", "version=$Version", "rid=$Rid", "profile=release",
   "salts=$env:SALTS_BASE_VERSION", "saltsutils=$env:SALTS_UTILS_VERSION",
-  "cmeta=$env:CMETA_VERSION", "cnet=$env:SALTS_CORE_VERSION",
-  "drivers=sqlite,postgresql,mysql", "source=$env:GITHUB_SHA",
+  "cmeta=$env:CMETA_VERSION", "cnet=$env:SALTS_CNET_VERSION",
+  "drivers=sqlite,postgresql,drivers/mysql", "source=$env:GITHUB_SHA",
   "tidessql=OFF", "tidesdb=OFF"
   $runtimeManifest
 ) | Set-Content -LiteralPath (Join-Path $stage "turbodb-sdk-manifest.txt") -Encoding utf8NoBOM

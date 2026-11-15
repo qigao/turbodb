@@ -159,8 +159,8 @@ bool ParseConnectionConfig(vstr text, const std::wstring& config_path,
     const vstr driver = ini_get_v(ini.get(), section, "driver");
     if (Is(driver, "sqlite")) preset.provider = SqlProvider::sqlite;
     else if (Is(driver, "postgresql")) preset.provider = SqlProvider::postgresql;
-    else if (Is(driver, "mysql")) preset.provider = SqlProvider::mysql;
-    else return Fail(error, L"driver must be sqlite, postgresql, or mysql.");
+    else if (Is(driver, "drivers/mysql")) preset.provider = SqlProvider::mysql;
+    else return Fail(error, L"driver must be sqlite, postgresql, or drivers/mysql.");
     const bool network = preset.provider != SqlProvider::sqlite;
     for (std::size_t key_index = 0; key_index < ini_key_count(ini.get(), section);
          ++key_index) {

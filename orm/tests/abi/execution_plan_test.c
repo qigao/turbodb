@@ -184,7 +184,7 @@ static orm_status_t explain_fake_open(
   uint64_t columns = 0u;
   const char *sql = plan->raw_sql;
 
-  if (strcmp(backend->provider, "mysql") == 0) {
+  if (strcmp(backend->provider, "drivers/mysql") == 0) {
     if (strcmp(sql, "SELECT VERSION()") == 0) {
       rows = mysql_version_rows;
       row_count = sizeof(mysql_version_rows) / sizeof(mysql_version_rows[0]);
@@ -383,7 +383,7 @@ spec("ORM provider-neutral execution plans") {
     orm_execution_plan_t *plan = NULL;
     uint64_t count = 0u;
     orm_error_init(&error);
-    orm_connection_t *connection = open_fake("mysql", &error);
+    orm_connection_t *connection = open_fake("drivers/mysql", &error);
     check_not_null(connection);
 
     check_equal(
@@ -410,7 +410,7 @@ spec("ORM provider-neutral execution plans") {
     orm_execution_plan_t *plan = NULL;
     uint64_t count = 0u;
     orm_error_init(&error);
-    orm_connection_t *connection = open_fake("mysql", &error);
+    orm_connection_t *connection = open_fake("drivers/mysql", &error);
 
     check_equal(
         orm_query_explain(

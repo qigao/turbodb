@@ -29,7 +29,7 @@ TINYMOCk_FUNCTION_DECLARE(test_finish);
 #define PQisBusy test_busy
 #define PQsetnonblocking test_nonblocking
 #define PQfinish test_finish
-#include "../../../drivers/postgresql/backend.c"
+#include "../../../backends/postgresql/backend.c"
 #undef PQconsumeInput
 #undef PQflush
 #undef PQisBusy

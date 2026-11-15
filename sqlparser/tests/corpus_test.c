@@ -61,7 +61,7 @@ static void run_corpus(sqlparser_dialect dialect, const char *report_path) {
   fs_buf_t output = {report, tstr_len(report)};
   check_equal(fs_write_file(report_path, &output), 0);
   printf("CORPUS dialect=%s files=%zu bytes=%zu accepted=%zu syntax_errors=%zu limits=%zu accepted_statements=%zu\n",
-    dialect == SQLPARSER_SQLITE ? "sqlite" : "mysql", files, bytes, accepted, rejected, limited, statements);
+    dialect == SQLPARSER_SQLITE ? "sqlite" : "drivers/mysql", files, bytes, accepted, rejected, limited, statements);
   printf("CORPUS report=%s\n", report_path);
   if (dialect == SQLPARSER_SQLITE)
     printf("CORPUS sqlite_update_delete_limit=%d\n", (int)sqlparser_sqlite_update_delete_limit_enabled());

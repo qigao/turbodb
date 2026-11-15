@@ -580,7 +580,7 @@ orm_status_t ORM_C_CALL orm_connection_metadata_snapshot(
 
   if (strcmp(connection->driver_id, "sqlite") == 0)
     status = metadata_load_sqlite(connection, snapshot, error);
-  else if (strcmp(connection->driver_id, "mysql") == 0)
+  else if (strcmp(connection->driver_id, "drivers/mysql") == 0)
     status = metadata_load_mysql(connection, snapshot, error);
   else if (strcmp(connection->driver_id, "postgresql") == 0)
     status = metadata_load_postgresql(connection, snapshot, error);

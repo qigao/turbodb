@@ -5,7 +5,7 @@ include(CMakeOptions.cmake)
 
 project(
   TurboDB
-  VERSION 0.1.0
+  VERSION 0.1.1
   DESCRIPTION "C/C++ database libraries"
   HOMEPAGE_URL "https://github.com/qigao/turbodb"
   LANGUAGES C CXX)
@@ -31,35 +31,39 @@ include(GNUInstallDirs)
 include(Sanitizers)
 include(CmakeUtils)
 
+# Compiler selection belongs to presets; consume the prepared vcpkg triplet.
+list(PREPEND CMAKE_PREFIX_PATH
+  "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/$ENV{VCPKG_CONFIGURATION_SUBDIR}"
+  "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+
 find_package(SaltsBase "$ENV{SALTS_BASE_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{SALTS_BASE_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 find_package(CMeta "$ENV{CMETA_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{CMETA_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 find_package(SaltsUtils "$ENV{SALTS_UTILS_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-find_package(SaltsCore "$ENV{SALTS_CORE_VERSION}" EXACT CONFIG REQUIRED
-  PATHS "$ENV{SALTSCORE_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+find_package(GmSSL CONFIG REQUIRED)
+find_package(SaltsCNet "$ENV{SALTS_CNET_VERSION}" EXACT CONFIG REQUIRED
+  PATHS "$ENV{SALTS_CNET_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 
 add_library(turbodb_types INTERFACE)
+configure_file(orm/types.h "${CMAKE_CURRENT_BINARY_DIR}/include/turbodb/types.h" COPYONLY)
 target_include_directories(turbodb_types INTERFACE
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(turbodb_types INTERFACE Salts::Core)
 cmake_config_target(turbodb_types ALIAS TurboDB::Types EXPORT_SET TurboDBTargets
   EXPORT_NAME Types FOLDER types NO_VERSION)
-cmake_install_headers(FILES include/turbodb/types.h
+cmake_install_headers(FILES orm/types.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/turbodb)
 
 
-add_subdirectory(tools EXCLUDE_FROM_ALL)
 include(FindTools)
 add_subdirectory(sqlparser)
-add_subdirectory(drivers/schema)
-add_subdirectory(redis)
-add_subdirectory(mysql)
+add_subdirectory(drivers)
 add_subdirectory(orm)
 if(WIN32)
   add_subdirectory(app)

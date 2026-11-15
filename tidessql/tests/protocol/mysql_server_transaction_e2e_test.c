@@ -215,7 +215,7 @@ static bool read_score(int64_t id, int64_t *score, mysql_session_error_t *client
 spec("TidesSQL MySQL server remote transaction end to end") {
   before_each() {
     database = NULL;
-    directory = tt_make_temp_dir("tidessql-mysql-transaction");
+    directory = tt_make_temp_dir("tidessql-drivers/mysql-transaction");
     check_not_null(directory);
     server = (tdsql_mysql_server){0};
     executor = NULL;

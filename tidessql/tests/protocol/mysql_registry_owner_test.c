@@ -80,7 +80,7 @@ spec("MySQL registry native commit and cleanup boundaries") {
   before_each() {
     database=NULL; first=second=NULL; registry=(tdsql_mysql_registry){0}; dispatch=(tdsql_mysql_dispatch){0}; response=tdsql_response_default(); turbodb_error_init(&error);
     prepared=(mysql_stmt_prepare_ok_t){.statement_id=TEST_SENTINEL}; commits=rollbacks=0; commit_unknown=rollback_failure=false;
-    directory=tt_make_temp_dir("tidessql-mysql-registry-owner"); check_not_null(directory);
+    directory=tt_make_temp_dir("tidessql-drivers/mysql-registry-owner"); check_not_null(directory);
     const turbodb_option_t options[]={
       {turbodb_view("path"),turbodb_view(directory)},
       {turbodb_view("column_family"),turbodb_view("registry_owner")},
