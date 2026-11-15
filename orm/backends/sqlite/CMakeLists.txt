@@ -1,4 +1,4 @@
-find_package(SQLite3 REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
 add_library(
   orm_sqlite_driver MODULE
@@ -15,7 +15,7 @@ target_link_libraries(
   orm_sqlite_driver
   PRIVATE turbo_orm
           turbodb_schema_support
-          SQLite::SQLite3
+          unofficial::sqlite3::sqlite3
           Orm::DriverABI
           Salts::Core
           Salts::CSerde
@@ -25,10 +25,10 @@ target_link_libraries(
 # independent from SQLite headers, objects and link items.
 get_target_property(ORM_SQLITE_DRIVER_LINK_CONTRACT orm_sqlite_driver
                     LINK_LIBRARIES)
-list(FIND ORM_SQLITE_DRIVER_LINK_CONTRACT "SQLite::SQLite3"
+list(FIND ORM_SQLITE_DRIVER_LINK_CONTRACT "unofficial::sqlite3::sqlite3"
      ORM_SQLITE_DRIVER_SQLITE_LINK_INDEX)
 if(ORM_SQLITE_DRIVER_SQLITE_LINK_INDEX EQUAL -1)
-  message(FATAL_ERROR "orm_sqlite_driver must directly link SQLite::SQLite3")
+  message(FATAL_ERROR "orm_sqlite_driver must directly link unofficial::sqlite3::sqlite3")
 endif()
 set_target_properties(
   orm_sqlite_driver

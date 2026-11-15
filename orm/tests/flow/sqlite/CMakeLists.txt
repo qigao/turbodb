@@ -3,7 +3,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_sqlite_async
   SOURCES orm_sqlite_async_test.c
-  LIBS orm_c_test_static SQLite::SQLite3 CMeta::CFlow Salts::Core
+  LIBS orm_c_test_static unofficial::sqlite3::sqlite3 CMeta::CFlow Salts::Core
     Salts::TinyTest CMeta::TinyMock
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/abi
@@ -19,7 +19,7 @@ cmake_add_test(
   FOLDER "orm/tests/flow/sqlite"
   TEST_NAME orm_sqlite_flow
   SOURCES orm_sqlite_flow_test.c
-  LIBS ${ORM_INTERNAL_TEST_LIBRARY} SQLite::SQLite3 Salts::DataBind CMeta::CFlow
+  LIBS ${ORM_INTERNAL_TEST_LIBRARY} unofficial::sqlite3::sqlite3 Salts::DataBind CMeta::CFlow
     Salts::TinyTest
   DEFS ORM_C_STATIC
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow

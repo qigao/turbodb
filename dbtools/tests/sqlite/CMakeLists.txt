@@ -1,8 +1,8 @@
 if(BUILD_TESTS)
-  find_package(SQLite3 REQUIRED)
+  find_package(unofficial-sqlite3 CONFIG REQUIRED)
   add_executable(dbtool_sqlite_test dbtool_sqlite_test.c
     ../../../orm/backends/sqlite/schema.c)
-  target_link_libraries(dbtool_sqlite_test PRIVATE turbodb_schema_support SQLite::SQLite3
+  target_link_libraries(dbtool_sqlite_test PRIVATE turbodb_schema_support unofficial::sqlite3::sqlite3
                                                    Salts::TinyTest)
   target_include_directories(dbtool_sqlite_test
                              PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../src)

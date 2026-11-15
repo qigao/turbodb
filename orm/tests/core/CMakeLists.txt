@@ -24,7 +24,7 @@ target_link_libraries(
           ${CMAKE_DL_LIBS})
 target_compile_definitions(orm_c_test_static
                            PRIVATE ORM_LEGACY_SQLITE_FACTORY)
-target_link_libraries(orm_c_test_static PRIVATE SQLite::SQLite3)
+target_link_libraries(orm_c_test_static PRIVATE unofficial::sqlite3::sqlite3)
 set_target_properties(orm_c_test_static PROPERTIES
   FOLDER "orm/tests/core")
 set(ORM_INTERNAL_TEST_LIBRARY orm_c_test_static PARENT_SCOPE)

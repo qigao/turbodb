@@ -72,8 +72,8 @@ spec("runtime driver registry") {
                   ORM_STATUS_INVALID_ARGUMENT);
     }
     const char embedded_nul[] = "drivers/mysql\0hidden";
-    check_equal(orm_runtime_driver_info(runtime,
-                    (orm_string_view_t){embedded_nul, sizeof(embedded_nul) - 1u},
+    const orm_string_view_t invalid_id = {embedded_nul, sizeof(embedded_nul) - 1u};
+    check_equal(orm_runtime_driver_info(runtime, invalid_id,
                     &info, &error), ORM_STATUS_INVALID_ARGUMENT);
     check_equal(orm_runtime_close(runtime, &error), ORM_STATUS_OK);
     orm_runtime_release(runtime);

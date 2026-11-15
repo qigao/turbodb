@@ -193,9 +193,10 @@ The restore entry point checks release asset SHA-256 digests and exports
 `SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTS_CNET_ROOT`,
 `VCPKG_INSTALLED_DIR`, `RE2C_ROOT`, and `LEMON_ROOT` to the calling PowerShell process.
 The shared vcpkg-cache `resolve-release` and `locked` operations restore the
-selected preinstalled archive. On Windows, this explicit restore step also runs
-vcpkg against TurboDB's manifest to prepare GmSSL and Studio's Scintilla/Lexilla
-ports in that installation. CMake consumes the prepared triplet through
+selected preinstalled archive. This explicit restore step also runs vcpkg against
+TurboDB's complete manifest on every platform; the shared warm-up archive omits
+libpq on macOS/Android and Studio's Scintilla/Lexilla on Windows.
+CMake consumes the prepared triplet through
 `CMAKE_PREFIX_PATH`, as in TurboScript and http-services. Configuration does not
 run vcpkg or generate compiler toolchains; missing dependencies fail discovery.
 The generator packages are Re2c 4.6.7 and Lemon 1.0.0 from that same cache release.

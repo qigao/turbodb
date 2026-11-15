@@ -8,7 +8,7 @@
   环境事实源统一为 `SALTS_CNET_VERSION` / `SALTS_CNET_ROOT`；本地 `.env`
   的相关版本和 SDK 根已与本仓库恢复回执对齐，其他机器设置保留。
 - vcpkg-cache 预安装包不含 Studio 的 Scintilla/Lexilla；GmSSL 是静态
-  Crypto/MySQL 的显式依赖。Windows 的现有 SDK 恢复入口现在显式执行项目
+  Crypto/MySQL 的显式依赖。所有平台的现有 SDK 恢复入口现在显式执行项目
   manifest install，先准备完整依赖，成功后才发布恢复环境。
   vcpkg 构建端口所需编译器文件由该步骤内部调用共享 helper 准备，不向产品
   configure 导出 toolchain 路径，不把它们持久化到 `.env`。
@@ -69,6 +69,19 @@ cmake --build --preset install-native-release-user
 由多平台构建、正式 CTest、install、包内容测试全部成功后发布 NuGet 和 GitHub Release。
 本地发布验证日志为 `build/release-{configure,build,tests}.log`，
 JUnit 为 `build/native-release-user/ctest-release.xml`。
+
+首次发布 CI 的跨平台取证：
+
+- vcpkg-cache 0.1.3 的 warm-up manifest 只在 Linux/Windows 预装 libpq。
+  macOS/Android 必须在恢复阶段按本项目 manifest 显式安装，不能在 configure
+  时借用系统 PostgreSQL 或跳过驱动。host triplet 按宿主 RID 明确选择。
+- Linux 静态 SQLite 的 FTS5 对象依赖 libm；CMake 内置 FindSQLite3 的原始
+  库路径不带完整依赖闭包。统一消费发布包的
+  `unofficial::sqlite3::sqlite3` 导出 target，由生产者记录系统链接依赖。
+- MSVC `/WX` 会把断言参数内复合字面量引起的 C4189 当作失败；边界测试改用
+  具名的 counted view，保留嵌入 NUL 断言，不关闭警告。
+- 上述修复后本地 llvm-mingw 正式 CTest 再次 92/92 通过；远端按相同正式流水线
+  重新执行全部平台，失败即阻止打包和发布。
 
 ## 发布 CI 的配置边界
 

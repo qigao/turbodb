@@ -1,4 +1,4 @@
-find_package(SQLite3 REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(PostgreSQL REQUIRED)
 
 get_target_property(ORM_SOURCE_DIR turbo_orm SOURCE_DIR)

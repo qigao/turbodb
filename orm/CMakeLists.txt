@@ -41,7 +41,7 @@ target_link_libraries(
           ${CMAKE_DL_LIBS})
 
 get_target_property(ORM_CORE_LINK_CONTRACT turbo_orm LINK_LIBRARIES)
-set(ORM_CORE_FORBIDDEN_LINKS SQLite::SQLite3 PostgreSQL::PostgreSQL Salts::CNet
+set(ORM_CORE_FORBIDDEN_LINKS unofficial::sqlite3::sqlite3 PostgreSQL::PostgreSQL Salts::CNet
                              TurboDB::Redis)
 list(REMOVE_ITEM ORM_CORE_FORBIDDEN_LINKS "")
 set(ORM_CORE_ALLOWED_LINKS ${ORM_CORE_LINK_CONTRACT})

@@ -5,7 +5,7 @@ if(NOT TARGET orm_c_test_static)
     FATAL_ERROR "Native ownership tests require the real ORM test library")
 endif()
 # Backend imports are directory-scoped; use the same required packages/preset.
-find_package(SQLite3 REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
 get_target_property(owner_source_dir turbo_orm SOURCE_DIR)
 get_target_property(owner_sources orm_c_test_static SOURCES)
 set(owner_absolute_sources ${owner_sources})

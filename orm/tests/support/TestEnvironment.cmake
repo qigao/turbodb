@@ -4,7 +4,7 @@ if(WIN32)
   )
 
   string(APPEND ORM_TEST_RUNTIME_PATH
-         ";PATH=path_list_prepend:$<TARGET_FILE_DIR:SQLite::SQLite3>")
+         ";PATH=path_list_prepend:$<TARGET_FILE_DIR:unofficial::sqlite3::sqlite3>")
   if(SQLite3_LIBRARY)
     get_filename_component(ORM_TEST_SQLITE_LIBRARY_DIR "${SQLite3_LIBRARY}"
                            DIRECTORY)

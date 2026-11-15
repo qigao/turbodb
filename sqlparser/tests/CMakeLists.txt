@@ -6,11 +6,11 @@ cmake_add_test(NAME sqlparser_failure_test SOURCES failure_test.c
   FOLDER "sqlparser/tests")
 cmake_add_test(NAME sqlparser_benchmark SOURCES benchmark.c
   LIBS sqlparser Salts::TinyTest FOLDER "sqlparser/tests")
-find_package(SQLite3 REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
 cmake_add_test(NAME sqlparser_dialect_test SOURCES dialect_test.c
-  LIBS sqlparser SQLite::SQLite3 Salts::TinyTest FOLDER "sqlparser/tests")
+  LIBS sqlparser unofficial::sqlite3::sqlite3 Salts::TinyTest FOLDER "sqlparser/tests")
 cmake_add_test(NAME sqlparser_sqlite_extension_test SOURCES sqlite_extension_test.c
-  LIBS sqlparser SQLite::SQLite3 Salts::TinyTest FOLDER "sqlparser/tests")
+  LIBS sqlparser unofficial::sqlite3::sqlite3 Salts::TinyTest FOLDER "sqlparser/tests")
 
 set(SQLPARSER_CORPUS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../sqlite-spec")
 file(GLOB_RECURSE SQLPARSER_CORPUS_FILES CONFIGURE_DEPENDS

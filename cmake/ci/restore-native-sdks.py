@@ -161,22 +161,22 @@ for name, payload, required, prefix in [
     result = json.loads(run(*command))
     environment[prefix] = result['root']
 
-if args.rid.startswith('windows-'):
-    # The published cache lacks Studio's editor ports. Resolve the project's
-    # manifest here, before CMake consumes the prepared installation.
-    if profile == 'windows-llvm-mingw-x64':
-        compiler_root = Path(os.environ['LLVM_MINGW_ROOT'])
-        toolchains = destination / 'toolchains' / profile
-        toolchains.mkdir(parents=True, exist_ok=True)
-        paths = transport.tool_paths(compiler_root, 'llvm-mingw', 'x64', host)
-        dependency = transport.cmake_toolchain(toolchains, 'x64', paths)
-        os.environ['LLVM_MINGW_DEPENDENCY_TOOLCHAIN_FILE'] = dependency.as_posix()
-        os.environ['LLVM_MINGW_HOST_DEPENDENCY_TOOLCHAIN_FILE'] = dependency.as_posix()
-    vcpkg = Path(os.environ['VCPKG_ROOT']) / ('vcpkg.exe' if os.name == 'nt' else 'vcpkg')
-    subprocess.run([str(vcpkg), 'install', '--triplet=' + triplet,
-                    '--x-manifest-root=' + str(root),
-                    '--x-install-root=' + environment['VCPKG_INSTALLED_DIR'],
-                    '--overlay-triplets=' + str(infra / 'triplets')], check=True)
+# The release cache is a warm-up tree, not this product's complete manifest:
+# it omits libpq on macOS/Android and the editor ports on Windows.
+if profile == 'windows-llvm-mingw-x64':
+    compiler_root = Path(os.environ['LLVM_MINGW_ROOT'])
+    toolchains = destination / 'toolchains' / profile
+    toolchains.mkdir(parents=True, exist_ok=True)
+    paths = transport.tool_paths(compiler_root, 'llvm-mingw', 'x64', host)
+    dependency = transport.cmake_toolchain(toolchains, 'x64', paths)
+    os.environ['LLVM_MINGW_DEPENDENCY_TOOLCHAIN_FILE'] = dependency.as_posix()
+    os.environ['LLVM_MINGW_HOST_DEPENDENCY_TOOLCHAIN_FILE'] = dependency.as_posix()
+vcpkg = Path(os.environ['VCPKG_ROOT']) / ('vcpkg.exe' if os.name == 'nt' else 'vcpkg')
+subprocess.run([str(vcpkg), 'install', '--triplet=' + triplet,
+                '--host-triplet=' + profiles[host][1],
+                '--x-manifest-root=' + str(root),
+                '--x-install-root=' + environment['VCPKG_INSTALLED_DIR'],
+                '--overlay-triplets=' + str(infra / 'triplets')], check=True)
 
 environment.update({key: versions[repo] for repo, key in version_variables.items()})
 output = root / 'build/native-sdk-environment.json'
