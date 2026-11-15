@@ -82,6 +82,12 @@ JUnit 为 `build/native-release-user/ctest-release.xml`。
   具名的 counted view，保留嵌入 NUL 断言，不关闭警告。
 - 上述修复后本地 llvm-mingw 正式 CTest 再次 92/92 通过；远端按相同正式流水线
   重新执行全部平台，失败即阻止打包和发布。
+- 第二轮 CI 确认 Windows MSVC 的完整构建、正式测试和 SDK 暂存通过。Unix
+  静态 libpq 还需 `pgcommon`、`pgport` 及系统库；根 CMake 使用选定安装目录
+  内 `libpq.pc` 的静态导出元数据提供现有 `PostgreSQL::PostgreSQL` 契约，
+  不借用宿主 PostgreSQL，也不复制 vcpkg wrapper 的库列表。
+- Android NDK 27 的最终共享库显式链接 16 KiB 最大页大小，SDK 暂存对正式
+  install manifest 内的 ELF 实际 LOAD segment 做对齐验收；这不代表设备运行通过。
 
 ## 发布 CI 的配置边界
 

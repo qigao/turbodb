@@ -49,6 +49,21 @@ find_package(SaltsCNet "$ENV{SALTS_CNET_VERSION}" EXACT CONFIG REQUIRED
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 
+if(UNIX)
+  # The selected Unix triplets ship static libpq. Its own metadata owns the
+  # pgcommon/pgport/system-library closure omitted by FindPostgreSQL.
+  block(SCOPE_FOR VARIABLES)
+    set(PKG_CONFIG_ARGN --static)
+    pkg_check_modules(TurboDBPostgreSQL REQUIRED IMPORTED_TARGET GLOBAL
+      "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/pkgconfig/libpq.pc")
+    add_library(PostgreSQL::PostgreSQL ALIAS PkgConfig::TurboDBPostgreSQL)
+  endblock()
+endif()
+
+if(ANDROID)
+  add_link_options("LINKER:-z,max-page-size=16384")
+endif()
+
 add_library(turbodb_types INTERFACE)
 configure_file(orm/types.h "${CMAKE_CURRENT_BINARY_DIR}/include/turbodb/types.h" COPYONLY)
 target_include_directories(turbodb_types INTERFACE

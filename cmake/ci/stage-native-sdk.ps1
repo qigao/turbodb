@@ -54,6 +54,22 @@ if ($Rid -eq "windows-x64") {
   }
 }
 $runtimeManifest = @()
+if ($Rid -eq "android-arm64-v8a") {
+  foreach ($library in Get-Content -LiteralPath $InstallManifest | Sort-Object -Unique) {
+    if ([IO.Path]::GetExtension($library) -ne '.so') { continue }
+    $headers = & readelf -lW $library
+    if ($LASTEXITCODE -ne 0) { throw "failed to inspect Android ELF: $library" }
+    $alignments = @($headers | ForEach-Object {
+      if ($_ -match '^\s*LOAD\s+.*\s+(0x[0-9a-fA-F]+)\s*$') {
+        [Convert]::ToUInt64($Matches[1].Substring(2), 16)
+      }
+    })
+    if ($alignments.Count -eq 0 -or @($alignments | Where-Object { $_ -lt 16384 }).Count -ne 0) {
+      throw "Android ELF LOAD alignment is below 16 KiB: $library"
+    }
+  }
+  $runtimeManifest += 'elf_load_alignment_min=16384'
+}
 if ($Rid -in @("linux-x64", "linux-arm64", "android-arm64-v8a")) {
   if ([string]::IsNullOrWhiteSpace($env:SALTS_BASE_ROOT)) { throw "SALTS_BASE_ROOT is required" }
   $saltsLibrary = Join-Path $env:SALTS_BASE_ROOT "lib/libsalts.so"
