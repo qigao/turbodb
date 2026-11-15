@@ -306,7 +306,7 @@ spec("standalone database tool CLI") {
   }
 
   it("forwards MySQL connection environment and script through the shared CLI") {
-    char *path = tt_make_temp_file("dbtool-drivers/mysql-cli", ".sql");
+    char *path = tt_make_temp_file("dbtool-drivers-mysql-cli", ".sql");
     const char *argv[] = {"dbtools", "--driver", "drivers/mysql", "schema", "apply", "--file", path,
                          "--conninfo-env", "PATH"};
     dbtool_apply_result result = DBTOOL_APPLY_RESULT_INIT;

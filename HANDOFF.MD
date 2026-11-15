@@ -88,6 +88,10 @@ JUnit 为 `build/native-release-user/ctest-release.xml`。
   不借用宿主 PostgreSQL，也不复制 vcpkg wrapper 的库列表。
 - Android NDK 27 的最终共享库显式链接 16 KiB 最大页大小，SDK 暂存对正式
   install manifest 内的 ELF 实际 LOAD segment 做对齐验收；这不代表设备运行通过。
+- 第三轮 CI 的 Android 完整构建、install 和对齐暂存通过；Linux x64/ARM64
+  完整构建通过，均为 86/87 项测试通过。剩余 CLI fixture 的临时文件前缀
+  包含 `drivers/mysql` 中的斜杠，Unix mkstemp 将其解释为不存在的目录。
+  文件名前缀改为 `dbtool-drivers-mysql-cli`，驱动 ID 与 CLI 参数保持不变。
 
 ## 发布 CI 的配置边界
 
