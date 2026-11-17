@@ -271,3 +271,24 @@ JUnit 为 `build/native-release-user/ctest-release.xml`。
   推论：存在编辑器等外部配置任务并发操作同一构建目录；未更换工具链或
   屏蔽探测。无并发任务时单独完成正向 configure/build。原失败日志保留在
   build/crypto-header-concurrent-configure.log，不能将其归因为 Crypto 头文件。
+
+## 首次推送后 CI 仍使用旧变量与 Windows 路径错误（2026-11-18）
+
+- 事实：ecff5e8 的 push run 44128210288 创建于 16:39:16Z；
+  SALTS_CNET_VERSION / SALTS_UTILS_VERSION 分别在 16:39:19Z / 16:39:22Z
+  才更新。prepare 日志明确选择 CNet 0.1.12 / Utils 0.1.4，并生成对应的
+  原始 SDK 输入，后续 configure 因 API 最低版本 0.1.14 正确失败。
+  当前 repository variables 已为 0.1.15 / 0.1.5，修改变量不改变该旧 run
+  已固定的环境和准备产物。SDK 升级应先同步变量再触发 CI；若先推送，
+  同步后须启动完整的新 run，不能只重用旧 prepare 的 artifact。
+- 同一 run 的 LLVM-MinGW lane 在资源编译器探测阶段更早失败：
+  setup-llvm-mingw 返回合法 Windows 原生路径 D:\a\_temp\...，preset 将
+  CMAKE_RC_COMPILER 当作未标明类型的字符串传入，生成的 CMakeRCCompiler.cmake
+  把反斜杠解释为转义。此问题独立于 CNet 版本。
+- 将 LLVM-MinGW 的 C/C++、AR、RANLIB、RC 路径声明为 FILEPATH cache 值，
+  由 CMake 正常规范化路径，不新增路径猜测、工具链切换或 SDK 备用来源。
+  用本机 LLVM_MINGW_ROOT=C:\tools\llvm-mingw 在正式 CI preset 中复现
+  Invalid character escape；修正后同一反斜杠输入的 --fresh configure、
+  完整 build、正式 CTest 92/92 通过。日志为 build/ci-backslash-*.log。
+- 推送修正前再次核对远端 CNet 0.1.15 / Utils 0.1.5，重新触发完整十项
+  资格验证；远端结果以后续实际 run 为准，不把本机或旧 run 的结果视为通过。

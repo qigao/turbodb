@@ -6,11 +6,26 @@
       "hidden": true,
       "description": "LLVM-MinGW compiler selection; only the SDK root is machine-specific",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-clang.exe",
-        "CMAKE_CXX_COMPILER": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-clang++.exe",
-        "CMAKE_AR": "$env{LLVM_MINGW_ROOT}/bin/llvm-ar.exe",
-        "CMAKE_RANLIB": "$env{LLVM_MINGW_ROOT}/bin/llvm-ranlib.exe",
-        "CMAKE_RC_COMPILER": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-windres.exe"
+        "CMAKE_C_COMPILER": {
+          "type": "FILEPATH",
+          "value": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-clang.exe"
+        },
+        "CMAKE_CXX_COMPILER": {
+          "type": "FILEPATH",
+          "value": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-clang++.exe"
+        },
+        "CMAKE_AR": {
+          "type": "FILEPATH",
+          "value": "$env{LLVM_MINGW_ROOT}/bin/llvm-ar.exe"
+        },
+        "CMAKE_RANLIB": {
+          "type": "FILEPATH",
+          "value": "$env{LLVM_MINGW_ROOT}/bin/llvm-ranlib.exe"
+        },
+        "CMAKE_RC_COMPILER": {
+          "type": "FILEPATH",
+          "value": "$env{LLVM_MINGW_ROOT}/bin/$env{LLVM_MINGW_TARGET}-windres.exe"
+        }
       },
       "environment": {
         "LLVM_MINGW_TARGET": "x86_64-w64-mingw32",

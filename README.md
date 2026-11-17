@@ -284,6 +284,9 @@ When merging these changes, synchronize repository variables with
 `.env.example`, including CNet 0.1.15 and Utils 0.1.5. Existing releases remain
 immutable. To roll back the workflow migration, use the preceding source
 revision together with its matching SDK inputs and packaging files.
+Synchronize variables before queuing CI. Updating repository variables does not
+replace SDK inputs already selected by a running workflow; start a new complete
+workflow run after synchronization rather than reusing its prepared artifacts.
 
 Rebuild TurboDB, consumers, and driver plugins together for the split SDK ABI.
 `Salts::Core` comes from SaltsBase; `CMeta::CMeta`, `CMeta::CFlow`, `CMeta::CSTL`,
