@@ -42,6 +42,14 @@ find_package(CMeta "$ENV{CMETA_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{CMETA_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 find_package(SaltsUtils "$ENV{SALTS_UTILS_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+# MySQL authentication uses the public SHA-1 digest and secret-clear API.
+if("$ENV{SALTS_CNET_VERSION}" VERSION_LESS "0.1.14")
+  message(FATAL_ERROR
+    "TurboDB requires SaltsCNet >= 0.1.14 for crypto/symmetric.h. "
+    "Selected SALTS_CNET_VERSION='$ENV{SALTS_CNET_VERSION}', "
+    "SALTS_CNET_ROOT='$ENV{SALTS_CNET_ROOT}'. "
+    "Select a matching released SDK version/root and reconfigure with --fresh.")
+endif()
 find_package(SaltsCNet "$ENV{SALTS_CNET_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{SALTS_CNET_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 

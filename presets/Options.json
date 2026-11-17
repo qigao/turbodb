@@ -6,9 +6,9 @@
       "hidden": true,
       "cacheVariables": {
         "BUILD_TESTS": "OFF",
-        "ENABLE_ASAN": "OFF",
-        "ENABLE_UBSAN": "OFF",
-        "ENABLE_TSAN": "OFF"
+        "ENABLE_SANITIZER_ADDRESS": "OFF",
+        "ENABLE_SANITIZER_UNDEFINED": "OFF",
+        "ENABLE_SANITIZER_THREAD": "OFF"
       }
     },
     {
@@ -45,8 +45,8 @@
         "developer-mode"
       ],
       "cacheVariables": {
-        "ENABLE_ASAN": "ON",
-        "ENABLE_UBSAN": "ON"
+        "ENABLE_SANITIZER_ADDRESS": "ON",
+        "ENABLE_SANITIZER_UNDEFINED": "ON"
       }
     },
     {
@@ -56,7 +56,7 @@
         "developer-mode"
       ],
       "cacheVariables": {
-        "ENABLE_TSAN": "ON"
+        "ENABLE_SANITIZER_THREAD": "ON"
       }
     }
   ]

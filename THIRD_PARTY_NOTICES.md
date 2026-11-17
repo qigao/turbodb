@@ -16,12 +16,13 @@ Studio 通过固定 SHA-256 的正式发布源码归档使用
 
 ## GmSSL 密码库
 
-MySQL client 认证和私有 TidesSQL server 密码边界通过 vcpkg 的 `GmSSL::GmSSL`
-接入 GmSSL 3.2.0，不复制上游源码。来源：[guanzhi/GmSSL](https://github.com/guanzhi/GmSSL/tree/v3.2.0)，
-许可 Apache-2.0；安装包保留上游 `share/gmssl/copyright`。项目依赖由
-`vcpkg-configuration.json` 选定的 qigao/vcpkg-cache gmssl port 管理，
-该 port 包含 Salts CNet 所需 TLS 适配补丁与 SHA1/SHA2/AES/P256 构建选项；
-补丁和版本元数据由 registry 管理。其他 registry 包的原 baseline 不变。
+当前 MySQL client 认证通过 SaltsCNet 的公开 `Salts::Crypto` 接口使用
+GmSSL 后端，不直接包含或链接 GmSSL。来源：
+[guanzhi/GmSSL](https://github.com/guanzhi/GmSSL/tree/v3.2.0)，许可 Apache-2.0；
+版本、补丁及后端许可由所选 SaltsCNet SDK 管理，部署该 SDK 的运行库时
+一并保留其许可材料。TurboDB SDK TAR 不重新分发这些上游运行库。
+未纳入根构建图的私有 TidesSQL 源码仍有直接 GmSSL 引用，不能将其视为
+当前 TurboDB 的公开依赖或已验证模块。
 
 ## MySQL 8.4.0 测试语料
 

@@ -15,6 +15,15 @@
       ]
     },
     {
+      "name": "llvm-native-asan-ubsan-user",
+      "displayName": "Linux LLVM ASan + UBSan",
+      "inherits": [
+        "native-environment",
+        "full-native-asan-ubsan",
+        "toolkit-llvm-native"
+      ]
+    },
+    {
       "name": "llvm-native-tsan-user",
       "displayName": "Linux LLVM TSan",
       "inherits": [
@@ -356,6 +365,22 @@
       "name": "install-ci-android-x64-release-user",
       "inherits": "install-android-x64-release-user",
       "configurePreset": "ci-android-x64-release-user"
+    },
+    {
+      "name": "llvm-native-asan-ubsan-user",
+      "inherits": [
+        "base-build",
+        "build-linux"
+      ],
+      "configurePreset": "llvm-native-asan-ubsan-user"
+    },
+    {
+      "name": "install-llvm-native-asan-ubsan-user",
+      "inherits": [
+        "base-install",
+        "build-linux"
+      ],
+      "configurePreset": "llvm-native-asan-ubsan-user"
     }
   ],
   "testPresets": [
@@ -434,6 +459,14 @@
         "gcc-release-user"
       ],
       "configurePreset": "ci-gcc-release-user"
+    },
+    {
+      "name": "llvm-native-asan-ubsan-user",
+      "inherits": [
+        "base-test",
+        "test-linux"
+      ],
+      "configurePreset": "llvm-native-asan-ubsan-user"
     }
   ]
 }

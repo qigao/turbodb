@@ -74,6 +74,8 @@
 
 ## 构建与验证
 
+- 每个仓库采用单一顶层 `project()`、多个 module 的 CMake 管理方式。根目录统一工程版本、工具链/SDK 选择、选项和整体组装；module 通过 `add_subdirectory()` 声明自己的 targets、链接、安装及所属测试，不声明独立 `project()`，不保留单独配置子目录的兼容分支，不重复设置顶层 CMake policy 或发布包版本入口。多个库 target 或 export set 仍属于同一个 project。
+
 使用 `cmake-presets` 执行构建、测试、安装与打包；使用 `tinytest` 编写或修改 C/C++ 测试、benchmark 和 Mock。现有脚本测试沿用所属模块的正式测试入口。准确的 preset、target、测试名及 helper 签名以当前 checkout 为准。
 
 - 禁止生成、新增或恢复 install/installer、consumer、installed-consumer、smoke 等独立验证工程；不得通过改名、换目录、放入 CI 或临时分支绕过。验证复用本项目的构建目标和正式测试入口。正常的 install/package 命令及发布流程不属于此禁令。

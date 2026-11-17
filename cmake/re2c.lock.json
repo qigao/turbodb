@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "source": {
+    "kind": "package",
+    "feed": "https://nuget.pkg.github.com/qigao/index.json",
+    "id": "Qigao.Re2c.Binary",
+    "version": "4.6.7"
+  },
+  "sha256": "fe3c64ef3c25a28a9e5143bf2e85e3a7f25691f9bf47bec490f3e6be8e461305"
+}

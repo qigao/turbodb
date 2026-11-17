@@ -351,26 +351,24 @@ unchanged.
 
 ## Build and test
 
-ORM builds SQLite, PostgreSQL and MySQL drivers together.
-There are no per-database ORM build switches. `TURBODB_BUILD_ORM` and
-`TURBODB_BUILD_DBTOOLS` select the ORM and database-tool modules;
-`TURBODB_BUILD_REDIS` independently selects the standalone Redis client.
-The database tools always support SQLite and PostgreSQL. Enabling either module
-selects both vcpkg manifest features before toolchain initialization.
-The standalone Redis client is built from its repository module;
-Salts and SaltsUtils come from the installed SDKs selected by the preset.
+ORM is a module of the root `project(TurboDB)` and builds SQLite, PostgreSQL
+and MySQL drivers together. Configure/build/test/install from the repository
+root presets. ORM, dbtools and the Redis/MySQL client modules are assembled by
+the root build graph; there are no module or per-database build switches.
+`BUILD_TESTS` controls formal tests and `BUILD_BENCHMARK` controls benchmarks.
+Dependency versions and SDK roots come from the loaded parent environment or
+local `.env`; prepare the complete vcpkg manifest before configuration.
 Native database libraries stay outside the generic `Orm::C` link interface.
 
 The TidesDB ORM plugin and its `orm_tidesdb.h` maintenance interface have been
-removed. ORM can now build with TidesSQL disabled. Keeping the plugin would
-retain that build dependency; the chosen removal keeps TidesSQL and its TidesDB
-storage engine independently selectable. Applications using the removed driver
+removed. The `tidessql/` server/storage sources are outside the current root
+build graph. Applications using the removed driver
 must switch to the [TidesSQL SDK](../tidessql/readme.md) or connect through the
 MySQL driver to `tidessqld`. Existing database files and storage formats are
 unchanged. Storage, WAL fault and concurrency tests live in
 `tidessql/tests/storage/`; plugin-specific tests have been removed. To roll back,
 restore the plugin, header and test registrations together from the preceding
-revision and enable TidesSQL.
+revision with its matching build graph and SDK set.
 
 The root `drivers/mysql/` directory provides the standalone `TurboDB::MySQL` static
 client and installed headers, without ORM dependencies. `orm/backends/drivers/mysql/`

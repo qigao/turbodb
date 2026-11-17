@@ -2,26 +2,14 @@
 
 **Typed and bounded database/storage infrastructure for the Salts ecosystem.**
 
-TurboDB provides C database components, C++ header-only wrappers, native-driver database tooling, Redis integrations, and optional ORM capabilities. It uses the released SaltsBase, CMeta, SaltsUtils, and CNet SDKs as its systems foundation while keeping storage semantics, drivers, durability behavior, and database-specific contracts owned by TurboDB.
+TurboDB provides C database components, C++ header-only wrappers, native-driver database tooling, Redis integrations, and typed ORM capabilities. It uses the released SaltsBase, CMeta, SaltsUtils, and CNet SDKs as its systems foundation while keeping storage semantics, drivers, durability behavior, and database-specific contracts owned by TurboDB.
 
 **Tags:** C11 · C++17 · database · storage · ORM · Redis · SQLite · PostgreSQL · durability · async-io
 
-## 0.1.1 migration
-
-MySQL's canonical runtime ID and CLI selector are now `drivers/mysql`.
-Update connection profiles, `expected_driver_id`, and `dbtools --driver` arguments
-together. SQLite and PostgreSQL IDs are unchanged. Driver IDs accept bounded
-slash-separated tokens, each starting with a lowercase letter and continuing
-with lowercase letters, digits, `_` or `-`; empty or traversal components fail.
-Plugin ABI, reflected contract checks and exact ID matching still apply.
-
-Client sources now live under `drivers/mysql` and `drivers/redis`; concrete ORM
-adapters live under `orm/backends`. Native consumers use installed headers under
-`drivers/mysql/` and `drivers/redis/`. The shared DTO include remains
-`turbodb/types.h`. Rebuild hosts and driver plugins with the matching SDK set
-listed below. No database file conversion is required. To roll back, select the
-complete 0.1.0 package and matching SDKs, restore its original IDs/header paths,
-and configure with `--fresh`.
+The root `project(TurboDB)` owns the CMake build. SQLParser, drivers, ORM,
+Studio and dbtools are modules assembled with `add_subdirectory()`. Configure,
+build, test and install through the repository's root presets; modules do not
+provide standalone CMake projects or separate package-version entry points.
 
 ## Built on Salts
 
@@ -183,18 +171,21 @@ Select exact published versions through the parent environment or `.env`.
 The current set is [vcpkg-cache 0.1.3](https://github.com/qigao/vcpkg-cache/releases/tag/v0.1.3),
 [SaltsBase 0.1.8](https://github.com/qigao/salts-base/releases/tag/v0.1.8),
 [CMeta 0.1.7](https://github.com/qigao/cmeta/releases/tag/v0.1.7),
-[SaltsUtils 0.1.4](https://github.com/qigao/salts-utils/releases/tag/v0.1.4), and
-[CNet 0.1.12](https://github.com/qigao/salts-cnet/releases/tag/v0.1.12).
-`.env.example` lists the version variables and infrastructure paths; CI uses
+[SaltsUtils 0.1.5](https://github.com/qigao/salts-utils/releases/tag/v0.1.5), and
+[CNet 0.1.15](https://github.com/qigao/salts-cnet/releases/tag/v0.1.15).
+`.env.example` lists the version variables and SDK roots; CI uses
 repository variables with the same names. The infrastructure checkout must
 match the selected release. Upgrades use separate versioned SDK directories.
 
-The restore entry point checks release asset SHA-256 digests and exports
-`SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTS_CNET_ROOT`,
-`VCPKG_INSTALLED_DIR`, `RE2C_ROOT`, and `LEMON_ROOT` to the calling PowerShell process.
+Select `SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTS_CNET_ROOT`,
+`VCPKG_INSTALLED_DIR`, `RE2C_ROOT`, and `LEMON_ROOT` in the loaded parent
+environment or local `.env`. CMake requires the exact selected SDK versions at
+those roots; it does not select versions, restore SDKs or search for a replacement.
+Before selecting a new SDK root, verify the public release manifest, producer CI,
+platform/compiler, archive size and SHA-256. Preserve the original SDK archive.
 The shared vcpkg-cache `resolve-release` and `locked` operations restore the
-selected preinstalled archive. This explicit restore step also runs vcpkg against
-TurboDB's complete manifest on every platform; the shared warm-up archive omits
+selected preinstalled archive. Prepare TurboDB's complete vcpkg manifest before
+configuration on every platform; the shared warm-up archive omits
 libpq on macOS/Android and Studio's Scintilla/Lexilla on Windows.
 CMake consumes the prepared triplet through
 `CMAKE_PREFIX_PATH`, as in TurboScript and http-services. Configuration does not
@@ -204,47 +195,95 @@ Lemon's executable and `share/lemon/lempar.c` must come from the same host packa
 
 SaltsCNet 0.1.12 renamed its CMake package from `SaltsCore` to `SaltsCNet`;
 its public targets remain `Salts::CNet` and `Salts::Crypto`. Select it through
-`SALTS_CNET_VERSION` and `SALTS_CNET_ROOT`. SaltsUtils 0.1.4 was built against
+`SALTS_CNET_VERSION` and `SALTS_CNET_ROOT`. SaltsUtils 0.1.5 was built against
 Base 0.1.8 with CMeta 0.1.6 source; CMeta 0.1.7 provides the matching Base 0.1.8
 binary composition without changing its public ABI. Rebuild TurboDB and its
 plugins with this set. Rollback requires selecting the previous complete SDK
 set and its matching package configuration, then configuring with `--fresh`.
 
-Copy `.env.example` to `.env`, set the paths for your machine, and run these
-Windows MSVC commands in one PowerShell session:
+CNet 0.1.13 ships `Salts::Crypto` as a shared library. Distribute its matching
+runtime with CNet (`salts_crypto.dll` on Windows). Its exported CMake interface
+does not expose GmSSL or libecc targets or native backend symbols.
+
+MySQL uses the public SHA-1 digest and secret-clear APIs from
+`<crypto/symmetric.h>`, available in the selected CNet 0.1.15 SDK. Its existing
+native-password and caching-SHA2 wire algorithms remain unchanged. Keep the
+version and root selected explicitly in `.env` or the parent environment;
+no direct GmSSL dependency or older-SDK fallback is used.
+The API compatibility minimum is CNet 0.1.14; selecting an older SDK fails
+during configuration. This minimum does not select or override the environment's
+exact SDK version. After changing `.env`, reload both `SALTS_CNET_VERSION` and
+`SALTS_CNET_ROOT` into the parent environment before configuring with `--fresh`.
+
+Copy `.env.example` to `.env`, set the SDK paths for your machine and selected
+preset, and load the build settings into the parent environment. For Windows
+MSVC, run these commands in that same PowerShell session:
 
 ```powershell
-./cmake/ci/restore-native-sdks.ps1 -Rid windows-x64 -Local
 ./cmake/WithVs.cmd cmake --fresh --preset msvc-release-user
 ./cmake/WithVs.cmd cmake --build --preset msvc-release-user
 ./cmake/WithVs.cmd ctest --preset msvc-release-user -LE e2e
 ./cmake/WithVs.cmd cmake --build --preset install-msvc-release-user
 ```
 
-`-Local` explicitly loads build settings from `.env`; CMake never loads it implicitly.
-GitHub authentication comes from the active `gh` login or parent token environment. Use `--fresh`
-when changing SDKs or toolchains. Runtime startup uses the preset `PATH`/`LD_LIBRARY_PATH`. Windows retains the
-existing `TurboDBRuntime` task to stage target runtime dependencies into the
-build executable directory, which is a trusted search location for Plugin.
+CMake never loads `.env` implicitly. GitHub authentication comes from the active
+`gh` login or parent token environment. Use `--fresh` when changing SDKs or
+toolchains. Runtime startup uses the preset `PATH`/`LD_LIBRARY_PATH`.
+Windows absolute-path plugins restrict dependency discovery to their directory,
+the application directory, System32 and explicitly registered directories.
+Deploy the matching CNet/Crypto runtime DLLs to a trusted directory before
+loading MySQL plugins; a plain PATH entry alone does not admit plugin dependencies.
 
-Linux Clang uses `-Rid linux-x64` and `llvm-native-release-user`. Linux GCC uses
-`-Profile linux-gcc-x64` and `gcc-release-user`. Windows llvm-mingw uses
-`-Profile windows-llvm-mingw-x64` and `llvm-mingw-x64-release-user` with its
+Linux Clang uses `llvm-native-release-user`; Linux GCC uses `gcc-release-user`.
+Windows llvm-mingw uses `llvm-mingw-x64-release-user` with its
 matching compiler environment. As in TurboScript, its local `.env` only supplies
 `LLVM_MINGW_ROOT`; presets select the compiler executables and target.
 After loading the SDK roots and compiler root into the parent environment,
 `cmake --preset llvm-mingw-x64-release-user --fresh` works directly, without
 rerunning restoration. CMake does not load `QigaoVcpkgToolchain.cmake` or require
 `LLVM_MINGW_*TOOLCHAIN_FILE` variables. Compiler files needed while preparing
-vcpkg ports remain internal to the dependency restore process.
-Android uses `-Rid android-arm64-v8a -HostRid
-linux-x64` and `android-arm64-release-user`; its tests need a device runner.
-CNet 0.1.12 includes the native Linux ARM64 SDK. Its producer CI runs the
+vcpkg ports remain internal to dependency preparation.
+Android uses `android-arm64-release-user` and a matching target SDK plus native
+host generator packages; its tests need a device runner.
+CNet 0.1.13 includes the native Linux ARM64 SDK. Its producer CI runs the
 complete native CTest suite on `ubuntu-24.04-arm` before publication.
 
 CI builds the complete configured graph. External database tests remain
 registered with the `e2e` label; run them with `ctest --preset <profile> -L e2e`
 after providing their database environment. `-LE e2e` selects local tests.
+
+The shared [SDK matrix](.github/ci/sdk-matrix.json) defines ten qualifications:
+Linux Clang x64/ARM64, Linux GCC x64, macOS Clang ARM64, Windows MSVC x64,
+Windows LLVM-MinGW x64, Android x64/ARM64, Linux Clang x64 ASan+UBSan, and
+Linux Clang x64 TSan. The eight native profiles run formal CTest after the full
+build; Android profiles cross-build, install, and verify every installed shared
+library's ELF LOAD alignment is at least 16 KiB. Android device execution and
+external database E2E are separate validation requirements.
+
+`driver-sdk-package.yml` runs this graph for PRs, master pushes and manual
+dispatch, including build and workflow changes. Windows Studio and its editor
+ABI checks belong to the same matrix, replacing the separate Studio workflow.
+`native-sdk-release.yml` retains version-tag/manual/release-commit triggers
+and runs the identical ten-job graph before publication. Release assets are
+ten original installed SDK TARs, a provenance manifest, and SHA256SUMS; the
+deleted NuGet project and staging helpers are no longer used. Compiler names
+and sanitizer variants are explicit in archive profiles, keeping MSVC and
+LLVM-MinGW artifacts distinct.
+
+Preparation verifies selected releases against their public manifests, producer
+CI, source trees, archive sizes and digests, then distributes the same SDK and
+compiler inputs to every runner. Shared vcpkg-cache tooling bootstraps its
+pinned vcpkg tool on each runner and installs this repository's complete
+manifest before product configuration; its normal port-source downloads are
+separate from restoring SDK archives. Product CMake still consumes the selected
+prefix without a vcpkg toolchain. SDK TARs contain TurboDB's own installation;
+consumers select the four upstream SDK roots and prepared vcpkg prefix recorded
+in their provenance, rather than relying on a bundled runtime closure.
+
+When merging these changes, synchronize repository variables with
+`.env.example`, including CNet 0.1.15 and Utils 0.1.5. Existing releases remain
+immutable. To roll back the workflow migration, use the preceding source
+revision together with its matching SDK inputs and packaging files.
 
 Rebuild TurboDB, consumers, and driver plugins together for the split SDK ABI.
 `Salts::Core` comes from SaltsBase; `CMeta::CMeta`, `CMeta::CFlow`, `CMeta::CSTL`,

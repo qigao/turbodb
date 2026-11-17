@@ -1,0 +1,129 @@
+name: TurboDB native SDK release
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: turbodb-native-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Validate release identity
+    if: >-
+      github.ref_type == 'tag' ||
+      (github.ref_name == 'master' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release: publish TurboDB package')))
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $text = Get-Content CMakeLists.txt -Raw
+          if ($text -cnotmatch '(?m)^\s*VERSION\s+(\d+\.\d+\.\d+)\s*$') { throw 'Root CMake project version is required' }
+          $version = $Matches[1]
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne $tag) { throw 'Release tag differs from root project version' }
+          & git show-ref --verify --quiet "refs/tags/$tag"
+          if ($LASTEXITCODE -eq 0) {
+            $source = & git rev-list -n 1 $tag
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($source -cne $env:GITHUB_SHA) { throw 'Existing release tag points to a different source commit' }
+          } elseif ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+  sdk:
+    needs: metadata
+    uses: ./.github/workflows/native-sdk.yml
+    with:
+      version: ${{ needs.metadata.outputs.version }}
+
+  pack:
+    name: Verify ten SDK archives and generate release manifest
+    needs: [metadata, sdk]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: turbodb-sdk-*
+          path: build/release-artifacts
+          merge-multiple: false
+      - name: Verify original archives and record their provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $matrix = Get-Content .github/ci/sdk-matrix.json -Raw | ConvertFrom-Json
+          $archives = @(Get-ChildItem build/release-artifacts -Recurse -Filter *.tar -File)
+          if ($archives.Count -ne 10 -or $matrix.include.Count -ne 10) { throw 'Exactly ten qualified SDK archives are required' }
+          New-Item -ItemType Directory -Path dist | Out-Null
+          $sdks = @()
+          foreach ($entry in $matrix.include) {
+            $name = "turbodb-$env:VERSION-$($entry.id).tar"
+            $archive = "build/release-artifacts/turbodb-sdk-$($entry.id)/$name"
+            $body = & tar xOf $archive ./turbodb-sdk-manifest.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $manifest = $body | ConvertFrom-Json
+            if ($manifest.schema -ne 1 -or $manifest.version -cne $env:VERSION -or $manifest.source -cne $env:GITHUB_SHA -or
+                $manifest.profile -cne $entry.id -or $manifest.preset -cne $entry.preset -or $manifest.native_tests -ne $entry.test -or
+                @($manifest.dependencies).Count -ne 4) { throw "SDK provenance mismatch: $name" }
+            $sdks += @{profile=$entry.id; asset=$name; sha256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant();
+              sizeBytes=(Get-Item $archive).Length; sdk_manifest=$manifest}
+            Copy-Item -LiteralPath $archive -Destination "dist/$name"
+          }
+          @{schema=1; repository=$env:GITHUB_REPOSITORY; version=$env:VERSION; commit=$env:GITHUB_SHA;
+            producer_run=[long]$env:GITHUB_RUN_ID; producer_url="$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; sdks=$sdks} |
+            ConvertTo-Json -Depth 12 | Set-Content "dist/turbodb-$env:VERSION-manifest.json" -Encoding utf8
+          Get-ChildItem dist -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-release-${{ needs.metadata.outputs.version }}
+          path: dist/
+          compression-level: 0
+          if-no-files-found: error
+
+  publish:
+    name: Publish SDK TARs and GitHub Release
+    needs: [metadata, pack]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.metadata.outputs.tag }}
+      VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: turbodb-release-${{ needs.metadata.outputs.version }}
+          path: dist
+      - name: Publish verified release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check SHA256SUMS)
+          gh release create "$TAG" dist/*.tar dist/*-manifest.json dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "TurboDB $VERSION" --latest \
+            --notes "Ten compiler/platform SDKs from source $GITHUB_SHA. Eight native profiles run CTest; Android profiles pass cross-build, install and ELF 16 KiB alignment checks. See the manifest for exact upstream versions and archive SHA-256 values."

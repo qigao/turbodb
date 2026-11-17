@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "source": {
+    "kind": "package",
+    "feed": "https://nuget.pkg.github.com/qigao/index.json",
+    "id": "Qigao.Lemon.Binary",
+    "version": "1.0.0"
+  },
+  "sha256": "92539e4d99c38657fa69f0bdaea73be2b35f6572cb6a9264731ae58a6da073cd"
+}

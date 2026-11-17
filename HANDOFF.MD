@@ -139,3 +139,135 @@ JUnit 为 `build/native-release-user/ctest-release.xml`。
 - HIGH：MySQL `mysql_native_password` 保留原协议所需的 SHA-1，当前上游尚无
   对应公开 Crypto API。直接头文件引用需随上游补齐封装后迁移，不能通过
   删除认证方式、手写摘要实现或修改已发布 SDK 绕过。
+
+## CNet 0.1.13 / Utils 0.1.5 的环境选择（2026-11-17）
+
+- 本地 `.env` 选择 `SALTS_CNET_VERSION=0.1.13` 与
+  `SALTS_UTILS_VERSION=0.1.5`，SDK 根仍由同名 `*_ROOT` 选择；根 CMake 已经
+  使用环境中的精确版本与路径做 `find_package(... EXACT ... NO_DEFAULT_PATH)`，
+  本次不加入 CMake 默认版本、SDK 路径或隐式 `.env` 读取。
+- CNet 原始 LLVM-MinGW SDK 取自正式发布的 `windows-x64` 资产，SHA-256 为
+  `4c6183da4e04fd7c51113114f8449ccd156d5328ed26c907746384f8146b24c8`。
+  发布清单、SHA256SUMS、资产大小、内嵌 SDK 清单和精确源码生产者
+  [CI 44074223743](https://github.com/qigao/salts-cnet/actions/runs/44074223743)
+  均已核对。版本独立目录为
+  `build/dependencies/salts-cnet-0.1.13-windows-x64-4c6183da4e04`，回执保存在该目录。
+- Utils 继续使用 `.env` 已选中的相邻 TurboRaft 正式 0.1.5 LLVM-MinGW SDK；
+  再次核对原始 TAR 与发布清单 SHA-256、源码、profile 和生产者回执。
+  SDK TAR 摘要为 `314ab3009235c1e9a15c62f460f4edc0aa66c47eab63658cb58ea5a6b91549de`。
+- `.env.example` 补齐 SDK/生成工具根目录示例，README 同步版本、共享 Crypto
+  运行库要求及父环境加载方式。保留用户已暂存的 CI helper 删除和依赖锁迁移。
+  GitHub variables 当前仍为 CNet 0.1.12 / Utils 0.1.4，沿用此前约定，在代码合入时
+  同步为 0.1.13 / 0.1.5，不提前改变远端构建环境。
+- `cmake --fresh --preset native-release-user` 配置与生成通过，消除了旧 CNet
+  导出接口要求 `GmSSL::GmSSL` 的问题。完整
+  `cmake --build --preset native-release-user` 在
+  `drivers/mysql/auth/auth.c:4` 失败：`gmssl/sha1.h` 不再由新 SDK 暴露。
+  CNet 0.1.13 只导出共享 `Salts::Crypto`，没有公开 SHA-1 API；已有 MySQL
+  `mysql_native_password` 仍直接调用该后端。HIGH：需确定上游公开 SHA-1 API
+  或 MySQL 独立后端依赖的方向，不能通过删除认证能力或回退 SDK 掩盖。
+  本轮未继续 CTest / install。日志为 `build/cnet-0.1.13-{configure,build}.log`。
+- 补充核对用户指定的 `../salts-core/vendor`：当前 libecc 编译范围只有
+  SHA-256/384/512 和 SHAKE256，Monocypher 不提供 SHA-1，不能用私有 vendor
+  头文件替换 MySQL 的引用。本地上游在 v0.1.13 之后的提交 `1640e94`
+  新增了公开 `crypto/symmetric.h` 与
+  `salts_crypto_digest(SALTS_CRYPTO_SHA1, ...)`，内部委托 GmSSL，已有正式
+  SHA-1 向量测试源码。该 API 尚不在本次选择的 0.1.13 SDK 中；待包含此提交
+  的正式 SDK 发布后，可通过 `.env` 选择并迁移 MySQL，保持消费方只依赖
+  `Salts::Crypto`。本次仅核对源码，没有将未发布接口写入 TurboDB。
+
+## Crypto 公开接口扩展与 MySQL 接入（2026-11-17）
+
+- 用户授权继续实现后，在相邻 `salts-core` 的既有 Crypto owner 中增加
+  通用流式 Digest/HMAC、HKDF、AES-CBC/CTR、RSA-PSS salt/OAEP label、
+  DER/PEM 导出及有迭代上限的加密 PKCS8 导入导出。API/生命周期及依赖限制
+  见该仓库 `crypto/README.md` 和公开头文件。当前源版本为 0.1.14，正式
+  0.1.13 SDK 不含这些接口；未改写已发布 SDK，也未引入直接 GmSSL 链接。
+- MySQL 的 SHA-1 改用 `salts_crypto_digest`，失败沿用 INVALID 结果，
+  native-password 与 caching-SHA2 的临时摘要缓冲区统一清理。
+  正式边界测试中的独立协议向量保持通过，`drivers/mysql` ID 不变。
+- 相邻 Crypto 完整 LLVM-MinGW build、101/101 正式 CTest 和 install 通过。
+  本仓库显式在本次验证的父进程设置：
+  `SALTS_CNET_VERSION=0.1.14`、
+  `SALTS_CNET_ROOT=C:/projects/cpp/turbonet/salts-core/build/native-release-user/stage`，
+  其余构建输入来自本地 `.env`。随后正式
+  `cmake --fresh --preset native-release-user`、完整 build、
+  `./cmake/WithVs.cmd ctest --preset native-release-user -LE e2e
+  --output-on-failure --output-junit ctest-crypto-candidate.xml` 和
+  `cmake --build --preset install-native-release-user` 均通过；CTest 为 92/92。
+  日志为 `build/crypto-candidate-{configure,build,ctest,install}.log`。
+- 首轮 90/92 的两项 MySQL Plugin 加载失败来自共享运行库部署。
+  CMeta 的绝对路径 loader 使用 DLL_LOAD_DIR | DEFAULT_DIRS，普通 PATH
+  不属于其信任源。明确将所选候选 SDK 的 `cnet.dll` / `salts_crypto.dll`
+  部署到正式构建的应用目录后，两项测试及完整 92 项测试通过。
+  原有文件与部署回执保存在 `build/crypto-candidate-runtime-backup/`。
+  未恢复用户删除的自动运行库复制框架，未扩大插件 DLL 搜索策略。
+- 本地 `.env` 仍选择正式 CNet 0.1.13 / Utils 0.1.5；本次候选版本/路径仅用于
+  明确的源码集成验证。正式使用新接口仍需发布匹配 SDK 并同时更新版本和根目录。
+  本轮未执行外部数据库 E2E、其他平台或 sanitizer，也未发布新版本。
+
+## 十项 CI 矩阵与 SDK TAR 发布（2026-11-18）
+
+- 触发：旧五项矩阵调用已暂存删除的恢复/暂存 helper，发布流程仍引用已删除
+  的 NuGet 项目和包测试；sanitizer presets 写入 ENABLE_ASAN/UBSAN/TSAN，
+  而项目只读取 ENABLE_SANITIZER_*，会造成未启用检查的错误通过。
+- 将 .github/ci/sdk-matrix.json 作为十项资格验证的唯一矩阵入口：Linux Clang
+  x64/ARM64、GCC x64、macOS ARM64、Windows MSVC/LLVM-MinGW x64、
+  Android x64/ARM64、Linux ASan+UBSan、TSan。补齐 ASan preset 并修正变量名，
+  不新增功能开关。八项 native 执行完整 build 与正式 CTest（排除已有 e2e
+  标签）；两项 Android 执行完整 build/install 与安装产物 ELF 16 KiB 检查。
+- 发布经用户确认改为十个独立 SDK TAR、发布清单及 SHA256SUMS，沿用
+  tag/manual/release-commit 触发，复用同一完整构建图，不再依赖 NuGet 文件。
+  Studio 的构建、PE/editor 检查及原生应用 artifact 纳入同一矩阵；
+  不再保留重复的 Studio workflow。
+- 准备步骤核对公开发布清单、producer CI、源码 tree、大小与 SHA-256，分发
+  原始 SDK/编译器和 per-triplet locked 输入。恢复使用共享 vcpkg-cache 入口，
+  未恢复被删除的 Python/PowerShell helper。runner 的 canonical vcpkg
+  bootstrap 与产品 manifest 端口准备使用其正常的固定来源网络输入；
+  产品 configure 继续只消费准备后的 prefix，不加载 vcpkg toolchain。
+- 实际恢复发现两种合法上游结构：Utils 0.1.5 为 annotated tag，须先解引用
+  到 commit 再核对 manifest；主机工具包路径为 tools/<host>，不带 payload/
+  前缀（payload 是共享恢复器增加的安装外层）。CMeta 0.1.7 SDK 为静态库，
+  没有 bin 目录；Windows 部署遍历所选 SDK 根的 DLL，vcpkg 只选 release bin，
+  同名不同摘要立即失败，不依赖 PATH 绕过插件 loader 的信任边界。
+- 已验证：actionlint、全部内联 PowerShell 语法、十项 configure/build/install/
+  test preset 对应关系；Base 0.1.8、CMeta 0.1.7、Utils 0.1.5、CNet 0.1.15
+  在十项配置中的 40 项 SDK 选择均通过正式清单/producer/tree/大小/摘要校验。
+  Re2c/Lemon 从正式发布资产按锁恢复成功。
+- 本机使用上述正式 SDK 与已准备的 vcpkg prefix：
+  cmake --fresh --preset ci-llvm-mingw-x64-release-user；
+  cmake --build --preset ci-llvm-mingw-x64-release-user --parallel 4；
+  cmake/WithVs.cmd ctest --preset ci-llvm-mingw-x64-release-user -LE e2e；
+  cmake --build --preset install-ci-llvm-mingw-x64-release-user 均通过，
+  正式 CTest 为 92/92。实际执行 workflow 的 Windows runtime 部署、Studio
+  PE 检查和 SDK TAR 归档步骤，核对 provenance、CMake package 与许可证。
+  日志在 build/workflow-review/；.env 的机器设置及 SDK 选择未改写。
+- 未验证：新 runner 上的完整 dependency bootstrap、其他九项实际构建、
+  sanitizer 运行、Android 设备、外部 DB E2E、远端打包/发布。合入时同步
+  GitHub variables 为所选 CNet 0.1.15 / Utils 0.1.5，沿用不提前影响旧代码
+  的约定；本轮未推送、打 tag 或发布 TurboDB。
+
+## 本地 CNet SDK 仍为 0.1.13 的缺头文件错误（2026-11-18）
+
+- 触发：drivers/mysql/auth/auth.c 包含 crypto/symmetric.h 时编译失败。
+  .env 和 llvm-mingw-x64-release-user 的 SaltsCNet_DIR / compile_commands.json
+  均仍指向 0.1.13；此前 0.1.15 验证使用进程级覆盖，并未改变本地选择。
+  MySQL target 已正确链接 Salts::Crypto，不能通过追加源码目录或直接链接
+  GmSSL 修复 SDK 版本不匹配。
+- 已按正式发布清单、恢复回执、原始 TAR 大小/SHA-256 校验本地 0.1.15 SDK，
+  并逐文件核对 73 个安装文件与原始归档。只更新 .env 的 SALTS_CNET_VERSION
+  和 SALTS_CNET_ROOT，其余机器设置与凭据保留，.env 仍被 Git 忽略。
+- 根 CMake 在配置边界声明 API 下限 0.1.14，旧 SDK 明确失败并提示同步版本、
+  根目录及 --fresh；该下限不替代环境选择的精确版本。公开 v0.1.14 头文件
+  已包含本次 MySQL 使用的 SHA-1 digest / secret-clear API。
+- 正式验证：0.1.13 的 llvm-mingw-x64-release-user configure 按预期失败；
+  加载更新后的 .env 后，该 preset 的 --fresh configure 与完整 build 通过；
+  ci-llvm-mingw-x64-release-user 的 --fresh configure、完整 build 和
+  cmake/WithVs.cmd ctest --preset ci-llvm-mingw-x64-release-user -LE e2e 通过，
+  为 92/92。日志为 build/crypto-header-*.log，JUnit 为
+  build/ci-llvm-mingw-x64-release-user/ctest-crypto-header.xml。
+- 一次正向 configure 曾在编译器探测阶段报告 CMAKE_C_COMPILER not set；
+  失败日志产生后，同目录 CMakeCache.txt 与 build.ninja 又继续更新。
+  推论：存在编辑器等外部配置任务并发操作同一构建目录；未更换工具链或
+  屏蔽探测。无并发任务时单独完成正向 configure/build。原失败日志保留在
+  build/crypto-header-concurrent-configure.log，不能将其归因为 Crypto 头文件。

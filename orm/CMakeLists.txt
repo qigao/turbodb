@@ -1,19 +1,3 @@
-cmake_minimum_required(VERSION 3.21)
-
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(
-    Orm
-    VERSION 2.2.0
-    DESCRIPTION "Typed reactive ORM for C11 with C++17 ownership wrappers"
-    LANGUAGES C)
-endif()
-
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
-  include(CmakeUtils)
-endif()
-
-set(ORM_VERSION 2.2.0)
 set(ORM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 include(GNUInstallDirs)

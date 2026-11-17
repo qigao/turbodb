@@ -1,4 +1,4 @@
-name: Build native SDK
+name: Build native SDKs
 
 on:
   workflow_call:
@@ -12,7 +12,7 @@ permissions:
   packages: read
 
 env:
-  GITHUB_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ github.token }}
   VCPKG_CACHE_VERSION: ${{ vars.VCPKG_CACHE_VERSION }}
   SALTS_BASE_VERSION: ${{ vars.SALTS_BASE_VERSION }}
   CMETA_VERSION: ${{ vars.CMETA_VERSION }}
@@ -20,157 +20,338 @@ env:
   SALTS_CNET_VERSION: ${{ vars.SALTS_CNET_VERSION }}
 
 jobs:
-  sdk:
-    name: ORM + SQLite/PostgreSQL/MySQL (${{ matrix.rid }})
-    runs-on: ${{ matrix.os }}
+  prepare:
+    name: Verify and download shared SDK inputs
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {os: ubuntu-24.04, rid: linux-x64, host: linux-x64, preset: ci-llvm-native-release-user, triplet: x64-linux}
-          - {os: ubuntu-24.04-arm, rid: linux-arm64, host: linux-arm64, preset: ci-llvm-native-release-user, triplet: arm64-linux}
-          - os: macos-15
-            rid: macos-arm64
-            host: macos-arm64
-            preset: ci-llvm-native-release-user
-            triplet: arm64-osx
-          - {os: windows-2025, rid: windows-x64, host: windows-x64, preset: ci-msvc-release-user, triplet: x64-windows}
-          - {os: ubuntu-24.04, rid: android-arm64-v8a, host: linux-x64, preset: ci-android-arm64-release-user, triplet: arm64-android}
+    outputs:
+      matrix: ${{ steps.inputs.outputs.matrix }}
+    env:
+      VCPKG_CACHE_REPOSITORY_ROOT: ${{ github.workspace }}/build/ci-infrastructure/vcpkg-cache
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-native
-        with:
-          platform: ${{ matrix.rid }}
-          preset: ${{ matrix.preset }}
-          triplet: ${{ matrix.triplet }}
-      - name: Install Linux host tools
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build gdb
-      - name: Install macOS host tools
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          brew install autoconf ninja
-      - name: Prepare MSVC environment and Ninja
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vs)) { throw 'x64 MSVC was not found' }
-          $developerEnvironment = & $env:ComSpec /d /s /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 >nul && set"
-          if ($LASTEXITCODE -ne 0) { throw 'MSVC environment setup failed' }
-          foreach ($entry in $developerEnvironment) {
-            $name, $value = $entry -split '=', 2
-            if ($name -match '^[A-Za-z_][A-Za-z0-9_]*$' -and $name -ne 'VCPKG_ROOT' -and
-                $value -cne [Environment]::GetEnvironmentVariable($name)) {
-              "$name=$value" >> $env:GITHUB_ENV
-            }
-          }
-          choco install ninja -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Ninja install failed' }
       - uses: actions/checkout@v4
         with:
           repository: qigao/vcpkg-cache
           ref: v${{ env.VCPKG_CACHE_VERSION }}
           path: build/ci-infrastructure/vcpkg-cache
           persist-credentials: false
-      - name: Install published native SDKs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve published SDKs and exact dependency locks
+        id: inputs
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VCPKG_CACHE_REPOSITORY_ROOT: ${{ github.workspace }}/build/ci-infrastructure/vcpkg-cache
-        run: ./cmake/ci/restore-native-sdks.ps1 -Rid '${{ matrix.rid }}' -HostRid '${{ matrix.host }}'
-      - name: Configure on Unix
-        if: runner.os != 'Windows'
-        shell: bash
         run: |
-          set -euo pipefail
-          cmake --preset '${{ matrix.preset }}'
-      - name: Configure on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          cmake --preset ci-msvc-release-user
-          if errorlevel 1 exit /b 1
-
-      - name: Build on Unix
-        if: runner.os != 'Windows'
-        run: cmake --build --preset '${{ matrix.preset }}' --parallel 4
-      - name: Build on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          cmake --build --preset ci-msvc-release-user --parallel 4
-          if errorlevel 1 exit /b 1
-
-      - name: Test on Unix
-        if: runner.os != 'Windows' && matrix.rid != 'android-arm64-v8a'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            mkdir -p "$RUNNER_TEMP/turbodb-cores"
-            sudo sysctl -w "kernel.core_pattern=$RUNNER_TEMP/turbodb-cores/%E"
-            ulimit -c unlimited
-          fi
-          ctest --preset '${{ matrix.preset }}' -LE e2e
-      - name: Diagnose Linux test crashes
-        if: failure() && runner.os == 'Linux' && matrix.rid != 'android-arm64-v8a'
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          for core in "$RUNNER_TEMP"/turbodb-cores/*; do
-            executable="${core##*/}"
-            executable="${executable//!//}"
-            gdb --batch "$executable" "$core" \
-              -ex 'thread apply all bt' -ex 'info registers' -ex 'x/8i $pc'
-          done
-      - name: Test on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          ctest --preset ci-msvc-release-user -LE e2e
-          if errorlevel 1 exit /b 1
-
-      - name: Install on Unix
-        if: runner.os != 'Windows'
-        run: cmake --build --preset 'install-${{ matrix.preset }}' --parallel 4
-      - name: Install on Windows
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: |
-          cmake --build --preset install-ci-msvc-release-user --parallel 4
-          if errorlevel 1 exit /b 1
-      - name: Stage native SDK
-        shell: pwsh
-        run: >-
-          ./cmake/ci/stage-native-sdk.ps1
-          -Rid '${{ matrix.rid }}' -Version '${{ inputs.version }}'
-          -InstallManifest '${{ github.workspace }}/build/${{ matrix.preset }}/install_manifest.txt'
-      - name: Audit Linux ORM DSO closure
-        if: matrix.rid == 'linux-x64'
-        shell: bash
-        run: |
-          set -euo pipefail
-          library="build/stage/sdk/linux-x64/lib/libturbo_orm.so"
-          test -f "$library"
-          if readelf --dyn-syms --wide "$library" |
-             grep -Eq '[[:space:]]UND[[:space:]].*\bvec_[[:alnum:]_]*($|@)'; then
-            echo "libturbo_orm.so leaks unresolved private CSTL symbols" >&2
-            readelf --dyn-syms --wide "$library" |
-              grep -E '[[:space:]]UND[[:space:]].*\bvec_[[:alnum:]_]*($|@)' >&2
-            exit 1
-          fi
+          $ErrorActionPreference = 'Stop'
+          $matrix = Get-Content .github/ci/sdk-matrix.json -Raw | ConvertFrom-Json
+          if ($matrix.include.Count -ne 10 -or @($matrix.include.id | Sort-Object -Unique).Count -ne 10) {
+            throw 'Exactly ten distinct SDK qualifications are required'
+          }
+          foreach ($key in @('VCPKG_CACHE_VERSION','SALTS_BASE_VERSION','CMETA_VERSION','SALTS_UTILS_VERSION','SALTS_CNET_VERSION')) {
+            if ([Environment]::GetEnvironmentVariable($key) -cnotmatch '^\d+\.\d+\.\d+$') {
+              throw "$key must select an exact stable release without v"
+            }
+          }
+          $root = 'build/ci-inputs'
+          New-Item -ItemType Directory -Path "$root/locks","$root/blobs" -Force | Out-Null
+          $reader = "$env:VCPKG_CACHE_REPOSITORY_ROOT/scripts/restore-native-dependency.py"
+          # All archive transport, host restrictions and digest verification belong to shared infrastructure.
+          $download = @'
+          import importlib.util, pathlib, sys
+          spec = importlib.util.spec_from_file_location("transport", pathlib.Path(sys.argv[1]) / "scripts/setup-compiler-toolchain.py")
+          transport = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(transport)
+          transport.verified_download(sys.argv[2], pathlib.Path(sys.argv[5]), sys.argv[3], int(sys.argv[4]))
+          '@
+          function Api([string]$Path) {
+            $reply = & gh api $Path
+            if ($LASTEXITCODE -ne 0) { throw "GitHub metadata request failed: $Path" }
+            return ($reply | ConvertFrom-Json)
+          }
+          function Asset($Release, [string]$Name) {
+            $found = @($Release.assets | Where-Object name -CEQ $Name)
+            if ($found.Count -ne 1 -or $found[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or $found[0].size -le 0) {
+              throw "Missing unique digest-qualified release asset: $Name"
+            }
+            return $found[0]
+          }
+          function Acquire($Asset) {
+            $path = "$root/blobs/$($Asset.digest.Substring(7))"
+            if (Test-Path $path) {
+              if ((Get-Item $path).Length -ne $Asset.size -or
+                  (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Asset.digest.Substring(7)) {
+                throw "Cached release input integrity failure: $($Asset.name)"
+              }
+              return $path
+            }
+            $download | python - $env:VCPKG_CACHE_REPOSITORY_ROOT $Asset.browser_download_url $Asset.digest.Substring(7) $Asset.size $path
+            if ($LASTEXITCODE -ne 0) { throw "Verified download failed: $($Asset.name)" }
+            if ((Get-Item $path).Length -ne $Asset.size) { throw "Release asset size mismatch: $($Asset.name)" }
+            return $path
+          }
+          $packages = @(
+            @{repo='salts-base'; key='SALTS_BASE'; package='SaltsBase'; version=$env:SALTS_BASE_VERSION},
+            @{repo='cmeta'; key='CMETA'; package='CMeta'; version=$env:CMETA_VERSION},
+            @{repo='salts-utils'; key='SALTS_UTILS'; package='SaltsUtils'; version=$env:SALTS_UTILS_VERSION},
+            @{repo='salts-cnet'; key='SALTS_CNET'; package='SaltsCNet'; version=$env:SALTS_CNET_VERSION}
+          )
+          $records = @()
+          foreach ($p in $packages) {
+            $repository = "qigao/$($p.repo)"
+            Write-Host "Verifying $repository $($p.version) for all ten profiles"
+            $release = Api "repos/$repository/releases/tags/v$($p.version)"
+            if ($release.draft -or $release.prerelease -or !$release.published_at -or $release.tag_name -cne "v$($p.version)") {
+              throw "Expected a published stable release: $repository"
+            }
+            $metadata = Asset $release "$($p.repo)-$($p.version)-manifest.json"
+            $manifest = Get-Content (Acquire $metadata) -Raw | ConvertFrom-Json
+            if ($manifest.version -cne $p.version -or $manifest.repository -cnotin @($repository,"https://github.com/$repository")) {
+              throw "Release manifest identity mismatch: $repository"
+            }
+            if ($p.repo -in @('salts-base','cmeta')) {
+              if ($manifest.schemaVersion -ne 1 -or $manifest.tag -cne $release.tag_name) { throw 'Invalid SDK manifest schema/tag' }
+              $producerId = $manifest.ci.runId
+              $producerUrl = $manifest.ci.url
+              $tree = $manifest.sourceTree
+              if ($manifest.ci.conclusion -cne 'success') { throw 'SDK manifest records an unsuccessful producer' }
+              if ($p.repo -eq 'cmeta' -and $manifest.cmakePackage -cne $p.package) { throw 'CMeta package mismatch' }
+            } else {
+              if ($manifest.schema -ne 1) { throw 'Invalid SDK manifest schema' }
+              $producerId = $manifest.producer_run
+              $producerUrl = $manifest.producer_url
+              $tree = $manifest.tree
+              if ($p.repo -eq 'salts-cnet' -and $manifest.cmake_package -cne $p.package) { throw 'CNet package mismatch' }
+            }
+            $tag = (Api "repos/$repository/git/ref/tags/v$($p.version)").object
+            if ($tag.type -ceq 'tag') { $tag = (Api "repos/$repository/git/tags/$($tag.sha)").object }
+            if ($tag.type -cne 'commit' -or $tag.sha -cne $manifest.commit) { throw "Release tag/manifest source mismatch: $repository" }
+            $producer = Api "repos/$repository/actions/runs/$producerId"
+            if ($producer.conclusion -cne 'success' -or $producer.html_url -cne $producerUrl) { throw "Unqualified producer: $repository" }
+            # A merged release may have a different commit with the same qualified source tree.
+            foreach ($source in @($manifest.commit,$producer.head_sha) + @($manifest.sdks | ForEach-Object {
+              if ($_.checkout) { $_.checkout }
+              if ($_.sdk_manifest.source) { $_.sdk_manifest.source }
+            }) | Sort-Object -Unique) {
+              if ((Api "repos/$repository/git/commits/$source").tree.sha -cne $tree) { throw "Producer/release source tree mismatch: $repository" }
+            }
+            if ($p.repo -eq 'salts-base') {
+              if ($manifest.name -cne 'SaltsBase' -or $manifest.dependencies.release -cne "v$env:VCPKG_CACHE_VERSION") { throw 'Base/cache composition mismatch' }
+            } elseif ($p.repo -in @('cmeta','salts-utils')) {
+              if ($manifest.dependencies.SaltsBase -cne $env:SALTS_BASE_VERSION -or $manifest.dependencies.'vcpkg-cache' -cne $env:VCPKG_CACHE_VERSION) {
+                throw "Base/cache composition mismatch: $repository"
+              }
+            }
+            foreach ($entry in $matrix.include) {
+              $profile = if ($p.repo -eq 'salts-cnet') { $entry.cnet } else { $entry.sdk }
+              $sdks = @($manifest.sdks | Where-Object { $_.platform -ceq $profile -or $_.profile -ceq $profile })
+              if ($sdks.Count -ne 1) { throw "$repository $($p.version) must publish one SDK for $profile" }
+              $sdk = $sdks[0]
+              if ($p.repo -eq 'salts-cnet' -and ($sdk.sdk_manifest.base_version -cne $env:SALTS_BASE_VERSION -or $sdk.sdk_manifest.cache_version -cne $env:VCPKG_CACHE_VERSION)) {
+                throw 'CNet dependency composition mismatch'
+              }
+              $name = if ($sdk.file) { $sdk.file } else { $sdk.asset }
+              $asset = Asset $release $name
+              if ($asset.digest -cne "sha256:$($sdk.sha256)" -or ($sdk.sizeBytes -and $asset.size -ne $sdk.sizeBytes)) {
+                throw "SDK manifest/asset mismatch: $name"
+              }
+              Acquire $asset | Out-Null
+              $records += @{id=$entry.id; key=$p.key; version=$p.version; profile=$profile; source=$manifest.commit;
+                producer=$producerId; sha256=$sdk.sha256; size=$asset.size; manifest_sha256=$metadata.digest.Substring(7)}
+            }
+            "$repository $($p.version): source $($manifest.commit), producer CI $producerId" >> $env:GITHUB_STEP_SUMMARY
+          }
+          $records | ConvertTo-Json -Depth 8 | Set-Content "$root/sdks.json" -Encoding utf8
+          foreach ($triplet in ($matrix.include.triplet | Sort-Object -Unique)) {
+            & python $reader resolve-release "cmake/dependencies/$triplet.lock.json" --output-lock "$root/locks/$triplet.json"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & python $reader download "$root/locks/$triplet.json" --destination "$root/blobs"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $cache = Api "repos/qigao/vcpkg-cache/releases/tags/v$env:VCPKG_CACHE_VERSION"
+          foreach ($name in @('re2c','lemon')) {
+            $lock = Get-Content "cmake/$name.lock.json" -Raw | ConvertFrom-Json
+            $asset = Asset $cache "$($lock.source.id).$($lock.source.version).nupkg"
+            if ($asset.digest -cne "sha256:$($lock.sha256)") { throw 'Host generator package lock/release mismatch' }
+            Acquire $asset | Out-Null
+          }
+          $contract = Get-Content "$env:VCPKG_CACHE_REPOSITORY_ROOT/compiler-contracts/release-obfuscation.json" -Raw | ConvertFrom-Json
+          $compiler = $contract.sources.'llvm-mingw'
+          $asset = @($compiler.assets | Where-Object host -EQ 'windows-x64')
+          if ($asset.Count -ne 1) { throw 'One Windows compiler archive is required' }
+          @{schema=1; source=@{kind='url'; url="https://github.com/$($compiler.repository)/releases/download/$($compiler.release_tag)/$($asset[0].name)"}; sha256=$asset[0].sha256} |
+            ConvertTo-Json -Depth 4 | Set-Content "$root/locks/windows-compiler.json" -Encoding utf8
+          & python $reader download "$root/locks/windows-compiler.json" --destination "$root/blobs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & git -C $env:VCPKG_CACHE_REPOSITORY_ROOT archive --format=tar HEAD --output ([IO.Path]::GetFullPath("$root/infrastructure.tar"))
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "matrix=$($matrix | ConvertTo-Json -Depth 8 -Compress)" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v4
         with:
-          name: turbodb-sdk-${{ matrix.rid }}
-          path: build/stage/sdk/${{ matrix.rid }}
+          name: turbodb-shared-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/ci-inputs/
+          compression-level: 0
           if-no-files-found: error
           retention-days: 3
+
+  sdk:
+    needs: prepare
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VCPKG_CACHE_REPOSITORY_ROOT: ${{ github.workspace }}/build/ci-infrastructure/vcpkg-cache
+      QIGAO_PREPARED_INPUTS: ${{ github.workspace }}/build/ci-inputs
+      VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
+      CI_PRESET: ${{ matrix.preset }}
+      SDK_ID: ${{ matrix.id }}
+      SDK_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: turbodb-shared-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/ci-inputs
+      - name: Restore exact infrastructure snapshot
+        run: |
+          New-Item -ItemType Directory -Path $env:VCPKG_CACHE_REPOSITORY_ROOT -Force | Out-Null
+          tar xf build/ci-inputs/infrastructure.tar -C $env:VCPKG_CACHE_REPOSITORY_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: ./.github/actions/setup-native
+        with:
+          profile: ${{ matrix.id }}
+          compiler: ${{ matrix.compiler }}
+          triplet: ${{ matrix.triplet }}
+          host-triplet: ${{ matrix.host_triplet }}
+          host: ${{ matrix.host }}
+          preset: ${{ matrix.preset }}
+      - name: Configure full graph
+        run: |
+          if ($IsWindows) { & cmake/WithVs.cmd cmake --fresh --preset $env:CI_PRESET }
+          else { & cmake --fresh --preset $env:CI_PRESET }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build full graph
+        run: |
+          if ($IsWindows) { & cmake/WithVs.cmd cmake --build --preset $env:CI_PRESET --parallel 4 }
+          else { & cmake --build --preset $env:CI_PRESET --parallel 4 }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Deploy selected Windows runtime DLLs for formal plugin tests
+        if: runner.os == 'Windows'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = "build/$env:CI_PRESET/bin"
+          # CMeta's absolute-path loader trusts the application directory, not PATH.
+          # SDKs may be static (CMeta) and therefore have no bin directory.
+          foreach ($root in @("$env:VCPKG_INSTALLED_DIR/$env:VCPKG_TARGET_TRIPLET/bin",$env:SALTS_BASE_ROOT,$env:CMETA_ROOT,$env:SALTS_UTILS_ROOT,$env:SALTS_CNET_ROOT)) {
+            foreach ($dll in Get-ChildItem -LiteralPath $root -Filter *.dll -File -Recurse) {
+              $target = Join-Path $bin $dll.Name
+              if (Test-Path $target) {
+                if ((Get-FileHash $target).Hash -cne (Get-FileHash $dll.FullName).Hash) { throw "Conflicting selected runtime: $($dll.Name)" }
+              } else { Copy-Item -LiteralPath $dll.FullName -Destination $target }
+            }
+          }
+      - name: Run formal native CTest suite
+        if: matrix.test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          TSAN_OPTIONS: halt_on_error=1
+        run: |
+          if ($IsWindows) { & cmake/WithVs.cmd ctest --preset $env:CI_PRESET -LE e2e --output-junit ctest.xml }
+          else { & ctest --preset $env:CI_PRESET -LE e2e --output-junit ctest.xml }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install complete SDK
+        run: |
+          if ($IsWindows) { & cmake/WithVs.cmd cmake --build --preset "install-$env:CI_PRESET" --parallel 4 }
+          else { & cmake --build --preset "install-$env:CI_PRESET" --parallel 4 }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Audit Linux ORM DSO closure
+        if: matrix.id == 'linux-clang-x64'
+        run: |
+          $symbols = & readelf --dyn-syms --wide "build/$env:CI_PRESET/stage/lib/libturbo_orm.so"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($symbols -match '\sUND\s.*\bvec_\w*($|@)') { throw 'ORM DSO leaks private CSTL symbols' }
+      - name: Check Android ELF load alignment
+        if: matrix.compiler == 'ndk'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $readelf = "$env:ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          $libraries = @(Get-ChildItem "build/$env:CI_PRESET/stage" -Filter *.so -File -Recurse)
+          if (!$libraries.Count) { throw 'No installed Android shared libraries' }
+          foreach ($library in $libraries) {
+            $headers = & $readelf --program-headers --wide $library.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $loads = @($headers | Select-String '^\s*LOAD\s+.+\s0x([0-9a-fA-F]+)\s*$')
+            if (!$loads.Count) { throw "No LOAD segments: $library" }
+            foreach ($load in $loads) {
+              if ([Convert]::ToInt64($load.Matches[0].Groups[1].Value,16) -lt 16384) { throw "Android ELF alignment below 16 KiB: $library" }
+            }
+          }
+      - name: Inspect native Windows Studio editor ABI
+        if: matrix.compiler == 'llvm-mingw'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = "build/$env:CI_PRESET/bin"
+          foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
+            $headers = & "$env:LLVM_MINGW_ROOT/bin/llvm-readobj.exe" --file-headers "$bin/$name" | Out-String
+            if ($LASTEXITCODE -ne 0 -or $headers -notmatch 'IMAGE_FILE_MACHINE_AMD64') { throw "Invalid Studio PE ABI: $name" }
+          }
+          $imports = & "$env:LLVM_MINGW_ROOT/bin/llvm-readobj.exe" --coff-imports "$bin/TurboDBStudio.exe" | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($imports -match '(?i)(?:Scintilla|Lexilla)[.]dll') { throw 'Studio must load editor DLLs explicitly' }
+      - uses: actions/upload-artifact@v4
+        if: matrix.compiler == 'llvm-mingw'
+        with:
+          name: turbodb-studio-llvm-mingw-x64
+          path: build/${{ matrix.preset }}/bin/
           compression-level: 0
+          if-no-files-found: error
+      - name: Archive qualified SDK with provenance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $prefix = [IO.Path]::GetFullPath("build/$env:CI_PRESET/stage")
+          $dependencies = @(Get-Content build/ci-inputs/sdks.json -Raw | ConvertFrom-Json | Where-Object id -CEQ $env:SDK_ID)
+          @{schema=1; version=$env:SDK_VERSION; source=$env:GITHUB_SHA; profile=$env:SDK_ID;
+            preset=$env:CI_PRESET; native_tests=('${{ matrix.test }}' -eq 'true');
+            cache_version=$env:VCPKG_CACHE_VERSION; dependencies=$dependencies} |
+            ConvertTo-Json -Depth 8 | Set-Content "$prefix/turbodb-sdk-manifest.json" -Encoding utf8
+          Copy-Item -LiteralPath LICENSE,THIRD_PARTY_NOTICES.md -Destination $prefix
+          New-Item -ItemType Directory -Path build/sdk-artifacts -Force | Out-Null
+          tar cf "build/sdk-artifacts/turbodb-$env:SDK_VERSION-$env:SDK_ID.tar" -C $prefix .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbodb-sdk-${{ matrix.id }}
+          path: build/sdk-artifacts/*.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.test
+        with:
+          name: turbodb-tests-${{ matrix.id }}
+          path: |
+            build/${{ matrix.preset }}/ctest.xml
+            build/${{ matrix.preset }}/Testing/Temporary/
+          if-no-files-found: warn
+
+  result:
+    name: Ten SDK qualifications
+    if: always()
+    needs: [prepare, sdk]
+    runs-on: ubuntu-24.04
+    steps:
+      - shell: bash
+        run: |
+          test '${{ needs.prepare.result }}' = success
+          test '${{ needs.sdk.result }}' = success

@@ -1,52 +1,10 @@
-name: ORM CI
+name: TurboDB CI
 
 on:
   pull_request:
     branches: [master]
-    paths:
-      - "drivers/mysql/**"
-      - "drivers/redis/**"
-      - "orm/**"
-      - "drivers/**"
-      - "dbtools/**"
-      - "app/**"
-      - "tidessql/**"
-      - "sqlparser/**"
-      - "include/**"
-      - "packaging/**"
-      - "cmake/**"
-      - "presets/**"
-      - "tools/**"
-      - "CMake*.txt"
-      - "CMake*.cmake"
-      - "CMake*.json"
-      - "vcpkg.json"
-      - "vcpkg-configuration.json"
-      - ".github/workflows/**"
-      - ".github/actions/**"
   push:
     branches: [master]
-    paths:
-      - "drivers/mysql/**"
-      - "drivers/redis/**"
-      - "orm/**"
-      - "drivers/**"
-      - "dbtools/**"
-      - "app/**"
-      - "tidessql/**"
-      - "sqlparser/**"
-      - "include/**"
-      - "packaging/**"
-      - "cmake/**"
-      - "presets/**"
-      - "tools/**"
-      - "CMake*.txt"
-      - "CMake*.cmake"
-      - "CMake*.json"
-      - "vcpkg.json"
-      - "vcpkg-configuration.json"
-      - ".github/workflows/**"
-      - ".github/actions/**"
   workflow_dispatch:
 
 permissions:
@@ -54,7 +12,7 @@ permissions:
   packages: read
 
 concurrency:
-  group: native-tests-${{ github.workflow }}-${{ github.ref }}
+  group: turbodb-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

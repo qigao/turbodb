@@ -1,49 +1,160 @@
-name: Native build dependencies
-description: Restore vcpkg binaries, compiler outputs, and published SDK archives with exact release versions.
+name: Prepare native build dependencies
+description: Restore verified release inputs and install the complete product manifest before CMake configuration.
 inputs:
-  platform:
-    description: Target RID used to separate native and cross-compilation caches.
+  profile:
+    description: Unique SDK qualification profile.
+    required: true
+  compiler:
+    description: clang, gcc, msvc, llvm-mingw or ndk.
     required: true
   triplet:
-    description: Exact target and host vcpkg triplet.
+    description: Exact target vcpkg triplet.
+    required: true
+  host-triplet:
+    description: Exact build-host vcpkg triplet.
+    required: true
+  host:
+    description: Host generator payload RID.
     required: true
   preset:
-    description: Configure preset used to separate compiler cache profiles.
+    description: Complete product configure/build/test preset.
     required: true
 runs:
   using: composite
   steps:
-    - uses: actions/setup-dotnet@v4
+    - uses: actions/setup-python@v5
       with:
-        dotnet-version: "8.0.x"
-    - uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@v0.1.3
+        python-version: '3.12'
+    - name: Install Linux build tools
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends ninja-build pkg-config autoconf automake libtool
+    - name: Install macOS build tools
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        brew install ninja pkg-config autoconf automake libtool
+    - name: Locate Windows developer tools
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+        $root = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if ($LASTEXITCODE -ne 0 -or !$root) { throw 'Visual Studio C++ tools are required' }
+        "VSDEVCMD_BAT=$root/Common7/Tools/VsDevCmd.bat" >> $env:GITHUB_ENV
+        choco install ninja -y --no-progress
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    - uses: ./build/ci-infrastructure/vcpkg-cache/.github/actions/setup-llvm-mingw
+      if: inputs.compiler == 'llvm-mingw'
+      with:
+        target: x64
+    - name: Restore original SDK TARs and their selected roots
+      shell: pwsh
+      env:
+        PROFILE: ${{ inputs.profile }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $extract = @'
+        import sys, tarfile
+        with tarfile.open(sys.argv[1]) as archive:
+            archive.extractall(sys.argv[2], filter="data")
+        '@
+        $sdks = @(Get-Content build/ci-inputs/sdks.json -Raw | ConvertFrom-Json | Where-Object id -CEQ $env:PROFILE)
+        if ($sdks.Count -ne 4 -or @($sdks.key | Sort-Object -Unique).Count -ne 4) { throw 'Four selected SDKs are required' }
+        foreach ($sdk in $sdks) {
+          if ($sdk.version -cne [Environment]::GetEnvironmentVariable("$($sdk.key)_VERSION")) { throw 'Prepared SDK version differs from selected environment' }
+          foreach ($entry in @(@{sha256=$sdk.sha256; size=$sdk.size},@{sha256=$sdk.manifest_sha256; size=0})) {
+            $path = "build/ci-inputs/blobs/$($entry.sha256)"
+            if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $entry.sha256 -or
+                ($entry.size -ne 0 -and (Get-Item $path).Length -ne $entry.size)) { throw 'Prepared SDK or manifest integrity failure' }
+          }
+          $destination = [IO.Path]::GetFullPath("build/dependencies/ci/$($sdk.key)-$($sdk.version)-$env:PROFILE")
+          New-Item -ItemType Directory -Path $destination | Out-Null
+          $extract | python - "build/ci-inputs/blobs/$($sdk.sha256)" $destination
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sdk | Add-Member -NotePropertyName root -NotePropertyValue ($destination.Replace('\','/'))
+          $sdk | ConvertTo-Json | Set-Content "$destination/sdk-restore-receipt.json" -Encoding utf8
+          "$($sdk.key)_ROOT=$($destination.Replace('\','/'))" >> $env:GITHUB_ENV
+        }
+    - name: Restore locked preinstalled dependency prefix
+      shell: pwsh
+      env:
+        TRIPLET: ${{ inputs.triplet }}
+        PROFILE: ${{ inputs.profile }}
+      run: |
+        & python "$env:VCPKG_CACHE_REPOSITORY_ROOT/scripts/restore-native-dependency.py" locked "build/ci-inputs/locks/$env:TRIPLET.json" --destination "build/dependencies/vcpkg-$env:PROFILE" --payload vcpkg_installed --env-prefix VCPKG_INSTALLED
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $receipt = Get-Content "build/dependencies/vcpkg-$env:PROFILE/receipt.json" -Raw | ConvertFrom-Json
+        "VCPKG_INSTALLED_DIR=$($receipt.root)" >> $env:GITHUB_ENV
+    - name: Restore locked host generators from prepared public release archives
+      shell: pwsh
+      env:
+        HOST_RID: ${{ inputs.host }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        foreach ($name in @('re2c','lemon')) {
+          $lock = Get-Content "cmake/$name.lock.json" -Raw | ConvertFrom-Json
+          $exe = if ($IsWindows) { "bin/$name.exe" } else { "bin/$name" }
+          $arguments = @("$env:VCPKG_CACHE_REPOSITORY_ROOT/scripts/restore-native-dependency.py",'locked',"cmake/$name.lock.json",
+            '--destination',"build/dependencies/$name-host",'--archive',"build/ci-inputs/blobs/$($lock.sha256)",
+            '--payload',"tools/$env:HOST_RID",'--executable',$exe,'--env-prefix',$name.ToUpperInvariant())
+          if ($name -eq 'lemon') { $arguments += @('--require','share/lemon/lempar.c') }
+          & python @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+    - name: Prepare canonical Windows pkg-config
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        QIGAO_PREPARED_INPUTS: ''
+      run: |
+        & python "$env:VCPKG_CACHE_REPOSITORY_ROOT/scripts/windows_pkgconf.py"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    - uses: ./build/ci-infrastructure/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache
       id: vcpkg
+      # Tool bootstrap and manifest port sources use their canonical pinned
+      # network inputs. SDKs and compiler archives use prepared blobs above.
+      env:
+        QIGAO_PREPARED_INPUTS: ''
       with:
-        mode: read
         triplet: ${{ inputs.triplet }}
-        host-triplet: ${{ runner.os == 'Linux' && inputs.platform == 'android-arm64-v8a' && 'x64-linux' || inputs.triplet }}
+        host-triplet: ${{ inputs.host-triplet }}
+        restore-packages: 'false'
     - uses: actions/cache@v4
       with:
         path: ${{ env.VCPKG_BINARY_CACHE }}
-        key: vcpkg-l1-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ steps.vcpkg.outputs.contract_version }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'app/vcpkg-ports/**') }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+        key: vcpkg-v3-${{ inputs.profile }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg*.json','app/vcpkg-ports/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          vcpkg-l1-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ steps.vcpkg.outputs.contract_version }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'app/vcpkg-ports/**') }}-
-          vcpkg-l1-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ steps.vcpkg.outputs.contract_version }}-${{ steps.vcpkg.outputs.cache_revision }}-
-    # This action owns ccache installation, restore/save, capacity, and statistics.
-    # The CI presets use the launcher without replacing the selected compiler.
+          vcpkg-v3-${{ inputs.profile }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg*.json','app/vcpkg-ports/**') }}-
+    - name: Complete the declared vcpkg manifest before product configuration
+      shell: pwsh
+      env:
+        TARGET_TRIPLET: ${{ inputs.triplet }}
+        HOST_TRIPLET: ${{ inputs.host-triplet }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        # The warm-up SDK omits libpq on some targets and Windows editor ports.
+        # This is the declared manifest install, using its pinned baseline and selected compiler.
+        $vcpkg = Join-Path $env:VCPKG_ROOT 'vcpkg'
+        $arguments = @('install',"--triplet=$env:TARGET_TRIPLET","--host-triplet=$env:HOST_TRIPLET",
+          "--x-manifest-root=$env:GITHUB_WORKSPACE","--x-install-root=$env:VCPKG_INSTALLED_DIR")
+        if ($IsWindows) { & cmake/WithVs.cmd "$vcpkg.exe" @arguments }
+        else { & $vcpkg @arguments }
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     - uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
       env:
         CCACHE_COMPILERCHECK: content
       with:
-        variant: ccache
         max-size: 2G
-        key: turbodb-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ inputs.preset }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'CMakeOptions.cmake', 'CMakePresets.json', 'presets/**/*.json') }}-${{ github.job }}
-        restore-keys: |
-          turbodb-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ inputs.preset }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'CMakeOptions.cmake', 'CMakePresets.json', 'presets/**/*.json') }}
+        key: turbodb-v3-${{ inputs.profile }}-${{ inputs.preset }}-${{ steps.vcpkg.outputs.cache_revision }}-${{ hashFiles('vcpkg*.json','presets/**/*.json') }}
         update-package-index: true
-    - uses: actions/cache@v4
-      with:
-        path: build/dependencies/archives
-        key: native-nuget-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ hashFiles('cmake/ci/restore-native-sdks.ps1') }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
-        restore-keys: |
-          native-nuget-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ hashFiles('cmake/ci/restore-native-sdks.ps1') }}-
+    - name: Select compiler cache for the complete graph
+      shell: pwsh
+      run: |
+        "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $env:GITHUB_ENV
+        "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $env:GITHUB_ENV

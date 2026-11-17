@@ -17,6 +17,7 @@ coverage.xml
 # IDE files
 .vs/
 .idea/
+/.openidea/
 .vscode/
 !.vscode/extensions.json
 !.vscode/launch.json
@@ -79,4 +80,3 @@ Thumbs.db
 .agent
 
 .worktrees/
-/.openidea/

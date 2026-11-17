@@ -10,7 +10,6 @@
         "zstd"
       ]
     },
-    "gmssl",
     {
       "name": "scintilla",
       "platform": "windows"
