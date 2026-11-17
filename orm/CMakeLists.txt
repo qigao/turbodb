@@ -38,7 +38,8 @@ set_target_properties(
   PROPERTIES
              LINKER_LANGUAGE C
              C_VISIBILITY_PRESET hidden)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   NOT TURBODB_SANITIZER_EXECUTABLE_RUNTIME)
   # The core DSO owns every private static dependency it uses.  Reject a
   # producer build that leaves CSTL calls for a downstream executable to
   # resolve; current Salts SDKs intentionally keep those symbols hidden.

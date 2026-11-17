@@ -292,3 +292,27 @@ JUnit 为 `build/native-release-user/ctest-release.xml`。
   完整 build、正式 CTest 92/92 通过。日志为 build/ci-backslash-*.log。
 - 推送修正前再次核对远端 CNet 0.1.15 / Utils 0.1.5，重新触发完整十项
   资格验证；远端结果以后续实际 run 为准，不把本机或旧 run 的结果视为通过。
+
+## 合并 CI 入口并移除自动发布（2026-11-18）
+
+- 按用户本轮清理决定，删除独立 native-sdk-release.yml；将
+  driver-sdk-package.yml 包装入口与 native-sdk.yml 复用流程合并为唯一
+  .github/workflows/ci.yml。此决定取代前面关于自动发布十个 TAR 的计划。
+  保留 PR/master push/manual dispatch、十项矩阵、完整构建/正式 CTest、
+  Android ELF 检查、Studio PE 检查及 SDK/Studio/test artifacts；
+  移除 release-commit 跳过逻辑、workflow_call 版本参数和自动 tag/release/package
+  发布。发布改为手动，历史 release 与 run 记录不删除。
+- 05e6442 的 run 44129844126 已明确使用 CNet 0.1.15 / Utils 0.1.5。
+  Linux Clang x64/ARM64、GCC x64、两项 Windows、两项 Android 共七项已通过。
+  两项 Clang sanitizer 在 turbo_orm.so 链接阶段因 -z defs 拒绝 sanitizer
+  runtime imports 而失败；这与旧 SDK 选择已无关。
+- Clang 的 sanitizer runtime 由最终 executable 提供，符合
+  https://clang.llvm.org/docs/AddressSanitizer.html#usage。Sanitizers.cmake
+  派生当前编译器/runtime 链接事实，仅在 Clang instrumentation 模式下
+  省略 ORM core / MySQL module 的 -z defs；普通生产 Linux 保持严格闭包，
+  MySQL 的 --exclude-libs,ALL 保留，不关闭 sanitizer 或放宽运行时错误。
+- 本地检查通过：唯一 workflow 的 actionlint、18 个 PowerShell 步骤语法、
+  十项矩阵 / 八项 native test lane；使用反斜杠 LLVM_MINGW_ROOT 的正式 CI
+  preset --fresh configure、完整 build、CTest 92/92 通过。日志为
+  build/ci-cleanup-*.log。Sanitizer 链接和其他平台的最终结果需以本次新 CI
+  run 为准；旧失败日志保留，不将旧 run 的部分通过写为十项全部通过。

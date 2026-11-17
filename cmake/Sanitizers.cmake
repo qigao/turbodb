@@ -1,7 +1,15 @@
+set(TURBODB_SANITIZER_EXECUTABLE_RUNTIME OFF)
 if(NOT ENABLE_SANITIZER_ADDRESS AND NOT ENABLE_SANITIZER_UNDEFINED AND
    NOT ENABLE_SANITIZER_LEAK AND NOT ENABLE_SANITIZER_THREAD AND
    NOT ENABLE_SANITIZER_MEMORY)
   return()
+endif()
+
+# Clang's instrumented DSOs resolve sanitizer hooks from the final executable.
+# -z defs rejects those intentional imports; production DSO closure stays strict.
+# https://clang.llvm.org/docs/AddressSanitizer.html#usage
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+  set(TURBODB_SANITIZER_EXECUTABLE_RUNTIME ON)
 endif()
 
 message(STATUS "=== Sanitizers Configuration ===")

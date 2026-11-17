@@ -260,15 +260,19 @@ build; Android profiles cross-build, install, and verify every installed shared
 library's ELF LOAD alignment is at least 16 KiB. Android device execution and
 external database E2E are separate validation requirements.
 
-`driver-sdk-package.yml` runs this graph for PRs, master pushes and manual
-dispatch, including build and workflow changes. Windows Studio and its editor
-ABI checks belong to the same matrix, replacing the separate Studio workflow.
-`native-sdk-release.yml` retains version-tag/manual/release-commit triggers
-and runs the identical ten-job graph before publication. Release assets are
-ten original installed SDK TARs, a provenance manifest, and SHA256SUMS; the
-deleted NuGet project and staging helpers are no longer used. Compiler names
-and sanitizer variants are explicit in archive profiles, keeping MSVC and
-LLVM-MinGW artifacts distinct.
+[`ci.yml`](.github/workflows/ci.yml) is the single workflow for PRs, master
+pushes and manual dispatch, including build and workflow changes. Windows
+Studio and its editor ABI checks belong to the same matrix. Successful jobs
+upload SDK TARs with provenance, Studio binaries and formal test reports as CI
+artifacts. Compiler names and sanitizer variants are explicit in archive
+profiles, keeping MSVC and LLVM-MinGW artifacts distinct. Release publication
+is manual; CI does not create tags, GitHub Releases or package feed uploads.
+
+Clang sanitizer builds resolve runtime hooks from the final test/application
+executable, so instrumented ORM DSOs omit `-z defs`. Production Linux builds
+retain strict DSO closure and the private CSTL symbol audit. The MySQL module
+continues to hide its static dependency symbols in both modes. See
+[Clang's sanitizer linking guidance](https://clang.llvm.org/docs/AddressSanitizer.html#usage).
 
 Preparation verifies selected releases against their public manifests, producer
 CI, source trees, archive sizes and digests, then distributes the same SDK and
@@ -280,11 +284,8 @@ prefix without a vcpkg toolchain. SDK TARs contain TurboDB's own installation;
 consumers select the four upstream SDK roots and prepared vcpkg prefix recorded
 in their provenance, rather than relying on a bundled runtime closure.
 
-When merging these changes, synchronize repository variables with
-`.env.example`, including CNet 0.1.15 and Utils 0.1.5. Existing releases remain
-immutable. To roll back the workflow migration, use the preceding source
-revision together with its matching SDK inputs and packaging files.
-Synchronize variables before queuing CI. Updating repository variables does not
+Keep repository variables synchronized with `.env.example`, including CNet
+0.1.15 and Utils 0.1.5, before queuing CI. Updating repository variables does not
 replace SDK inputs already selected by a running workflow; start a new complete
 workflow run after synchronization rather than reusing its prepared artifacts.
 

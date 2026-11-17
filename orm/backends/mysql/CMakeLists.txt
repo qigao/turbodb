@@ -25,7 +25,10 @@ set_target_properties(orm_mysql_driver PROPERTIES
   FOLDER "orm/backends/mysql")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_options(orm_mysql_driver PRIVATE
-    "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
+    "LINKER:--exclude-libs,ALL")
+  if(NOT TURBODB_SANITIZER_EXECUTABLE_RUNTIME)
+    target_link_options(orm_mysql_driver PRIVATE "LINKER:-z,defs")
+  endif()
 endif()
 
 install(
