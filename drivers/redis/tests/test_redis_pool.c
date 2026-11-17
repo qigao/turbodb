@@ -283,10 +283,11 @@ suite("drivers/redis CFlow connection pool") {
     check_equal(redis_pool_destroy(&pool), SALTS_OK);
     check_equal(redis_io_runtime_close(&runtime), SALTS_OK);
     check_equal(redis_io_runtime_destroy(&runtime), SALTS_OK);
-    redis_pool_test_close_socket(server.listener);
-    server.listener = REDIS_POOL_TEST_INVALID;
+    /* The worker borrows listener and owns the counters until join. */
     check_equal(sync_thread_join(&server.thread), SALTS_OK);
     sync_thread_destroy(&server.thread);
+    redis_pool_test_close_socket(server.listener);
+    server.listener = REDIS_POOL_TEST_INVALID;
     check_equal(server.accepted, 2);
     check_equal(server.commands, 2);
   }

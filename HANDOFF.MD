@@ -316,3 +316,24 @@ JUnit 为 `build/native-release-user/ctest-release.xml`。
   preset --fresh configure、完整 build、CTest 92/92 通过。日志为
   build/ci-cleanup-*.log。Sanitizer 链接和其他平台的最终结果需以本次新 CI
   run 为准；旧失败日志保留，不将旧 run 的部分通过写为十项全部通过。
+
+## Sanitizer 运行时发现的字节、计时与测试线程问题（2026-11-18）
+
+- e002db9 的单一 CI run 44132212499 已有全部八项普通平台通过，Clang
+  sanitizer 的完整 build 也已通过；正式 CTest 暴露以下四个既有问题：
+  lexer 的 signed char 隐式转 unsigned byte、ORM enum 掩码隐式转 unsigned、
+  Redis 计时器回绕减法，以及 Redis pool 测试线程借用 listener 时主线程改写它。
+- SQL lexer 在函数内以 unsigned char 游标读取同一份不可变输入，返回时转换
+  为既有 char 游标，长度/偏移仍是原始字节数，文档所有权与 NUL 边界不变。
+  正式 dialect_test 增加两种方言的 UTF-8 标识符 span 回归。
+- ORM cleanup 掩码显式转为 unsigned，再执行按位取反；接受的请求位及
+  cancel/destroy 生命周期语义不变。
+- Redis 现有 mock 已明确测试单次 UINT64 clock wrap。用私有 elapsed helper
+  分别计算非回绕/回绕差值，保证中间算术可表示，保留既有超时语义，不改为
+  饱和或重置 deadline。用于 publisher idle、runtime idle、forget-socket wait。
+- Redis pool 测试协议：主线程创建并持有 listener，worker 借用到 join；
+  accepted/commands 只由 worker 写，join 后主线程读取。将 listener 的关闭和
+  INVALID 写入移到 join/destroy 后，避免改写仍被 worker 借用的字段。
+  没有增加共享 stop flag、原子变量或新的同步框架。
+- 本地正式完整 build 与 CTest 92/92 通过，日志为
+  build/ci-sanitizer-fixes-{build,ctest}.log；sanitizer 的实际运行以新 CI 为准。

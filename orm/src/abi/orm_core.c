@@ -180,7 +180,7 @@ static void orm_connection_request_cleanup(orm_connection_t *connection,
                                             unsigned request) {
   if (node == NULL || node->run == NULL || node->finish == NULL ||
       request == 0u ||
-      (request & ~(ORM_NATIVE_CLEANUP_CANCEL | ORM_NATIVE_CLEANUP_DESTROY)) != 0u)
+      (request & ~(unsigned)(ORM_NATIVE_CLEANUP_CANCEL | ORM_NATIVE_CLEANUP_DESTROY)) != 0u)
     abort();
   sync_mutex_lock(&connection->owner.mutex);
   node->requested |= request;

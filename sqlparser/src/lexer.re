@@ -5,10 +5,10 @@
 /* The document owns an exact-length copy plus one NUL sentinel. YYLIMIT marks
  * that sentinel; embedded NUL has already been rejected at the API boundary. */
 int sqlp_lex(sqlp_lexer *lexer, sqlparser_span *token) {
-  const char *YYCURSOR = lexer->cursor;
-  const char *YYLIMIT = lexer->end;
-  const char *YYMARKER;
-  const char *start;
+  const unsigned char *YYCURSOR = (const unsigned char *)lexer->cursor;
+  const unsigned char *YYLIMIT = (const unsigned char *)lexer->end;
+  const unsigned char *YYMARKER;
+  const unsigned char *start;
   int kind;
   const bool sqlite = lexer->dialect == SQLPARSER_SQLITE;
   for (;;) {
@@ -353,8 +353,9 @@ common_token:
       * { kind = -1; break; }
     */
   }
-  *token = (sqlparser_span){(size_t)(start - lexer->base), (size_t)(YYCURSOR - start)};
-  lexer->cursor = YYCURSOR;
+  *token = (sqlparser_span){(size_t)(start - (const unsigned char *)lexer->base),
+                           (size_t)(YYCURSOR - start)};
+  lexer->cursor = (const char *)YYCURSOR;
   lexer->mysql_qualified = kind == SQLTK_DOT && lexer->mysql_after_name;
   lexer->mysql_after_name = kind == SQLTK_ID || kind == SQLTK_QID ||
       kind == SQLTK_STATUS || kind == SQLTK_VARIABLES || kind == SQLTK_ENGINE ||

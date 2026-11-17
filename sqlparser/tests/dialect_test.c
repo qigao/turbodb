@@ -48,6 +48,12 @@ spec("explicit MySQL and SQLite dialects") {
     if (database) { check_equal(sqlite3_close(database), SQLITE_OK); database = NULL; }
   }
 
+  it("retains UTF-8 identifier byte spans in both dialects") {
+    const char *sql = "SELECT caf\xc3\xa9";
+    text_is(expression(sql, SQLPARSER_MYSQL), "caf\xc3\xa9");
+    text_is(expression(sql, SQLPARSER_SQLITE), "caf\xc3\xa9");
+  }
+
   group("numeric CAST target spellings") {
     it("accepts ON as a SET value without changing JOIN or SELECT keyword rules") {
       const char *const forms[]={"SET autocommit=ON","SET SESSION `autocommit`=ON",

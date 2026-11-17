@@ -75,6 +75,13 @@ enum {
 
 static SALTS_THREAD_LOCAL unsigned redis_io_callback_depth;
 
+/* Preserve the clock's single-wrap elapsed-time contract without overflowing
+ * an intermediate subtraction when the monotonic counter rolls over. */
+static uint64_t redis_io_elapsed_ns(uint64_t now, uint64_t started) {
+  if (now >= started) return now - started;
+  return (UINT64_MAX - started) + UINT64_C(1) + now;
+}
+
 static void redis_io_publisher_driver_task(void *user);
 static void redis_io_publisher_driver_cancel(void *user);
 static void redis_io_bridge_driver_task(void *user);
@@ -576,12 +583,12 @@ int redis_io_runtime_wait_publisher_idle(redis_io_runtime_publisher *publisher, 
   started = hrtime();
   sync_mutex_lock(&impl->gate);
   while (redis_io_publisher_matches(publisher, slot) && (slot->scheduled || slot->running)) {
-    uint64_t now = hrtime();
-    if (now - started >= timeout_ns) {
+    const uint64_t elapsed = redis_io_elapsed_ns(hrtime(), started);
+    if (elapsed >= timeout_ns) {
       sync_mutex_unlock(&impl->gate);
       return SALTS_ETIMEDOUT;
     }
-    (void)sync_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - (now - started));
+    (void)sync_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - elapsed);
   }
   if (!redis_io_publisher_matches(publisher, slot)) {
     sync_mutex_unlock(&impl->gate);
@@ -659,9 +666,9 @@ int redis_io_runtime_wait_idle(redis_io_runtime *runtime, uint64_t timeout_ns) {
   if (redis_io_runtime_in_callback()) return SALTS_EBUSY;
   started = hrtime();
   for (;;) {
-    uint64_t now = hrtime();
+    uint64_t elapsed = redis_io_elapsed_ns(hrtime(), started);
     int status;
-    if (now - started >= timeout_ns) return SALTS_ETIMEDOUT;
+    if (elapsed >= timeout_ns) return SALTS_ETIMEDOUT;
     if (!cflow_executor_wait_idle(&impl->driver)) return SALTS_EIO;
     sync_mutex_lock(&impl->gate);
     if (redis_io_runtime_idle_locked(impl)) {
@@ -669,12 +676,12 @@ int redis_io_runtime_wait_idle(redis_io_runtime *runtime, uint64_t timeout_ns) {
       sync_mutex_unlock(&impl->gate);
       return status;
     }
-    now = hrtime();
-    if (now - started >= timeout_ns) {
+    elapsed = redis_io_elapsed_ns(hrtime(), started);
+    if (elapsed >= timeout_ns) {
       sync_mutex_unlock(&impl->gate);
       return SALTS_ETIMEDOUT;
     }
-    (void)sync_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - (now - started));
+    (void)sync_cond_timedwait(&impl->changed, &impl->gate, timeout_ns - elapsed);
     sync_mutex_unlock(&impl->gate);
   }
 }
@@ -738,7 +745,7 @@ int redis_io_runtime_forget_socket_wait(redis_io_runtime *runtime, uintptr_t clo
   for (;;) {
     int status = redis_io_runtime_forget_socket(runtime, closed_socket);
     if (status != SALTS_EBUSY) return status;
-    if (hrtime() - started >= timeout_ns) return SALTS_ETIMEDOUT;
+    if (redis_io_elapsed_ns(hrtime(), started) >= timeout_ns) return SALTS_ETIMEDOUT;
     sync_thread_yield();
   }
 }
