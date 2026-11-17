@@ -24,7 +24,6 @@ add_subdirectory(src/driver)
 add_subdirectory(src/runtime)
 add_subdirectory(src/sql)
 add_library(orm_cpp INTERFACE)
-add_subdirectory(driver-sdk)
 target_compile_definitions(turbo_orm PRIVATE ORM_C_BUILD
                                              ORM_NATIVE_OWNER_CANDIDATE)
 target_include_directories(

@@ -17,7 +17,6 @@ target_link_libraries(
   PRIVATE turbo_orm
           turbodb_schema_support
           PostgreSQL::PostgreSQL
-          Orm::DriverABI
           Salts::Core
           Salts::CNet
           Salts::CSerde

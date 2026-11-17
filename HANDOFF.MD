@@ -122,3 +122,20 @@ JUnit 为 `build/native-release-user/ctest-release.xml`。
   本次结果采用默认调度、三轮交替基线与优化版，每轮 200 × 1,024 次操作；
   原始日志与汇总保留在 `build/performance-{baseline,optimized}-*.log`
   和 `build/performance-comparison.json`。不把协议 CPU 基准写成数据库端到端吞吐。
+
+## SaltsUtils 0.1.5 与 Crypto 依赖边界（2026-11-17）
+
+- `.env` 只更新已有的 SaltsUtils 版本和根目录，选择已校验的正式 0.1.5
+  LLVM-MinGW SDK；`.env.example` 同步版本。SDK 恢复回执在相邻 TurboRaft 的
+  `build/dependencies/salts-utils-0.1.5-inputs/restore-receipt.json`，不提交 `.env`。
+- 保留用户移除运行时复制框架、DriverABI 转发目标和旧 SDK 消费查找的改动。
+  安装包仍需包含 `OrmTargets.cmake` 以公开 `Orm::C` / `Orm::Cpp`，
+  并保留实际插件安装目录；依赖选择由消费方加载的环境负责。
+- 消费端移除 GmSSL 的直接 package 查找和 target 链接，通过 `Salts::Crypto`
+  使用加密能力。HIGH：当前 SaltsCNet 0.1.12 的导出接口引用
+  `GmSSL::GmSSL`，包配置却未加载它。执行
+  `cmake --fresh --preset native-release-user` 在 generate 阶段因此失败，
+  日志为 `build/salts-utils-0.1.5-configure.log`，没有继续 build / CTest / install。
+- HIGH：MySQL `mysql_native_password` 保留原协议所需的 SHA-1，当前上游尚无
+  对应公开 Crypto API。直接头文件引用需随上游补齐封装后迁移，不能通过
+  删除认证方式、手写摘要实现或修改已发布 SDK 绕过。

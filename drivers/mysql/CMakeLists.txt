@@ -15,7 +15,7 @@ target_include_directories(turbodb_mysql PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/drivers/mysql>)
 target_link_libraries(turbodb_mysql
   PUBLIC Salts::Core Salts::CSerde
-  PRIVATE Salts::CNet Salts::Crypto Salts::SIMD GmSSL::GmSSL)
+  PRIVATE Salts::CNet Salts::Crypto Salts::SIMD)
 set_target_properties(turbodb_mysql PROPERTIES
   EXPORT_NAME MySQL
   POSITION_INDEPENDENT_CODE ON

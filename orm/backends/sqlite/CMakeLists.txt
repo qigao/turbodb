@@ -16,7 +16,6 @@ target_link_libraries(
   PRIVATE turbo_orm
           turbodb_schema_support
           unofficial::sqlite3::sqlite3
-          Orm::DriverABI
           Salts::Core
           Salts::CSerde
           CMeta::CFlow

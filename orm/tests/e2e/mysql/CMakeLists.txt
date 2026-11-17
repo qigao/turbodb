@@ -41,7 +41,7 @@ cmake_add_test(
     ${ORM_MYSQL_SOURCE_DIR}/wire/result.c ${ORM_MYSQL_SOURCE_DIR}/wire/handshake.c
     ${ORM_MYSQL_SOURCE_DIR}/wire/statement.c ${ORM_MYSQL_SOURCE_DIR}/wire/row.c
     ${ORM_MYSQL_SOURCE_DIR}/auth/auth.c
-  LIBS Salts::CNet Salts::Crypto GmSSL::GmSSL Salts::CSerde CMeta::CFlow Salts::Core
+  LIBS Salts::CNet Salts::Crypto Salts::CSerde CMeta::CFlow Salts::Core
   DEFS MYSQL_ENABLE_FAULT_INJECTION=1
   INCLUDES ${ORM_SOURCE_DIR}/include/orm ${ORM_SOURCE_DIR}/src/flow
     ${ORM_SOURCE_DIR}/backends/mysql ${ORM_MYSQL_SOURCE_DIR}

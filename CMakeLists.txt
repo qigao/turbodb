@@ -42,7 +42,6 @@ find_package(CMeta "$ENV{CMETA_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{CMETA_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 find_package(SaltsUtils "$ENV{SALTS_UTILS_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
-find_package(GmSSL CONFIG REQUIRED)
 find_package(SaltsCNet "$ENV{SALTS_CNET_VERSION}" EXACT CONFIG REQUIRED
   PATHS "$ENV{SALTS_CNET_ROOT}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 
@@ -84,10 +83,6 @@ if(WIN32)
   add_subdirectory(app)
 endif()
 add_subdirectory(dbtools)
-
-if(WIN32)
-  include(TurboDBRuntime)
-endif()
 
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
