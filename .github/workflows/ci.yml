@@ -217,7 +217,6 @@ jobs:
       VCPKG_TARGET_TRIPLET: ${{ matrix.triplet }}
       CI_PRESET: ${{ matrix.preset }}
       SDK_ID: ${{ matrix.id }}
-      SDK_VERSION: ci
     steps:
       - uses: actions/checkout@v4
         with:
@@ -324,14 +323,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $prefix = [IO.Path]::GetFullPath("build/$env:CI_PRESET/stage")
+          $version = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'version-semver'
           $dependencies = @(Get-Content build/ci-inputs/sdks.json -Raw | ConvertFrom-Json | Where-Object id -CEQ $env:SDK_ID)
-          @{schema=1; version=$env:SDK_VERSION; source=$env:GITHUB_SHA; profile=$env:SDK_ID;
+          @{schema=1; version=$version; source=$env:GITHUB_SHA; profile=$env:SDK_ID;
             preset=$env:CI_PRESET; native_tests=('${{ matrix.test }}' -eq 'true');
             cache_version=$env:VCPKG_CACHE_VERSION; dependencies=$dependencies} |
             ConvertTo-Json -Depth 8 | Set-Content "$prefix/turbodb-sdk-manifest.json" -Encoding utf8
           Copy-Item -LiteralPath LICENSE,THIRD_PARTY_NOTICES.md -Destination $prefix
           New-Item -ItemType Directory -Path build/sdk-artifacts -Force | Out-Null
-          tar cf "build/sdk-artifacts/turbodb-$env:SDK_VERSION-$env:SDK_ID.tar" -C $prefix .
+          tar cf "build/sdk-artifacts/turbodb-$version-$env:SDK_ID.tar" -C $prefix .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
