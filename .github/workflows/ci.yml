@@ -51,8 +51,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $matrix = Get-Content .github/ci/sdk-matrix.json -Raw | ConvertFrom-Json
-          if ($matrix.include.Count -ne 12 -or @($matrix.include.id | Sort-Object -Unique).Count -ne 12) {
-            throw 'Expected ten production profiles and two sanitizer profiles with distinct IDs'
+          if ($matrix.include.Count -ne 11 -or @($matrix.include.id | Sort-Object -Unique).Count -ne 11) {
+            throw 'Expected nine production profiles and two sanitizer profiles with distinct IDs'
           }
           foreach ($key in @('VCPKG_CACHE_VERSION','SALTS_BASE_VERSION','CMETA_VERSION','SALTS_UTILS_VERSION','SALTS_CNET_VERSION')) {
             if ([Environment]::GetEnvironmentVariable($key) -cnotmatch '^\d+\.\d+\.\d+$') {

@@ -61,18 +61,6 @@
       "test": true
     },
     {
-      "id": "macos-clang-x64",
-      "runner": "macos-15-intel",
-      "compiler": "clang",
-      "sdk": "macos-clang-x64",
-      "cnet": "macos-x64",
-      "triplet": "x64-osx",
-      "host_triplet": "x64-osx",
-      "host": "macos-x64",
-      "preset": "ci-llvm-native-release-user",
-      "test": true
-    },
-    {
       "id": "windows-msvc-x64",
       "runner": "windows-2025",
       "compiler": "msvc",
