@@ -252,9 +252,9 @@ CI builds the complete configured graph. External database tests remain
 registered with the `e2e` label; run them with `ctest --preset <profile> -L e2e`
 after providing their database environment. `-LE e2e` selects local tests.
 
-The shared SDK matrix defines nine production profiles and two sanitizer profiles.
+The shared SDK matrix defines eleven production profiles and two sanitizer profiles.
 It covers Linux x64 and arm64 with GCC and Clang, macOS arm64 with Clang,
-Windows x64 with MSVC and LLVM-MinGW, and Android x64 and arm64. Linux Clang x64
+Windows x64 and arm64 with MSVC and LLVM-MinGW, and Android x64 and arm64. Linux Clang x64
 also runs ASan+UBSan and TSan. The nine native profiles run formal CTest after the
 full build. Android profiles cross-build, install, and verify every installed shared
 library's ELF LOAD alignment is at least 16 KiB. Android device execution and

@@ -73,6 +73,18 @@
       "test": true
     },
     {
+      "id": "windows-msvc-arm64",
+      "runner": "windows-11-arm",
+      "compiler": "msvc",
+      "sdk": "windows-msvc-arm64",
+      "cnet": "windows-msvc-arm64",
+      "triplet": "arm64-windows",
+      "host_triplet": "arm64-windows",
+      "host": "windows-arm64",
+      "preset": "ci-msvc-arm64-release-user",
+      "test": true
+    },
+    {
       "id": "windows-llvm-mingw-x64",
       "runner": "windows-2025",
       "compiler": "llvm-mingw",
@@ -82,6 +94,18 @@
       "host_triplet": "qigao-x64-windows-llvm-mingw",
       "host": "windows-x64",
       "preset": "ci-llvm-mingw-x64-release-user",
+      "test": true
+    },
+    {
+      "id": "windows-llvm-mingw-arm64",
+      "runner": "windows-11-arm",
+      "compiler": "llvm-mingw",
+      "sdk": "windows-llvm-mingw-arm64",
+      "cnet": "windows-arm64",
+      "triplet": "qigao-arm64-windows-llvm-mingw",
+      "host_triplet": "qigao-arm64-windows-llvm-mingw",
+      "host": "windows-arm64",
+      "preset": "ci-llvm-mingw-native-arm64-release-user",
       "test": true
     },
     {

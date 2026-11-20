@@ -51,8 +51,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $matrix = Get-Content .github/ci/sdk-matrix.json -Raw | ConvertFrom-Json
-          if ($matrix.include.Count -ne 11 -or @($matrix.include.id | Sort-Object -Unique).Count -ne 11) {
-            throw 'Expected nine production profiles and two sanitizer profiles with distinct IDs'
+          if ($matrix.include.Count -ne 13 -or @($matrix.include.id | Sort-Object -Unique).Count -ne 13) {
+            throw 'Expected eleven production profiles and two sanitizer profiles with distinct IDs'
           }
           foreach ($key in @('VCPKG_CACHE_VERSION','SALTS_BASE_VERSION','CMETA_VERSION','SALTS_UTILS_VERSION','SALTS_CNET_VERSION')) {
             if ([Environment]::GetEnvironmentVariable($key) -cnotmatch '^\d+\.\d+\.\d+$') {
@@ -183,12 +183,15 @@ jobs:
           }
           $contract = Get-Content "$env:VCPKG_CACHE_REPOSITORY_ROOT/compiler-contracts/release-obfuscation.json" -Raw | ConvertFrom-Json
           $compiler = $contract.sources.'llvm-mingw'
-          $asset = @($compiler.assets | Where-Object host -EQ 'windows-x64')
-          if ($asset.Count -ne 1) { throw 'One Windows compiler archive is required' }
-          @{schema=1; source=@{kind='url'; url="https://github.com/$($compiler.repository)/releases/download/$($compiler.release_tag)/$($asset[0].name)"}; sha256=$asset[0].sha256} |
-            ConvertTo-Json -Depth 4 | Set-Content "$root/locks/windows-compiler.json" -Encoding utf8
-          & python $reader download "$root/locks/windows-compiler.json" --destination "$root/blobs"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($compilerHost in @($matrix.include | Where-Object compiler -EQ 'llvm-mingw' | Select-Object -ExpandProperty host -Unique)) {
+            $asset = @($compiler.assets | Where-Object host -EQ $compilerHost)
+            if ($asset.Count -ne 1) { throw "One Windows compiler archive is required for $compilerHost" }
+            $lockPath = "$root/locks/$compilerHost-compiler.json"
+            @{schema=1; source=@{kind='url'; url="https://github.com/$($compiler.repository)/releases/download/$($compiler.release_tag)/$($asset[0].name)"}; sha256=$asset[0].sha256} |
+              ConvertTo-Json -Depth 4 | Set-Content $lockPath -Encoding utf8
+            & python $reader download $lockPath --destination "$root/blobs"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           & git -C $env:VCPKG_CACHE_REPOSITORY_ROOT archive --format=tar HEAD --output ([IO.Path]::GetFullPath("$root/infrastructure.tar"))
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "matrix=$($matrix | ConvertTo-Json -Depth 8 -Compress)" >> $env:GITHUB_OUTPUT
@@ -302,12 +305,14 @@ jobs:
           }
       - name: Inspect native Windows Studio editor ABI
         if: matrix.compiler == 'llvm-mingw'
+        env:
+          EXPECTED_PE_MACHINE: ${{ matrix.host == 'windows-arm64' && 'IMAGE_FILE_MACHINE_ARM64' || 'IMAGE_FILE_MACHINE_AMD64' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $bin = "build/$env:CI_PRESET/bin"
           foreach ($name in @('TurboDBStudio.exe','Scintilla.dll','Lexilla.dll')) {
             $headers = & "$env:LLVM_MINGW_ROOT/bin/llvm-readobj.exe" --file-headers "$bin/$name" | Out-String
-            if ($LASTEXITCODE -ne 0 -or $headers -notmatch 'IMAGE_FILE_MACHINE_AMD64') { throw "Invalid Studio PE ABI: $name" }
+            if ($LASTEXITCODE -ne 0 -or $headers -notmatch $env:EXPECTED_PE_MACHINE) { throw "Invalid Studio PE ABI: $name" }
           }
           $imports = & "$env:LLVM_MINGW_ROOT/bin/llvm-readobj.exe" --coff-imports "$bin/TurboDBStudio.exe" | Out-String
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -315,7 +320,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.compiler == 'llvm-mingw'
         with:
-          name: turbodb-studio-llvm-mingw-x64
+          name: turbodb-studio-${{ matrix.id }}
           path: build/${{ matrix.preset }}/bin/
           compression-level: 0
           if-no-files-found: error
