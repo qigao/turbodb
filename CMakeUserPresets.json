@@ -365,6 +365,14 @@
       "configurePreset": "ci-gcc-arm64-release-user"
     },
     {
+      "name": "install-ci-gcc-arm64-release-user",
+      "inherits": [
+        "base-install",
+        "build-linux"
+      ],
+      "configurePreset": "ci-gcc-arm64-release-user"
+    },
+    {
       "name": "ci-android-arm64-release-user",
       "inherits": "android-arm64-release-user",
       "configurePreset": "ci-android-arm64-release-user"
