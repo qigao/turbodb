@@ -57,15 +57,15 @@ static tdsql_mysql_status parameter_type(uint16_t type) {
 static tdsql_mysql_status parameter_value(const uint8_t *data,size_t size,size_t *offset,
     uint16_t type,size_t *retained,size_t max_bytes,turbodb_value_t *out) {
   const uint8_t kind=(uint8_t)type; const bool unsigned_value=(type>>TDSQL_MYSQL_BYTE_BITS)!=0;
-  uint64_t word=0; uint32_t small=0; uint16_t short_word=0;
+  uint64_t word=0; uint32_t word32=0; uint16_t short_word=0;
   tdsql_mysql_status status=TDSQL_MYSQL_OK;
   switch(kind) {
     case MYSQL_TYPE_NULL: *out=turbodb_null(); return status;
     case MYSQL_TYPE_LONGLONG: status=complete(mysql_wire_read_u64_le(data,size,offset,&word)); break;
     case MYSQL_FIELD_TYPE_LONG: case MYSQL_FIELD_TYPE_INT24:
-      status=complete(mysql_wire_read_u32_le(data,size,offset,&small));
-      if(status==TDSQL_MYSQL_OK) { int32_t signed_word=0; memcpy(&signed_word,&small,sizeof(small));
-        *out=unsigned_value?turbodb_u64(small):turbodb_i64(signed_word); }
+      status=complete(mysql_wire_read_u32_le(data,size,offset,&word32));
+      if(status==TDSQL_MYSQL_OK) { int32_t signed_word=0; memcpy(&signed_word,&word32,sizeof(word32));
+        *out=unsigned_value?turbodb_u64(word32):turbodb_i64(signed_word); }
       return status;
     case MYSQL_FIELD_TYPE_SHORT:
       status=complete(mysql_wire_read_u16_le(data,size,offset,&short_word));
@@ -87,9 +87,9 @@ static tdsql_mysql_status parameter_value(const uint8_t *data,size_t size,size_t
       }
       return status;
     case MYSQL_FIELD_TYPE_FLOAT:
-      status=complete(mysql_wire_read_u32_le(data,size,offset,&small));
+      status=complete(mysql_wire_read_u32_le(data,size,offset,&word32));
       if(status==TDSQL_MYSQL_OK) {
-        float value=0; memcpy(&value,&small,sizeof(value));
+        float value=0; memcpy(&value,&word32,sizeof(value));
         if(!isfinite(value)) return TDSQL_MYSQL_INVALID;
         *out=turbodb_f64(value);
       }
