@@ -51,8 +51,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $matrix = Get-Content .github/ci/sdk-matrix.json -Raw | ConvertFrom-Json
-          if ($matrix.include.Count -ne 10 -or @($matrix.include.id | Sort-Object -Unique).Count -ne 10) {
-            throw 'Exactly ten distinct SDK qualifications are required'
+          if ($matrix.include.Count -ne 12 -or @($matrix.include.id | Sort-Object -Unique).Count -ne 12) {
+            throw 'Expected ten production profiles and two sanitizer profiles with distinct IDs'
           }
           foreach ($key in @('VCPKG_CACHE_VERSION','SALTS_BASE_VERSION','CMETA_VERSION','SALTS_UTILS_VERSION','SALTS_CNET_VERSION')) {
             if ([Environment]::GetEnvironmentVariable($key) -cnotmatch '^\d+\.\d+\.\d+$') {
@@ -105,7 +105,7 @@ jobs:
           $records = @()
           foreach ($p in $packages) {
             $repository = "qigao/$($p.repo)"
-            Write-Host "Verifying $repository $($p.version) for all ten profiles"
+            Write-Host "Verifying $repository $($p.version) for all $($matrix.include.Count) profiles"
             $release = Api "repos/$repository/releases/tags/v$($p.version)"
             if ($release.draft -or $release.prerelease -or !$release.published_at -or $release.tag_name -cne "v$($p.version)") {
               throw "Expected a published stable release: $repository"
@@ -350,7 +350,7 @@ jobs:
           if-no-files-found: warn
 
   result:
-    name: Ten SDK qualifications
+    name: SDK qualifications
     if: always()
     needs: [prepare, sdk]
     runs-on: ubuntu-24.04
