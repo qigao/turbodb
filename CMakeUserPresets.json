@@ -147,6 +147,16 @@
       ]
     },
     {
+      "name": "ci-gcc-arm64-release-user",
+      "displayName": "CI shared vcpkg cache: Linux GCC arm64 Release",
+      "inherits": [
+        "ci-native-tests",
+        "native-environment",
+        "linux-gcc-arm64",
+        "full-native"
+      ]
+    },
+    {
       "name": "ci-android-arm64-release-user",
       "displayName": "CI Android arm64-v8a Release (build and install)",
       "inherits": [
@@ -347,6 +357,14 @@
       "configurePreset": "ci-gcc-release-user"
     },
     {
+      "name": "ci-gcc-arm64-release-user",
+      "inherits": [
+        "base-build",
+        "build-linux"
+      ],
+      "configurePreset": "ci-gcc-arm64-release-user"
+    },
+    {
       "name": "ci-android-arm64-release-user",
       "inherits": "android-arm64-release-user",
       "configurePreset": "ci-android-arm64-release-user"
@@ -459,6 +477,13 @@
         "gcc-release-user"
       ],
       "configurePreset": "ci-gcc-release-user"
+    },
+    {
+      "name": "ci-gcc-arm64-release-user",
+      "inherits": [
+        "gcc-release-user"
+      ],
+      "configurePreset": "ci-gcc-arm64-release-user"
     },
     {
       "name": "llvm-native-asan-ubsan-user",

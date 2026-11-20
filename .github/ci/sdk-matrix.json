@@ -37,6 +37,18 @@
       "test": true
     },
     {
+      "id": "linux-gcc-arm64",
+      "runner": "ubuntu-24.04-arm",
+      "compiler": "gcc",
+      "sdk": "linux-gcc-arm64",
+      "cnet": "linux-gcc-arm64",
+      "triplet": "arm64-linux",
+      "host_triplet": "arm64-linux",
+      "host": "linux-arm64",
+      "preset": "ci-gcc-arm64-release-user",
+      "test": true
+    },
+    {
       "id": "macos-clang-arm64",
       "runner": "macos-15",
       "compiler": "clang",
@@ -45,6 +57,18 @@
       "triplet": "arm64-osx",
       "host_triplet": "arm64-osx",
       "host": "macos-arm64",
+      "preset": "ci-llvm-native-release-user",
+      "test": true
+    },
+    {
+      "id": "macos-clang-x64",
+      "runner": "macos-15-intel",
+      "compiler": "clang",
+      "sdk": "macos-clang-x64",
+      "cnet": "macos-x64",
+      "triplet": "x64-osx",
+      "host_triplet": "x64-osx",
+      "host": "macos-x64",
       "preset": "ci-llvm-native-release-user",
       "test": true
     },
