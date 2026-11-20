@@ -178,6 +178,10 @@
       "inherits": "msvc-release-user",
       "environment": {
         "VCPKG_TARGET_TRIPLET": "arm64-windows"
+      },
+      "cacheVariables": {
+        "CMAKE_C_FLAGS_RELEASE": "/Od /DNDEBUG",
+        "CMAKE_CXX_FLAGS_RELEASE": "/Od /DNDEBUG"
       }
     },
     {
