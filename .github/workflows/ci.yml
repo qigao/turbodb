@@ -6,6 +6,22 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      vcpkg_cache_version:
+        description: vcpkg-cache release version
+        type: string
+      salts_base_version:
+        description: salts-base release version
+        type: string
+      cmeta_version:
+        description: cmeta release version
+        type: string
+      salts_utils_version:
+        description: salts-utils release version
+        type: string
+      salts_cnet_version:
+        description: salts-cnet release version
+        type: string
 
 concurrency:
   group: turbodb-ci-${{ github.event.pull_request.number || github.ref }}
@@ -17,11 +33,11 @@ permissions:
 
 env:
   GH_TOKEN: ${{ github.token }}
-  VCPKG_CACHE_VERSION: ${{ vars.VCPKG_CACHE_VERSION }}
-  SALTS_BASE_VERSION: ${{ vars.SALTS_BASE_VERSION }}
-  CMETA_VERSION: ${{ vars.CMETA_VERSION }}
-  SALTS_UTILS_VERSION: ${{ vars.SALTS_UTILS_VERSION }}
-  SALTS_CNET_VERSION: ${{ vars.SALTS_CNET_VERSION }}
+  VCPKG_CACHE_VERSION: ${{ inputs.vcpkg_cache_version || vars.VCPKG_CACHE_VERSION }}
+  SALTS_BASE_VERSION: ${{ inputs.salts_base_version || vars.SALTS_BASE_VERSION }}
+  CMETA_VERSION: ${{ inputs.cmeta_version || vars.CMETA_VERSION }}
+  SALTS_UTILS_VERSION: ${{ inputs.salts_utils_version || vars.SALTS_UTILS_VERSION }}
+  SALTS_CNET_VERSION: ${{ inputs.salts_cnet_version || vars.SALTS_CNET_VERSION }}
 
 jobs:
   prepare:
