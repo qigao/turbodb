@@ -1,0 +1,27 @@
+{
+  "targets": {
+    "turbodb_types": {
+      "kind": "header_only",
+      "public": {
+        "includeDirs": ["$builddir/include"],
+        "deps": ["saltsbase_core"]
+      },
+      "preTasks": [
+        {
+          "name": "shared_types",
+          "builtin": "copy",
+          "inputs": ["orm/types.h"],
+          "outputs": ["$builddir/include/turbodb/types.h"]
+        }
+      ],
+      "install": {
+        "headers": [
+          {
+            "from": "orm/types.h",
+            "to": "include/turbodb"
+          }
+        ]
+      }
+    }
+  }
+}

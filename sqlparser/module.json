@@ -1,0 +1,95 @@
+{
+  "include": ["examples/module.json", "tests/module.json"],
+  "targets": {
+    "sqlparser": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "src/parser.c",
+          "src/ast.c",
+          "$builddir/sqlparser/sqlparser_lexer_gen.c",
+          "$builddir/sqlparser/sqlparser_grammar_gen.c",
+          "$builddir/sqlparser/sqlparser_sqlite_grammar_gen.c"
+        ]
+      },
+      "private": {
+        "deps": ["cmeta_cstl", "saltsbase_core"],
+        "includeDirs": ["src", "$builddir/sqlparser"]
+      },
+      "public": {
+        "includeDirs": ["include"],
+        "defines": {
+          "SQLPARSER_SQLITE_ENABLE_UPDATE_DELETE_LIMIT": "0"
+        }
+      },
+      "preTasks": [
+        {
+          "name": "sqlparser_grammar_input",
+          "builtin": "copy",
+          "inputs": ["$moduledir/src/grammar.y"],
+          "outputs": ["$builddir/sqlparser/sqlparser_grammar_gen.y"]
+        },
+        {
+          "name": "sqlparser_grammar",
+          "tool": "lemon",
+          "inputs": [
+            "$builddir/sqlparser/sqlparser_grammar_gen.y",
+            "$moduledir/src/internal.h",
+            "${envPath:LEMON_ROOT}/bin/lemon${host:exe}",
+            "${envPath:LEMON_ROOT}/share/lemon/lempar.c"
+          ],
+          "outputs": [
+            "$builddir/sqlparser/sqlparser_grammar_gen.c",
+            "$builddir/sqlparser/sqlparser_grammar_gen.h"
+          ],
+          "args": ["-T${envPath:LEMON_ROOT}/share/lemon/lempar.c", "$builddir/sqlparser/sqlparser_grammar_gen.y"]
+        },
+        {
+          "name": "sqlparser_sqlite_grammar_input",
+          "builtin": "copy",
+          "inputs": ["$moduledir/src/grammar.y"],
+          "outputs": ["$builddir/sqlparser/sqlparser_sqlite_grammar_gen.y"]
+        },
+        {
+          "name": "sqlparser_sqlite_grammar",
+          "tool": "lemon",
+          "inputs": [
+            "$builddir/sqlparser/sqlparser_sqlite_grammar_gen.y",
+            "$moduledir/src/internal.h",
+            "${envPath:LEMON_ROOT}/bin/lemon${host:exe}",
+            "${envPath:LEMON_ROOT}/share/lemon/lempar.c"
+          ],
+          "outputs": [
+            "$builddir/sqlparser/sqlparser_sqlite_grammar_gen.c",
+            "$builddir/sqlparser/sqlparser_sqlite_grammar_gen.h"
+          ],
+          "args": [
+            "-T${envPath:LEMON_ROOT}/share/lemon/lempar.c",
+            "-DSQLITE",
+            "$builddir/sqlparser/sqlparser_sqlite_grammar_gen.y"
+          ]
+        },
+        {
+          "name": "sql_lexer",
+          "tool": "re2c",
+          "inputs": [
+            "$moduledir/src/lexer.re",
+            "$moduledir/src/internal.h",
+            "$builddir/sqlparser/sqlparser_grammar_gen.h",
+            "${envPath:TURBODB_RE2C_ROOT}/bin/re2c${host:exe}"
+          ],
+          "outputs": ["$builddir/sqlparser/sqlparser_lexer_gen.c"],
+          "args": ["-o", "$builddir/sqlparser/sqlparser_lexer_gen.c", "$moduledir/src/lexer.re"]
+        }
+      ],
+      "install": {
+        "headers": [
+          {
+            "from": "include/sqlparser/sqlparser.h",
+            "to": "include/sqlparser"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "include": ["slates/Platforms.json", "slates/Tools.json"],
+  "env": [
+    "VCPKG_INSTALLED_DIR",
+    "SALTS_BASE_ROOT",
+    "CMETA_ROOT",
+    "SALTS_UTILS_ROOT",
+    "SALTS_CNET_ROOT",
+    "TURBODB_MSVC_VCPKG_INSTALLED_DIR",
+    "TURBODB_MSVC_SALTS_BASE_ROOT",
+    "TURBODB_MSVC_CMETA_ROOT",
+    "TURBODB_MSVC_SALTS_UTILS_ROOT",
+    "TURBODB_MSVC_SALTS_CNET_ROOT",
+    "TURBODB_RE2C_ROOT",
+    "LEMON_ROOT",
+    "LLVM_MINGW_ROOT",
+    "VSDEVCMD_BAT",
+    "ANDROID_NDK_TOOLCHAIN_DIR"
+  ],
+  "defaultPreset": "release",
+  "modules": [".", "third_party", "sqlparser", "drivers", "orm", "app", "dbtools"],
+  "presets": {
+    "base": {
+      "cStd": "c11",
+      "cxxStd": "c++17",
+      "tests": false
+    },
+    "release": {
+      "config": "release",
+      "options": {
+        "optimization": "speed"
+      },
+      "defines": {
+        "NDEBUG": null
+      },
+      "inherits": "base"
+    },
+    "debug": {
+      "inherits": "base",
+      "config": "debug",
+      "options": {
+        "optimization": "none",
+        "debugInfo": "full"
+      }
+    },
+    "tests": {
+      "inherits": "release",
+      "tests": true,
+      "config": "tests"
+    },
+    "debug-mingw": {
+      "inherits": "debug",
+      "targetPlatform": "windows-x64",
+      "toolchain": "llvm-mingw-x64"
+    },
+    "debug-msvc": {
+      "inherits": "debug",
+      "targetPlatform": "windows-x64",
+      "toolchain": "msvc-win64",
+      "vsDevCmd": "${envPath:VSDEVCMD_BAT}",
+      "config": "debug-msvc",
+      "styles": ["msvc-warnings"]
+    },
+    "release-msvc": {
+      "inherits": "release",
+      "targetPlatform": "windows-x64",
+      "toolchain": "msvc-win64",
+      "vsDevCmd": "${envPath:VSDEVCMD_BAT}",
+      "styles": ["msvc-warnings"]
+    },
+    "debug-tests": {
+      "inherits": "debug",
+      "tests": true,
+      "config": "debug-tests"
+    },
+    "tests-msvc": {
+      "inherits": "release-msvc",
+      "tests": true,
+      "config": "tests-msvc"
+    },
+    "debug-tests-msvc": {
+      "inherits": "debug-msvc",
+      "tests": true,
+      "config": "debug-tests-msvc"
+    },
+    "benchmarks": {
+      "inherits": "tests",
+      "config": "benchmark",
+      "tests": true
+    }
+  },
+  "styles": {
+    "msvc-warnings": {
+      "flags": ["/wd4996", "/wd4324", "/wd4245", "/wd4100", "/wd4200", "/wd4267", "/wd4244"]
+    }
+  }
+}

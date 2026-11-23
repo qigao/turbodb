@@ -1,0 +1,70 @@
+{
+  "targets": {
+    "dbtool_postgresql_live_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["postgresql_live_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_dbtool_core", "postgresql", "saltsbase_tinytest"]
+      },
+      "runtimeDeps": ["turbodb_driver_postgresql"],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_POSTGRESQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_postgresql.dll\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_POSTGRESQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_postgresql.so\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_POSTGRESQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_postgresql.dylib\""
+            }
+          }
+        },
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror", "-Wall", "-Wextra", "-Wpedantic"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX", "/W4"]
+          }
+        }
+      ],
+      "test": {
+        "name": "dbtool_postgresql_live_test",
+        "labels": ["e2e"]
+      }
+    }
+  }
+}

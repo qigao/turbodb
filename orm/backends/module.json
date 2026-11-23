@@ -1,0 +1,3 @@
+{
+  "include": ["mysql/module.json", "postgresql/module.json", "sqlite/module.json", "tests/module.json"]
+}

@@ -1,0 +1,56 @@
+{
+  "targets": {
+    "orm_core_dependencies_mingw": {
+      "kind": "header_only",
+      "when": {
+        "os": "windows",
+        "driver": "llvm-mingw",
+        "native": true
+      },
+      "runtimeDeps": ["turbo_orm"],
+      "test": {
+        "tool": "cmake",
+        "name": "orm_core_dependencies",
+        "timeout": 30,
+        "labels": ["architecture", "local"],
+        "args": [
+          "-DORM_OBJDUMP=${envPath:LLVM_MINGW_ROOT}/bin/llvm-objdump${host:exe}",
+          "-P",
+          "$moduledir/core_dependencies_test.cmake",
+          "${artifact:turbo_orm}"
+        ]
+      }
+    },
+    "orm_core_dependencies_msvc": {
+      "kind": "header_only",
+      "when": {
+        "os": "windows",
+        "driver": "msvc",
+        "native": true
+      },
+      "runtimeDeps": ["turbo_orm"],
+      "test": {
+        "tool": "cmake",
+        "name": "orm_core_dependencies",
+        "timeout": 30,
+        "labels": ["architecture", "local"],
+        "args": ["-P", "$moduledir/core_dependencies_test.cmake", "${artifact:turbo_orm}"]
+      }
+    },
+    "orm_core_dependencies_linux": {
+      "kind": "header_only",
+      "when": {
+        "os": "linux",
+        "native": true
+      },
+      "runtimeDeps": ["turbo_orm"],
+      "test": {
+        "tool": "cmake",
+        "name": "orm_core_dependencies",
+        "timeout": 30,
+        "labels": ["architecture", "local"],
+        "args": ["-P", "$moduledir/core_dependencies_test.cmake", "${artifact:turbo_orm}"]
+      }
+    }
+  }
+}

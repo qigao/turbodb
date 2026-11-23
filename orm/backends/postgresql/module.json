@@ -1,0 +1,68 @@
+{
+  "targets": {
+    "turbodb_driver_postgresql": {
+      "kind": "cmeta_plugin",
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": [
+          "plugin.c",
+          "../../src/driver/orm_driver_backend_bridge.c",
+          "backend.c",
+          "schema.c",
+          "postgres_transport_policy.c",
+          "postgres_direct_tls_bridge.c",
+          "orm_postgres_cursor.c",
+          "orm_postgres_libpq.c",
+          "../../src/flow/orm_text_token.c",
+          "../../src/sql/orm_sql_render.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "turbo_orm",
+          "turbodb_schema_support",
+          "postgresql",
+          "saltsbase_core",
+          "saltscnet_cnet",
+          "saltsbase_cserde",
+          "cmeta_cflow",
+          "cmeta_cstl",
+          "turbodb_types"
+        ],
+        "includeDirs": [
+          "../../include/orm",
+          "../../src/abi",
+          "../../src/flow",
+          "../../src/sql",
+          "../../src/driver",
+          "."
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "linux"
+          },
+          "private": {
+            "linkFlags": ["-Wl,--exclude-libs,ALL", "-Wl,-z,defs"]
+          }
+        },
+        {
+          "when": {
+            "os": "android"
+          },
+          "private": {
+            "linkFlags": ["-Wl,-z,max-page-size=16384"]
+          }
+        }
+      ]
+    }
+  }
+}

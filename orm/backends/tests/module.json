@@ -1,0 +1,515 @@
+{
+  "include": ["cross_driver/module.json", "mysql/module.json", "postgresql/module.json", "sqlite/module.json"],
+  "targets": {
+    "orm_driver_backend_adapter_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_driver_backend_adapter_test.c", "../../src/driver/orm_driver_backend_bridge.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_c_test_static",
+          "saltsbase_core",
+          "cmeta_cstl",
+          "saltsbase_cserde",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "includeDirs": ["../../include/orm", "../../src/abi", "../../src/flow", "../../src/driver"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_driver_backend_adapter",
+        "labels": ["local"]
+      }
+    },
+    "orm_driver_backend_bridge_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_driver_backend_bridge_test.c", "../../src/driver/orm_driver_backend_bridge.c"]
+      },
+      "private": {
+        "deps": ["saltsbase_core", "cmeta_cflow", "cmeta_cstl", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../include/orm", "../../src/abi", "../../src/flow", "../../src/driver"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_driver_backend_bridge",
+        "labels": ["local"]
+      }
+    },
+    "orm_driver_interface_cpp_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_driver_interface_cpp_test.cpp"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror", "-Wno-shadow"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_driver_interface_cpp",
+        "labels": ["local"]
+      }
+    },
+    "orm_driver_interface_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "orm_driver_interface_test.c",
+          "orm_driver_interface_peer_a.c",
+          "orm_driver_interface_peer_b.c"
+        ]
+      },
+      "private": {
+        "deps": ["cmeta_plugin", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_driver_interface",
+        "labels": ["local"]
+      }
+    },
+    "orm_driver_owner_bridge_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_driver_owner_bridge_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../include/orm", "../../src/abi", "../../src/flow", "../../src/driver"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_driver_owner_bridge",
+        "labels": ["local"]
+      }
+    },
+    "orm_driver_plan_view_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_driver_plan_view_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../include/orm", "../../src/abi", "../../src/flow", "../../src/driver"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_driver_plan_view",
+        "labels": ["local"]
+      }
+    },
+    "orm_plugin_bad_abi_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_module_bad_abi_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "turbodb_types"]
+      }
+    },
+    "orm_plugin_bad_contract_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_module_bad_contract_version_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_core", "saltsbase_cserde", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"]
+      }
+    },
+    "orm_plugin_bad_shape_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_module_bad_interface_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_core", "saltsbase_cserde", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"]
+      }
+    },
+    "orm_plugin_bad_storage_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_module_bad_storage_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_core", "saltsbase_cserde", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"]
+      }
+    },
+    "orm_plugin_no_query_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_module_no_entry_fixture.c"]
+      },
+      "private": {
+        "deps": ["turbodb_types"]
+      }
+    },
+    "orm_runtime_plugin_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_runtime_plugin_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_core", "saltsbase_cserde", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"]
+      }
+    },
+    "orm_runtime_race_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_runtime_race_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_core", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"]
+      }
+    },
+    "orm_runtime_race_fixture_two": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["orm_runtime_race_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_core", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"],
+        "defines": {
+          "ORM_RUNTIME_RACE_DRIVER_ID": "\"race2\""
+        }
+      }
+    },
+    "orm_runtime_race_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_runtime_race_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../include/orm", "../../src/abi", "../../src/flow", "../../src/runtime"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "runtimeDeps": ["orm_runtime_race_fixture", "orm_runtime_race_fixture_two"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_runtime_race",
+        "labels": ["local"],
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_RUNTIME_RACE_FIXTURE",
+          "${artifact:orm_runtime_race_fixture}",
+          "ORM_RUNTIME_RACE_FIXTURE_TWO",
+          "${artifact:orm_runtime_race_fixture_two}",
+          "ORM_RUNTIME_RACE_GATE_PREFIX",
+          "$builddir/runtime-race-gate",
+          "--"
+        ]
+      }
+    },
+    "orm_runtime_registry_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_runtime_registry_test.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "saltsbase_tinytest", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../../include/orm"]
+      },
+      "runtimeDeps": [
+        "orm_runtime_plugin_fixture",
+        "orm_plugin_no_query_fixture",
+        "orm_plugin_bad_abi_fixture",
+        "orm_plugin_bad_contract_fixture",
+        "orm_plugin_bad_shape_fixture",
+        "orm_plugin_bad_storage_fixture"
+      ],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_runtime_registry",
+        "labels": ["local"],
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_PLUGIN_FIXTURE",
+          "${artifact:orm_runtime_plugin_fixture}",
+          "ORM_PLUGIN_NO_QUERY_FIXTURE",
+          "${artifact:orm_plugin_no_query_fixture}",
+          "ORM_PLUGIN_BAD_ABI_FIXTURE",
+          "${artifact:orm_plugin_bad_abi_fixture}",
+          "ORM_PLUGIN_BAD_CONTRACT_FIXTURE",
+          "${artifact:orm_plugin_bad_contract_fixture}",
+          "ORM_PLUGIN_BAD_SHAPE_FIXTURE",
+          "${artifact:orm_plugin_bad_shape_fixture}",
+          "ORM_PLUGIN_BAD_STORAGE_FIXTURE",
+          "${artifact:orm_plugin_bad_storage_fixture}",
+          "--"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "targets": {
+    "orm_sqlite_plugin_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_sqlite_plugin_test.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "saltsbase_tinytest", "cmeta_cflow", "saltsbase_core", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "runtimeDeps": ["turbodb_driver_sqlite"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_sqlite_plugin",
+        "labels": ["local"],
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_SQLITE_PLUGIN",
+          "${artifact:turbodb_driver_sqlite}",
+          "--"
+        ]
+      }
+    }
+  }
+}

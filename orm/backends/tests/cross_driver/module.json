@@ -1,0 +1,155 @@
+{
+  "targets": {
+    "orm_coexistence_mysql_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["../orm_runtime_plugin_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_cserde", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_FIXTURE_DRIVER_ID": "\"drivers/mysql\"",
+          "ORM_FIXTURE_ROW_VALUE": "42"
+        }
+      }
+    },
+    "orm_coexistence_postgresql_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["../orm_runtime_plugin_fixture.c"]
+      },
+      "private": {
+        "deps": ["cmeta_plugin_abi", "saltsbase_cserde", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_FIXTURE_DRIVER_ID": "\"postgresql\"",
+          "ORM_FIXTURE_ROW_VALUE": "84"
+        }
+      }
+    },
+    "orm_runtime_coexistence_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_runtime_coexistence_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "cmeta_cflow", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm", "../../../src/runtime"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "runtimeDeps": ["orm_coexistence_mysql_fixture", "orm_coexistence_postgresql_fixture"],
+      "test": {
+        "name": "orm_runtime_coexistence",
+        "labels": ["local"],
+        "timeout": 30,
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_MYSQL_MOCK_PLUGIN",
+          "${artifact:orm_coexistence_mysql_fixture}",
+          "ORM_POSTGRESQL_MOCK_PLUGIN",
+          "${artifact:orm_coexistence_postgresql_fixture}",
+          "--"
+        ]
+      }
+    },
+    "orm_sql_plugin_matrix_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_sql_plugin_matrix.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../../../include/orm"]
+      },
+      "runtimeDeps": ["turbodb_driver_sqlite", "turbodb_driver_postgresql"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ]
+    },
+    "orm_sql_plugin_matrix_sqlite": {
+      "kind": "header_only",
+      "when": {
+        "native": true
+      },
+      "runtimeDeps": ["orm_sql_plugin_matrix_test", "turbodb_driver_sqlite", "turbodb_driver_postgresql"],
+      "test": {
+        "name": "orm_sql_plugin_matrix_sqlite",
+        "labels": ["local"],
+        "args": ["sqlite", "${artifact:turbodb_driver_sqlite}", "${artifact:turbodb_driver_postgresql}"],
+        "program": "${artifact:orm_sql_plugin_matrix_test}"
+      }
+    },
+    "orm_sql_plugin_matrix_postgresql": {
+      "kind": "header_only",
+      "when": {
+        "native": true
+      },
+      "runtimeDeps": ["orm_sql_plugin_matrix_test", "turbodb_driver_sqlite", "turbodb_driver_postgresql"],
+      "test": {
+        "name": "orm_sql_plugin_matrix_postgresql",
+        "labels": ["local"],
+        "args": ["postgresql", "${artifact:turbodb_driver_sqlite}", "${artifact:turbodb_driver_postgresql}"],
+        "program": "${artifact:orm_sql_plugin_matrix_test}"
+      }
+    },
+    "orm_sql_plugin_matrix_both": {
+      "kind": "header_only",
+      "when": {
+        "native": true
+      },
+      "runtimeDeps": ["orm_sql_plugin_matrix_test", "turbodb_driver_sqlite", "turbodb_driver_postgresql"],
+      "test": {
+        "name": "orm_sql_plugin_matrix_both",
+        "labels": ["local"],
+        "args": ["both", "${artifact:turbodb_driver_sqlite}", "${artifact:turbodb_driver_postgresql}"],
+        "program": "${artifact:orm_sql_plugin_matrix_test}"
+      }
+    }
+  }
+}

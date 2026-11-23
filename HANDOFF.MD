@@ -1,5 +1,16 @@
 # 构建与性能排障记录
 
+## Slate 的 Windows PostgreSQL 依赖与 Studio 资源
+
+- 只有链接成功不足以确认插件可以加载。Windows 的 Slate 配置显式指定同一
+  triplet 的 libpq 导入库与 DLL。MSVC 缓存缺少 libpq 的 pkg-config
+  条目，LLVM-MinGW 本地缓存的 pkg-config 可以链接，但未把 DLL 带入测试
+  目录。显式运行时依赖使 libpq 与 PostgreSQL 插件一起部署。
+- Studio 和菜单测试共用资源生成任务。资源摘要编入生成的翻译单元，
+  使资源发生变化时 Ninja 重链两个消费者。OpenWTL 与 CMake 共用固定摘要。
+- LLVM-MinGW 与 MSVC 的 Slate 列表均与 CTest 的 104 项一致，两边
+  `--label local` 各通过 92 项，包含 Studio 和插件用例。
+
 ## 2026-11-15 正式依赖与目录迁移验收
 
 - 已核实最新正式发布：vcpkg-cache 0.1.3、OpenWTL 0.1.2、SaltsBase 0.1.8、

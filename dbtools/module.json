@@ -1,0 +1,67 @@
+{
+  "include": ["tests/module.json"],
+  "targets": {
+    "dbtools": {
+      "kind": "executable",
+      "when": {
+        "os": ["windows", "linux", "macos"]
+      },
+      "sources": {
+        "files": ["main.c"]
+      },
+      "private": {
+        "deps": ["turbodb_dbtool_core"]
+      },
+      "runtimeDeps": ["turbodb_driver_sqlite", "turbodb_driver_postgresql", "turbodb_driver_mysql"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror", "-Wall", "-Wextra", "-Wpedantic"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX", "/W4"]
+          }
+        }
+      ]
+    },
+    "turbodb_dbtool_core": {
+      "kind": "static",
+      "sources": {
+        "files": ["src/dbtool_cli.c", "src/dbtool_file.c", "src/dbtool_plugin.c"]
+      },
+      "public": {
+        "deps": ["turbodb_schema_support", "saltsbase_core", "cmeta_plugin"],
+        "includeDirs": ["src"]
+      },
+      "private": {
+        "deps": ["saltsbase_cmd"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror", "-Wall", "-Wextra", "-Wpedantic"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX", "/W4"]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,256 @@
+{
+  "targets": {
+    "turbodb-app-config-test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "os": "windows"
+      },
+      "sources": {
+        "files": ["connection_config_test.cpp", "../src/connection/connection_config.cpp"]
+      },
+      "private": {
+        "deps": ["saltsbase_ini", "saltsbase_tinytest"],
+        "includeDirs": ["../src"],
+        "defines": {
+          "NOMINMAX": null,
+          "UNICODE": null,
+          "WIN32_LEAN_AND_MEAN": null,
+          "_UNICODE": null
+        }
+      },
+      "test": {
+        "name": "turbodb-app-config",
+        "labels": ["local"]
+      }
+    },
+    "turbodb-app-language-test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "os": "windows"
+      },
+      "sources": {
+        "files": [
+          "sql_language_service_test.cpp",
+          "../src/connection/connection_manager.cpp",
+          "../src/explorer/schema_explorer_model.cpp",
+          "../src/language/sql_language_service.cpp"
+        ]
+      },
+      "private": {
+        "deps": ["turbo_orm", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../src"]
+      },
+      "runtimeDeps": ["turbodb_driver_sqlite"],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.dll\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.so\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.dylib\""
+            }
+          }
+        }
+      ],
+      "test": {
+        "name": "turbodb-app-language",
+        "labels": ["local"]
+      }
+    },
+    "turbodb-app-menu-test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "os": "windows"
+      },
+      "sources": {
+        "files": [
+          "main_window_menu_test.cpp",
+          "../src/command_toolbar.cpp",
+          "../src/main_window.cpp",
+          "../src/connection/connection_manager.cpp",
+          "../src/connection/connection_config.cpp",
+          "../src/connection/connection_dialog.cpp",
+          "../src/editor/scintilla_runtime.cpp",
+          "../src/editor/sql_editor.cpp",
+          "../src/explorer/schema_explorer_model.cpp",
+          "../src/explorer/schema_explorer_view.cpp",
+          "../src/language/sql_language_service.cpp",
+          "../src/plan/execution_plan_model.cpp",
+          "../src/plan/explain_controller.cpp",
+          "../src/query/query_controller.cpp",
+          "../src/query/query_result_model.cpp",
+          "../src/results/result_workspace_view.cpp",
+          "../src/workspace/query_notebook.cpp",
+          "$builddir/app/studio_resource_revision.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "orm_cpp",
+          "openwtl",
+          "turbodb_app_editor_deps",
+          "saltsbase_tinytest",
+          "saltsbase_ini",
+          "studio_resources",
+          "turbodb_types",
+          "cmeta_cflow"
+        ],
+        "includeDirs": ["../src"],
+        "defines": {
+          "NOMINMAX": null,
+          "UNICODE": null,
+          "WIN32_LEAN_AND_MEAN": null,
+          "_UNICODE": null
+        }
+      },
+      "runtimeDeps": ["turbodb_driver_sqlite"],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.dll\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.so\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.dylib\""
+            }
+          }
+        }
+      ],
+      "test": {
+        "name": "turbodb-app-menu",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "turbodb-app-query-test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "os": "windows"
+      },
+      "sources": {
+        "files": [
+          "query_controller_test.cpp",
+          "../src/connection/connection_manager.cpp",
+          "../src/plan/execution_plan_model.cpp",
+          "../src/plan/explain_controller.cpp",
+          "../src/query/query_controller.cpp",
+          "../src/query/query_result_model.cpp"
+        ]
+      },
+      "private": {
+        "deps": ["turbo_orm", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../src"],
+        "defines": {
+          "NOMINMAX": null,
+          "WIN32_LEAN_AND_MEAN": null
+        },
+        "libs": ["user32"]
+      },
+      "runtimeDeps": ["turbodb_driver_sqlite"],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.dll\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.so\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "private": {
+            "defines": {
+              "TURBODB_APP_SQLITE_PLUGIN_PATH": "\"$builddir/plugins/turbodb_driver_sqlite.dylib\""
+            }
+          }
+        }
+      ],
+      "test": {
+        "name": "turbodb-app-query",
+        "labels": ["local"]
+      }
+    },
+    "turbodb_app_startup": {
+      "kind": "header_only",
+      "when": {
+        "os": "windows",
+        "native": true
+      },
+      "runtimeDeps": [
+        "TurboDBStudio",
+        "turbodb_driver_sqlite",
+        "turbodb_driver_mysql",
+        "turbodb_driver_postgresql"
+      ],
+      "test": {
+        "name": "turbodb-app-startup",
+        "labels": ["local"],
+        "args": ["--self-test"],
+        "program": "${artifact:TurboDBStudio}"
+      }
+    }
+  }
+}

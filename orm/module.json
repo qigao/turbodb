@@ -1,0 +1,123 @@
+{
+  "include": ["backends/module.json", "tests/module.json"],
+  "targets": {
+    "turbo_orm": {
+      "kind": "shared",
+      "variants": [
+        {
+          "when": {
+            "os": "linux"
+          },
+          "private": {
+            "linkFlags": ["-Wl,-z,defs"]
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "libs": ["dl"]
+          }
+        },
+        {
+          "when": {
+            "os": "android"
+          },
+          "private": {
+            "linkFlags": ["-Wl,-z,max-page-size=16384"]
+          }
+        }
+      ],
+      "sources": {
+        "files": [
+          "src/abi/orm_core.c",
+          "src/abi/orm_explain.c",
+          "src/abi/orm_metadata.c",
+          "src/abi/orm_owner.c",
+          "src/abi/orm_plan.c",
+          "src/abi/orm_result.c",
+          "src/flow/orm_command_publisher.c",
+          "src/flow/orm_row_publisher.c",
+          "src/flow/orm_text_token.c",
+          "src/driver/orm_driver_contract.c",
+          "src/driver/orm_driver_owner_bridge.c",
+          "src/driver/orm_driver_plan_view.c",
+          "src/runtime/orm_runtime.c",
+          "src/runtime/orm_runtime_plugin.c",
+          "src/runtime/orm_runtime_connection.c",
+          "src/sql/orm_sql_render.c"
+        ]
+      },
+      "public": {
+        "deps": ["turbodb_types", "saltsbase_core", "cmeta_cflow"],
+        "includeDirs": ["include/orm"]
+      },
+      "private": {
+        "deps": ["saltsbase_cserde", "saltsutils_databind", "cmeta_plugin", "cmeta_cstl"],
+        "includeDirs": ["src/abi", "src/flow", "src/sql", "src/driver", "src/runtime"],
+        "defines": {
+          "ORM_C_BUILD": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "install": {
+        "headers": [
+          {
+            "from": "include/orm/orm.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm.hpp",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_flow.hpp",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_driver_base.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_driver_plan.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_driver_ops.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_driver_storage.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_driver_interface.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_driver_plugin.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_runtime.h",
+            "to": "include/shared/orm"
+          },
+          {
+            "from": "include/orm/orm_sqlite.h",
+            "to": "include/shared/orm"
+          }
+        ]
+      }
+    },
+    "orm_cpp": {
+      "kind": "header_only",
+      "public": {
+        "deps": ["turbo_orm", "cmeta_cflow"]
+      }
+    }
+  }
+}

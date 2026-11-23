@@ -1,0 +1,23 @@
+{
+  "include": ["e2e/module.json"],
+  "targets": {
+    "dbtool_mysql_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["dbtool_mysql_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_support", "saltsbase_json", "saltsbase_tinytest", "cmeta_tinymock"],
+        "includeDirs": ["../../../drivers/mysql"]
+      },
+      "test": {
+        "name": "dbtool_mysql_test",
+        "labels": ["local"]
+      }
+    }
+  }
+}

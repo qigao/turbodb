@@ -178,7 +178,7 @@ repository variables with the same names. The infrastructure checkout must
 match the selected release. Upgrades use separate versioned SDK directories.
 
 Select `SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTS_CNET_ROOT`,
-`VCPKG_INSTALLED_DIR`, `RE2C_ROOT`, and `LEMON_ROOT` in the loaded parent
+`VCPKG_INSTALLED_DIR`, `TURBODB_RE2C_ROOT`, and `LEMON_ROOT` in the loaded parent
 environment or local `.env`. CMake requires the exact selected SDK versions at
 those roots; it does not select versions, restore SDKs or search for a replacement.
 Before selecting a new SDK root, verify the public release manifest, producer CI,
@@ -367,6 +367,38 @@ The packaged manifest records producer versions and the Base runtime SONAME.
 CMeta owns reflection, Plugin, CFlow, and CSTL. SaltsBase owns native systems
 primitives; SaltsUtils owns Schema, IDL, and DataBind; CNet owns networking and
 crypto. TurboDB owns database-domain semantics on those contracts.
+
+### Build with Slate
+
+Use Slate 0.1.14 or later, Ninja, CMake for the existing build helpers, and
+`pkgconf` on `PATH`. Restore the pinned SDKs and host tools above, then set the
+roots in your `.env` using [.env.example](.env.example). Slate reads these
+values directly. `TURBODB_RE2C_ROOT` selects the project's re2c package. CMake
+CI also accepts `RE2C_ROOT`.
+
+```sh
+slate doctor --preset release
+slate build --preset release
+slate test --preset tests --list
+slate test --preset tests --label local
+slate test --preset benchmarks --label benchmark
+slate install --preset release --prefix build/slate-stage
+```
+
+The [Slate project](slate.json) exposes the SQL parser, drivers, ORM, dbtools,
+Studio on Windows, and their tests and examples in the VS Code Slate tree.
+Select `tests` or `tests-msvc` to include test builds. The `e2e` label selects
+the existing live database suites, which require their database environment.
+
+Use `release-msvc`, `debug-msvc`, or `tests-msvc` with the matching
+`TURBODB_MSVC_*` roots. These presets use `x64-windows` independently of
+LLVM-MinGW. The MSVC debug presets emit symbols and disable optimization
+while using the release CRT to match the published SDKs. Both Windows
+toolchains require the target-ABI Scintilla and Lexilla ports for Studio.
+
+Slate installs artifacts and headers in its native layout. The release
+SDK's CMake package exports continue to be produced by the CMake install
+presets.
 
 ## Design principles
 

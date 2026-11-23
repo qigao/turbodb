@@ -1,0 +1,210 @@
+{
+  "targets": {
+    "orm_owner_postgres_loss_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_owner_postgres_loss_test.c"]
+      },
+      "private": {
+        "deps": [
+          "turbo_orm",
+          "postgresql",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../../src/abi", "../../../src/flow"]
+      },
+      "runtimeDeps": ["turbodb_driver_postgresql"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_postgres_loss",
+        "labels": ["e2e"],
+        "timeout": 60,
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_POSTGRESQL_PLUGIN",
+          "${artifact:turbodb_driver_postgresql}",
+          "--"
+        ]
+      }
+    },
+    "orm_owner_postgres_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_owner_postgres_test.c"]
+      },
+      "private": {
+        "deps": [
+          "turbo_orm",
+          "postgresql",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../../src/abi", "../../../src/flow"]
+      },
+      "runtimeDeps": ["turbodb_driver_postgresql"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_postgres",
+        "labels": ["e2e"],
+        "timeout": 60,
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_POSTGRESQL_PLUGIN",
+          "${artifact:turbodb_driver_postgresql}",
+          "--"
+        ]
+      }
+    },
+    "orm_postgres_direct_tls_binding_mismatch_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "postgres_direct_tls_binding_mismatch_test.c",
+          "../../../backends/postgresql/postgres_direct_tls_bridge.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "postgresql",
+          "saltscnet_cnet",
+          "saltsbase_core",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "includeDirs": ["../../../include/orm", "../../../backends/postgresql"]
+      },
+      "test": {
+        "name": "orm_postgres_direct_tls_binding_mismatch",
+        "labels": ["e2e"],
+        "timeout": 60
+      }
+    },
+    "orm_postgres_direct_tls_live_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["postgres_direct_tls_live_test.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "saltsbase_tinytest", "saltsbase_core", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "runtimeDeps": ["turbodb_driver_postgresql"],
+      "test": {
+        "name": "orm_postgres_direct_tls_live",
+        "labels": ["e2e"],
+        "timeout": 60,
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_POSTGRESQL_PLUGIN",
+          "${artifact:turbodb_driver_postgresql}",
+          "--"
+        ]
+      }
+    },
+    "orm_postgres_live_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["postgres_live_test.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "saltsbase_tinytest", "saltsbase_core", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "runtimeDeps": ["turbodb_driver_postgresql"],
+      "test": {
+        "name": "orm_postgres_live",
+        "labels": ["e2e"],
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_POSTGRESQL_PLUGIN",
+          "${artifact:turbodb_driver_postgresql}",
+          "--"
+        ]
+      }
+    }
+  }
+}

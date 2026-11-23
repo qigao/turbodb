@@ -1,0 +1,54 @@
+{
+  "targets": {
+    "dbtool_mysql_live_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_live_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_dbtool_core", "saltsbase_tinytest"]
+      },
+      "runtimeDeps": ["turbodb_driver_mysql"],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_MYSQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_mysql.dll\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_MYSQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_mysql.so\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_MYSQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_mysql.dylib\""
+            }
+          }
+        }
+      ],
+      "test": {
+        "name": "dbtool_mysql_live_test",
+        "labels": ["e2e"]
+      }
+    }
+  }
+}

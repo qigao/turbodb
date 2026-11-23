@@ -1,0 +1,76 @@
+{
+  "include": ["command/module.json", "postgresql/module.json", "sqlite/module.json"],
+  "targets": {
+    "orm_pure_c_build_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_pure_c_build_test.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "saltsbase_tinytest", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "test": {
+        "name": "orm_pure_c_build",
+        "labels": ["local"]
+      }
+    },
+    "orm_row_publisher_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_row_publisher_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_c_test_static",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "includeDirs": ["../../include/orm", "../../src/flow"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_row_publisher",
+        "labels": ["local"]
+      }
+    },
+    "orm_sql_render_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_sql_render_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../include/orm", "../../src/abi", "../../src/flow", "../../src/sql"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_sql_render",
+        "labels": ["local"]
+      }
+    }
+  }
+}

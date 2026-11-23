@@ -1,0 +1,80 @@
+{
+  "include": ["tests/module.json"],
+  "targets": {
+    "turbodb_mysql": {
+      "kind": "static",
+      "sources": {
+        "files": [
+          "session.c",
+          "transaction_control.c",
+          "parameters.c",
+          "cursor_row.c",
+          "row_reader.c",
+          "wire/codec.c",
+          "wire/packet.c",
+          "wire/query.c",
+          "wire/result.c",
+          "wire/handshake.c",
+          "wire/statement.c",
+          "wire/row.c",
+          "auth/auth.c"
+        ]
+      },
+      "public": {
+        "deps": ["saltsbase_core", "saltsbase_cserde"],
+        "includeDirs": ["."]
+      },
+      "private": {
+        "deps": ["saltscnet_cnet", "saltscnet_crypto", "saltsbase_simd"]
+      },
+      "install": {
+        "headers": [
+          {
+            "from": "turbodb_mysql.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "session.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "session_script.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "session_async.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "source.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "session_cursor.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "session_transaction.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "cursor_row.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "row_reader.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "parameters.h",
+            "to": "include/drivers/mysql"
+          },
+          {
+            "from": "transaction_control.h",
+            "to": "include/drivers/mysql"
+          }
+        ]
+      }
+    }
+  }
+}

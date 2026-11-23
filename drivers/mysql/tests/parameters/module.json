@@ -1,0 +1,21 @@
+{
+  "targets": {
+    "mysql_parameter_boundary_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_parameter_boundary_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest"]
+      },
+      "test": {
+        "name": "mysql_parameter_boundary",
+        "labels": ["local"]
+      }
+    }
+  }
+}

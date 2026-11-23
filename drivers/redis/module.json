@@ -1,0 +1,131 @@
+{
+  "include": ["tests/module.json"],
+  "targets": {
+    "tedis": {
+      "kind": "shared",
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "libs": ["ws2_32"],
+            "defines": {
+              "WIN32_LEAN_AND_MEAN": null,
+              "_CRT_SECURE_NO_WARNINGS": null
+            }
+          }
+        },
+        {
+          "when": {
+            "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+          },
+          "private": {
+            "defines": {
+              "REDIS_TESTING": null
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "android"
+          },
+          "private": {
+            "linkFlags": ["-Wl,-z,max-page-size=16384"]
+          }
+        }
+      ],
+      "sources": {
+        "files": [
+          "redis_cflow.c",
+          "redis_cluster.c",
+          "redis_io.c",
+          "redis_io_flow.c",
+          "redis_lua_apply.c",
+          "redis_lua_apply_batch.c",
+          "redis_parser.c",
+          "redis_pool.c",
+          "redis_protocol.c",
+          "redis_sentinel.c",
+          "redis_socket.c",
+          "redis_stream_group.c",
+          "$builddir/drivers/redis/redis_resp_lexer_gen.c"
+        ]
+      },
+      "public": {
+        "deps": ["saltsbase_core", "cmeta_cflow"],
+        "includeDirs": ["."]
+      },
+      "private": {
+        "includeDirs": ["$builddir/drivers/redis"],
+        "defines": {
+          "REDIS_BUILD": null
+        }
+      },
+      "preTasks": [
+        {
+          "name": "redis_lexer",
+          "tool": "re2c",
+          "inputs": [
+            "$moduledir/parser/redis_resp_parser.re",
+            "${envPath:TURBODB_RE2C_ROOT}/bin/re2c${host:exe}"
+          ],
+          "outputs": ["$builddir/drivers/redis/redis_resp_lexer_gen.c"],
+          "args": [
+            "-o",
+            "$builddir/drivers/redis/redis_resp_lexer_gen.c",
+            "$moduledir/parser/redis_resp_parser.re"
+          ]
+        }
+      ],
+      "install": {
+        "headers": [
+          {
+            "from": "redis_export.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_reply.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_io.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_cflow.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_lua_apply.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_lua_apply_batch.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_lua_apply_batch_compact.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_pool.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_cluster.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_sentinel.h",
+            "to": "include/drivers/redis"
+          },
+          {
+            "from": "redis_stream_group.h",
+            "to": "include/drivers/redis"
+          }
+        ]
+      }
+    }
+  }
+}

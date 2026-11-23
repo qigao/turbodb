@@ -1,0 +1,473 @@
+{
+  "targets": {
+    "orm_mysql_binary_row_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_binary_row_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_binary_row",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_cursor_row_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_cursor_row_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "saltsbase_cserde", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql", "../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_cursor_row",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_cursor_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_cursor_test.c", "../../mysql/cursor.c"]
+      },
+      "private": {
+        "deps": [
+          "turbodb_mysql",
+          "saltsbase_core",
+          "cmeta_cflow",
+          "saltsbase_cserde",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "includeDirs": [
+          "../../../include/orm",
+          "../../../src/flow",
+          "../../mysql",
+          "../../../../drivers/mysql",
+          "../../../../drivers/mysql/wire"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_cursor",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_dialect_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_dialect_test.c", "../../../src/sql/orm_mysql_render.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": [
+          "../../../include/orm",
+          "../../../src/abi",
+          "../../../src/flow",
+          "../../../src/sql",
+          "../../mysql",
+          "../../../../drivers/mysql"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_dialect",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_handshake_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_handshake_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql/wire", "../../../../drivers/mysql/auth"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_handshake",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_parameters_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_parameters_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql", "../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_parameters",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_plugin_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_plugin_test.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "saltsbase_tinytest", "turbodb_types", "cmeta_cflow"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "runtimeDeps": ["turbodb_driver_mysql"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_plugin",
+        "labels": ["local"],
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_MYSQL_PLUGIN",
+          "${artifact:turbodb_driver_mysql}",
+          "--"
+        ]
+      }
+    },
+    "orm_mysql_query_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_query_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_query",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_row_reader_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_row_reader_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "saltsbase_cserde", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql", "../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_row_reader",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_savepoint_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_savepoint_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql", "../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_savepoint",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_statement_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_statement_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_statement",
+        "labels": ["local"]
+      }
+    },
+    "orm_mysql_wire_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_mysql_wire_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../../drivers/mysql/wire"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_wire",
+        "labels": ["local"]
+      }
+    }
+  }
+}

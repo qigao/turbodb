@@ -1,0 +1,261 @@
+{
+  "include": ["tests/module.json"],
+  "targets": {
+    "TurboDBStudio": {
+      "kind": "executable",
+      "when": {
+        "os": "windows"
+      },
+      "sources": {
+        "files": [
+          "src/main.cpp",
+          "src/command_toolbar.cpp",
+          "src/main_window.cpp",
+          "src/connection/connection_manager.cpp",
+          "src/connection/connection_config.cpp",
+          "src/connection/connection_dialog.cpp",
+          "src/editor/scintilla_runtime.cpp",
+          "src/editor/sql_editor.cpp",
+          "src/explorer/schema_explorer_model.cpp",
+          "src/explorer/schema_explorer_view.cpp",
+          "src/language/sql_language_service.cpp",
+          "src/plan/execution_plan_model.cpp",
+          "src/plan/explain_controller.cpp",
+          "src/query/query_controller.cpp",
+          "src/query/query_result_model.cpp",
+          "src/results/result_workspace_view.cpp",
+          "src/workspace/query_notebook.cpp",
+          "$builddir/app/studio_resource_revision.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "orm_cpp",
+          "openwtl",
+          "saltsbase_ini",
+          "turbodb_app_editor_deps",
+          "studio_resources",
+          "turbodb_types",
+          "cmeta_cflow"
+        ],
+        "includeDirs": ["src"],
+        "defines": {
+          "NOMINMAX": null,
+          "UNICODE": null,
+          "WIN32_LEAN_AND_MEAN": null,
+          "_UNICODE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "llvm-mingw"
+          },
+          "private": {
+            "linkFlags": ["-mwindows", "-municode"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "linkFlags": ["/SUBSYSTEM:WINDOWS"]
+          }
+        }
+      ],
+      "runtimeDeps": ["turbodb_driver_sqlite", "turbodb_driver_mysql", "turbodb_driver_postgresql"]
+    },
+    "studio_resources": {
+      "kind": "header_only",
+      "when": {
+        "os": "windows"
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "preTasks": [
+            {
+              "name": "studio_resource",
+              "tool": "msvc-rc",
+              "inputs": [
+                "$root/app/src/studio.rc",
+                "$root/app/src/studio.manifest",
+                "$root/app/src/connection/connection_dialog.rc",
+                "$root/app/src/connection/connection_resource.h"
+              ],
+              "outputs": ["$builddir/app/studio_resources.res"],
+              "args": [
+                "/nologo",
+                "/I",
+                "$root/app/src",
+                "/fo",
+                "$builddir/app/studio_resources.res",
+                "$root/app/src/studio.rc"
+              ]
+            },
+            {
+              "name": "studio_resource_revision",
+              "tool": "cmake",
+              "inputs": ["$root/cmake/TrackStudioResource.cmake", "$builddir/app/studio_resources.res"],
+              "outputs": ["$builddir/app/studio_resource_revision.c"],
+              "args": [
+                "-DRESOURCE=$builddir/app/studio_resources.res",
+                "-DREVISION=$builddir/app/studio_resource_revision.c",
+                "-P",
+                "$root/cmake/TrackStudioResource.cmake"
+              ]
+            }
+          ],
+          "public": {
+            "linkFlags": ["app/studio_resources.res"]
+          }
+        },
+        {
+          "when": {
+            "driver": "llvm-mingw",
+            "arch": "x64"
+          },
+          "preTasks": [
+            {
+              "name": "studio_resource",
+              "tool": "windres-x64",
+              "inputs": [
+                "$root/app/src/studio.rc",
+                "$root/app/src/studio.manifest",
+                "$root/app/src/connection/connection_dialog.rc",
+                "$root/app/src/connection/connection_resource.h"
+              ],
+              "outputs": ["$builddir/app/studio_resources.o"],
+              "args": [
+                "--output-format=coff",
+                "-I",
+                "$root/app/src",
+                "-i",
+                "$root/app/src/studio.rc",
+                "-o",
+                "$builddir/app/studio_resources.o"
+              ]
+            },
+            {
+              "name": "studio_resource_revision",
+              "tool": "cmake",
+              "inputs": ["$root/cmake/TrackStudioResource.cmake", "$builddir/app/studio_resources.o"],
+              "outputs": ["$builddir/app/studio_resource_revision.c"],
+              "args": [
+                "-DRESOURCE=$builddir/app/studio_resources.o",
+                "-DREVISION=$builddir/app/studio_resource_revision.c",
+                "-P",
+                "$root/cmake/TrackStudioResource.cmake"
+              ]
+            }
+          ],
+          "public": {
+            "linkFlags": ["app/studio_resources.o"]
+          }
+        },
+        {
+          "when": {
+            "driver": "llvm-mingw",
+            "arch": "arm64"
+          },
+          "preTasks": [
+            {
+              "name": "studio_resource",
+              "tool": "windres-arm64",
+              "inputs": [
+                "$root/app/src/studio.rc",
+                "$root/app/src/studio.manifest",
+                "$root/app/src/connection/connection_dialog.rc",
+                "$root/app/src/connection/connection_resource.h"
+              ],
+              "outputs": ["$builddir/app/studio_resources.o"],
+              "args": [
+                "--output-format=coff",
+                "-I",
+                "$root/app/src",
+                "-i",
+                "$root/app/src/studio.rc",
+                "-o",
+                "$builddir/app/studio_resources.o"
+              ]
+            },
+            {
+              "name": "studio_resource_revision",
+              "tool": "cmake",
+              "inputs": ["$root/cmake/TrackStudioResource.cmake", "$builddir/app/studio_resources.o"],
+              "outputs": ["$builddir/app/studio_resource_revision.c"],
+              "args": [
+                "-DRESOURCE=$builddir/app/studio_resources.o",
+                "-DREVISION=$builddir/app/studio_resource_revision.c",
+                "-P",
+                "$root/cmake/TrackStudioResource.cmake"
+              ]
+            }
+          ],
+          "public": {
+            "linkFlags": ["app/studio_resources.o"]
+          }
+        }
+      ]
+    },
+    "openwtl": {
+      "kind": "header_only",
+      "when": {
+        "os": "windows"
+      },
+      "public": {
+        "includeDirs": [
+          "$builddir/openwtl/OpenWTL-0.1.2/wtl/Include",
+          "$builddir/openwtl/OpenWTL-0.1.2/alt/include"
+        ],
+        "defines": {
+          "UNICODE": null,
+          "_UNICODE": null,
+          "_WIN32_WINNT": "0x0601",
+          "WINVER": "0x0601",
+          "_WIN32_IE": "0x0601"
+        },
+        "libs": [
+          "ole32",
+          "oleaut32",
+          "uuid",
+          "advapi32",
+          "comctl32",
+          "gdi32",
+          "user32",
+          "shell32",
+          "shlwapi",
+          "comdlg32",
+          "uxtheme",
+          "msimg32",
+          "dwmapi"
+        ]
+      },
+      "preTasks": [
+        {
+          "name": "restore_openwtl",
+          "tool": "cmake",
+          "inputs": ["$root/cmake/OpenWTLSource.cmake"],
+          "outputs": [
+            "$builddir/openwtl/OpenWTL-0.1.2/wtl/Include/atlapp.h",
+            "$builddir/openwtl/OpenWTL-0.1.2/alt/include/atlbase.h"
+          ],
+          "args": ["-DOPENWTL_OUTPUT=$builddir/openwtl", "-P", "$root/cmake/OpenWTLSource.cmake"]
+        }
+      ]
+    },
+    "turbodb_app_editor_deps": {
+      "kind": "header_only",
+      "when": {
+        "os": "windows"
+      },
+      "public": {
+        "requiredIncludeDirs": ["$vcpkg/include/scintilla", "$vcpkg/include/lexilla"]
+      },
+      "runtimeBins": ["$vcpkg/bin/Scintilla.dll", "$vcpkg/bin/Lexilla.dll"]
+    }
+  }
+}

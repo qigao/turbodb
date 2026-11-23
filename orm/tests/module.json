@@ -1,0 +1,12 @@
+{
+  "include": [
+    "abi/module.json",
+    "architecture/module.json",
+    "core/module.json",
+    "e2e/module.json",
+    "flow/module.json",
+    "integration/module.json",
+    "ownership/module.json",
+    "support/module.json"
+  ]
+}

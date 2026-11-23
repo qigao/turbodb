@@ -1,0 +1,280 @@
+{
+  "include": ["io/module.json"],
+  "targets": {
+    "redis_protocol_benchmark": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["protocol_benchmark.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"]
+      },
+      "test": {
+        "name": "redis_protocol_benchmark",
+        "labels": ["benchmark"]
+      }
+    },
+    "test_redis_cflow": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_cflow.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."],
+        "defines": {
+          "REDIS_BUILD": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "libs": ["ws2_32"]
+          }
+        }
+      ],
+      "test": {
+        "name": "test_redis_cflow",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_cluster": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_cluster.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."]
+      },
+      "test": {
+        "name": "test_redis_cluster",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_io": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_io.c", "../redis_io.c"]
+      },
+      "private": {
+        "deps": ["cmeta_cflow", "saltsbase_core", "saltsbase_tinytest"],
+        "includeDirs": [".."],
+        "defines": {
+          "REDIS_BUILD": null
+        }
+      },
+      "test": {
+        "name": "test_redis_io",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_lua_apply": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_lua_apply.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "libs": ["ws2_32"]
+          }
+        }
+      ],
+      "test": {
+        "name": "test_redis_lua_apply",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_lua_apply_batch": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_lua_apply_batch.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "libs": ["ws2_32"]
+          }
+        }
+      ],
+      "test": {
+        "name": "test_redis_lua_apply_batch",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_pool": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_pool.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."]
+      },
+      "variants": [
+        {
+          "when": {
+            "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+          },
+          "private": {
+            "defines": {
+              "REDIS_TESTING": null
+            }
+          }
+        }
+      ],
+      "test": {
+        "name": "test_redis_pool",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_resp_buffer": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_resp_buffer.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."]
+      },
+      "test": {
+        "name": "test_redis_resp_buffer",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_sentinel": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_sentinel.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."]
+      },
+      "test": {
+        "name": "test_redis_sentinel",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_socket": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_socket.c", "../redis_socket.c"]
+      },
+      "private": {
+        "deps": ["saltsbase_core", "saltsbase_tinytest"],
+        "includeDirs": [".."]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "libs": ["ws2_32"]
+          }
+        }
+      ],
+      "test": {
+        "name": "test_redis_socket",
+        "labels": ["local"]
+      }
+    },
+    "test_redis_stream_group": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_stream_group.c"]
+      },
+      "private": {
+        "deps": ["tedis", "saltsbase_tinytest", "cmeta_cflow"],
+        "includeDirs": [".."]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "libs": ["ws2_32"]
+          }
+        }
+      ],
+      "test": {
+        "name": "test_redis_stream_group",
+        "labels": ["local"]
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "targets": {
+    "turbodb_driver_mysql": {
+      "kind": "cmeta_plugin",
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": [
+          "plugin.c",
+          "schema.c",
+          "backend.c",
+          "../../src/sql/orm_mysql_render.c",
+          "cursor.c",
+          "../../src/driver/orm_driver_backend_bridge.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "turbo_orm",
+          "turbodb_mysql",
+          "cmeta_cstl",
+          "turbodb_schema_support",
+          "saltsbase_json",
+          "turbodb_types",
+          "cmeta_cflow"
+        ],
+        "includeDirs": ["../../src/sql", "../../src/abi", "../../src/flow", "../../src/driver"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "linux"
+          },
+          "private": {
+            "linkFlags": ["-Wl,--exclude-libs,ALL", "-Wl,-z,defs"]
+          }
+        },
+        {
+          "when": {
+            "os": "android"
+          },
+          "private": {
+            "linkFlags": ["-Wl,-z,max-page-size=16384"]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,11 +1,12 @@
 enable_language(RC)
 
 include(FetchContent)
+include("../cmake/OpenWTLSource.cmake")
 # OpenWTL publishes source archives only. Keep its source identity and bytes
 # pinned together; CMake verifies the archive before exposing OpenWTL::WTL.
 FetchContent_Declare(OpenWTL
-  URL https://github.com/qigao/OpenWTL/archive/refs/tags/v0.1.2.zip
-  URL_HASH SHA256=9fbe6cc68d23ee37bbd4ae4e2a54f64b4d428f2837f0d557687d9551fde485bd
+  URL "${TURBODB_OPENWTL_URL}"
+  URL_HASH SHA256=${TURBODB_OPENWTL_SHA256}
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   SYSTEM)
 FetchContent_MakeAvailable(OpenWTL)

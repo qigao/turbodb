@@ -1,0 +1,26 @@
+{
+  "targets": {
+    "test_redis_io_mock": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true,
+        "config": ["tests", "debug-tests", "tests-msvc", "debug-tests-msvc"]
+      },
+      "sources": {
+        "files": ["test_redis_io_mock.c"]
+      },
+      "private": {
+        "deps": ["cmeta_cflow", "saltsbase_core", "saltsbase_tinytest"],
+        "defines": {
+          "REDIS_STATIC": null
+        }
+      },
+      "test": {
+        "name": "test_redis_io_mock",
+        "labels": ["local"],
+        "timeout": 30
+      }
+    }
+  }
+}

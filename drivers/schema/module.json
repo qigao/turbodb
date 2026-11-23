@@ -1,0 +1,32 @@
+{
+  "targets": {
+    "turbodb_schema_support": {
+      "kind": "static",
+      "sources": {
+        "files": ["dbtool_error.c"]
+      },
+      "public": {
+        "deps": ["turbodb_schema_abi"]
+      }
+    },
+    "turbodb_schema_abi": {
+      "kind": "header_only",
+      "public": {
+        "includeDirs": ["."],
+        "deps": ["cmeta_plugin_abi"]
+      },
+      "install": {
+        "headers": [
+          {
+            "from": "dbtool_error.h",
+            "to": "include/turbodb/schema"
+          },
+          {
+            "from": "dbtool_schema_driver.h",
+            "to": "include/turbodb/schema"
+          }
+        ]
+      }
+    }
+  }
+}

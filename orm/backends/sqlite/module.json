@@ -1,0 +1,64 @@
+{
+  "targets": {
+    "turbodb_driver_sqlite": {
+      "kind": "cmeta_plugin",
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": [
+          "plugin.c",
+          "../../src/driver/orm_driver_backend_bridge.c",
+          "backend.c",
+          "async.c",
+          "maintenance.c",
+          "schema.c",
+          "orm_sqlite_cursor.c",
+          "../../src/sql/orm_sql_render.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "turbo_orm",
+          "turbodb_schema_support",
+          "sqlite",
+          "saltsbase_core",
+          "saltsbase_cserde",
+          "cmeta_cflow",
+          "cmeta_cstl",
+          "turbodb_types"
+        ],
+        "includeDirs": [
+          "../../include/orm",
+          "../../src/abi",
+          "../../src/flow",
+          "../../src/sql",
+          "../../src/driver",
+          "."
+        ],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "linux"
+          },
+          "private": {
+            "linkFlags": ["-Wl,--exclude-libs,ALL"]
+          }
+        },
+        {
+          "when": {
+            "os": "android"
+          },
+          "private": {
+            "linkFlags": ["-Wl,-z,max-page-size=16384"]
+          }
+        }
+      ]
+    }
+  }
+}

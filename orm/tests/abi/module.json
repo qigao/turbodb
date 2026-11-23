@@ -1,0 +1,47 @@
+{
+  "targets": {
+    "orm_backend_profile_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["backend_profile_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_backend_profile",
+        "labels": ["local"]
+      }
+    },
+    "orm_execution_plan_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["execution_plan_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_cserde", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../include/orm", "../../src/abi", "../../src/flow"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_execution_plan",
+        "labels": ["local"]
+      }
+    }
+  }
+}

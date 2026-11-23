@@ -1,0 +1,27 @@
+{
+  "targets": {
+    "orm_command_publisher_mock_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_command_publisher_mock_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "cmeta_cflow", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm", "../../../src/flow"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_command_publisher_mock",
+        "labels": ["local"],
+        "timeout": 30
+      }
+    }
+  }
+}

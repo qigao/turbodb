@@ -1,0 +1,230 @@
+{
+  "platforms": {
+    "windows-x64": {
+      "os": "windows",
+      "arch": "x64",
+      "toolchains": [
+        {
+          "id": "llvm-mingw-x64",
+          "vcpkgTriplet": "qigao-x64-windows-llvm-mingw",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        },
+        {
+          "id": "msvc-win64",
+          "vcpkgTriplet": "x64-windows",
+          "vcpkgRoot": "${env:TURBODB_MSVC_VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    },
+    "windows-arm64": {
+      "os": "windows",
+      "arch": "arm64",
+      "toolchains": [
+        {
+          "id": "llvm-mingw-arm64",
+          "vcpkgTriplet": "qigao-arm64-windows-llvm-mingw",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        },
+        {
+          "id": "msvc-arm64",
+          "vcpkgTriplet": "arm64-windows",
+          "vcpkgRoot": "${env:TURBODB_MSVC_VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    },
+    "linux-x64": {
+      "os": "linux",
+      "arch": "x64",
+      "toolchains": [
+        {
+          "id": "gcc-linux-x64",
+          "vcpkgTriplet": "x64-linux",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        },
+        {
+          "id": "clang-linux-x64",
+          "vcpkgTriplet": "x64-linux",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    },
+    "macos-x64": {
+      "os": "macos",
+      "arch": "x64",
+      "toolchains": [
+        {
+          "id": "apple-clang-x64",
+          "vcpkgTriplet": "x64-osx",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    },
+    "android-x64": {
+      "os": "android",
+      "arch": "x64",
+      "toolchains": [
+        {
+          "id": "ndk-x64",
+          "vcpkgTriplet": "x64-android",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    },
+    "linux-arm64": {
+      "os": "linux",
+      "arch": "arm64",
+      "toolchains": [
+        {
+          "id": "gcc-linux-arm64",
+          "vcpkgTriplet": "arm64-linux",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        },
+        {
+          "id": "clang-linux-arm64",
+          "vcpkgTriplet": "arm64-linux",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    },
+    "macos-arm64": {
+      "os": "macos",
+      "arch": "arm64",
+      "toolchains": [
+        {
+          "id": "apple-clang-arm64",
+          "vcpkgTriplet": "arm64-osx",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    },
+    "android-arm64": {
+      "os": "android",
+      "arch": "arm64",
+      "toolchains": [
+        {
+          "id": "ndk-arm64",
+          "vcpkgTriplet": "arm64-android",
+          "vcpkgRoot": "${env:VCPKG_INSTALLED_DIR}"
+        }
+      ]
+    }
+  },
+  "toolchains": {
+    "llvm-mingw-x64": {
+      "driver": "llvm-mingw",
+      "hostOs": "windows",
+      "triple": "x86_64-w64-mingw32",
+      "cc": "${env:LLVM_MINGW_ROOT}/bin/x86_64-w64-mingw32-clang.exe",
+      "cxx": "${env:LLVM_MINGW_ROOT}/bin/x86_64-w64-mingw32-clang++.exe",
+      "ar": "${env:LLVM_MINGW_ROOT}/bin/llvm-ar.exe",
+      "ld": "${env:LLVM_MINGW_ROOT}/bin/x86_64-w64-mingw32-clang++.exe",
+      "runtimeBins": [
+        "${env:LLVM_MINGW_ROOT}/x86_64-w64-mingw32/bin/libc++.dll",
+        "${env:LLVM_MINGW_ROOT}/x86_64-w64-mingw32/bin/libunwind.dll"
+      ]
+    },
+    "msvc-win64": {
+      "driver": "msvc",
+      "cc": "cl.exe",
+      "cxx": "cl.exe",
+      "ar": "lib.exe",
+      "ld": "link.exe"
+    },
+    "llvm-mingw-arm64": {
+      "driver": "llvm-mingw",
+      "hostOs": "windows",
+      "triple": "aarch64-w64-mingw32",
+      "cc": "${env:LLVM_MINGW_ROOT}/bin/aarch64-w64-mingw32-clang.exe",
+      "cxx": "${env:LLVM_MINGW_ROOT}/bin/aarch64-w64-mingw32-clang++.exe",
+      "ar": "${env:LLVM_MINGW_ROOT}/bin/llvm-ar.exe",
+      "ld": "${env:LLVM_MINGW_ROOT}/bin/aarch64-w64-mingw32-clang++.exe",
+      "runtimeBins": [
+        "${env:LLVM_MINGW_ROOT}/aarch64-w64-mingw32/bin/libc++.dll",
+        "${env:LLVM_MINGW_ROOT}/aarch64-w64-mingw32/bin/libunwind.dll"
+      ]
+    },
+    "msvc-arm64": {
+      "driver": "msvc",
+      "cc": "cl.exe",
+      "cxx": "cl.exe",
+      "ar": "lib.exe",
+      "ld": "link.exe"
+    },
+    "gcc-linux-x64": {
+      "driver": "gcc",
+      "hostOs": "linux",
+      "hostArch": "x64",
+      "cc": "gcc",
+      "cxx": "g++",
+      "ar": "gcc-ar",
+      "ld": "g++"
+    },
+    "clang-linux-x64": {
+      "driver": "clang",
+      "hostOs": "linux",
+      "hostArch": "x64",
+      "cc": "clang",
+      "cxx": "clang++",
+      "ar": "llvm-ar",
+      "ld": "clang++"
+    },
+    "apple-clang-x64": {
+      "driver": "clang",
+      "hostOs": "macos",
+      "hostArch": "x64",
+      "cc": "clang",
+      "cxx": "clang++",
+      "ar": "ar",
+      "ld": "clang++"
+    },
+    "ndk-x64": {
+      "driver": "clang",
+      "cc": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/clang${host:exe}",
+      "cxx": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/clang++${host:exe}",
+      "ar": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/llvm-ar${host:exe}",
+      "ld": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/clang++${host:exe}",
+      "triple": "x86_64-linux-android26",
+      "sysroot": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/sysroot",
+      "runtimeBins": ["${env:ANDROID_NDK_TOOLCHAIN_DIR}/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so"]
+    },
+    "gcc-linux-arm64": {
+      "driver": "gcc",
+      "hostOs": "linux",
+      "hostArch": "arm64",
+      "cc": "gcc",
+      "cxx": "g++",
+      "ar": "gcc-ar",
+      "ld": "g++"
+    },
+    "clang-linux-arm64": {
+      "driver": "clang",
+      "hostOs": "linux",
+      "hostArch": "arm64",
+      "cc": "clang",
+      "cxx": "clang++",
+      "ar": "llvm-ar",
+      "ld": "clang++"
+    },
+    "apple-clang-arm64": {
+      "driver": "clang",
+      "hostOs": "macos",
+      "hostArch": "arm64",
+      "cc": "clang",
+      "cxx": "clang++",
+      "ar": "ar",
+      "ld": "clang++"
+    },
+    "ndk-arm64": {
+      "driver": "clang",
+      "cc": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/clang${host:exe}",
+      "cxx": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/clang++${host:exe}",
+      "ar": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/llvm-ar${host:exe}",
+      "ld": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/bin/clang++${host:exe}",
+      "triple": "aarch64-linux-android26",
+      "sysroot": "${env:ANDROID_NDK_TOOLCHAIN_DIR}/sysroot",
+      "runtimeBins": [
+        "${env:ANDROID_NDK_TOOLCHAIN_DIR}/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+      ]
+    }
+  }
+}

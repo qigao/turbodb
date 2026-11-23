@@ -1,0 +1,482 @@
+{
+  "targets": {
+    "orm_owner_checked_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "orm_owner_test.c",
+          "orm_transaction_owner_test.c",
+          "orm_connection_control_test.c",
+          "orm_cursor_open_owner_test.c",
+          "orm_cursor_execution_owner_test.c",
+          "orm_row_storage_cutover_test.c",
+          "orm_row_budget_owner_test.c",
+          "orm_row_borrowed_contract_test.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_checked",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_cleanup_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_cleanup_failure_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_cleanup",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_cpp_flow_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["../flow/sqlite/orm_cpp_flow_test.cpp"]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "test": {
+        "name": "orm_owner_cpp_flow",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_failure_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_connection_failure_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_failure",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_public_flow_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["../flow/sqlite/orm_public_flow_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_public_flow",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_race_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_owner_race_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_race",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_regression_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_owner_regression_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_regression",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_state_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_owner_state_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": ["../../src/abi", "../../src/flow"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_owner_state",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_owner_test_core": {
+      "kind": "static",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "../../src/abi/orm_core.c",
+          "../../src/abi/orm_explain.c",
+          "../../src/abi/orm_metadata.c",
+          "../../src/abi/orm_owner.c",
+          "../../src/abi/orm_plan.c",
+          "../../src/abi/orm_result.c",
+          "../../src/flow/orm_command_publisher.c",
+          "orm_row_allocator_probe.c",
+          "../../src/flow/orm_text_token.c",
+          "../../src/driver/orm_driver_contract.c",
+          "../../src/driver/orm_driver_owner_bridge.c",
+          "../../src/driver/orm_driver_plan_view.c",
+          "../../src/runtime/orm_runtime.c",
+          "../../src/runtime/orm_runtime_plugin.c",
+          "../../src/runtime/orm_runtime_connection.c",
+          "../../src/sql/orm_sql_render.c",
+          "../../backends/sqlite/backend.c",
+          "../../backends/sqlite/async.c",
+          "../../backends/sqlite/orm_sqlite_cursor.c"
+        ]
+      },
+      "public": {
+        "deps": ["saltsbase_core", "cmeta_cflow", "turbodb_types"],
+        "includeDirs": ["../../include/orm"]
+      },
+      "private": {
+        "deps": [
+          "turbodb_types",
+          "saltsbase_cserde",
+          "saltsutils_databind",
+          "cmeta_plugin",
+          "cmeta_cstl",
+          "sqlite"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_LEGACY_SQLITE_FACTORY": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        },
+        "includeDirs": [
+          "../../src/abi",
+          "../../src/flow",
+          "../../src/sql",
+          "../../src/driver",
+          "../../src/runtime"
+        ]
+      }
+    },
+    "orm_postgres_connection_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "../flow/postgresql/orm_postgres_connection_test.c",
+          "../../backends/postgresql/orm_postgres_libpq.c",
+          "../../backends/postgresql/postgres_direct_tls_bridge.c",
+          "../../backends/postgresql/orm_postgres_cursor.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "orm_owner_test_core",
+          "postgresql",
+          "saltsbase_cserde",
+          "saltsutils_databind",
+          "saltscnet_cnet",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "includeDirs": ["../../backends/postgresql", "../../src/abi", "../../src/flow"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_postgres_connection",
+        "labels": ["local"],
+        "timeout": 30
+      }
+    }
+  }
+}

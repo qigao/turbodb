@@ -1,0 +1,7 @@
+{
+  "include": [
+    "mysql/module.json",
+    "redis/module.json",
+    "schema/module.json"
+  ]
+}

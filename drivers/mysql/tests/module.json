@@ -1,0 +1,22 @@
+{
+  "include": ["auth/module.json", "parameters/module.json", "session/module.json", "wire/module.json"],
+  "targets": {
+    "mysql_parameter_benchmark": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["parameters/parameter_benchmark.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest"]
+      },
+      "test": {
+        "name": "mysql_parameter_benchmark",
+        "labels": ["benchmark"]
+      }
+    }
+  }
+}

@@ -1,0 +1,222 @@
+{
+  "targets": {
+    "dbtool_orm_plugins_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["dbtool_orm_plugins_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_dbtool_core", "saltsbase_tinytest"]
+      },
+      "runtimeDeps": ["turbodb_driver_sqlite", "turbodb_driver_postgresql", "turbodb_driver_mysql"],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_MYSQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_mysql.dll\"",
+              "DBTOOL_POSTGRESQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_postgresql.dll\"",
+              "DBTOOL_SQLITE_PLUGIN": "\"$builddir/plugins/turbodb_driver_sqlite.dll\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_MYSQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_mysql.so\"",
+              "DBTOOL_POSTGRESQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_postgresql.so\"",
+              "DBTOOL_SQLITE_PLUGIN": "\"$builddir/plugins/turbodb_driver_sqlite.so\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_MYSQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_mysql.dylib\"",
+              "DBTOOL_POSTGRESQL_PLUGIN": "\"$builddir/plugins/turbodb_driver_postgresql.dylib\"",
+              "DBTOOL_SQLITE_PLUGIN": "\"$builddir/plugins/turbodb_driver_sqlite.dylib\""
+            }
+          }
+        }
+      ],
+      "test": {
+        "name": "dbtool_orm_plugins_test",
+        "labels": ["local"]
+      }
+    },
+    "dbtool_plugin_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["dbtool_plugin_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_dbtool_core", "saltsbase_tinytest"]
+      },
+      "runtimeDeps": [
+        "dbtool_schema_fixture",
+        "dbtool_schema_missing_fixture",
+        "dbtool_schema_abi_fixture",
+        "dbtool_schema_contract_fixture",
+        "dbtool_schema_ops_fixture"
+      ],
+      "variants": [
+        {
+          "when": {
+            "os": "windows"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_ABI_FIXTURE": "\"$builddir/plugins/dbtool_schema_abi_fixture.dll\"",
+              "DBTOOL_CONTRACT_FIXTURE": "\"$builddir/plugins/dbtool_schema_contract_fixture.dll\"",
+              "DBTOOL_MISSING_FIXTURE": "\"$builddir/plugins/dbtool_schema_missing_fixture.dll\"",
+              "DBTOOL_OPS_FIXTURE": "\"$builddir/plugins/dbtool_schema_ops_fixture.dll\"",
+              "DBTOOL_SCHEMA_FIXTURE": "\"$builddir/plugins/dbtool_schema_fixture.dll\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": ["linux", "android"]
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_ABI_FIXTURE": "\"$builddir/plugins/dbtool_schema_abi_fixture.so\"",
+              "DBTOOL_CONTRACT_FIXTURE": "\"$builddir/plugins/dbtool_schema_contract_fixture.so\"",
+              "DBTOOL_MISSING_FIXTURE": "\"$builddir/plugins/dbtool_schema_missing_fixture.so\"",
+              "DBTOOL_OPS_FIXTURE": "\"$builddir/plugins/dbtool_schema_ops_fixture.so\"",
+              "DBTOOL_SCHEMA_FIXTURE": "\"$builddir/plugins/dbtool_schema_fixture.so\""
+            }
+          }
+        },
+        {
+          "when": {
+            "os": "macos"
+          },
+          "private": {
+            "defines": {
+              "DBTOOL_ABI_FIXTURE": "\"$builddir/plugins/dbtool_schema_abi_fixture.dylib\"",
+              "DBTOOL_CONTRACT_FIXTURE": "\"$builddir/plugins/dbtool_schema_contract_fixture.dylib\"",
+              "DBTOOL_MISSING_FIXTURE": "\"$builddir/plugins/dbtool_schema_missing_fixture.dylib\"",
+              "DBTOOL_OPS_FIXTURE": "\"$builddir/plugins/dbtool_schema_ops_fixture.dylib\"",
+              "DBTOOL_SCHEMA_FIXTURE": "\"$builddir/plugins/dbtool_schema_fixture.dylib\""
+            }
+          }
+        }
+      ],
+      "test": {
+        "name": "dbtool_plugin_test",
+        "labels": ["local"]
+      }
+    },
+    "dbtool_schema_abi_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["invalid_fixture.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_abi"],
+        "defines": {
+          "DBTOOL_FIXTURE_ABI": null
+        }
+      }
+    },
+    "dbtool_schema_contract_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["invalid_fixture.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_abi"],
+        "defines": {
+          "DBTOOL_FIXTURE_CONTRACT": null
+        }
+      }
+    },
+    "dbtool_schema_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["schema_fixture.c", "../../../orm/backends/sqlite/schema.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_support", "sqlite"]
+      }
+    },
+    "dbtool_schema_missing_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["invalid_fixture.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_abi"],
+        "defines": {
+          "DBTOOL_FIXTURE_MISSING": null
+        }
+      }
+    },
+    "dbtool_schema_ops_fixture": {
+      "kind": "cmeta_plugin",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "outputPrefix": "",
+      "options": {
+        "symbolVisibility": "hidden"
+      },
+      "sources": {
+        "files": ["invalid_fixture.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_abi"]
+      }
+    }
+  }
+}

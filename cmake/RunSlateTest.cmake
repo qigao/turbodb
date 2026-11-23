@@ -1,0 +1,17 @@
+# CMake passes the program and fixture paths as separate arguments so they
+# can be resolved from Slate target artifacts for the selected platform.
+set(command "${CMAKE_ARGV3}")
+set(index 4)
+while(index LESS CMAKE_ARGC AND NOT CMAKE_ARGV${index} STREQUAL "--")
+  set(key "${CMAKE_ARGV${index}}")
+  math(EXPR index "${index} + 1")
+  set(ENV{${key}} "${CMAKE_ARGV${index}}")
+  math(EXPR index "${index} + 1")
+endwhile()
+math(EXPR index "${index} + 1")
+while(index LESS CMAKE_ARGC)
+  string(REPLACE ";" "\;" argument "${CMAKE_ARGV${index}}")
+  list(APPEND arguments "${argument}")
+  math(EXPR index "${index} + 1")
+endwhile()
+execute_process(COMMAND "${command}" ${arguments} COMMAND_ERROR_IS_FATAL ANY)

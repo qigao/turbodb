@@ -1,0 +1,40 @@
+{
+  "targets": {
+    "dbtool_sqlite_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["dbtool_sqlite_test.c", "../../../orm/backends/sqlite/schema.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_support", "sqlite", "saltsbase_tinytest"],
+        "includeDirs": ["../../src"]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror", "-Wall", "-Wextra", "-Wpedantic"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX", "/W4"]
+          }
+        }
+      ],
+      "test": {
+        "name": "dbtool_sqlite_test",
+        "labels": ["local"]
+      }
+    }
+  }
+}

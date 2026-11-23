@@ -1,0 +1,22 @@
+{
+  "tools": {
+    "cmake": {
+      "program": "cmake"
+    },
+    "re2c": {
+      "program": "${envPath:TURBODB_RE2C_ROOT}/bin/re2c${host:exe}"
+    },
+    "lemon": {
+      "program": "${envPath:LEMON_ROOT}/bin/lemon${host:exe}"
+    },
+    "windres-x64": {
+      "program": "${envPath:LLVM_MINGW_ROOT}/bin/x86_64-w64-mingw32-windres${host:exe}"
+    },
+    "windres-arm64": {
+      "program": "${envPath:LLVM_MINGW_ROOT}/bin/aarch64-w64-mingw32-windres${host:exe}"
+    },
+    "msvc-rc": {
+      "program": "rc.exe"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "include": ["e2e/module.json"],
+  "targets": {
+    "dbtool_postgresql_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["dbtool_postgresql_test.c", "fake_libpq.c", "../../../orm/backends/postgresql/schema.c"]
+      },
+      "private": {
+        "deps": ["turbodb_schema_support", "saltsbase_tinytest", "postgresql"],
+        "includeDirs": [
+          "../../src",
+          ".",
+          "$vcpkg/include",
+          "$vcpkg/include/postgresql/server"
+        ]
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror", "-Wall", "-Wextra", "-Wpedantic"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX", "/W4"]
+          }
+        }
+      ],
+      "test": {
+        "name": "dbtool_postgresql_test",
+        "labels": ["local"]
+      }
+    }
+  }
+}

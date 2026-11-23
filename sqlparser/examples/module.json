@@ -1,0 +1,23 @@
+{
+  "targets": {
+    "sqlparser_example": {
+      "kind": "executable",
+      "sources": {
+        "files": ["parse.c"]
+      },
+      "private": {
+        "deps": ["sqlparser"]
+      },
+      "variants": [
+        {
+          "when": {
+            "os": "android"
+          },
+          "private": {
+            "linkFlags": ["-Wl,-z,max-page-size=16384"]
+          }
+        }
+      ]
+    }
+  }
+}

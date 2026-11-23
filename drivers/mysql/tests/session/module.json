@@ -1,0 +1,72 @@
+{
+  "targets": {
+    "mysql_client_cpp_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_client_cpp_test.cpp"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest"]
+      },
+      "test": {
+        "name": "mysql_client_cpp",
+        "labels": ["local"]
+      }
+    },
+    "mysql_client_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_client_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest"]
+      },
+      "test": {
+        "name": "mysql_client",
+        "labels": ["local"]
+      }
+    },
+    "mysql_script_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_script_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltscnet_cnet", "saltsbase_tinytest"]
+      },
+      "test": {
+        "name": "mysql_script",
+        "labels": ["local"]
+      }
+    },
+    "mysql_session_mock_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_session_mock_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltscnet_cnet", "saltsbase_tinytest"]
+      },
+      "test": {
+        "name": "mysql_session_mock",
+        "labels": ["local"]
+      }
+    }
+  }
+}

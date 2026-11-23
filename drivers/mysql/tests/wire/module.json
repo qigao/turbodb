@@ -1,0 +1,21 @@
+{
+  "targets": {
+    "mysql_packet_boundary_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_packet_boundary_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_mysql", "saltsbase_tinytest"]
+      },
+      "test": {
+        "name": "mysql_packet_boundary",
+        "labels": ["local"]
+      }
+    }
+  }
+}

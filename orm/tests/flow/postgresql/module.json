@@ -1,0 +1,157 @@
+{
+  "targets": {
+    "orm_postgres_async_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "orm_postgres_async_test.c",
+          "../../../backends/postgresql/postgres_transport_policy.c",
+          "../../../backends/postgresql/postgres_direct_tls_bridge.c",
+          "../../../backends/postgresql/orm_postgres_cursor.c",
+          "../../../backends/postgresql/orm_postgres_libpq.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "orm_c_test_static",
+          "postgresql",
+          "saltscnet_cnet",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "cmeta_tinymock",
+          "turbodb_types"
+        ],
+        "includeDirs": [
+          "../../../src/abi",
+          "../../../src/flow",
+          "../../../src/sql",
+          "../../../backends/postgresql"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_postgres_async",
+        "labels": ["local"]
+      }
+    },
+    "orm_postgres_direct_tls_bridge_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "orm_postgres_direct_tls_bridge_test.c",
+          "../../../backends/postgresql/postgres_direct_tls_bridge.c"
+        ]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltscnet_cnet", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm", "../../../backends/postgresql"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_postgres_direct_tls_bridge",
+        "labels": ["local"]
+      }
+    },
+    "orm_postgres_flow_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_postgres_flow_test.c", "../../../backends/postgresql/orm_postgres_cursor.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "cmeta_cflow", "cmeta_tinymock", "turbodb_types"],
+        "includeDirs": ["../../../include/orm", "../../../src/flow", "../../../backends/postgresql"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_postgres_flow",
+        "labels": ["local"]
+      }
+    },
+    "orm_postgres_libpq_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "orm_postgres_libpq_test.c",
+          "../../abi/c_api_fake_libpq.cpp",
+          "../../../backends/postgresql/orm_postgres_libpq.c",
+          "../../../backends/postgresql/postgres_direct_tls_bridge.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "orm_test_support",
+          "saltsbase_core",
+          "saltscnet_cnet",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "includeDirs": [
+          "../../../include/orm",
+          "../../../src/flow",
+          "../../../backends/postgresql",
+          "../../abi",
+          "$vcpkg/include",
+          "$vcpkg/include/postgresql/server"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "test": {
+        "name": "orm_postgres_libpq",
+        "labels": ["local"]
+      }
+    },
+    "orm_postgres_transport_policy_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "orm_postgres_transport_policy_test.c",
+          "../../../backends/postgresql/postgres_transport_policy.c"
+        ]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm", "../../../src/abi", "../../../backends/postgresql"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_postgres_transport_policy",
+        "labels": ["local"]
+      }
+    }
+  }
+}

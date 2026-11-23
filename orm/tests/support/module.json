@@ -1,0 +1,15 @@
+{
+  "targets": {
+    "orm_test_support": {
+      "kind": "header_only",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "public": {
+        "includeDirs": ["."],
+        "deps": ["turbodb_types"]
+      }
+    }
+  }
+}

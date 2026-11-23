@@ -1,0 +1,121 @@
+{
+  "targets": {
+    "orm_mysql_driver_live_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["mysql_driver_live_test.c"]
+      },
+      "private": {
+        "deps": ["turbo_orm", "cmeta_cflow", "saltsbase_core", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null
+        }
+      },
+      "runtimeDeps": ["turbodb_driver_mysql"],
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_driver_live",
+        "labels": ["e2e"],
+        "tool": "cmake",
+        "args": [
+          "-P",
+          "$root/cmake/RunSlateTest.cmake",
+          "$target",
+          "ORM_MYSQL_PLUGIN",
+          "${artifact:turbodb_driver_mysql}",
+          "--"
+        ]
+      }
+    },
+    "orm_mysql_live_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "mysql_live_test.c",
+          "../../../../drivers/mysql/session.c",
+          "../../../../drivers/mysql/transaction_control.c",
+          "../../../backends/mysql/cursor.c",
+          "../../../../drivers/mysql/cursor_row.c",
+          "../../../../drivers/mysql/row_reader.c",
+          "../../../../drivers/mysql/wire/codec.c",
+          "../../../../drivers/mysql/wire/packet.c",
+          "../../../../drivers/mysql/wire/query.c",
+          "../../../../drivers/mysql/wire/result.c",
+          "../../../../drivers/mysql/wire/handshake.c",
+          "../../../../drivers/mysql/wire/statement.c",
+          "../../../../drivers/mysql/wire/row.c",
+          "../../../../drivers/mysql/auth/auth.c"
+        ]
+      },
+      "private": {
+        "deps": [
+          "saltscnet_cnet",
+          "saltscnet_crypto",
+          "saltsbase_cserde",
+          "cmeta_cflow",
+          "saltsbase_core",
+          "turbodb_types"
+        ],
+        "includeDirs": [
+          "../../../include/orm",
+          "../../../src/flow",
+          "../../../backends/mysql",
+          "../../../../drivers/mysql",
+          "../../../../drivers/mysql/wire",
+          "../../../../drivers/mysql/auth"
+        ],
+        "defines": {
+          "MYSQL_ENABLE_FAULT_INJECTION": "1"
+        }
+      },
+      "variants": [
+        {
+          "when": {
+            "driver": ["llvm-mingw", "gcc", "clang"]
+          },
+          "private": {
+            "flags": ["-Werror"]
+          }
+        },
+        {
+          "when": {
+            "driver": "msvc"
+          },
+          "private": {
+            "flags": ["/WX"]
+          }
+        }
+      ],
+      "test": {
+        "name": "orm_mysql_live",
+        "labels": ["e2e"]
+      }
+    }
+  }
+}

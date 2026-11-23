@@ -1,0 +1,41 @@
+{
+  "include": ["mysql/module.json", "pgsql/module.json", "plugin/module.json", "sqlite/module.json"],
+  "targets": {
+    "dbtool_cli_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["dbtool_cli_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_dbtool_core", "saltsbase_tinytest"],
+        "includeDirs": ["../src"]
+      },
+      "test": {
+        "name": "dbtool_cli_test",
+        "labels": ["local"]
+      }
+    },
+    "dbtool_file_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["dbtool_file_test.c"]
+      },
+      "private": {
+        "deps": ["turbodb_dbtool_core", "saltsbase_tinytest"],
+        "includeDirs": ["../src"]
+      },
+      "test": {
+        "name": "dbtool_file_test",
+        "labels": ["local"]
+      }
+    }
+  }
+}

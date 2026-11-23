@@ -1,0 +1,60 @@
+{
+  "targets": {
+    "orm_c_test_static": {
+      "kind": "static",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": [
+          "../../src/abi/orm_core.c",
+          "../../src/abi/orm_explain.c",
+          "../../src/abi/orm_metadata.c",
+          "../../src/abi/orm_owner.c",
+          "../../src/abi/orm_plan.c",
+          "../../src/abi/orm_result.c",
+          "../../src/flow/orm_command_publisher.c",
+          "../../src/flow/orm_row_publisher.c",
+          "../../src/flow/orm_text_token.c",
+          "../../src/driver/orm_driver_contract.c",
+          "../../src/driver/orm_driver_owner_bridge.c",
+          "../../src/driver/orm_driver_plan_view.c",
+          "../../src/runtime/orm_runtime.c",
+          "../../src/runtime/orm_runtime_plugin.c",
+          "../../src/runtime/orm_runtime_connection.c",
+          "../../src/sql/orm_sql_render.c",
+          "../../backends/sqlite/backend.c",
+          "../../backends/sqlite/async.c",
+          "../../backends/sqlite/orm_sqlite_cursor.c"
+        ]
+      },
+      "public": {
+        "deps": ["turbodb_types", "saltsbase_core", "cmeta_cflow"],
+        "includeDirs": ["../../include/orm"]
+      },
+      "private": {
+        "deps": [
+          "saltsbase_cserde",
+          "saltsutils_databind",
+          "cmeta_plugin",
+          "cmeta_cstl",
+          "sqlite",
+          "turbodb_types"
+        ],
+        "includeDirs": [
+          "../../src/abi",
+          "../../src/flow",
+          "../../src/sql",
+          "../../src/driver",
+          "../../src/runtime"
+        ],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_LEGACY_SQLITE_FACTORY": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      }
+    }
+  }
+}

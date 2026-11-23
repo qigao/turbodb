@@ -1,0 +1,152 @@
+{
+  "targets": {
+    "orm_cpp_flow_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_cpp_flow_test.cpp"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "cmeta_cflow", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_cpp_flow",
+        "labels": ["local"]
+      }
+    },
+    "orm_public_flow_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_public_flow_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "cmeta_cflow", "saltsutils_databind", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_public_flow",
+        "labels": ["local"]
+      }
+    },
+    "orm_public_ownership_cpp_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_public_ownership_cpp_test.cpp"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_public_ownership_cpp",
+        "labels": ["local"]
+      }
+    },
+    "orm_public_ownership_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_public_ownership_test.c"]
+      },
+      "private": {
+        "deps": ["orm_c_test_static", "cmeta_cflow", "saltsbase_tinytest", "turbodb_types"],
+        "includeDirs": ["../../../include/orm"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_public_ownership",
+        "labels": ["local"]
+      }
+    },
+    "orm_sqlite_async_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_sqlite_async_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_c_test_static",
+          "sqlite",
+          "cmeta_cflow",
+          "saltsbase_core",
+          "saltsbase_tinytest",
+          "cmeta_tinymock",
+          "turbodb_types"
+        ],
+        "includeDirs": ["../../../include/orm", "../../../src/abi", "../../../src/flow"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_sqlite_async",
+        "labels": ["local"],
+        "timeout": 60
+      }
+    },
+    "orm_sqlite_flow_test": {
+      "kind": "executable",
+      "testOnly": true,
+      "when": {
+        "native": true
+      },
+      "sources": {
+        "files": ["orm_sqlite_flow_test.c"]
+      },
+      "private": {
+        "deps": [
+          "orm_c_test_static",
+          "sqlite",
+          "saltsutils_databind",
+          "cmeta_cflow",
+          "saltsbase_tinytest",
+          "turbodb_types"
+        ],
+        "includeDirs": ["../../../include/orm", "../../../src/flow", "../../../backends/sqlite"],
+        "defines": {
+          "ORM_C_STATIC": null,
+          "ORM_NATIVE_OWNER_CANDIDATE": null
+        }
+      },
+      "test": {
+        "name": "orm_sqlite_flow",
+        "labels": ["local"]
+      }
+    }
+  }
+}
