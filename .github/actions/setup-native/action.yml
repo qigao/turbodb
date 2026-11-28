@@ -44,15 +44,18 @@ runs:
       run: |
         $ErrorActionPreference = 'Stop'
         $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-        $root = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        $arch = $env:RUNNER_ARCH.ToLowerInvariant()
+        $tools = if ($arch -eq 'arm64') { 'ARM64' } else { 'x86.x64' }
+        $root = & $vswhere -latest -products '*' -requires "Microsoft.VisualStudio.Component.VC.Tools.$tools" -property installationPath
         if ($LASTEXITCODE -ne 0 -or !$root) { throw 'Visual Studio C++ tools are required' }
         "VSDEVCMD_BAT=$root/Common7/Tools/VsDevCmd.bat" >> $env:GITHUB_ENV
+        "VSDEVCMD_ARCH=$arch" >> $env:GITHUB_ENV
         choco install ninja -y --no-progress
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     - uses: ./build/ci-infrastructure/vcpkg-cache/.github/actions/setup-llvm-mingw
       if: inputs.compiler == 'llvm-mingw'
       with:
-        target: x64
+        target: ${{ inputs.host == 'windows-arm64' && 'arm64' || 'x64' }}
     - name: Restore original SDK TARs and their selected roots
       shell: pwsh
       env:

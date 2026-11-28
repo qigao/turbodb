@@ -168,13 +168,14 @@ guard-page input bounds, output capacity and in-place lowering.
 #### Upstream dependency versions
 
 Select exact published versions through the parent environment or `.env`.
-The current set is [vcpkg-cache 0.1.3](https://github.com/qigao/vcpkg-cache/releases/tag/v0.1.3),
-[SaltsBase 0.1.8](https://github.com/qigao/salts-base/releases/tag/v0.1.8),
-[CMeta 0.1.7](https://github.com/qigao/cmeta/releases/tag/v0.1.7),
-[SaltsUtils 0.1.5](https://github.com/qigao/salts-utils/releases/tag/v0.1.5), and
-[CNet 0.1.15](https://github.com/qigao/salts-cnet/releases/tag/v0.1.15).
-`.env.example` lists the version variables and SDK roots; CI uses
-repository variables with the same names. The infrastructure checkout must
+The current set is [vcpkg-cache 0.1.9](https://github.com/qigao/vcpkg-cache/releases/tag/v0.1.9),
+[SaltsBase 0.1.11](https://github.com/qigao/salts-base/releases/tag/v0.1.11),
+[CMeta 0.1.11](https://github.com/qigao/cmeta/releases/tag/v0.1.11),
+[SaltsUtils 0.1.10](https://github.com/qigao/salts-utils/releases/tag/v0.1.10), and
+[CNet 0.1.20](https://github.com/qigao/salts-cnet/releases/tag/v0.1.20).
+`.env.example` lists the version variables and SDK roots. PR and push CI
+use the pinned versions in `ci.yml`; manual dispatch can explicitly select a
+matched release set. The infrastructure checkout must
 match the selected release. Upgrades use separate versioned SDK directories.
 
 Select `SALTS_BASE_ROOT`, `CMETA_ROOT`, `SALTS_UTILS_ROOT`, `SALTS_CNET_ROOT`,
@@ -252,13 +253,14 @@ CI builds the complete configured graph. External database tests remain
 registered with the `e2e` label; run them with `ctest --preset <profile> -L e2e`
 after providing their database environment. `-LE e2e` selects local tests.
 
-The shared [SDK matrix](.github/ci/sdk-matrix.json) defines ten qualifications:
-Linux Clang x64/ARM64, Linux GCC x64, macOS Clang ARM64, Windows MSVC x64,
-Windows LLVM-MinGW x64, Android x64/ARM64, Linux Clang x64 ASan+UBSan, and
-Linux Clang x64 TSan. The eight native profiles run formal CTest after the full
-build; Android profiles cross-build, install, and verify every installed shared
-library's ELF LOAD alignment is at least 16 KiB. Android device execution and
-external database E2E are separate validation requirements.
+The shared [SDK matrix](.github/ci/sdk-matrix.json) defines thirteen qualifications:
+eleven production profiles and two sanitizer profiles. It covers Linux x64/ARM64
+with GCC and Clang, macOS ARM64 with Clang, Windows x64/ARM64 with MSVC and
+LLVM-MinGW, and Android x64/ARM64. Linux Clang x64 also runs ASan+UBSan and TSan.
+The eleven native profiles run formal CTest after the full build; Android
+profiles cross-build, install, and verify every installed shared library's ELF
+LOAD alignment is at least 16 KiB. Android device execution and external
+database E2E are separate validation requirements.
 
 [`ci.yml`](.github/workflows/ci.yml) is the single workflow for PRs, master
 pushes and manual dispatch, including build and workflow changes. Windows
