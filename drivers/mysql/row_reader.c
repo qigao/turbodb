@@ -36,8 +36,11 @@ static cserde_status mysql_row_reader_emit_bytes(
 
   if (column->type == MYSQL_FIELD_TYPE_BIT ||
       column->type == MYSQL_FIELD_TYPE_GEOMETRY ||
-      (mysql_row_reader_is_blob_type(column->type) &&
-       column->character_set == MYSQL_BINARY_CHARSET)) {
+      (column->character_set == MYSQL_BINARY_CHARSET &&
+       (mysql_row_reader_is_blob_type(column->type) ||
+        column->type == MYSQL_FIELD_TYPE_VARCHAR ||
+        column->type == MYSQL_FIELD_TYPE_VAR_STRING ||
+        column->type == MYSQL_FIELD_TYPE_STRING))) {
     out->kind = CSERDE_BYTES;
   } else if (mysql_row_reader_is_string_type(column->type) ||
              mysql_row_reader_is_blob_type(column->type)) {
