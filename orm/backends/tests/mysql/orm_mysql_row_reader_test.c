@@ -118,6 +118,71 @@ spec("drivers/mysql CSerde row reader") {
     check_equal(cserde_reader_next(&reader, &token), CSERDE_DONE);
   }
 
+  it("distinguishes binary string columns from text and decimal values") {
+    static const uint8_t bytes[] = {0x00, 0xff, 0x61, 0x00};
+    static const uint8_t text[] = {'a', 'b', 'c'};
+    static const uint8_t types[] = {
+      MYSQL_FIELD_TYPE_VARCHAR, MYSQL_FIELD_TYPE_VAR_STRING,
+      MYSQL_FIELD_TYPE_STRING, MYSQL_FIELD_TYPE_BLOB
+    };
+    for (size_t i = 0u; i < sizeof(types) / sizeof(types[0]); ++i) {
+      for (unsigned binary = 0u; binary < 2u; ++binary) {
+        mysql_column_definition_t column =
+            test_column("value", types[i], binary ? 63u : 255u);
+        mysql_binary_value_t value = {
+          .kind = MYSQL_BINARY_VALUE_BYTES,
+          .mysql_type = types[i],
+          .data.bytes = {binary ? bytes : text,
+                         binary ? sizeof(bytes) : sizeof(text), false}
+        };
+        mysql_row_reader_state state;
+        cserde_reader reader = {0};
+        cserde_token token;
+        check_equal(mysql_row_reader_init(
+                        &state, &column, &value, 1u, &reader), CSERDE_OK);
+        next_kind(&reader, CSERDE_MAP_BEGIN, &token);
+        next_kind(&reader, CSERDE_STRING, &token);
+        next_kind(&reader, binary ? CSERDE_BYTES : CSERDE_STRING, &token);
+        check_equal(token.value.slice.size, value.data.bytes.length);
+        check_equal(memcmp(token.value.slice.data, value.data.bytes.data,
+                           value.data.bytes.length), 0);
+        next_kind(&reader, CSERDE_MAP_END, &token);
+        check_equal(cserde_reader_next(&reader, &token), CSERDE_DONE);
+      }
+    }
+
+    /* Numeric/JSON textual encodings may also advertise charset 63. */
+    static const uint8_t decimal[] = {'1', '2', '.', '5'};
+    static const uint8_t json[] = {'{', '}'};
+    mysql_column_definition_t columns[2] = {
+      test_column("decimal", MYSQL_FIELD_TYPE_NEWDECIMAL, 63u),
+      test_column("json", MYSQL_FIELD_TYPE_JSON, 63u)
+    };
+    mysql_binary_value_t values[2] = {
+      {.kind = MYSQL_BINARY_VALUE_BYTES,
+       .mysql_type = MYSQL_FIELD_TYPE_NEWDECIMAL,
+       .data.bytes = {decimal, sizeof(decimal), false}},
+      {.kind = MYSQL_BINARY_VALUE_BYTES,
+       .mysql_type = MYSQL_FIELD_TYPE_JSON,
+       .data.bytes = {json, sizeof(json), false}}
+    };
+    mysql_row_reader_state state;
+    cserde_reader reader = {0};
+    cserde_token token;
+    check_equal(mysql_row_reader_init(
+                    &state, columns, values, 2u, &reader), CSERDE_OK);
+    next_kind(&reader, CSERDE_MAP_BEGIN, &token);
+    for (size_t i = 0u; i < 2u; ++i) {
+      next_kind(&reader, CSERDE_STRING, &token);
+      next_kind(&reader, CSERDE_STRING, &token);
+      check_equal(token.value.slice.size, values[i].data.bytes.length);
+      check_equal(memcmp(token.value.slice.data, values[i].data.bytes.data,
+                         values[i].data.bytes.length), 0);
+    }
+    next_kind(&reader, CSERDE_MAP_END, &token);
+    check_equal(cserde_reader_next(&reader, &token), CSERDE_DONE);
+  }
+
   it("treats nonbinary BLOB-family values as strings") {
     static const uint8_t text[] = {'t','e','x','t'};
     mysql_column_definition_t column =
